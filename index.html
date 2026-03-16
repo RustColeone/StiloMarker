@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Stilo Marker</title>
+    <link rel="stylesheet" href="./app/styles.css">
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <header class="topbar">
+        <div class="brand-cluster">
+          <div class="brand-mark" aria-hidden="true">S</div>
+          <div class="brand-block">
+            <div class="eyebrow">Stilo Marker, a Markdown workspace</div>
+            <h1>Stilo Marker</h1>
+          </div>
+        </div>
+
+        <nav class="menu-bar" aria-label="Application menus">
+          <div class="menu-group">
+            <button id="file-menu-button" class="menu-trigger" type="button">File</button>
+            <div id="file-menu" class="menu-popover" hidden>
+              <button id="new-project-button" type="button">New Project</button>
+              <button id="open-directory-button" type="button">Open Directory</button>
+              <button id="import-file-button" type="button">Import File or Zip</button>
+              <button id="save-button" type="button">Save</button>
+              <button id="save-pdf-button" type="button">Save as PDF</button>
+              <button id="export-button" type="button">Export</button>
+              <button id="export-selected-button" type="button">Export Selected</button>
+            </div>
+          </div>
+
+          <div class="menu-group">
+            <button id="edit-menu-button" class="menu-trigger" type="button">Edit</button>
+            <div id="edit-menu" class="menu-popover" hidden>
+              <button id="rename-selected-button" type="button">Rename Selected</button>
+              <button id="delete-selected-button" type="button">Delete Selected</button>
+            </div>
+          </div>
+
+          <div class="menu-group">
+            <button id="selection-menu-button" class="menu-trigger" type="button">Create</button>
+            <div id="selection-menu" class="menu-popover" hidden>
+              <button id="new-markdown-button" type="button">New Markdown</button>
+              <button id="new-mtree-button" type="button">New MTREE</button>
+              <button id="new-urldb-button" type="button">New URL Album</button>
+            </div>
+          </div>
+
+          <div class="menu-group">
+            <button id="view-menu-button" class="menu-trigger" type="button">View</button>
+            <div id="view-menu" class="menu-popover" hidden>
+              <button id="toggle-explorer-menu-button" type="button">Toggle Explorer</button>
+              <button id="toggle-preview-button" type="button">Toggle Preview</button>
+            </div>
+          </div>
+
+          <div class="menu-group">
+            <button id="settings-menu-button" class="menu-trigger" type="button">Settings</button>
+            <div id="settings-menu" class="menu-popover" hidden>
+              <button id="open-settings-menu-button" type="button">Open Settings</button>
+              <button id="toggle-debug-menu-button" type="button">Toggle Debug Panel</button>
+            </div>
+          </div>
+        </nav>
+
+        <div class="window-caption" aria-hidden="true">Markdown IDE</div>
+
+        <input id="import-file-input" type="file" accept=".md,.mtree,.urldb,.png,.jpg,.jpeg,.gif,.svg,.webp,.bmp,.zip" hidden>
+        <input id="replace-file-input" type="file" accept=".png,.jpg,.jpeg,.gif,.svg,.webp,.bmp" hidden>
+      </header>
+
+      <div id="workspace-shell" class="workspace-shell">
+        <aside class="activity-bar" aria-label="Activity bar">
+          <button id="explorer-toggle-button" class="activity-button" type="button" aria-label="Toggle explorer" title="Explorer">≡</button>
+          <button id="settings-button" class="activity-button" type="button" aria-label="Open settings" title="Settings">⋯</button>
+          <div class="activity-bar-spacer"></div>
+          <div class="activity-status-mark" aria-hidden="true"></div>
+        </aside>
+
+        <aside id="explorer-panel" class="sidebar" aria-label="Project explorer sidebar">
+          <header class="sidebar-header">
+            <div>
+              <div class="eyebrow">Explorer</div>
+              <div id="project-name-label" class="sidebar-title">Workspace</div>
+            </div>
+            <div class="sidebar-actions">
+              <button id="explorer-filter-button" class="sidebar-icon-button sidebar-funnel-button" type="button" aria-label="Filter items" title="Filter items"></button>
+              <button id="explorer-add-button" class="sidebar-add-button" type="button" aria-label="Add items" title="Add items">+</button>
+            </div>
+          </header>
+
+          <div id="explorer-tree" class="explorer-tree" role="tree" aria-label="Project files"></div>
+
+          <section class="sidebar-panel collaboration-sidebar-panel" aria-label="Collaboration panel">
+            <div class="sidebar-panel-header">
+              <span>Session</span>
+              <span id="session-id-label" class="subtle-label">Offline</span>
+            </div>
+            <p id="session-detail-text" class="subtle-label">Not connected to a shared session.</p>
+            <div id="presence-strip" class="presence-strip"></div>
+          </section>
+        </aside>
+
+        <div id="workspace-splitter" class="panel-splitter workspace-splitter" role="separator" aria-orientation="vertical" aria-label="Resize explorer"></div>
+
+        <main class="workspace">
+          <section id="editor-grid" class="editor-grid">
+            <div id="source-pane" class="editor-pane">
+                <div class="pane-header">
+                  <label for="editor-textarea" class="pane-label">Source</label>
+                  <div id="source-tab-strip" class="tab-strip pane-tab-strip" aria-label="Open source tabs"></div>
+                  <button id="preview-toggle-activity-button" class="pane-action source-preview-toggle" type="button" aria-label="Show preview" title="Show preview">◫</button>
+                </div>
+              <div class="editor-surface">
+                <div id="editor-gutter" class="editor-gutter" aria-hidden="true"></div>
+                <div id="editor-scroll" class="editor-scroll">
+                  <pre id="editor-highlight" class="editor-highlight" aria-hidden="true"></pre>
+                  <textarea id="editor-textarea" spellcheck="false" placeholder="Select or create a .md or .mtree file"></textarea>
+                </div>
+                <div id="editor-autocomplete" class="editor-autocomplete" hidden>
+                  <div id="editor-autocomplete-label" class="subtle-label">Suggestions</div>
+                  <div id="editor-autocomplete-list" class="editor-autocomplete-list"></div>
+                </div>
+              </div>
+            </div>
+            <div id="editor-splitter" class="panel-splitter editor-splitter" role="separator" aria-orientation="vertical" aria-label="Resize preview"></div>
+            <div id="preview-pane" class="preview-pane">
+                <div class="pane-header">
+                  <div class="pane-label">Preview</div>
+                  <div id="preview-tab-strip" class="tab-strip pane-tab-strip" aria-label="Open preview tabs"></div>
+                  <button id="preview-collapse-button" class="pane-action" type="button" aria-label="Collapse preview" title="Collapse preview">×</button>
+                </div>
+              <article id="preview-output" class="preview-output"></article>
+            </div>
+          </section>
+
+          <div id="debug-splitter" class="panel-splitter debug-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize debug panel"></div>
+
+          <section id="debug-panel" class="debug-panel" aria-label="Debug panel" hidden>
+            <div class="debug-panel-header">
+              <div class="debug-panel-heading">
+                <div class="eyebrow">Debug</div>
+                <div id="debug-tab-strip" class="debug-tab-strip" role="tablist" aria-label="Debug tabs">
+                  <button id="debug-tab-all" class="debug-tab is-active" type="button" role="tab" aria-selected="true">All</button>
+                  <button id="debug-tab-actions" class="debug-tab" type="button" role="tab" aria-selected="false">Actions</button>
+                  <button id="debug-tab-responses" class="debug-tab" type="button" role="tab" aria-selected="false">Responses</button>
+                </div>
+              </div>
+              <div class="debug-panel-actions">
+                <button id="debug-copy-button" type="button">Copy All</button>
+                <button id="debug-clear-button" type="button">Clear</button>
+              </div>
+            </div>
+            <div id="debug-log-list" class="debug-log-list"></div>
+          </section>
+        </main>
+      </div>
+
+      <footer class="status-bar" aria-label="Status bar">
+        <div class="status-item">
+          <span id="source-indicator" class="status-dot"></span>
+          <span id="source-status-text">In Browser</span>
+        </div>
+        <div class="status-item">
+          <span id="browser-indicator" class="status-dot"></span>
+          <span id="browser-status-text">Checking browser support</span>
+        </div>
+        <div class="status-item">
+          <span id="server-indicator" class="status-dot"></span>
+          <span id="server-status-bar-text">Server offline</span>
+        </div>
+        <div class="status-item status-item-grow">
+          <span id="presence-summary-text">0 collaborators</span>
+        </div>
+      </footer>
+    </div>
+
+    <div id="explorer-context-menu" class="explorer-context-menu" hidden></div>
+
+    <dialog id="settings-dialog">
+      <form method="dialog" class="settings-form">
+        <header class="dialog-header">
+          <div>
+            <div class="eyebrow">Workbench</div>
+            <h2>Settings</h2>
+          </div>
+          <p class="subtle-label">Theme, layout, and collaboration preferences.</p>
+        </header>
+
+        <div class="settings-grid">
+          <section class="settings-section">
+            <h3>Appearance</h3>
+
+            <label>
+              Theme
+              <select id="theme-select">
+                <option value="system">System</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </label>
+
+            <label>
+              Explorer
+              <select id="explorer-select">
+                <option value="expanded">Expanded</option>
+                <option value="collapsed">Collapsed</option>
+              </select>
+            </label>
+
+            <label>
+              Preview
+              <select id="preview-select">
+                <option value="shown">Shown</option>
+                <option value="hidden">Hidden</option>
+              </select>
+            </label>
+
+            <label>
+              Word Wrap
+              <select id="word-wrap-select">
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
+
+            <label>
+              Tab Key Inserts
+              <select id="indent-style-select">
+                <option value="tab">Tab</option>
+                <option value="spaces">4 Spaces</option>
+              </select>
+            </label>
+          </section>
+
+          <section class="settings-section">
+            <h3>Collaboration</h3>
+
+            <label>
+              Server URL
+              <input id="server-url-input" type="url" placeholder="http://localhost:8000">
+            </label>
+
+            <label>
+              PIN
+              <input id="server-pin-input" type="password" inputmode="numeric" placeholder="Server PIN">
+            </label>
+
+            <label>
+              Display Name
+              <input id="display-name-input" type="text" maxlength="40" placeholder="Name shown to collaborators">
+            </label>
+
+            <div class="settings-actions-row">
+              <button id="ping-server-button" type="button">Ping Server</button>
+              <button id="connect-server-button" type="button">Connect</button>
+            </div>
+
+            <div class="settings-status-panel">
+              <p id="server-status-text" class="subtle-label">No server checked yet.</p>
+            </div>
+            <div id="presence-list" class="presence-list"></div>
+          </section>
+        </div>
+
+        <menu class="dialog-actions">
+          <button value="cancel" type="submit">Close</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="mtree-tools-dialog">
+      <form method="dialog" class="settings-form mtree-tools-form">
+        <header class="dialog-header">
+          <div>
+            <div class="eyebrow">MTREE Tools</div>
+            <h2>Module Map</h2>
+          </div>
+          <p id="mtree-source-text" class="subtle-label">Choose a .mtree file from the explorer to generate a module map.</p>
+        </header>
+
+        <div class="settings-grid mtree-tools-grid">
+          <section class="settings-section">
+            <h3>Options</h3>
+
+            <label class="checkbox-row">
+              <input id="mtree-simplify-input" type="checkbox" checked>
+              <span>Simplify repeated subtrees</span>
+            </label>
+
+            <label class="checkbox-row">
+              <input id="mtree-continuation-input" type="checkbox" checked>
+              <span>Split continuation trees</span>
+            </label>
+
+            <label class="checkbox-row">
+              <input id="mtree-include-navigation-input" type="checkbox" checked>
+              <span>Include Navigation</span>
+            </label>
+
+            <label class="checkbox-row">
+              <input id="mtree-include-modules-input" type="checkbox" checked>
+              <span>Include Modules</span>
+            </label>
+
+            <label class="checkbox-row">
+              <input id="mtree-include-parents-input" type="checkbox" checked>
+              <span>Include Parents</span>
+            </label>
+
+            <label class="checkbox-row">
+              <input id="mtree-include-children-input" type="checkbox" checked>
+              <span>Include Children</span>
+            </label>
+
+            <label class="checkbox-row">
+              <input id="mtree-include-descriptions-input" type="checkbox" checked>
+              <span>Include Description</span>
+            </label>
+
+            <label class="checkbox-row">
+              <input id="mtree-include-empty-input" type="checkbox">
+              <span>Show Empty Sections</span>
+            </label>
+
+            <label>
+              Target Markdown File
+              <select id="mtree-target-file-select">
+                <option value="__new__">Create new markdown file</option>
+              </select>
+            </label>
+
+            <label>
+              New Markdown File Name
+              <input id="mtree-output-name-input" type="text" placeholder="module-map.md">
+            </label>
+
+            <div class="settings-status-panel">
+              <p id="mtree-quality-text" class="subtle-label">No module map generated yet.</p>
+            </div>
+
+            <div id="mtree-warning-list" class="presence-list mtree-warning-list"></div>
+          </section>
+
+          <section class="settings-section">
+            <div class="mtree-pane-header">
+              <h3>Generated Markdown</h3>
+              <div class="settings-actions-row mtree-editor-actions">
+                <button id="mtree-keep-button" type="button">Keep</button>
+                <button id="mtree-undo-button" type="button">Undo</button>
+              </div>
+            </div>
+
+            <div class="mtree-editor-grid">
+              <div class="mtree-editor-pane">
+                <div class="mtree-editor-surface">
+                  <pre id="mtree-output-highlight" class="mtree-output-highlight" aria-hidden="true"></pre>
+                  <textarea id="mtree-output-text" class="mtree-output-text" spellcheck="false" placeholder="Generate a module map to preview the Markdown output."></textarea>
+                </div>
+              </div>
+              <article id="mtree-render-preview" class="preview-output mtree-render-preview"></article>
+            </div>
+          </section>
+        </div>
+
+        <menu class="dialog-actions">
+          <button id="mtree-create-button" type="button">Write to Target</button>
+          <button value="cancel" type="submit">Close</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="add-file-dialog">
+      <form method="dialog" class="settings-form add-file-form">
+        <header class="dialog-header">
+          <div>
+            <div class="eyebrow">Explorer</div>
+            <h2>Add File</h2>
+          </div>
+          <p id="add-file-target-text" class="subtle-label">Add a markdown, mtree, or image file into the selected folder.</p>
+        </header>
+
+        <div class="settings-grid add-file-grid">
+          <section class="settings-section">
+            <label>
+              File URL
+              <input id="add-file-url-input" type="url" placeholder="https://example.com/image.png">
+            </label>
+
+            <div id="add-file-dropzone" class="add-file-dropzone" tabindex="0">
+              <div class="add-file-dropzone-title">Drop a file here</div>
+              <p class="subtle-label">You can also paste an image, paste a URL, or choose a local file.</p>
+              <p id="add-file-source-text" class="subtle-label">No staged file yet.</p>
+              <button id="add-file-picker-button" type="button">Choose File</button>
+              <input id="add-file-picker-input" type="file" accept=".md,.mtree,.urldb,.png,.jpg,.jpeg,.gif,.svg,.webp,.bmp" hidden>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <label>
+              File Name
+              <input id="add-file-name-input" type="text" placeholder="asset.png">
+            </label>
+
+            <div class="settings-status-panel">
+              <p id="add-file-status-text" class="subtle-label">Supported: .md, .mtree, .urldb, .png, .jpg, .jpeg, .gif, .svg, .webp, .bmp.</p>
+            </div>
+          </section>
+        </div>
+
+        <menu class="dialog-actions">
+          <button id="add-file-submit-button" type="button">Add File</button>
+          <button value="cancel" type="submit">Close</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="notice-dialog" class="app-dialog">
+      <form method="dialog" class="app-dialog-form">
+        <header class="dialog-header">
+          <div>
+            <div class="eyebrow">Notice</div>
+            <h2 id="notice-dialog-title">Message</h2>
+          </div>
+          <p id="notice-dialog-message" class="subtle-label">Message</p>
+        </header>
+        <menu class="dialog-actions">
+          <button id="notice-dialog-close-button" value="default" type="submit">OK</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="confirm-dialog" class="app-dialog">
+      <form method="dialog" class="app-dialog-form">
+        <header class="dialog-header">
+          <div>
+            <div class="eyebrow">Confirm</div>
+            <h2 id="confirm-dialog-title">Confirm Action</h2>
+          </div>
+          <p id="confirm-dialog-message" class="subtle-label">Are you sure?</p>
+        </header>
+        <menu class="dialog-actions">
+          <button value="cancel" type="submit">Cancel</button>
+          <button id="confirm-dialog-accept-button" value="accept" type="submit">Confirm</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="input-dialog" class="app-dialog">
+      <form method="dialog" class="app-dialog-form">
+        <header class="dialog-header">
+          <div>
+            <div class="eyebrow">Rename</div>
+            <h2 id="input-dialog-title">Rename Item</h2>
+          </div>
+          <p id="input-dialog-message" class="subtle-label">Enter a value.</p>
+        </header>
+        <label>
+          <span id="input-dialog-label">Name</span>
+          <input id="input-dialog-input" type="text" autocomplete="off">
+        </label>
+        <menu class="dialog-actions">
+          <button value="cancel" type="submit">Cancel</button>
+          <button id="input-dialog-submit-button" value="accept" type="submit">Save</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="bookmark-entry-dialog" class="app-dialog">
+      <form method="dialog" class="app-dialog-form bookmark-entry-form">
+        <header class="dialog-header">
+          <div>
+            <div class="eyebrow">URL Album</div>
+            <h2 id="bookmark-entry-dialog-title">New Bookmark Entry</h2>
+          </div>
+          <p id="bookmark-entry-dialog-message" class="subtle-label">Add a named image bookmark to this URL album.</p>
+        </header>
+        <label>
+          <span>Name</span>
+          <input id="bookmark-entry-name-input" type="text" autocomplete="off" placeholder="Reference Image 1">
+        </label>
+        <label>
+          <span>URL</span>
+          <input id="bookmark-entry-url-input" type="url" autocomplete="off" placeholder="https://example.com/image.jpg">
+        </label>
+        <label>
+          <span>Description</span>
+          <textarea id="bookmark-entry-description-input" rows="4" placeholder="Optional description"></textarea>
+        </label>
+        <menu class="dialog-actions">
+          <button value="cancel" type="submit">Cancel</button>
+          <button id="bookmark-entry-submit-button" value="accept" type="submit">Save</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <script type="module" src="./app/main.js"></script>
+  </body>
+</html>

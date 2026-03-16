@@ -1,0 +1,3139 @@
+import { findChildByName, getNode, getNodeIdByPath, getPath, isAllowedFileName, isImageFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
+import { createProjectController, seedDefaultProject } from "./domain/project-service.js";
+import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
+import { createCollaborationRuntime } from "./services/collaboration-service.js";
+import { dataUrlToBlob, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent } from "./services/file-content-service.js";
+import { renderMarkdown } from "./services/markdown-service.js";
+import { buildModuleMapSection, replaceOrAppendModuleMap } from "./services/mtree-module-map-service.js";
+import { registerOfflineShell } from "./services/offline-service.js";
+import { applyTheme, loadSettings, saveSettings } from "./services/settings-service.js";
+import { loadProject, saveProject } from "./services/storage-service.js";
+import { pingServer } from "./services/sync-service.js";
+import { appendUrlDbEntry, formatUrlDbEntryBody, parseUrlDb, parseUrlDbEntryBody, removeUrlDbEntry, updateUrlDbEntry } from "./services/urldb-service.js";
+import { createZip, downloadBlob } from "./services/zip-service.js";
+import { query } from "./ui/dom.js";
+import { createExplorerView } from "./ui/explorer-view.js";
+
+const elements = {
+  app: query("#app"),
+  workspaceShell: query("#workspace-shell"),
+  workspaceSplitter: query("#workspace-splitter"),
+  editorGrid: query("#editor-grid"),
+  editorSplitter: query("#editor-splitter"),
+  debugSplitter: query("#debug-splitter"),
+  explorerPanel: query("#explorer-panel"),
+  sourcePane: query("#source-pane"),
+  previewPane: query("#preview-pane"),
+  sourceTabStrip: query("#source-tab-strip"),
+  previewTabStrip: query("#preview-tab-strip"),
+  explorerTree: query("#explorer-tree"),
+  explorerContextMenu: query("#explorer-context-menu"),
+  explorerFilterButton: query("#explorer-filter-button"),
+  explorerAddButton: query("#explorer-add-button"),
+  projectNameLabel: query("#project-name-label"),
+  editorGutter: query("#editor-gutter"),
+  editorScroll: query("#editor-scroll"),
+  editorHighlight: query("#editor-highlight"),
+  textarea: query("#editor-textarea"),
+  editorAutocomplete: query("#editor-autocomplete"),
+  editorAutocompleteLabel: query("#editor-autocomplete-label"),
+  editorAutocompleteList: query("#editor-autocomplete-list"),
+  preview: query("#preview-output"),
+  mtreeToolsDialog: query("#mtree-tools-dialog"),
+  mtreeSourceText: query("#mtree-source-text"),
+  mtreeSimplifyInput: query("#mtree-simplify-input"),
+  mtreeContinuationInput: query("#mtree-continuation-input"),
+  mtreeIncludeNavigationInput: query("#mtree-include-navigation-input"),
+  mtreeIncludeModulesInput: query("#mtree-include-modules-input"),
+  mtreeIncludeParentsInput: query("#mtree-include-parents-input"),
+  mtreeIncludeChildrenInput: query("#mtree-include-children-input"),
+  mtreeIncludeDescriptionsInput: query("#mtree-include-descriptions-input"),
+  mtreeIncludeEmptyInput: query("#mtree-include-empty-input"),
+  mtreeTargetFileSelect: query("#mtree-target-file-select"),
+  mtreeOutputNameInput: query("#mtree-output-name-input"),
+  mtreeQualityText: query("#mtree-quality-text"),
+  mtreeWarningList: query("#mtree-warning-list"),
+  mtreeOutputHighlight: query("#mtree-output-highlight"),
+  mtreeOutputText: query("#mtree-output-text"),
+  mtreeRenderPreview: query("#mtree-render-preview"),
+  mtreeCreateButton: query("#mtree-create-button"),
+  mtreeKeepButton: query("#mtree-keep-button"),
+  mtreeUndoButton: query("#mtree-undo-button"),
+  addFileDialog: query("#add-file-dialog"),
+  addFileTargetText: query("#add-file-target-text"),
+  addFileUrlInput: query("#add-file-url-input"),
+  addFileDropzone: query("#add-file-dropzone"),
+  addFileSourceText: query("#add-file-source-text"),
+  addFilePickerButton: query("#add-file-picker-button"),
+  addFilePickerInput: query("#add-file-picker-input"),
+  addFileNameInput: query("#add-file-name-input"),
+  addFileStatusText: query("#add-file-status-text"),
+  addFileSubmitButton: query("#add-file-submit-button"),
+  replaceFileInput: query("#replace-file-input"),
+  noticeDialog: query("#notice-dialog"),
+  noticeDialogTitle: query("#notice-dialog-title"),
+  noticeDialogMessage: query("#notice-dialog-message"),
+  confirmDialog: query("#confirm-dialog"),
+  confirmDialogTitle: query("#confirm-dialog-title"),
+  confirmDialogMessage: query("#confirm-dialog-message"),
+  confirmDialogAcceptButton: query("#confirm-dialog-accept-button"),
+  inputDialog: query("#input-dialog"),
+  inputDialogTitle: query("#input-dialog-title"),
+  inputDialogMessage: query("#input-dialog-message"),
+  inputDialogLabel: query("#input-dialog-label"),
+  inputDialogInput: query("#input-dialog-input"),
+  inputDialogSubmitButton: query("#input-dialog-submit-button"),
+  bookmarkEntryDialog: query("#bookmark-entry-dialog"),
+  bookmarkEntryDialogTitle: query("#bookmark-entry-dialog-title"),
+  bookmarkEntryDialogMessage: query("#bookmark-entry-dialog-message"),
+  bookmarkEntryNameInput: query("#bookmark-entry-name-input"),
+  bookmarkEntryUrlInput: query("#bookmark-entry-url-input"),
+  bookmarkEntryDescriptionInput: query("#bookmark-entry-description-input"),
+  bookmarkEntrySubmitButton: query("#bookmark-entry-submit-button"),
+  settingsButton: query("#settings-button"),
+  settingsDialog: query("#settings-dialog"),
+  settingsMenuButton: query("#settings-menu-button"),
+  settingsMenu: query("#settings-menu"),
+  openSettingsMenuButton: query("#open-settings-menu-button"),
+  toggleDebugMenuButton: query("#toggle-debug-menu-button"),
+  newUrlDbButton: query("#new-urldb-button"),
+  themeSelect: query("#theme-select"),
+  explorerSelect: query("#explorer-select"),
+  previewSelect: query("#preview-select"),
+  wordWrapSelect: query("#word-wrap-select"),
+  indentStyleSelect: query("#indent-style-select"),
+  serverUrlInput: query("#server-url-input"),
+  serverPinInput: query("#server-pin-input"),
+  displayNameInput: query("#display-name-input"),
+  pingServerButton: query("#ping-server-button"),
+  connectServerButton: query("#connect-server-button"),
+  serverStatusText: query("#server-status-text"),
+  sessionDetailText: query("#session-detail-text"),
+  presenceList: query("#presence-list"),
+  presenceStrip: query("#presence-strip"),
+  sessionIdLabel: query("#session-id-label"),
+  explorerToggleButton: query("#explorer-toggle-button"),
+  fileMenuButton: query("#file-menu-button"),
+  editMenuButton: query("#edit-menu-button"),
+  selectionMenuButton: query("#selection-menu-button"),
+  viewMenuButton: query("#view-menu-button"),
+  fileMenu: query("#file-menu"),
+  editMenu: query("#edit-menu"),
+  selectionMenu: query("#selection-menu"),
+  viewMenu: query("#view-menu"),
+  newProjectButton: query("#new-project-button"),
+  openDirectoryButton: query("#open-directory-button"),
+  importFileButton: query("#import-file-button"),
+  importFileInput: query("#import-file-input"),
+  saveButton: query("#save-button"),
+  savePdfButton: query("#save-pdf-button"),
+  exportButton: query("#export-button"),
+  renameSelectedButton: query("#rename-selected-button"),
+  deleteSelectedButton: query("#delete-selected-button"),
+  newMarkdownButton: query("#new-markdown-button"),
+  newMtreeButton: query("#new-mtree-button"),
+  exportSelectedButton: query("#export-selected-button"),
+  toggleExplorerMenuButton: query("#toggle-explorer-menu-button"),
+  togglePreviewButton: query("#toggle-preview-button"),
+  previewCollapseButton: query("#preview-collapse-button"),
+  sourceIndicator: query("#source-indicator"),
+  sourceStatusText: query("#source-status-text"),
+  browserIndicator: query("#browser-indicator"),
+  browserStatusText: query("#browser-status-text"),
+  serverIndicator: query("#server-indicator"),
+  serverStatusBarText: query("#server-status-bar-text"),
+  presenceSummaryText: query("#presence-summary-text"),
+  previewToggleActivityButton: query("#preview-toggle-activity-button"),
+  debugPanel: query("#debug-panel"),
+  debugTabStrip: query("#debug-tab-strip"),
+  debugTabAll: query("#debug-tab-all"),
+  debugTabActions: query("#debug-tab-actions"),
+  debugTabResponses: query("#debug-tab-responses"),
+  debugCopyButton: query("#debug-copy-button"),
+  debugClearButton: query("#debug-clear-button"),
+  debugLogList: query("#debug-log-list")
+};
+
+const settings = loadSettings();
+const controller = createProjectController(loadProject() ?? seedDefaultProject());
+let sourceOpenTabIds = controller.getProject().activeFileId ? [controller.getProject().activeFileId] : [];
+let previewOpenTabIds = controller.getProject().activeFileId ? [controller.getProject().activeFileId] : [];
+let previewFileId = controller.getProject().activeFileId ?? null;
+let previewUrlDbEntry = null;
+let sourceUrlDbEntry = null;
+let mathJaxLoadPromise = null;
+
+let selectionNodeId = controller.getProject().activeFileId ?? controller.getProject().rootId;
+const syncState = {
+  status: "offline",
+  detail: "No server checked yet.",
+  presence: [],
+  sessionId: null,
+  revision: 0,
+  displayName: null,
+  clientId: null
+};
+
+const mtreeToolState = {
+  sourceFileId: null,
+  generatedSection: "",
+  draftSection: "",
+  warnings: [],
+  quality: null,
+  selectedTargetFileId: "__new__"
+};
+
+const addFileState = {
+  parentId: null,
+  fileName: "",
+  content: null,
+  sourceLabel: ""
+};
+
+const autocompleteState = {
+  items: [],
+  activeIndex: 0,
+  range: null,
+  kind: ""
+};
+
+const debugState = {
+  entries: [],
+  maxEntries: 300,
+  activeTab: "all"
+};
+
+const debugTabs = [
+  { id: "all", element: elements.debugTabAll, label: "All" },
+  { id: "actions", element: elements.debugTabActions, label: "Actions" },
+  { id: "responses", element: elements.debugTabResponses, label: "Responses" }
+];
+
+let draggingTabState = null;
+
+let replaceFileTargetId = null;
+
+function initializePaneState(project) {
+  sourceOpenTabIds = project.activeFileId ? [project.activeFileId] : [];
+  previewOpenTabIds = project.activeFileId ? [project.activeFileId] : [];
+  previewFileId = project.activeFileId ?? null;
+  sourceUrlDbEntry = null;
+  previewUrlDbEntry = null;
+}
+
+function escapeHtmlAttribute(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function isPreviewableFileName(name) {
+  return name.endsWith(".md") || isImageFileName(name) || isUrlDbFileName(name);
+}
+
+function looksLikeUrl(value) {
+  return /^(https?:\/\/|data:)/i.test(value.trim());
+}
+
+function normalizePath(path) {
+  const nextSegments = [];
+  path.split("/").forEach((segment) => {
+    if (!segment || segment === ".") {
+      return;
+    }
+    if (segment === "..") {
+      nextSegments.pop();
+      return;
+    }
+    nextSegments.push(segment);
+  });
+  return nextSegments.join("/");
+}
+
+function inferNameFromUrl(value) {
+  try {
+    const url = new URL(value);
+    const rawName = decodeURIComponent(url.pathname.split("/").filter(Boolean).pop() ?? "").trim();
+    return rawName || "remote-file";
+  } catch {
+    return "remote-file";
+  }
+}
+
+function getUrlDbEntries(fileContent) {
+  return parseUrlDb(fileContent);
+}
+
+function getUrlDbEntryById(fileContent, entryId) {
+  return getUrlDbEntries(fileContent).find((entry) => entry.id === entryId) ?? null;
+}
+
+function createMarkdownImageReference(name, url) {
+  return `![${name}](${url})`;
+}
+
+function slugTitle(base, index, extension = "") {
+  return `${base} ${index}${extension}`;
+}
+
+function getNextDefaultFolderName(project, parentId) {
+  let index = 1;
+  let candidate = slugTitle("new folder", index);
+  while (findChildByName(project, parentId, candidate)) {
+    index += 1;
+    candidate = slugTitle("new folder", index);
+  }
+  return candidate;
+}
+
+function getNextDefaultFileName(project, parentId, kind) {
+  const label = kind === "md"
+    ? "new markdown"
+    : kind === "mtree"
+      ? "new mtree"
+      : "new url album";
+  const extension = kind === "md" ? ".md" : kind === "mtree" ? ".mtree" : ".urldb";
+  let index = 1;
+  let candidate = slugTitle(label, index, extension);
+  while (findChildByName(project, parentId, candidate)) {
+    index += 1;
+    candidate = slugTitle(label, index, extension);
+  }
+  return candidate;
+}
+
+function getNextUrlDbEntryName(fileContent) {
+  const entries = getUrlDbEntries(fileContent);
+  let index = 1;
+  let candidate = `reference image ${index}`;
+  while (entries.some((entry) => entry.name.toLowerCase() === candidate.toLowerCase())) {
+    index += 1;
+    candidate = `reference image ${index}`;
+  }
+  return candidate;
+}
+
+function buildDebugLogText() {
+  return debugState.entries.map((entry) => {
+    const detail = entry.detail ? ` :: ${entry.detail}` : "";
+    return `[${entry.timestamp}] ${entry.kind.toUpperCase()} ${entry.message}${detail}`;
+  }).join("\n");
+}
+
+function resolveProjectAssetUrl(project, sourceFileId, url) {
+  const trimmed = String(url ?? "").trim();
+  if (!trimmed || /^(https?:\/\/|data:|blob:|#|\/)/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  const basePath = sourceFileId ? getPath(project, sourceFileId) : "";
+  const baseSegments = basePath.split("/").filter(Boolean);
+  baseSegments.pop();
+  const resolvedPath = normalizePath([...baseSegments, trimmed].join("/"));
+  const nodeId = getNodeIdByPath(project, resolvedPath);
+  if (!nodeId) {
+    return trimmed;
+  }
+
+  const node = project.nodes[nodeId];
+  if (node?.kind === "file" && isImageFileName(node.name)) {
+    return node.content;
+  }
+
+  return trimmed;
+}
+
+function logDebug(kind, message, detail = "") {
+  if (!settings.debugPanel) {
+    return;
+  }
+
+  debugState.entries.push({
+    kind,
+    message,
+    detail,
+    timestamp: new Date().toLocaleTimeString()
+  });
+
+  if (debugState.entries.length > debugState.maxEntries) {
+    debugState.entries.splice(0, debugState.entries.length - debugState.maxEntries);
+  }
+
+  renderDebugPanel();
+}
+
+function getSelectedTarget() {
+  if (sourceUrlDbEntry) {
+    return { nodeId: sourceUrlDbEntry.fileId, entryId: sourceUrlDbEntry.entryId };
+  }
+  return { nodeId: selectionNodeId, entryId: null };
+}
+
+function showNoticeDialog(message, title = "Message") {
+  elements.noticeDialogTitle.textContent = title;
+  elements.noticeDialogMessage.textContent = String(message);
+  if (!elements.noticeDialog.open) {
+    elements.noticeDialog.showModal();
+  }
+}
+
+function showConfirmDialog({ title = "Confirm Action", message, acceptLabel = "Confirm" }) {
+  return new Promise((resolve) => {
+    elements.confirmDialogTitle.textContent = title;
+    elements.confirmDialogMessage.textContent = message;
+    elements.confirmDialogAcceptButton.textContent = acceptLabel;
+
+    const handleClose = () => {
+      elements.confirmDialog.removeEventListener("close", handleClose);
+      resolve(elements.confirmDialog.returnValue === "accept");
+    };
+
+    elements.confirmDialog.addEventListener("close", handleClose, { once: true });
+    elements.confirmDialog.showModal();
+  });
+}
+
+function showInputDialog({ title = "Rename Item", message = "Enter a value.", label = "Name", value = "", submitLabel = "Save" }) {
+  return new Promise((resolve) => {
+    elements.inputDialogTitle.textContent = title;
+    elements.inputDialogMessage.textContent = message;
+    elements.inputDialogLabel.textContent = label;
+    elements.inputDialogInput.value = value;
+    elements.inputDialogSubmitButton.textContent = submitLabel;
+
+    const handleClose = () => {
+      elements.inputDialog.removeEventListener("close", handleClose);
+      const result = elements.inputDialog.returnValue === "accept"
+        ? elements.inputDialogInput.value.trim() || null
+        : null;
+      resolve(result);
+    };
+
+    elements.inputDialog.addEventListener("close", handleClose, { once: true });
+    elements.inputDialog.showModal();
+    elements.inputDialogInput.focus();
+    elements.inputDialogInput.select();
+  });
+}
+
+function showBookmarkEntryDialog({ title = "New Bookmark Entry", message = "Add a named image bookmark to this URL album.", name = "", url = "", description = "", submitLabel = "Save" }) {
+  return new Promise((resolve) => {
+    elements.bookmarkEntryDialogTitle.textContent = title;
+    elements.bookmarkEntryDialogMessage.textContent = message;
+    elements.bookmarkEntryNameInput.value = name;
+    elements.bookmarkEntryUrlInput.value = url;
+    elements.bookmarkEntryDescriptionInput.value = description;
+    elements.bookmarkEntrySubmitButton.textContent = submitLabel;
+
+    const handleClose = () => {
+      elements.bookmarkEntryDialog.removeEventListener("close", handleClose);
+      if (elements.bookmarkEntryDialog.returnValue !== "accept") {
+        resolve(null);
+        return;
+      }
+      resolve({
+        name: elements.bookmarkEntryNameInput.value.trim(),
+        url: elements.bookmarkEntryUrlInput.value.trim(),
+        description: elements.bookmarkEntryDescriptionInput.value.trim()
+      });
+    };
+
+    elements.bookmarkEntryDialog.addEventListener("close", handleClose, { once: true });
+    elements.bookmarkEntryDialog.showModal();
+    elements.bookmarkEntryNameInput.focus();
+    elements.bookmarkEntryNameInput.select();
+  });
+}
+
+function getVisibleDebugEntries() {
+  if (debugState.activeTab === "actions") {
+    return debugState.entries.filter((entry) => entry.kind === "action");
+  }
+
+  if (debugState.activeTab === "responses") {
+    return debugState.entries.filter((entry) => entry.kind !== "action");
+  }
+
+  return debugState.entries;
+}
+
+function renderDebugPanel() {
+  debugTabs.forEach((tab) => {
+    const active = tab.id === debugState.activeTab;
+    tab.element.classList.toggle("is-active", active);
+    tab.element.setAttribute("aria-selected", active ? "true" : "false");
+  });
+
+  elements.debugLogList.replaceChildren();
+
+  if (!settings.debugPanel) {
+    return;
+  }
+
+  const visibleEntries = getVisibleDebugEntries();
+
+  if (visibleEntries.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "debug-log-entry is-empty";
+    empty.textContent = "Debug logging is enabled. Matching interactions will appear here.";
+    elements.debugLogList.append(empty);
+    return;
+  }
+
+  visibleEntries.forEach((entry) => {
+    const row = document.createElement("div");
+    row.className = `debug-log-entry is-${entry.kind}`;
+    row.innerHTML = `<span class="debug-log-time">${escapeEditorHtml(entry.timestamp)}</span><span class="debug-log-kind">${escapeEditorHtml(entry.kind)}</span><span class="debug-log-message">${escapeEditorHtml(entry.message)}</span>${entry.detail ? `<span class="debug-log-detail">${escapeEditorHtml(entry.detail)}</span>` : ""}`;
+    elements.debugLogList.append(row);
+  });
+
+  elements.debugLogList.scrollTop = elements.debugLogList.scrollHeight;
+}
+
+async function copyDebugLogToClipboard() {
+  const text = buildDebugLogText();
+  if (!text) {
+    notify("There are no debug entries to copy.");
+    return;
+  }
+
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    notify("Debug log copied to clipboard.");
+    return;
+  }
+
+  const fallback = document.createElement("textarea");
+  fallback.value = text;
+  fallback.setAttribute("readonly", "readonly");
+  fallback.style.position = "fixed";
+  fallback.style.opacity = "0";
+  document.body.append(fallback);
+  fallback.select();
+  document.execCommand("copy");
+  fallback.remove();
+  notify("Debug log copied to clipboard.");
+}
+
+function notify(message) {
+  logDebug("response", String(message));
+  showNoticeDialog(message);
+}
+
+async function confirmAction(message) {
+  logDebug("action", "Confirm requested", String(message));
+  const result = await showConfirmDialog({ message: String(message) });
+  logDebug("response", `Confirm ${result ? "accepted" : "cancelled"}`, String(message));
+  return result;
+}
+
+async function promptForName(message, defaultValue = "") {
+  logDebug("action", "Prompt requested", `${message} :: ${defaultValue}`);
+  const result = await showInputDialog({ title: message, message, value: defaultValue, submitLabel: "Save" });
+  logDebug("response", result ? `Prompt value: ${result}` : "Prompt cancelled", message);
+  return result;
+}
+
+function splitPathSegments(path) {
+  return path.split("/").filter(Boolean);
+}
+
+function getRelativePath(fromPath, toPath) {
+  const fromSegments = splitPathSegments(fromPath);
+  fromSegments.pop();
+  const toSegments = splitPathSegments(toPath);
+  let sharedIndex = 0;
+
+  while (sharedIndex < fromSegments.length && sharedIndex < toSegments.length && fromSegments[sharedIndex] === toSegments[sharedIndex]) {
+    sharedIndex += 1;
+  }
+
+  const upSegments = Array.from({ length: fromSegments.length - sharedIndex }, () => "..");
+  const downSegments = toSegments.slice(sharedIndex);
+  const relative = [...upSegments, ...downSegments].join("/");
+  return relative || "./";
+}
+
+function buildProjectFileSuggestions(project, activeFileId, kind = "path") {
+  const activePath = activeFileId ? getPath(project, activeFileId) : "";
+  return Object.values(project.nodes)
+    .filter((node) => node.kind === "file")
+    .filter((node) => node.id !== activeFileId)
+    .filter((node) => {
+      if (kind === "image") {
+        return isImageFileName(node.name);
+      }
+      return true;
+    })
+    .map((node) => {
+      const fullPath = getPath(project, node.id);
+      return {
+        fileId: node.id,
+        fullPath,
+        insertText: getRelativePath(activePath, fullPath),
+        label: node.name,
+        detail: fullPath,
+        kind: isImageFileName(node.name) ? "image" : (node.name.endsWith(".md") ? "note" : "file")
+      };
+    })
+    .sort((left, right) => left.detail.localeCompare(right.detail));
+}
+
+function findAutocompleteContext(textarea, force = false) {
+  const activeFile = controller.getActiveFile();
+  if (!activeFile || !isTextFileName(activeFile.name)) {
+    return null;
+  }
+
+  const value = textarea.value;
+  const cursor = textarea.selectionStart;
+  const before = value.slice(0, cursor);
+  const lineStart = before.lastIndexOf("\n") + 1;
+  const linePrefix = before.slice(lineStart);
+
+  if (activeFile.name.endsWith(".md")) {
+    const imageMatch = linePrefix.match(/!\[[^\]]*\]\(([^)]*)$/);
+    if (imageMatch) {
+      const token = imageMatch[1];
+      return {
+        kind: "image",
+        token,
+        start: cursor - token.length,
+        end: cursor
+      };
+    }
+
+    const linkMatch = linePrefix.match(/\[[^\]]*\]\(([^)]*)$/);
+    if (linkMatch) {
+      const token = linkMatch[1];
+      return {
+        kind: "path",
+        token,
+        start: cursor - token.length,
+        end: cursor
+      };
+    }
+  }
+
+  const genericMatch = linePrefix.match(/([./A-Za-z0-9_-][./A-Za-z0-9_\-/]*)$/);
+  if (genericMatch && (force || genericMatch[1].includes("/") || genericMatch[1].startsWith("."))) {
+    const token = genericMatch[1];
+    return {
+      kind: "path",
+      token,
+      start: cursor - token.length,
+      end: cursor
+    };
+  }
+
+  if (!force) {
+    return null;
+  }
+
+  return {
+    kind: activeFile.name.endsWith(".md") ? "path" : "path",
+    token: "",
+    start: cursor,
+    end: cursor
+  };
+}
+
+function hideEditorAutocomplete() {
+  autocompleteState.items = [];
+  autocompleteState.activeIndex = 0;
+  autocompleteState.range = null;
+  autocompleteState.kind = "";
+  elements.editorAutocomplete.hidden = true;
+  elements.editorAutocompleteList.replaceChildren();
+}
+
+function renderEditorAutocomplete() {
+  elements.editorAutocompleteList.replaceChildren();
+
+  autocompleteState.items.forEach((item, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `editor-autocomplete-item${index === autocompleteState.activeIndex ? " is-active" : ""}`;
+    button.innerHTML = `<span class="editor-autocomplete-item-title">${escapeEditorHtml(item.label)}</span><span class="editor-autocomplete-item-detail">${escapeEditorHtml(item.detail)}</span>`;
+    button.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      acceptEditorAutocomplete(index);
+    });
+    elements.editorAutocompleteList.append(button);
+  });
+
+  elements.editorAutocomplete.hidden = autocompleteState.items.length === 0;
+}
+
+function showEditorAutocomplete(force = false) {
+  const context = findAutocompleteContext(elements.textarea, force);
+  if (!context) {
+    hideEditorAutocomplete();
+    return;
+  }
+
+  const activeFile = controller.getActiveFile();
+  const project = controller.getProject();
+  const tokenLower = context.token.toLowerCase();
+  const items = buildProjectFileSuggestions(project, activeFile?.id ?? null, context.kind)
+    .filter((item) => !tokenLower || item.insertText.toLowerCase().includes(tokenLower) || item.detail.toLowerCase().includes(tokenLower));
+  if (items.length === 0) {
+    hideEditorAutocomplete();
+    return;
+  }
+
+  autocompleteState.items = items.slice(0, 12);
+  autocompleteState.activeIndex = 0;
+  autocompleteState.range = { start: context.start, end: context.end };
+  autocompleteState.kind = context.kind;
+  elements.editorAutocompleteLabel.textContent = context.kind === "image" ? "Image paths" : "Project paths";
+  renderEditorAutocomplete();
+}
+
+function replaceTextareaRange(start, end, nextText) {
+  const value = elements.textarea.value;
+  elements.textarea.value = `${value.slice(0, start)}${nextText}${value.slice(end)}`;
+  const nextCursor = start + nextText.length;
+  elements.textarea.selectionStart = nextCursor;
+  elements.textarea.selectionEnd = nextCursor;
+  elements.textarea.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function acceptEditorAutocomplete(index = autocompleteState.activeIndex) {
+  const item = autocompleteState.items[index];
+  const range = autocompleteState.range;
+  if (!item || !range) {
+    hideEditorAutocomplete();
+    return;
+  }
+
+  replaceTextareaRange(range.start, range.end, item.insertText);
+  logDebug("action", "Autocomplete accepted", item.detail);
+  hideEditorAutocomplete();
+}
+
+function insertReferenceAtCursor(referenceText) {
+  replaceTextareaRange(elements.textarea.selectionStart, elements.textarea.selectionEnd, referenceText);
+}
+
+function suggestUniqueFileName(project, parentId, name) {
+  const dotIndex = name.lastIndexOf(".");
+  const baseName = dotIndex >= 0 ? name.slice(0, dotIndex) : name;
+  const extension = dotIndex >= 0 ? name.slice(dotIndex) : "";
+  let candidate = name;
+  let counter = 2;
+
+  while (findChildByName(project, parentId, candidate)) {
+    candidate = `${baseName}-${counter}${extension}`;
+    counter += 1;
+  }
+
+  return candidate;
+}
+
+function createMarkdownReference(activeFile, targetFile) {
+  const activePath = getPath(controller.getProject(), activeFile.id);
+  const targetPath = getPath(controller.getProject(), targetFile.id);
+  const relativePath = getRelativePath(activePath, targetPath);
+  return isImageFileName(targetFile.name)
+    ? createMarkdownImageReference(targetFile.name, relativePath)
+    : `[${targetFile.name}](${relativePath})`;
+}
+
+applyTheme(settings);
+elements.themeSelect.value = settings.theme;
+elements.serverUrlInput.value = settings.serverUrl;
+elements.serverPinInput.value = settings.serverPin;
+elements.displayNameInput.value = settings.displayName;
+elements.explorerSelect.value = settings.explorer;
+elements.previewSelect.value = settings.preview;
+elements.wordWrapSelect.value = settings.wordWrap ? "on" : "off";
+elements.indentStyleSelect.value = settings.indentStyle;
+
+const collaboration = createCollaborationRuntime({
+  getProject() {
+    return controller.getProject();
+  },
+  replaceProject(project) {
+    controller.replaceProject(project);
+  },
+  applyOperation(operation) {
+    controller.applySyncOperation(operation);
+  },
+  onStatusChange(nextState) {
+    syncState.status = nextState.status;
+    syncState.detail = nextState.detail;
+    syncState.presence = nextState.presence ?? [];
+    syncState.sessionId = nextState.sessionId;
+    syncState.revision = nextState.revision ?? 0;
+    syncState.displayName = nextState.displayName ?? null;
+    syncState.clientId = nextState.clientId ?? null;
+    render(controller.getProject());
+  }
+});
+
+const explorer = createExplorerView({
+  container: elements.explorerTree,
+  surface: elements.explorerPanel,
+  contextMenu: elements.explorerContextMenu,
+  onOpenFile(fileId) {
+    openFileFromExplorer(fileId);
+  },
+  onOpenUrlDbEntry(fileId, entryId) {
+    const project = controller.getProject();
+    const file = project.nodes[fileId];
+    if (!file || file.kind !== "file" || !isUrlDbFileName(file.name)) {
+      return;
+    }
+    setActiveSourceUrlDbEntry(fileId, entryId);
+    openPreviewTab(fileId);
+    previewFileId = fileId;
+    previewUrlDbEntry = entryId;
+    updateStatus(project);
+  },
+  onToggleFolder(nodeId) {
+    selectionNodeId = nodeId;
+    sourceUrlDbEntry = null;
+    controller.toggleFolder(nodeId);
+  },
+  onSelectNode(target) {
+    selectionNodeId = target.nodeId;
+    sourceUrlDbEntry = target.entryId ? { fileId: target.nodeId, entryId: target.entryId } : null;
+    render(controller.getProject());
+  },
+  onAction(action, target) {
+    selectionNodeId = target.nodeId;
+    sourceUrlDbEntry = target.entryId ? { fileId: target.nodeId, entryId: target.entryId } : null;
+    void handleExplorerAction(action, target);
+  },
+  onDragFileStart(fileId, event) {
+    event.dataTransfer?.setData("text/mdnotes-file-id", fileId);
+    event.dataTransfer?.setData("text/plain", fileId);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "copyMove";
+    }
+  },
+  onDragUrlDbEntryStart(fileId, entryId, event) {
+    const project = controller.getProject();
+    const file = project.nodes[fileId];
+    const entry = file?.kind === "file" ? getUrlDbEntryById(file.content, entryId) : null;
+    if (!entry) {
+      return;
+    }
+    event.dataTransfer?.setData("text/mdnotes-urldb-entry", JSON.stringify({ fileId, entryId }));
+    event.dataTransfer?.setData("text/plain", entry.url);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "copyMove";
+    }
+  },
+  getFilterMode() {
+    return settings.explorerFilter;
+  },
+  getAssetPreviewSrc(fileId) {
+    const file = controller.getProject().nodes[fileId];
+    return file?.kind === "file" && isImageFileName(file.name) ? file.content : "";
+  },
+  getUrlDbEntries(fileId) {
+    const file = controller.getProject().nodes[fileId];
+    if (!file || file.kind !== "file" || !isUrlDbFileName(file.name)) {
+      return [];
+    }
+    return getUrlDbEntries(file.content);
+  },
+  getSelectedTarget() {
+    return getSelectedTarget();
+  }
+});
+
+const menuPairs = [
+  [elements.fileMenuButton, elements.fileMenu],
+  [elements.editMenuButton, elements.editMenu],
+  [elements.selectionMenuButton, elements.selectionMenu],
+  [elements.viewMenuButton, elements.viewMenu],
+  [elements.settingsMenuButton, elements.settingsMenu]
+];
+
+function getDefaultModuleMapName(fileName) {
+  const baseName = fileName.replace(/\.mtree$/i, "") || "module-map";
+  return `${baseName}.module-map.md`;
+}
+
+function renderMtreeWarnings(warnings) {
+  elements.mtreeWarningList.replaceChildren();
+
+  if (warnings.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "subtle-label";
+    empty.textContent = "No warnings.";
+    elements.mtreeWarningList.append(empty);
+    return;
+  }
+
+  warnings.forEach((warning) => {
+    const row = document.createElement("div");
+    row.className = "subtle-label";
+    row.textContent = warning;
+    elements.mtreeWarningList.append(row);
+  });
+}
+
+function renderMtreeQuality(quality) {
+  if (!quality) {
+    elements.mtreeQualityText.textContent = "No module map generated yet.";
+    return;
+  }
+
+  const warningCount = quality.missingDescriptionModules.length + quality.recursionModules.length;
+  const passedCount = Math.max(0, quality.totalModules - warningCount);
+  elements.mtreeQualityText.textContent = `${passedCount}/${quality.totalModules} modules passed checks.`;
+}
+
+function listMarkdownTargets(project) {
+  return Object.values(project.nodes)
+    .filter((node) => node.kind === "file" && node.name.endsWith(".md"))
+    .sort((left, right) => getPath(project, left.id).localeCompare(getPath(project, right.id)));
+}
+
+function populateMtreeTargetPicker(selectedFileId = "__new__") {
+  const project = controller.getProject();
+  const markdownFiles = listMarkdownTargets(project);
+  elements.mtreeTargetFileSelect.replaceChildren();
+
+  const createNewOption = document.createElement("option");
+  createNewOption.value = "__new__";
+  createNewOption.textContent = "Create new markdown file";
+  elements.mtreeTargetFileSelect.append(createNewOption);
+
+  markdownFiles.forEach((file) => {
+    const option = document.createElement("option");
+    option.value = file.id;
+    option.textContent = getPath(project, file.id);
+    elements.mtreeTargetFileSelect.append(option);
+  });
+
+  const nextValue = markdownFiles.some((file) => file.id === selectedFileId) ? selectedFileId : "__new__";
+  mtreeToolState.selectedTargetFileId = nextValue;
+  elements.mtreeTargetFileSelect.value = nextValue;
+  elements.mtreeOutputNameInput.disabled = nextValue !== "__new__";
+}
+
+function refreshMtreeDraftPresentation() {
+  const draft = mtreeToolState.draftSection || "";
+  elements.mtreeOutputHighlight.innerHTML = `${highlightMarkdownSource(draft)}<div class="editor-line"> </div>`;
+  elements.mtreeRenderPreview.innerHTML = renderMarkdown(draft);
+  void typesetPreview(draft, elements.mtreeRenderPreview);
+  syncMtreeOutputScroll();
+  elements.mtreeKeepButton.disabled = draft === mtreeToolState.generatedSection;
+  elements.mtreeUndoButton.disabled = draft === mtreeToolState.generatedSection;
+}
+
+function renderMtreeDraft() {
+  const draft = mtreeToolState.draftSection || "";
+  elements.mtreeOutputText.value = draft;
+  refreshMtreeDraftPresentation();
+}
+
+function syncMtreeOutputScroll() {
+  const scrollTop = elements.mtreeOutputText.scrollTop;
+  const scrollLeft = elements.mtreeOutputText.scrollLeft;
+  elements.mtreeOutputHighlight.style.transform = `translate(${-scrollLeft}px, ${-scrollTop}px)`;
+}
+
+function keepMtreeDraft() {
+  mtreeToolState.generatedSection = mtreeToolState.draftSection;
+  renderMtreeDraft();
+}
+
+function undoMtreeDraft() {
+  mtreeToolState.draftSection = mtreeToolState.generatedSection;
+  renderMtreeDraft();
+}
+
+function ensureMtreeOutputName(fileName) {
+  const currentValue = elements.mtreeOutputNameInput.value.trim();
+  if (currentValue) {
+    return currentValue.toLowerCase().endsWith(".md") ? currentValue : `${currentValue}.md`;
+  }
+  const suggested = getDefaultModuleMapName(fileName);
+  elements.mtreeOutputNameInput.value = suggested;
+  return suggested;
+}
+
+function generateModuleMap() {
+  const project = controller.getProject();
+  const sourceFile = mtreeToolState.sourceFileId ? project.nodes[mtreeToolState.sourceFileId] : null;
+  if (!sourceFile || sourceFile.kind !== "file" || !sourceFile.name.endsWith(".mtree")) {
+    throw new Error("Select a .mtree file before generating a module map.");
+  }
+
+  const result = buildModuleMapSection(sourceFile.content, {
+    simplify: elements.mtreeSimplifyInput.checked,
+    splitContinuationTrees: elements.mtreeContinuationInput.checked,
+    includeNavigation: elements.mtreeIncludeNavigationInput.checked,
+    includeModules: elements.mtreeIncludeModulesInput.checked,
+    includeParents: elements.mtreeIncludeParentsInput.checked,
+    includeChildren: elements.mtreeIncludeChildrenInput.checked,
+    includeDescriptions: elements.mtreeIncludeDescriptionsInput.checked,
+    includeEmptySections: elements.mtreeIncludeEmptyInput.checked
+  });
+
+  mtreeToolState.generatedSection = result.section;
+  mtreeToolState.draftSection = result.section;
+  mtreeToolState.warnings = result.warnings;
+  mtreeToolState.quality = result.quality;
+
+  renderMtreeWarnings(result.warnings);
+  renderMtreeQuality(result.quality);
+  renderMtreeDraft();
+  ensureMtreeOutputName(sourceFile.name);
+
+  return result;
+}
+
+function openMtreeToolsDialog(fileId) {
+  const project = controller.getProject();
+  const file = project.nodes[fileId];
+  if (!file || file.kind !== "file" || !file.name.endsWith(".mtree")) {
+    notify("Module map tools are only available for .mtree files.");
+    return;
+  }
+
+  mtreeToolState.sourceFileId = fileId;
+  mtreeToolState.generatedSection = "";
+  mtreeToolState.draftSection = "";
+  mtreeToolState.warnings = [];
+  mtreeToolState.quality = null;
+  mtreeToolState.selectedTargetFileId = "__new__";
+
+  elements.mtreeSourceText.textContent = `Generate a module map from ${getPath(project, fileId) || file.name}.`;
+  elements.mtreeOutputNameInput.value = getDefaultModuleMapName(file.name);
+  populateMtreeTargetPicker();
+  renderMtreeWarnings([]);
+  renderMtreeQuality(null);
+  renderMtreeDraft();
+  elements.mtreeToolsDialog.showModal();
+
+  try {
+    generateModuleMap();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+function regenerateModuleMapWithNotification() {
+  if (!elements.mtreeToolsDialog.open || !mtreeToolState.sourceFileId) {
+    return;
+  }
+  try {
+    generateModuleMap();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+function upsertModuleMapMarkdown() {
+  const project = controller.getProject();
+  const sourceFile = mtreeToolState.sourceFileId ? project.nodes[mtreeToolState.sourceFileId] : null;
+  if (!sourceFile || sourceFile.kind !== "file" || !sourceFile.name.endsWith(".mtree")) {
+    notify("Module map source file is no longer available.");
+    return;
+  }
+
+  if (!mtreeToolState.generatedSection) {
+    try {
+      generateModuleMap();
+    } catch (error) {
+      notify(error.message);
+      return;
+    }
+  }
+
+  const draftSection = elements.mtreeOutputText.value;
+  mtreeToolState.draftSection = draftSection;
+  const parentId = getNode(project, sourceFile.id).parentId;
+  const selectedTargetFileId = elements.mtreeTargetFileSelect.value;
+
+  if (selectedTargetFileId !== "__new__") {
+    const targetFile = project.nodes[selectedTargetFileId];
+    if (!targetFile || targetFile.kind !== "file" || !targetFile.name.endsWith(".md")) {
+      notify("Selected target markdown file is no longer available.");
+      populateMtreeTargetPicker();
+      return;
+    }
+
+    const nextContent = replaceOrAppendModuleMap(targetFile.content, draftSection);
+    controller.updateContent(targetFile.id, nextContent);
+    publishOperation({ type: "update-file", path: getPath(project, targetFile.id), content: nextContent });
+    setActiveSourceFile(targetFile.id);
+    setPreviewFile(targetFile.id);
+    elements.mtreeToolsDialog.close();
+    notify(`Updated ${targetFile.name} with the generated module map.`);
+    return;
+  }
+
+  const outputName = ensureMtreeOutputName(sourceFile.name);
+  const sibling = findChildByName(project, parentId, outputName);
+
+  if (sibling && sibling.kind !== "file") {
+    notify(`Cannot write module map to ${outputName} because a folder already uses that name.`);
+    return;
+  }
+
+  if (sibling && !sibling.name.endsWith(".md")) {
+    notify("Module map output must be a .md file.");
+    return;
+  }
+
+  if (sibling) {
+    const nextContent = replaceOrAppendModuleMap(sibling.content, draftSection);
+    controller.updateContent(sibling.id, nextContent);
+    publishOperation({ type: "update-file", path: getPath(project, sibling.id), content: nextContent });
+    setActiveSourceFile(sibling.id);
+    setPreviewFile(sibling.id);
+    elements.mtreeToolsDialog.close();
+    notify(`Updated ${outputName} with the generated module map.`);
+    return;
+  }
+
+  controller.createFile(parentId, outputName, replaceOrAppendModuleMap("", draftSection));
+  const nextProject = controller.getProject();
+  const createdFile = findChildByName(nextProject, parentId, outputName);
+  if (createdFile) {
+    publishOperation({
+      type: "create-file",
+      parentPath: parentId === nextProject.rootId ? "" : getPath(nextProject, parentId),
+      name: outputName,
+      content: createdFile.content
+    });
+    setActiveSourceFile(createdFile.id);
+    setPreviewFile(createdFile.id);
+  }
+  elements.mtreeToolsDialog.close();
+  notify(`Created ${outputName} from ${sourceFile.name}.`);
+}
+
+function escapeEditorHtml(value) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function applyInlineHighlighting(value) {
+  return value
+    .replace(/(`[^`]*`)/g, '<span class="token-inline-code">$1</span>')
+    .replace(/(\[[^\]]+\]\([^)]+\))/g, '<span class="token-link">$1</span>')
+    .replace(/(\*\*[^*]+\*\*)/g, '<span class="token-strong">$1</span>')
+    .replace(/(^|[^*])(\*[^*]+\*)/g, '$1<span class="token-emphasis">$2</span>');
+}
+
+function highlightMtreeSource(value) {
+  const lines = value.replace(/\r\n/g, "\n").split("\n");
+
+  return lines.map((rawLine) => {
+    const escaped = escapeEditorHtml(rawLine || " ");
+    const trimmed = rawLine.trimStart();
+
+    if (!trimmed) {
+      return '<div class="editor-line"> </div>';
+    }
+
+    if (trimmed.startsWith("#")) {
+      return `<div class="editor-line"><span class="token-mtree-comment">${escaped}</span></div>`;
+    }
+
+    if (/^\[[^\]]+\]$/.test(trimmed)) {
+      const [, name] = trimmed.match(/^\[([^\]]+)\]$/);
+      const indent = escapeEditorHtml(rawLine.slice(0, rawLine.indexOf("[")));
+      return `<div class="editor-line">${indent}<span class="token-mtree-section-mark">[</span><span class="token-mtree-section-name">${escapeEditorHtml(name)}</span><span class="token-mtree-section-mark">]</span></div>`;
+    }
+
+    if (trimmed.startsWith("|")) {
+      const indent = escapeEditorHtml(rawLine.slice(0, rawLine.indexOf("|")));
+      return `<div class="editor-line">${indent}<span class="token-mtree-continuation">|</span><span class="token-mtree-description">${escapeEditorHtml(trimmed.slice(1))}</span></div>`;
+    }
+
+    const semicolonIndex = rawLine.indexOf(";");
+    const chainPart = semicolonIndex >= 0 ? rawLine.slice(0, semicolonIndex) : rawLine;
+    const descriptionPart = semicolonIndex >= 0 ? rawLine.slice(semicolonIndex + 1) : "";
+    const highlightedChain = escapeEditorHtml(chainPart)
+      .replace(/\.\.\./g, '<span class="token-mtree-continuation">...</span>')
+      .replace(/-&gt;/g, '<span class="token-mtree-chain-arrow">-&gt;</span>');
+
+    const chainHtml = highlightedChain.replace(/(^|\s)([^\s<][^<&]*?)(?=(?:\s*&gt;|\s*$|<span class="token-mtree-chain-arrow">))/g, (match, prefix, name) => {
+      return `${prefix}<span class="token-mtree-name">${name}</span>`;
+    });
+
+    const descriptionHtml = semicolonIndex >= 0
+      ? `<span class="token-mtree-section-mark">;</span><span class="token-mtree-description">${escapeEditorHtml(descriptionPart)}</span>`
+      : "";
+
+    return `<div class="editor-line">${chainHtml}${descriptionHtml}</div>`;
+  }).join("");
+}
+
+function highlightUrlDbSource(value) {
+  const lines = value.replace(/\r\n/g, "\n").split("\n");
+
+  return lines.map((rawLine) => {
+    const escaped = escapeEditorHtml(rawLine || " ");
+    const trimmed = rawLine.trimStart();
+
+    if (!trimmed) {
+      return '<div class="editor-line"> </div>';
+    }
+
+    if (trimmed.startsWith("#")) {
+      return `<div class="editor-line"><span class="token-mtree-comment">${escaped}</span></div>`;
+    }
+
+    if (/^\[[^\]]+\]$/.test(trimmed)) {
+      const [, name] = trimmed.match(/^\[([^\]]+)\]$/);
+      const indent = escapeEditorHtml(rawLine.slice(0, rawLine.indexOf("[")));
+      return `<div class="editor-line">${indent}<span class="token-urldb-bracket">[</span><span class="token-urldb-name">${escapeEditorHtml(name)}</span><span class="token-urldb-bracket">]</span></div>`;
+    }
+
+    const keyValueMatch = rawLine.match(/^(\s*)(url|description)(\s*=\s*)(.*)$/i);
+    if (keyValueMatch) {
+      const [, indent, key, separator, valuePart] = keyValueMatch;
+      const valueClass = key.toLowerCase() === "url" ? "token-link" : "token-urldb-description";
+      return `<div class="editor-line">${escapeEditorHtml(indent)}<span class="token-urldb-key">${escapeEditorHtml(key)}</span><span class="token-urldb-separator">${escapeEditorHtml(separator)}</span><span class="${valueClass}">${escapeEditorHtml(valuePart)}</span></div>`;
+    }
+
+    return `<div class="editor-line">${escaped}</div>`;
+  }).join("");
+}
+
+function highlightMarkdownSource(value) {
+  const lines = value.replace(/\r\n/g, "\n").split("\n");
+  let inFence = false;
+
+  return lines.map((rawLine) => {
+    const escaped = escapeEditorHtml(rawLine || " ");
+    const trimmed = rawLine.trimStart();
+
+    if (trimmed.startsWith("```")) {
+      inFence = !inFence;
+      return `<div class="editor-line"><span class="token-fence">${escaped}</span></div>`;
+    }
+
+    if (inFence) {
+      return `<div class="editor-line"><span class="token-code-block">${escaped}</span></div>`;
+    }
+
+    if (/^\s*#{1,6}\s/.test(rawLine)) {
+      const [, indent, hashes, space, text] = rawLine.match(/^(\s*)(#{1,6})(\s+)(.*)$/);
+      return `<div class="editor-line">${escapeEditorHtml(indent)}<span class="token-heading-mark">${escapeEditorHtml(hashes)}</span>${escapeEditorHtml(space)}<span class="token-heading-text">${applyInlineHighlighting(escapeEditorHtml(text || ""))}</span></div>`;
+    }
+
+    if (/^\s*-\s+/.test(rawLine)) {
+      const [, indent, marker, text] = rawLine.match(/^(\s*)(-)\s+(.*)$/);
+      return `<div class="editor-line">${escapeEditorHtml(indent)}<span class="token-list-mark">${marker}</span> ${applyInlineHighlighting(escapeEditorHtml(text || ""))}</div>`;
+    }
+
+    if (/^\s*>\s?/.test(rawLine)) {
+      const [, indent, marker, text] = rawLine.match(/^(\s*)(>)(\s?.*)$/);
+      return `<div class="editor-line">${escapeEditorHtml(indent)}<span class="token-quote-mark">${marker}</span><span class="token-quote-text">${applyInlineHighlighting(escapeEditorHtml(text || ""))}</span></div>`;
+    }
+
+    return `<div class="editor-line">${applyInlineHighlighting(escaped)}</div>`;
+  }).join("");
+}
+
+function getEditorLineHeight() {
+  const lineHeight = Number.parseFloat(globalThis.getComputedStyle(elements.textarea).lineHeight);
+  return Number.isFinite(lineHeight) ? lineHeight : 20.8;
+}
+
+function renderEditorDecorations(value) {
+  const normalized = value.replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n");
+  const activeFile = controller.getActiveFile();
+  const highlightMarkup = activeFile?.name.endsWith(".mtree")
+    ? highlightMtreeSource(normalized)
+    : activeFile?.name.endsWith(".urldb")
+      ? highlightUrlDbSource(normalized)
+      : highlightMarkdownSource(normalized);
+  elements.editorHighlight.innerHTML = `${highlightMarkup}<div class="editor-line"> </div>`;
+
+  const renderedLines = Array.from(elements.editorHighlight.querySelectorAll(".editor-line")).slice(0, Math.max(1, lines.length));
+  const minimumLineHeight = getEditorLineHeight();
+  const gutterMarkup = renderedLines.map((line, index) => {
+    const height = Math.max(minimumLineHeight, Math.ceil(line.getBoundingClientRect().height));
+    return `<div class="editor-gutter-line" style="height:${height}px">${index + 1}</div>`;
+  }).join("");
+  elements.editorGutter.innerHTML = gutterMarkup;
+}
+
+function syncEditorScroll() {
+  const scrollTop = elements.textarea.scrollTop;
+  const scrollLeft = elements.textarea.scrollLeft;
+  elements.editorHighlight.style.transform = `translate(${-scrollLeft}px, ${-scrollTop}px)`;
+  elements.editorGutter.style.transform = `translateY(${-scrollTop}px)`;
+}
+
+function forwardEditorWheel(event) {
+  const hasVertical = event.deltaY !== 0;
+  const hasHorizontal = event.deltaX !== 0;
+  if (!hasVertical && !hasHorizontal) {
+    return;
+  }
+  elements.textarea.scrollTop += event.deltaY;
+  elements.textarea.scrollLeft += event.deltaX;
+  syncEditorScroll();
+  event.preventDefault();
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function getIndentText() {
+  return settings.indentStyle === "spaces" ? "    " : "\t";
+}
+
+function insertIndentIntoTextarea(textarea) {
+  const indentText = getIndentText();
+  const value = textarea.value;
+  const selectionStart = textarea.selectionStart;
+  const selectionEnd = textarea.selectionEnd;
+  const nextValue = `${value.slice(0, selectionStart)}${indentText}${value.slice(selectionEnd)}`;
+  textarea.value = nextValue;
+  const nextCaret = selectionStart + indentText.length;
+  textarea.selectionStart = nextCaret;
+  textarea.selectionEnd = nextCaret;
+  textarea.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function handleIndentKeydown(event) {
+  if (event.key !== "Tab" || event.ctrlKey || event.metaKey || event.altKey) {
+    return;
+  }
+  event.preventDefault();
+  insertIndentIntoTextarea(event.currentTarget);
+}
+
+function handleEditorKeydown(event) {
+  if ((event.ctrlKey || event.metaKey) && event.key === " ") {
+    event.preventDefault();
+    showEditorAutocomplete(true);
+    return;
+  }
+
+  if (!elements.editorAutocomplete.hidden) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      autocompleteState.activeIndex = (autocompleteState.activeIndex + 1) % autocompleteState.items.length;
+      renderEditorAutocomplete();
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      autocompleteState.activeIndex = (autocompleteState.activeIndex - 1 + autocompleteState.items.length) % autocompleteState.items.length;
+      renderEditorAutocomplete();
+      return;
+    }
+    if (event.key === "Enter" || (event.key === "Tab" && !event.shiftKey)) {
+      event.preventDefault();
+      acceptEditorAutocomplete();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      hideEditorAutocomplete();
+      return;
+    }
+  }
+
+  handleIndentKeydown(event);
+}
+
+function hasMathMarkup(value) {
+  return /\$\$[\s\S]+?\$\$|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\]|\$(?!\s)[^$\n]+\$/.test(value);
+}
+
+function ensureMathJax() {
+  if (globalThis.MathJax?.typesetPromise) {
+    return Promise.resolve(globalThis.MathJax);
+  }
+
+  if (mathJaxLoadPromise) {
+    return mathJaxLoadPromise;
+  }
+
+  globalThis.MathJax = globalThis.MathJax ?? {
+    tex: {
+      inlineMath: [["$", "$"], ["\\(", "\\)"]],
+      displayMath: [["$$", "$$"], ["\\[", "\\]"]]
+    },
+    svg: { fontCache: "global" },
+    startup: { typeset: false }
+  };
+
+  mathJaxLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js";
+    script.async = true;
+    script.onload = () => resolve(globalThis.MathJax);
+    script.onerror = () => reject(new Error("MathJax failed to load."));
+    document.head.append(script);
+  });
+
+  return mathJaxLoadPromise;
+}
+
+async function typesetPreview(content, target = elements.preview) {
+  if (!hasMathMarkup(content)) {
+    return;
+  }
+
+  try {
+    const mathJax = await ensureMathJax();
+    if (mathJax?.typesetClear) {
+      mathJax.typesetClear([target]);
+    }
+    if (mathJax?.typesetPromise) {
+      await mathJax.typesetPromise([target]);
+    }
+  } catch {
+    // Preview still works without MathJax when offline or blocked.
+  }
+}
+
+function ensureOpenTabs(project) {
+  sourceOpenTabIds = sourceOpenTabIds.filter((fileId) => {
+    const node = project.nodes[fileId];
+    return node?.kind === "file";
+  });
+
+  previewOpenTabIds = previewOpenTabIds.filter((fileId) => {
+    const node = project.nodes[fileId];
+    return node?.kind === "file";
+  });
+
+  if (project.activeFileId && !sourceOpenTabIds.includes(project.activeFileId)) {
+    sourceOpenTabIds.push(project.activeFileId);
+  }
+
+  if (!project.activeFileId && sourceOpenTabIds.length > 0) {
+    sourceOpenTabIds = [];
+  }
+
+  if (previewFileId) {
+    const previewNode = project.nodes[previewFileId];
+    if (previewNode?.kind !== "file") {
+      previewFileId = null;
+    }
+  }
+
+  if (previewFileId && !previewOpenTabIds.includes(previewFileId)) {
+    previewOpenTabIds.push(previewFileId);
+  }
+
+  if (!previewFileId && previewOpenTabIds.length > 0) {
+    previewFileId = previewOpenTabIds[previewOpenTabIds.length - 1] ?? null;
+  }
+}
+
+function openSourceTab(fileId) {
+  const project = controller.getProject();
+  const node = project.nodes[fileId];
+  if (!node || node.kind !== "file") {
+    return;
+  }
+
+  if (!sourceOpenTabIds.includes(fileId)) {
+    sourceOpenTabIds.push(fileId);
+  }
+}
+
+function openPreviewTab(fileId) {
+  const project = controller.getProject();
+  const node = project.nodes[fileId];
+  if (!node || node.kind !== "file") {
+    return;
+  }
+
+  if (!previewOpenTabIds.includes(fileId)) {
+    previewOpenTabIds.push(fileId);
+  }
+}
+
+function setActiveSourceFile(fileId) {
+  selectionNodeId = fileId;
+  sourceUrlDbEntry = null;
+  openSourceTab(fileId);
+  controller.setActiveFile(fileId);
+}
+
+function setActiveSourceUrlDbEntry(fileId, entryId) {
+  selectionNodeId = fileId;
+  sourceUrlDbEntry = { fileId, entryId };
+  openSourceTab(fileId);
+  controller.setActiveFile(fileId);
+}
+
+function setPreviewFile(fileId) {
+  const project = controller.getProject();
+  const node = project.nodes[fileId];
+  if (!node || node.kind !== "file") {
+    return;
+  }
+  openPreviewTab(fileId);
+  previewFileId = fileId;
+  previewUrlDbEntry = null;
+  updateStatus(project);
+}
+
+function openFileFromExplorer(fileId) {
+  const project = controller.getProject();
+  const node = project.nodes[fileId];
+  if (!node || node.kind !== "file") {
+    return;
+  }
+  logDebug("action", "File opened", getPath(project, fileId));
+  setActiveSourceFile(fileId);
+  if (previewFileId === null && isPreviewableFileName(node.name)) {
+    setPreviewFile(fileId);
+  }
+}
+
+function openDroppedFileInPane(fileId, pane) {
+  const project = controller.getProject();
+  const node = project.nodes[fileId];
+  if (!node || node.kind !== "file") {
+    return;
+  }
+  if (pane === "preview") {
+    setPreviewFile(fileId);
+    return;
+  }
+  setActiveSourceFile(fileId);
+}
+
+function openUrlDbEntryInPane(fileId, entryId, pane) {
+  const project = controller.getProject();
+  const file = project.nodes[fileId];
+  if (!file || file.kind !== "file" || !isUrlDbFileName(file.name)) {
+    return;
+  }
+
+  if (pane === "preview") {
+    openPreviewTab(fileId);
+    previewFileId = fileId;
+    previewUrlDbEntry = entryId;
+    updateStatus(project);
+    return;
+  }
+
+  setActiveSourceFile(fileId);
+}
+
+async function saveActiveWorkspaceFile() {
+  const project = controller.getProject();
+  const activeFile = controller.getActiveFile();
+  if (!activeFile) {
+    return;
+  }
+  const wroteToDisk = await saveProjectToHandles(project);
+  controller.markSaved(activeFile.id);
+  if (!wroteToDisk) {
+    notify("Saved in browser cache. Use Export to download files.");
+  }
+}
+
+async function handleSaveCommand() {
+  if (elements.mtreeToolsDialog.open && elements.mtreeToolsDialog.contains(document.activeElement)) {
+    logDebug("action", "Module map written to target");
+    upsertModuleMapMarkdown();
+    return;
+  }
+
+  try {
+    logDebug("action", "Workspace save requested");
+    await saveActiveWorkspaceFile();
+    logDebug("response", "Workspace saved");
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+function bindPaneDropTarget(target, pane) {
+  target.addEventListener("dragover", (event) => {
+    const fileId = event.dataTransfer?.getData("text/mdnotes-file-id");
+    const urlDbEntry = event.dataTransfer?.getData("text/mdnotes-urldb-entry");
+    if (!fileId && !urlDbEntry) {
+      return;
+    }
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "copy";
+    }
+  });
+
+  target.addEventListener("drop", (event) => {
+    const fileId = event.dataTransfer?.getData("text/mdnotes-file-id");
+    const urlDbPayload = event.dataTransfer?.getData("text/mdnotes-urldb-entry");
+    if (!fileId && !urlDbPayload) {
+      return;
+    }
+    event.preventDefault();
+    if (fileId) {
+      openDroppedFileInPane(fileId, pane);
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(urlDbPayload);
+      openUrlDbEntryInPane(parsed.fileId, parsed.entryId, pane);
+    } catch {
+      // Ignore malformed derived explorer payloads.
+    }
+  });
+}
+
+function closeSourceTab(fileId) {
+  const project = controller.getProject();
+  const wasActive = project.activeFileId === fileId;
+  sourceOpenTabIds = sourceOpenTabIds.filter((tabId) => tabId !== fileId);
+
+  if (!wasActive) {
+    updateStatus(project);
+    return;
+  }
+
+  const fallbackId = sourceOpenTabIds[sourceOpenTabIds.length - 1] ?? null;
+  if (fallbackId) {
+    selectionNodeId = fallbackId;
+    controller.setActiveFile(fallbackId);
+    return;
+  }
+
+  const nextProject = structuredClone(project);
+  nextProject.activeFileId = null;
+  controller.replaceProject(nextProject);
+}
+
+function closePreviewTab(fileId) {
+  previewOpenTabIds = previewOpenTabIds.filter((tabId) => tabId !== fileId);
+  if (previewFileId === fileId) {
+    previewFileId = previewOpenTabIds[previewOpenTabIds.length - 1] ?? null;
+  }
+  updateStatus(controller.getProject());
+}
+
+function moveTabWithinList(tabIds, draggedFileId, targetFileId, placeAfter = false) {
+  const next = tabIds.filter((tabId) => tabId !== draggedFileId);
+  const targetIndex = next.indexOf(targetFileId);
+  if (targetIndex < 0) {
+    next.push(draggedFileId);
+    return next;
+  }
+
+  next.splice(targetIndex + (placeAfter ? 1 : 0), 0, draggedFileId);
+  return next;
+}
+
+function reorderPaneTabs(pane, draggedFileId, targetFileId, placeAfter = false) {
+  if (pane === "source") {
+    sourceOpenTabIds = moveTabWithinList(sourceOpenTabIds, draggedFileId, targetFileId, placeAfter);
+  } else {
+    previewOpenTabIds = moveTabWithinList(previewOpenTabIds, draggedFileId, targetFileId, placeAfter);
+  }
+
+  renderTabs(controller.getProject());
+}
+
+function renderTabStrip({ strip, pane, project, tabIds, activeFileId, emptyText, onActivate, onClose, allowReorder = false }) {
+  strip.replaceChildren();
+
+  if (tabIds.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "editor-tab is-empty";
+    empty.textContent = emptyText;
+    strip.append(empty);
+    return;
+  }
+
+  tabIds.forEach((fileId) => {
+    const file = project.nodes[fileId];
+    if (!file || file.kind !== "file") {
+      return;
+    }
+
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = `editor-tab${activeFileId === fileId ? " is-active" : ""}`;
+    tab.dataset.fileId = fileId;
+    tab.title = getPath(project, fileId);
+    tab.draggable = allowReorder;
+
+    const icon = document.createElement("span");
+    icon.className = "tab-file-icon";
+    icon.setAttribute("aria-hidden", "true");
+
+    const title = document.createElement("span");
+    title.className = "tab-title";
+    title.textContent = file.name;
+
+    const dirty = document.createElement("span");
+    dirty.className = `tab-dirty${file.dirty ? " is-dirty" : ""}`;
+    dirty.textContent = file.dirty ? "●" : "";
+
+    const close = document.createElement("span");
+    close.className = "tab-close";
+    close.textContent = "×";
+    close.setAttribute("aria-hidden", "true");
+
+    tab.append(icon, title, dirty, close);
+    tab.addEventListener("click", () => onActivate(fileId));
+    if (allowReorder) {
+      tab.addEventListener("dragstart", (event) => {
+        draggingTabState = { pane, fileId };
+        event.dataTransfer?.setData("text/mdnotes-tab", JSON.stringify(draggingTabState));
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = "move";
+        }
+      });
+      tab.addEventListener("dragend", () => {
+        draggingTabState = null;
+      });
+      tab.addEventListener("dragover", (event) => {
+        if (draggingTabState?.pane !== pane || draggingTabState.fileId === fileId) {
+          return;
+        }
+        event.preventDefault();
+      });
+      tab.addEventListener("drop", (event) => {
+        if (draggingTabState?.pane !== pane || draggingTabState.fileId === fileId) {
+          return;
+        }
+        event.preventDefault();
+        const rect = tab.getBoundingClientRect();
+        const placeAfter = event.clientX > rect.left + (rect.width / 2);
+        reorderPaneTabs(pane, draggingTabState.fileId, fileId, placeAfter);
+      });
+    }
+    close.addEventListener("click", (event) => {
+      event.stopPropagation();
+      onClose(fileId);
+    });
+    strip.append(tab);
+  });
+}
+
+function renderTabs(project) {
+  renderTabStrip({
+    strip: elements.sourceTabStrip,
+    pane: "source",
+    project,
+    tabIds: sourceOpenTabIds,
+    activeFileId: project.activeFileId,
+    emptyText: "No source file selected",
+    onActivate: setActiveSourceFile,
+    onClose: closeSourceTab,
+    allowReorder: true
+  });
+
+  renderTabStrip({
+    strip: elements.previewTabStrip,
+    pane: "preview",
+    project,
+    tabIds: previewOpenTabIds,
+    activeFileId: previewFileId,
+    emptyText: "No preview file selected",
+    onActivate: setPreviewFile,
+    onClose: closePreviewTab,
+    allowReorder: true
+  });
+}
+
+function bindTabStripReorderTarget(strip, pane) {
+  strip.addEventListener("dragover", (event) => {
+    if (draggingTabState?.pane !== pane) {
+      return;
+    }
+    event.preventDefault();
+  });
+
+  strip.addEventListener("drop", (event) => {
+    if (draggingTabState?.pane !== pane) {
+      return;
+    }
+    const targetTab = event.target.closest(".editor-tab[data-file-id]");
+    if (targetTab) {
+      return;
+    }
+
+    event.preventDefault();
+    const targetList = pane === "source" ? sourceOpenTabIds : previewOpenTabIds;
+    const draggedId = draggingTabState.fileId;
+    const next = targetList.filter((tabId) => tabId !== draggedId);
+    next.push(draggedId);
+    if (pane === "source") {
+      sourceOpenTabIds = next;
+    } else {
+      previewOpenTabIds = next;
+    }
+    renderTabs(controller.getProject());
+  });
+}
+
+function renderUrlDbTable(target, file) {
+  const entries = getUrlDbEntries(file.content);
+  const frame = document.createElement("div");
+  frame.className = "urldb-preview";
+
+  if (entries.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "editor-readonly-note";
+    empty.textContent = "No valid bookmark entries yet. Add sections like [Name] and url = https://...";
+    frame.append(empty);
+    target.append(frame);
+    return { shouldTypeset: false, content: "" };
+  }
+
+  const table = document.createElement("table");
+  table.className = "urldb-table";
+  table.innerHTML = "<thead><tr><th>Preview</th><th>Name</th><th>URL</th><th>Description</th></tr></thead>";
+  const body = document.createElement("tbody");
+
+  entries.forEach((entry) => {
+    const row = document.createElement("tr");
+    row.innerHTML = `<td><img src="${escapeHtmlAttribute(entry.url)}" alt="${escapeHtmlAttribute(entry.name)}"></td><td>${escapeEditorHtml(entry.name)}</td><td><a href="${escapeHtmlAttribute(entry.url)}" target="_blank" rel="noreferrer">${escapeEditorHtml(entry.url)}</a></td><td>${escapeEditorHtml(entry.description || "")}</td>`;
+    body.append(row);
+  });
+
+  table.append(body);
+  frame.append(table);
+  target.append(frame);
+  return { shouldTypeset: false, content: "" };
+}
+
+function renderUrlDbEntryPreview(target, file, entryId) {
+  const entry = getUrlDbEntryById(file.content, entryId);
+  if (!entry) {
+    previewUrlDbEntry = null;
+    return renderUrlDbTable(target, file);
+  }
+
+  const frame = document.createElement("div");
+  frame.className = "asset-preview remote-asset-preview";
+
+  const image = document.createElement("img");
+  image.src = entry.url;
+  image.alt = entry.name;
+  frame.append(image);
+
+  const meta = document.createElement("div");
+  meta.className = "remote-asset-meta";
+  meta.innerHTML = `<strong>${escapeEditorHtml(entry.name)}</strong><span>${escapeEditorHtml(entry.description || entry.url)}</span>`;
+  frame.append(meta);
+
+  target.append(frame);
+  return { shouldTypeset: false, content: "" };
+}
+
+function renderPreviewContent(target, project, file) {
+  target.replaceChildren();
+
+  if (!file) {
+    return { shouldTypeset: false, content: "" };
+  }
+
+  if (isImageFileName(file.name)) {
+    const frame = document.createElement("div");
+    frame.className = "asset-preview";
+    const image = document.createElement("img");
+    image.src = file.content;
+    image.alt = file.name;
+    frame.append(image);
+    target.append(frame);
+    return { shouldTypeset: false, content: "" };
+  }
+
+  if (isUrlDbFileName(file.name)) {
+    if (previewUrlDbEntry && previewFileId === file.id) {
+      return renderUrlDbEntryPreview(target, file, previewUrlDbEntry);
+    }
+    return renderUrlDbTable(target, file);
+  }
+
+  if (file.name.endsWith(".mtree")) {
+    target.innerHTML = `<pre><code>${escapeEditorHtml(file.content)}</code></pre>`;
+    return { shouldTypeset: false, content: "" };
+  }
+
+  target.innerHTML = renderMarkdown(file.content, {
+    resolveUrl(url) {
+      return resolveProjectAssetUrl(project, file.id, url);
+    }
+  });
+
+  return { shouldTypeset: true, content: file.content };
+}
+
+function printPreviewAsPdf() {
+  const project = controller.getProject();
+  const previewFile = previewFileId ? project.nodes[previewFileId] : null;
+  if (!previewFile) {
+    notify("Open a markdown or image file before exporting PDF.");
+    return;
+  }
+
+  const printFrame = document.createElement("iframe");
+  printFrame.setAttribute("aria-hidden", "true");
+  printFrame.style.position = "fixed";
+  printFrame.style.right = "0";
+  printFrame.style.bottom = "0";
+  printFrame.style.width = "0";
+  printFrame.style.height = "0";
+  printFrame.style.border = "0";
+  printFrame.style.opacity = "0";
+  printFrame.style.pointerEvents = "none";
+  document.body.append(printFrame);
+
+  const printWindow = printFrame.contentWindow;
+  if (!printWindow) {
+    printFrame.remove();
+    notify("Unable to prepare PDF export in this browser.");
+    return;
+  }
+
+  const previewHtml = isImageFileName(previewFile.name)
+    ? `<div class="asset-preview"><img src="${escapeHtmlAttribute(previewFile.content)}" alt="${escapeHtmlAttribute(previewFile.name)}"></div>`
+    : isUrlDbFileName(previewFile.name)
+      ? elements.preview.innerHTML
+    : previewFile.name.endsWith(".mtree")
+      ? `<pre><code>${escapeEditorHtml(previewFile.content)}</code></pre>`
+    : renderMarkdown(previewFile.content, {
+      resolveUrl(url) {
+        return resolveProjectAssetUrl(project, previewFile.id, url);
+      }
+    });
+  const title = previewFile.name.replace(/\.md$/i, "") || "MDNotes";
+  const includeMath = previewFile.name.endsWith(".md") && hasMathMarkup(previewFile.content);
+
+  const cleanupPrintFrame = () => {
+    globalThis.setTimeout(() => {
+      printFrame.remove();
+    }, 250);
+  };
+
+  printWindow.document.write(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>${title}</title>
+    <style>
+      body { font-family: "Segoe UI", sans-serif; margin: 32px; color: #1f1f1f; line-height: 1.6; }
+      pre, code { font-family: "Cascadia Code", Consolas, monospace; }
+      pre { padding: 12px; background: #f5f5f5; border: 1px solid #ddd; overflow: auto; }
+      code { background: #f5f5f5; padding: 1px 4px; }
+      blockquote { margin: 0; padding-left: 12px; border-left: 3px solid #0e639c; color: #555; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 6px 8px; border: 1px solid #ddd; }
+      img { display: block; max-width: 100%; height: auto; }
+      mjx-container { break-inside: avoid; page-break-inside: avoid; }
+      mjx-container[jax="SVG"] { overflow: visible; }
+      mjx-container[jax="SVG"] > svg { max-width: 100%; }
+      @page { size: A4; margin: 14mm; }
+    </style>
+    ${includeMath ? '<script>window.MathJax={tex:{inlineMath:[["$","$"],["\\(","\\)"]],displayMath:[["$$","$$"],["\\[","\\]"]]},svg:{fontCache:"global"},startup:{typeset:false}};<\/script><script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"><\/script>' : ""}
+  </head>
+  <body>
+    <main id="print-root">${previewHtml}</main>
+  </body>
+</html>`);
+  printWindow.document.close();
+
+  const finalizePrint = () => {
+    printWindow.addEventListener("afterprint", cleanupPrintFrame, { once: true });
+    printWindow.focus();
+    printWindow.print();
+    globalThis.setTimeout(cleanupPrintFrame, 1500);
+  };
+
+  if (includeMath) {
+    const waitForMath = () => {
+      if (printWindow.MathJax?.typesetPromise) {
+        printWindow.MathJax.typesetPromise([printWindow.document.getElementById("print-root")]).finally(finalizePrint);
+        return;
+      }
+      printWindow.setTimeout(waitForMath, 120);
+    };
+    printWindow.setTimeout(waitForMath, 120);
+    return;
+  }
+
+  printWindow.setTimeout(finalizePrint, 80);
+}
+
+function applyWorkspaceSettings() {
+  elements.app.dataset.explorer = settings.explorer;
+  elements.app.dataset.preview = settings.preview;
+  elements.app.dataset.wordWrap = settings.wordWrap ? "on" : "off";
+  elements.app.dataset.debug = settings.debugPanel ? "on" : "off";
+  elements.app.style.setProperty("--sidebar-width", `${settings.sidebarWidth}px`);
+  elements.app.style.setProperty("--preview-width", `${settings.previewWidth}px`);
+  elements.app.style.setProperty("--debug-height", `${settings.debugPanelHeight}px`);
+  elements.app.style.setProperty("--indent-tab-size", "4");
+  elements.textarea.wrap = settings.wordWrap ? "soft" : "off";
+  elements.previewCollapseButton.setAttribute("aria-expanded", settings.preview === "shown" ? "true" : "false");
+  elements.debugPanel.hidden = !settings.debugPanel;
+  elements.toggleDebugMenuButton.textContent = settings.debugPanel ? "Hide Debug Panel" : "Show Debug Panel";
+  elements.explorerFilterButton.classList.toggle("is-active", settings.explorerFilter !== "all");
+  renderDebugPanel();
+}
+
+function startPointerResize(event, onMove) {
+  event.preventDefault();
+
+  function handleMove(moveEvent) {
+    onMove(moveEvent);
+  }
+
+  function handleUp() {
+    document.removeEventListener("pointermove", handleMove);
+    document.removeEventListener("pointerup", handleUp);
+  }
+
+  document.addEventListener("pointermove", handleMove);
+  document.addEventListener("pointerup", handleUp);
+}
+
+elements.workspaceSplitter.addEventListener("pointerdown", (event) => {
+  if (settings.explorer === "collapsed") {
+    return;
+  }
+
+  startPointerResize(event, (moveEvent) => {
+    const shellRect = elements.workspaceShell.getBoundingClientRect();
+    const activityWidth = 48;
+    const nextWidth = clamp(moveEvent.clientX - shellRect.left - activityWidth, 180, Math.max(240, shellRect.width - 320));
+    settings.sidebarWidth = Math.round(nextWidth);
+    persistSettings();
+    renderEditorDecorations(elements.textarea.value);
+    syncEditorScroll();
+  });
+});
+
+elements.editorSplitter.addEventListener("pointerdown", (event) => {
+  if (settings.preview === "hidden") {
+    return;
+  }
+
+  startPointerResize(event, (moveEvent) => {
+    const gridRect = elements.editorGrid.getBoundingClientRect();
+    const nextWidth = clamp(gridRect.right - moveEvent.clientX, 280, Math.max(320, gridRect.width - 280));
+    settings.previewWidth = Math.round(nextWidth);
+    persistSettings();
+    renderEditorDecorations(elements.textarea.value);
+    syncEditorScroll();
+  });
+});
+
+elements.debugSplitter.addEventListener("pointerdown", (event) => {
+  if (!settings.debugPanel) {
+    return;
+  }
+
+  startPointerResize(event, (moveEvent) => {
+    const workspaceRect = elements.workspaceShell.getBoundingClientRect();
+    const footerHeight = 24;
+    const bottom = workspaceRect.bottom - footerHeight;
+    const nextHeight = clamp(bottom - moveEvent.clientY, 120, Math.max(180, workspaceRect.height - 220));
+    settings.debugPanelHeight = Math.round(nextHeight);
+    persistSettings();
+  });
+});
+
+function closeMenus() {
+  menuPairs.forEach(([button, menu]) => {
+    button.classList.remove("is-open");
+    menu.hidden = true;
+  });
+}
+
+function toggleMenu(button, menu) {
+  const shouldOpen = menu.hidden;
+  closeMenus();
+  if (shouldOpen) {
+    button.classList.add("is-open");
+    menu.hidden = false;
+  }
+}
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".menu-group")) {
+    closeMenus();
+  }
+});
+
+menuPairs.forEach(([button, menu]) => {
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleMenu(button, menu);
+  });
+  menu.querySelectorAll("button").forEach((menuButton) => {
+    menuButton.addEventListener("click", closeMenus);
+  });
+});
+
+function setStatusDot(node, kind) {
+  node.classList.remove("is-success", "is-warning", "is-danger");
+  if (kind) {
+    node.classList.add(kind);
+  }
+}
+
+function persistSettings() {
+  saveSettings(settings);
+  applyWorkspaceSettings();
+}
+
+applyWorkspaceSettings();
+
+function getSelectedNode(project) {
+  return project.nodes[selectionNodeId] ?? (project.activeFileId ? project.nodes[project.activeFileId] : project.nodes[project.rootId]);
+}
+
+function getSelectedUrlDbEntry(project) {
+  if (!sourceUrlDbEntry) {
+    return null;
+  }
+
+  const file = project.nodes[sourceUrlDbEntry.fileId];
+  if (!file || file.kind !== "file" || !isUrlDbFileName(file.name)) {
+    return null;
+  }
+
+  const entry = getUrlDbEntryById(file.content, sourceUrlDbEntry.entryId);
+  if (!entry) {
+    return null;
+  }
+
+  return { file, entry };
+}
+
+function getSelectedParent(project) {
+  const selectedNode = getSelectedNode(project);
+  if (!selectedNode) {
+    return project.nodes[project.rootId];
+  }
+  if (selectedNode.kind === "folder") {
+    return selectedNode;
+  }
+  return project.nodes[selectedNode.parentId];
+}
+
+function setAddFileStatus(message) {
+  elements.addFileStatusText.textContent = message;
+}
+
+function resetAddFileState() {
+  addFileState.fileName = "";
+  addFileState.content = null;
+  addFileState.sourceLabel = "";
+  elements.addFileUrlInput.value = "";
+  elements.addFileNameInput.value = "";
+  elements.addFileSourceText.textContent = "No staged file yet.";
+  setAddFileStatus("Supported: .md, .mtree, .urldb, .png, .jpg, .jpeg, .gif, .svg, .webp, .bmp.");
+}
+
+function stageAddFileContent({ name, content, sourceLabel }) {
+  addFileState.fileName = name;
+  addFileState.content = content;
+  addFileState.sourceLabel = sourceLabel;
+  elements.addFileNameInput.value = name;
+  elements.addFileSourceText.textContent = sourceLabel;
+  setAddFileStatus(`Ready to add ${name}.`);
+}
+
+async function stageAddFileFromLocalFile(file) {
+  if (!isAllowedFileName(file.name)) {
+    throw new Error("Only markdown, mtree, urldb, and supported image files can be added.");
+  }
+
+  const content = await readFileAsProjectContent(file, file.name);
+  stageAddFileContent({
+    name: file.name,
+    content,
+    sourceLabel: `Staged from local file: ${file.name}`
+  });
+}
+
+async function stageAddFileFromUrl() {
+  const url = elements.addFileUrlInput.value.trim();
+  if (!url) {
+    throw new Error("Enter a file URL first.");
+  }
+
+  const suggestedName = elements.addFileNameInput.value.trim() || inferNameFromUrl(url);
+  if (!isAllowedFileName(suggestedName)) {
+    throw new Error("The fetched file name must end with a supported extension.");
+  }
+
+  let response;
+  try {
+    response = await fetch(url);
+  } catch {
+    if (isImageFileName(suggestedName)) {
+      throw new Error("Remote image download was blocked by the source host or browser policy. Add that URL to a .urldb album instead.");
+    }
+    throw new Error("Unable to fetch file from URL.");
+  }
+  if (!response.ok) {
+    throw new Error(`Unable to fetch file from URL (${response.status}).`);
+  }
+
+  const blob = await response.blob();
+  const file = new File([blob], suggestedName, { type: blob.type });
+  const content = await readFileAsProjectContent(file, suggestedName);
+  stageAddFileContent({
+    name: suggestedName,
+    content,
+    sourceLabel: `Fetched from ${url}`
+  });
+}
+
+async function handleAddFileTransfer(transfer) {
+  const directFile = transfer.files?.[0];
+  if (directFile) {
+    await stageAddFileFromLocalFile(directFile);
+    return;
+  }
+
+  const itemFile = Array.from(transfer.items ?? [])
+    .map((item) => item.kind === "file" ? item.getAsFile() : null)
+    .find(Boolean);
+  if (itemFile) {
+    await stageAddFileFromLocalFile(itemFile);
+    return;
+  }
+
+  const uri = transfer.getData("text/uri-list")?.trim();
+  const text = transfer.getData("text/plain")?.trim();
+
+  if (uri || looksLikeUrl(text || "")) {
+    elements.addFileUrlInput.value = uri || text;
+    setAddFileStatus("URL staged. Use Add File to fetch it.");
+    return;
+  }
+
+  if (text) {
+    const suggestedName = elements.addFileNameInput.value.trim() || "pasted-note.md";
+    const finalName = /\.(md|mtree)$/i.test(suggestedName) ? suggestedName : `${suggestedName}.md`;
+    stageAddFileContent({
+      name: finalName,
+      content: text,
+      sourceLabel: "Staged from pasted text"
+    });
+  }
+}
+
+async function addDroppedImageAndInsert(file, textarea) {
+  const activeFile = controller.getActiveFile();
+  if (!activeFile || !activeFile.name.endsWith(".md")) {
+    return false;
+  }
+
+  if (!await confirmAction(`Add ${file.name} to the current folder and insert a markdown image reference?`)) {
+    return false;
+  }
+
+  const project = controller.getProject();
+  const parentId = project.nodes[activeFile.id].parentId;
+  const parentPath = parentId === project.rootId ? "" : getPath(project, parentId);
+  const content = await readFileAsProjectContent(file, file.name);
+  const fileName = suggestUniqueFileName(project, parentId, file.name);
+  controller.createFile(parentId, fileName, content);
+  publishOperation({ type: "create-file", parentPath, name: fileName, content });
+
+  const nextProject = controller.getProject();
+  const createdFile = findChildByName(nextProject, parentId, fileName);
+  if (!createdFile || createdFile.kind !== "file") {
+    return false;
+  }
+
+  textarea.focus();
+  insertReferenceAtCursor(createMarkdownReference(activeFile, createdFile));
+  logDebug("action", "Dropped image inserted", fileName);
+  return true;
+}
+
+async function handleEditorDrop(event) {
+  const activeFile = controller.getActiveFile();
+  if (!activeFile || !isTextFileName(activeFile.name)) {
+    return;
+  }
+
+  const urlDbPayload = event.dataTransfer?.getData("text/mdnotes-urldb-entry");
+  if (urlDbPayload && activeFile.name.endsWith(".md")) {
+    try {
+      const parsed = JSON.parse(urlDbPayload);
+      const project = controller.getProject();
+      const sourceFile = project.nodes[parsed.fileId];
+      const entry = sourceFile?.kind === "file" ? getUrlDbEntryById(sourceFile.content, parsed.entryId) : null;
+      if (entry) {
+        insertReferenceAtCursor(createMarkdownImageReference(entry.name, entry.url));
+        logDebug("action", "Bookmark image inserted", `${entry.name} :: ${entry.url}`);
+      }
+    } catch {
+      // Ignore malformed bookmark payloads.
+    }
+    return;
+  }
+
+  const internalFileId = event.dataTransfer?.getData("text/mdnotes-file-id");
+  if (internalFileId) {
+    const project = controller.getProject();
+    const targetFile = project.nodes[internalFileId];
+    if (targetFile?.kind === "file") {
+      const insertText = activeFile.name.endsWith(".md")
+        ? createMarkdownReference(activeFile, targetFile)
+        : getRelativePath(getPath(project, activeFile.id), getPath(project, targetFile.id));
+      insertReferenceAtCursor(insertText);
+      logDebug("action", "Explorer reference inserted", getPath(project, targetFile.id));
+    }
+    return;
+  }
+
+  const file = event.dataTransfer?.files?.[0];
+  if (file && isImageFileName(file.name) && activeFile.name.endsWith(".md")) {
+    await addDroppedImageAndInsert(file, event.currentTarget);
+  }
+}
+
+async function replaceImageFile(targetFileId, file) {
+  const project = controller.getProject();
+  const targetFile = project.nodes[targetFileId];
+  if (!targetFile || targetFile.kind !== "file" || !isImageFileName(targetFile.name)) {
+    throw new Error("Replace File is only available for image assets.");
+  }
+
+  const targetExtension = targetFile.name.slice(targetFile.name.lastIndexOf(".")).toLowerCase();
+  const sourceExtension = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+  if (targetExtension !== sourceExtension) {
+    throw new Error(`Replacement file must also be ${targetExtension}.`);
+  }
+
+  const content = await readFileAsProjectContent(file, targetFile.name);
+  controller.updateContent(targetFile.id, content);
+  publishOperation({ type: "update-file", path: getPath(project, targetFile.id), content });
+  logDebug("action", "Image file replaced", getPath(project, targetFile.id));
+}
+
+function openAddFileDialog(nodeId = selectionNodeId) {
+  const project = controller.getProject();
+  const node = project.nodes[nodeId] ?? project.nodes[project.rootId];
+  const parent = node.kind === "folder" ? node : project.nodes[node.parentId];
+
+  addFileState.parentId = parent.id;
+  resetAddFileState();
+  const targetPath = parent.id === project.rootId ? project.name : getPath(project, parent.id);
+  elements.addFileTargetText.textContent = `Add a markdown, mtree, urldb, or image file into ${targetPath}.`;
+  elements.addFileDialog.showModal();
+}
+
+async function promptAndAddUrlDbEntry(fileId) {
+  const project = controller.getProject();
+  const file = project.nodes[fileId];
+  if (!file || file.kind !== "file" || !isUrlDbFileName(file.name)) {
+    notify("Bookmark entries can only be added to .urldb files.");
+    return;
+  }
+
+  const entryDraft = await showBookmarkEntryDialog({
+    name: getNextUrlDbEntryName(file.content),
+    url: "https://example.com/image.jpg",
+    description: ""
+  });
+
+  if (!entryDraft) {
+    return;
+  }
+
+  if (!entryDraft.name) {
+    notify("Bookmark entries require a name.");
+    return;
+  }
+
+  if (!entryDraft.url || !looksLikeUrl(entryDraft.url)) {
+    notify("Bookmark entries require a valid URL.");
+    return;
+  }
+
+  try {
+    const nextContent = appendUrlDbEntry(file.content, entryDraft);
+    controller.updateContent(file.id, nextContent);
+    publishOperation({ type: "update-file", path: getPath(project, file.id), content: nextContent });
+    const nextEntry = getUrlDbEntries(nextContent).find((entry) => entry.name === entryDraft.name);
+    if (nextEntry) {
+      setActiveSourceUrlDbEntry(file.id, nextEntry.id);
+    } else {
+      setActiveSourceFile(file.id);
+    }
+    openPreviewTab(file.id);
+    previewFileId = file.id;
+    previewUrlDbEntry = null;
+    logDebug("action", "Bookmark added", `${getPath(project, file.id)} :: ${entryDraft.name}`);
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function submitAddFile() {
+  try {
+    if (!addFileState.content) {
+      await stageAddFileFromUrl();
+    }
+
+    const fileName = (elements.addFileNameInput.value.trim() || addFileState.fileName).trim();
+    if (!fileName) {
+      throw new Error("Provide a file name before adding the file.");
+    }
+    if (!isAllowedFileName(fileName)) {
+      throw new Error("Only markdown, mtree, urldb, and supported image files can be added.");
+    }
+    if (typeof addFileState.content === "string" && addFileState.content.startsWith("data:image/") && !isImageFileName(fileName)) {
+      throw new Error("Image assets must keep an image file extension.");
+    }
+    if (typeof addFileState.content === "string" && !addFileState.content.startsWith("data:image/") && isImageFileName(fileName)) {
+      throw new Error("Image file extensions can only be used with image content.");
+    }
+
+    const project = controller.getProject();
+    const parent = project.nodes[addFileState.parentId] ?? getSelectedParent(project);
+    const parentPath = parent.id === project.rootId ? "" : getPath(project, parent.id);
+    controller.createFile(parent.id, fileName, addFileState.content);
+    publishOperation({ type: "create-file", parentPath, name: fileName, content: addFileState.content });
+    logDebug("action", "File added", `${parentPath}/${fileName}`.replace(/^\//, ""));
+
+    const nextProject = controller.getProject();
+    const createdFile = findChildByName(nextProject, parent.id, fileName);
+    if (createdFile?.kind === "file") {
+      selectionNodeId = createdFile.id;
+      setActiveSourceFile(createdFile.id);
+      if (isPreviewableFileName(createdFile.name)) {
+        setPreviewFile(createdFile.id);
+      }
+    }
+
+    elements.addFileDialog.close();
+    resetAddFileState();
+  } catch (error) {
+    notify(error.message);
+    setAddFileStatus(error.message);
+  }
+}
+
+function createPresenceChip(entry) {
+  const chip = document.createElement("div");
+  chip.className = "presence-chip";
+  const avatar = document.createElement("span");
+  avatar.className = "presence-avatar";
+  const label = document.createElement("span");
+  label.textContent = entry.displayName || entry.clientId;
+  chip.append(avatar, label);
+  return chip;
+}
+
+function renderPresence(presence) {
+  elements.presenceStrip.replaceChildren();
+  elements.presenceList.replaceChildren();
+
+  if (presence.length === 0) {
+    const emptyStrip = document.createElement("span");
+    emptyStrip.className = "subtle-label";
+    emptyStrip.textContent = "No collaborators connected.";
+    elements.presenceStrip.append(emptyStrip);
+
+    const emptyList = document.createElement("span");
+    emptyList.className = "subtle-label";
+    emptyList.textContent = "No active session members.";
+    elements.presenceList.append(emptyList);
+    return;
+  }
+
+  presence.forEach((entry) => {
+    elements.presenceStrip.append(createPresenceChip(entry));
+    elements.presenceList.append(createPresenceChip(entry));
+  });
+}
+
+function updateStatus(project) {
+  const liveDirectory = project.sourceMode === "filesystem";
+  const browserSupported = supportsDirectoryAccess();
+  const collaboratorCount = syncState.presence.length;
+  ensureOpenTabs(project);
+  renderTabs(project);
+
+  elements.projectNameLabel.textContent = project.name;
+  elements.sourceStatusText.textContent = liveDirectory ? "Live directory" : "In-browser workspace";
+  elements.browserStatusText.textContent = browserSupported ? "Chromium directory access available" : "Fallback import/export mode";
+  elements.serverStatusBarText.textContent = syncState.status === "connected"
+    ? `Connected r${syncState.revision}`
+    : syncState.status === "reachable"
+      ? "Server reachable"
+      : "Server offline";
+  elements.serverStatusText.textContent = syncState.detail;
+  elements.sessionDetailText.textContent = syncState.sessionId
+    ? `Session ${syncState.sessionId} at revision ${syncState.revision}${syncState.displayName ? ` as ${syncState.displayName}` : ""}.`
+    : "Not connected to a shared session.";
+  elements.sessionIdLabel.textContent = syncState.sessionId ? `${syncState.sessionId} · r${syncState.revision}` : "Offline";
+  elements.presenceSummaryText.textContent = collaboratorCount === 1 ? "1 collaborator online" : `${collaboratorCount} collaborators online`;
+
+  setStatusDot(elements.sourceIndicator, liveDirectory ? "is-success" : "is-warning");
+  setStatusDot(elements.browserIndicator, browserSupported ? "is-success" : "is-warning");
+  setStatusDot(elements.serverIndicator, syncState.status === "connected" ? "is-success" : syncState.status === "reachable" ? "is-warning" : "is-danger");
+
+  renderPresence(syncState.presence);
+
+  const activeFile = project.activeFileId ? project.nodes[project.activeFileId] : null;
+  const previewFile = previewFileId ? project.nodes[previewFileId] : null;
+  const selectedEntry = getSelectedUrlDbEntry(project);
+  if (!activeFile) {
+    elements.textarea.readOnly = false;
+    elements.textarea.placeholder = "Select or create a .md, .mtree, .urldb, or image file";
+    elements.textarea.value = "";
+    renderEditorDecorations("");
+    syncEditorScroll();
+    const previewState = renderPreviewContent(elements.preview, project, previewFile);
+    if (previewState.shouldTypeset) {
+      void typesetPreview(previewState.content);
+    }
+    return;
+  }
+
+  const isTextFile = isTextFileName(activeFile.name);
+  elements.textarea.readOnly = !isTextFile;
+  elements.textarea.placeholder = isTextFile
+    ? "Select or create a .md, .mtree, .urldb, or image file"
+    : "Image assets are preview-only in the source pane.";
+  if (elements.textarea !== document.activeElement) {
+    elements.textarea.value = isTextFile
+      ? selectedEntry
+        ? formatUrlDbEntryBody(selectedEntry.entry)
+        : activeFile.content
+      : `[${activeFile.name}]\n\nThis image asset is preview-only in the source pane.\nUse the preview pane to inspect it or Explorer > Add File to replace it.`;
+  }
+  renderEditorDecorations(elements.textarea.value);
+  syncEditorScroll();
+  const previewState = renderPreviewContent(elements.preview, project, previewFile);
+  if (previewState.shouldTypeset) {
+    void typesetPreview(previewState.content);
+  }
+}
+
+function render(project) {
+  explorer.render(project);
+  updateStatus(project);
+  saveProject(project);
+}
+
+controller.subscribe(render);
+
+function publishSnapshot() {
+  if (collaboration.isConnected()) {
+    collaboration.scheduleSnapshot(controller.getProject());
+  }
+}
+
+function publishOperation(operation) {
+  if (!collaboration.isConnected()) {
+    return;
+  }
+  collaboration.publishOperation(operation).catch((error) => {
+    notify(error.message);
+  });
+}
+
+function createItem(kind) {
+  const project = controller.getProject();
+  const parent = getSelectedParent(project);
+  const parentPath = parent.id === project.rootId ? "" : getPath(project, parent.id);
+
+  try {
+    if (kind === "folder") {
+      const name = getNextDefaultFolderName(project, parent.id);
+      controller.createFolder(parent.id, name);
+      publishOperation({ type: "create-folder", parentPath, name });
+      return;
+    }
+
+    const name = getNextDefaultFileName(project, parent.id, kind);
+    controller.createFile(parent.id, name, "");
+    publishOperation({ type: "create-file", parentPath, name, content: "" });
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function renameSelected() {
+  const project = controller.getProject();
+  const selectedEntry = getSelectedUrlDbEntry(project);
+  if (selectedEntry) {
+    const nextName = await promptForName("Rename bookmark", selectedEntry.entry.name);
+    if (!nextName) {
+      return;
+    }
+
+    try {
+      const nextContent = updateUrlDbEntry(selectedEntry.file.content, selectedEntry.entry.id, { name: nextName });
+      controller.updateContent(selectedEntry.file.id, nextContent);
+      publishOperation({ type: "update-file", path: getPath(project, selectedEntry.file.id), content: nextContent });
+      const nextEntry = getUrlDbEntries(nextContent).find((entry) => entry.name === nextName);
+      if (nextEntry) {
+        setActiveSourceUrlDbEntry(selectedEntry.file.id, nextEntry.id);
+      }
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const node = getSelectedNode(project);
+  if (!node || node.id === project.rootId) {
+    return;
+  }
+  const currentPath = getPath(project, node.id);
+  const name = await promptForName("Rename item", node.name);
+  if (!name) {
+    return;
+  }
+
+  try {
+    controller.rename(node.id, name);
+    publishOperation({ type: "rename-node", path: currentPath, name });
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function deleteSelected() {
+  const project = controller.getProject();
+  const selectedEntry = getSelectedUrlDbEntry(project);
+  if (selectedEntry) {
+    if (!await confirmAction(`Delete ${selectedEntry.entry.name}?`)) {
+      return;
+    }
+
+    try {
+      const nextContent = removeUrlDbEntry(selectedEntry.file.content, selectedEntry.entry.id);
+      controller.updateContent(selectedEntry.file.id, nextContent);
+      publishOperation({ type: "update-file", path: getPath(project, selectedEntry.file.id), content: nextContent });
+      sourceUrlDbEntry = null;
+      previewUrlDbEntry = null;
+      setActiveSourceFile(selectedEntry.file.id);
+    } catch (error) {
+      notify(error.message);
+    }
+    return;
+  }
+
+  const node = getSelectedNode(project);
+  if (!node || node.id === project.rootId) {
+    return;
+  }
+  const path = getPath(project, node.id);
+  if (!await confirmAction(`Delete ${node.name}?`)) {
+    return;
+  }
+  controller.remove(node.id);
+  publishOperation({ type: "delete-node", path });
+}
+
+function collectFileEntries(project, nodeId) {
+  const node = project.nodes[nodeId];
+  if (!node) {
+    return [];
+  }
+
+  if (node.kind === "file") {
+    return [{ path: node.name, bytes: getExportBytes(node.name, node.content) }];
+  }
+
+  const entries = [];
+  function walk(currentId, prefix = "") {
+    const current = project.nodes[currentId];
+    if (current.kind === "file") {
+      entries.push({ path: `${prefix}${current.name}`, bytes: getExportBytes(current.name, current.content) });
+      return;
+    }
+    current.children.forEach((childId) => {
+      const child = project.nodes[childId];
+      const nextPrefix = child.kind === "folder" ? `${prefix}${child.name}/` : prefix;
+      walk(childId, nextPrefix);
+    });
+  }
+  walk(nodeId, nodeId === project.rootId ? "" : `${node.name}/`);
+  return entries;
+}
+
+function exportNode(nodeId) {
+  const project = controller.getProject();
+  const node = project.nodes[nodeId] ?? project.nodes[project.rootId];
+  if (node.kind === "file") {
+    const blob = isImageFileName(node.name)
+      ? dataUrlToBlob(node.content)
+      : new Blob([node.content], { type: getMimeTypeForFileName(node.name) });
+    downloadBlob(blob, node.name);
+    return;
+  }
+  downloadBlob(createZip(collectFileEntries(project, node.id)), `${node.name || project.name}.zip`);
+}
+
+async function handleExplorerAction(action, target) {
+  const nodeId = target.nodeId;
+  selectionNodeId = nodeId;
+  logDebug("action", "Explorer action", action);
+  if (action.startsWith("filter-")) {
+    settings.explorerFilter = action.replace("filter-", "");
+    persistSettings();
+    render(controller.getProject());
+    return;
+  }
+  if (action === "new-folder") {
+    createItem("folder");
+    return;
+  }
+  if (action === "new-md") {
+    createItem("md");
+    return;
+  }
+  if (action === "new-mtree") {
+    createItem("mtree");
+    return;
+  }
+  if (action === "new-urldb") {
+    createItem("urldb");
+    return;
+  }
+  if (action === "add-file") {
+    openAddFileDialog(nodeId);
+    return;
+  }
+  if (action === "add-bookmark-entry") {
+    await promptAndAddUrlDbEntry(nodeId);
+    return;
+  }
+  if (action === "rename-entry") {
+    await renameSelected();
+    return;
+  }
+  if (action === "delete-entry") {
+    await deleteSelected();
+    return;
+  }
+  if (action === "generate-module-map") {
+    openMtreeToolsDialog(nodeId);
+    return;
+  }
+  if (action === "replace-file") {
+    replaceFileTargetId = nodeId;
+    elements.replaceFileInput.click();
+    return;
+  }
+  if (action === "rename") {
+    await renameSelected();
+    return;
+  }
+  if (action === "delete") {
+    await deleteSelected();
+    return;
+  }
+  if (action === "export") {
+    exportNode(nodeId);
+  }
+}
+
+elements.textarea.addEventListener("input", (event) => {
+  const activeFile = controller.getActiveFile();
+  if (!activeFile || !isTextFileName(activeFile.name)) {
+    hideEditorAutocomplete();
+    return;
+  }
+  const selectedEntry = getSelectedUrlDbEntry(controller.getProject());
+  let nextContent = event.target.value;
+  let previousContent = activeFile.content;
+
+  if (selectedEntry) {
+    const parsed = parseUrlDbEntryBody(nextContent);
+    nextContent = updateUrlDbEntry(activeFile.content, selectedEntry.entry.id, parsed);
+  }
+
+  renderEditorDecorations(event.target.value);
+  syncEditorScroll();
+  controller.updateContent(activeFile.id, nextContent);
+  showEditorAutocomplete();
+  if (collaboration.isConnected()) {
+    collaboration.scheduleTextPatch(getPath(controller.getProject(), activeFile.id), previousContent, nextContent);
+  }
+});
+
+elements.textarea.addEventListener("scroll", syncEditorScroll);
+elements.textarea.addEventListener("keydown", handleEditorKeydown);
+elements.textarea.addEventListener("click", () => hideEditorAutocomplete());
+elements.textarea.addEventListener("dragover", (event) => {
+  if (!controller.getActiveFile()?.name.endsWith(".md")) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+});
+elements.textarea.addEventListener("drop", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  void handleEditorDrop(event).catch((error) => notify(error.message));
+});
+elements.editorGutter.addEventListener("wheel", forwardEditorWheel, { passive: false });
+elements.editorScroll.addEventListener("wheel", (event) => {
+  if (event.target === elements.textarea) {
+    return;
+  }
+  forwardEditorWheel(event);
+}, { passive: false });
+
+elements.saveButton.addEventListener("click", async () => {
+  await handleSaveCommand();
+});
+
+elements.savePdfButton.addEventListener("click", printPreviewAsPdf);
+elements.exportButton.addEventListener("click", () => exportNode(controller.getProject().rootId));
+elements.exportSelectedButton.addEventListener("click", () => exportNode(getSelectedNode(controller.getProject())?.id ?? controller.getProject().rootId));
+
+elements.newProjectButton.addEventListener("click", () => {
+  logDebug("action", "New project created");
+  controller.replaceProject(seedDefaultProject());
+  selectionNodeId = controller.getProject().activeFileId ?? controller.getProject().rootId;
+  initializePaneState(controller.getProject());
+  publishSnapshot();
+});
+
+elements.openDirectoryButton.addEventListener("click", async () => {
+  if (!supportsDirectoryAccess()) {
+    notify("Directory access is only available in Chromium-based browsers.");
+    return;
+  }
+  try {
+    logDebug("action", "Open directory requested");
+    const project = await importDirectory();
+    controller.replaceProject(project);
+    selectionNodeId = project.activeFileId ?? project.rootId;
+    initializePaneState(project);
+    publishSnapshot();
+  } catch (error) {
+    notify(error.message);
+  }
+});
+
+elements.importFileButton.addEventListener("click", () => elements.importFileInput.click());
+
+elements.importFileInput.addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) {
+    return;
+  }
+  try {
+    logDebug("action", "Import requested", file.name);
+    const project = file.name.toLowerCase().endsWith(".zip") ? await importZipArchive(file) : await importSingleFile(file);
+    controller.replaceProject(project);
+    selectionNodeId = project.activeFileId ?? project.rootId;
+    initializePaneState(project);
+    publishSnapshot();
+  } catch (error) {
+    notify(error.message);
+  } finally {
+    event.target.value = "";
+  }
+});
+
+elements.replaceFileInput.addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (!file || !replaceFileTargetId) {
+    event.target.value = "";
+    return;
+  }
+  try {
+    await replaceImageFile(replaceFileTargetId, file);
+  } catch (error) {
+    notify(error.message);
+  } finally {
+    replaceFileTargetId = null;
+    event.target.value = "";
+  }
+});
+
+elements.explorerAddButton.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const project = controller.getProject();
+  const parent = getSelectedParent(project);
+  selectionNodeId = parent.id;
+  const opened = explorer.toggleQuickAddMenu(elements.explorerAddButton, parent.id);
+  logDebug("action", opened ? "Explorer add menu opened" : "Explorer add menu closed", getPath(project, parent.id) || project.name);
+});
+
+elements.explorerFilterButton.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const project = controller.getProject();
+  const parent = getSelectedParent(project);
+  selectionNodeId = parent.id;
+  const opened = explorer.toggleFilterMenu(elements.explorerFilterButton, parent.id);
+  logDebug("action", opened ? "Explorer filter menu opened" : "Explorer filter menu closed", settings.explorerFilter);
+});
+
+elements.renameSelectedButton.addEventListener("click", () => {
+  void renameSelected();
+});
+elements.deleteSelectedButton.addEventListener("click", () => {
+  void deleteSelected();
+});
+elements.newMarkdownButton.addEventListener("click", () => createItem("md"));
+elements.newMtreeButton.addEventListener("click", () => createItem("mtree"));
+elements.newUrlDbButton.addEventListener("click", () => createItem("urldb"));
+elements.addFilePickerButton.addEventListener("click", () => elements.addFilePickerInput.click());
+elements.addFilePickerInput.addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) {
+    return;
+  }
+  try {
+    await stageAddFileFromLocalFile(file);
+  } catch (error) {
+    notify(error.message);
+    setAddFileStatus(error.message);
+  } finally {
+    event.target.value = "";
+  }
+});
+elements.addFileNameInput.addEventListener("input", (event) => {
+  addFileState.fileName = event.target.value.trim();
+});
+elements.addFileSubmitButton.addEventListener("click", () => {
+  void submitAddFile();
+});
+elements.addFileDropzone.addEventListener("dragenter", (event) => {
+  event.preventDefault();
+  elements.addFileDropzone.classList.add("is-active");
+});
+elements.addFileDropzone.addEventListener("dragover", (event) => {
+  event.preventDefault();
+  elements.addFileDropzone.classList.add("is-active");
+});
+elements.addFileDropzone.addEventListener("dragleave", (event) => {
+  if (event.currentTarget.contains(event.relatedTarget)) {
+    return;
+  }
+  elements.addFileDropzone.classList.remove("is-active");
+});
+elements.addFileDropzone.addEventListener("drop", (event) => {
+  event.preventDefault();
+  elements.addFileDropzone.classList.remove("is-active");
+  void handleAddFileTransfer(event.dataTransfer).catch((error) => {
+    notify(error.message);
+    setAddFileStatus(error.message);
+  });
+});
+elements.addFileDropzone.addEventListener("paste", (event) => {
+  void handleAddFileTransfer(event.clipboardData).catch((error) => {
+    notify(error.message);
+    setAddFileStatus(error.message);
+  });
+});
+elements.addFileDialog.addEventListener("close", () => {
+  elements.addFileDropzone.classList.remove("is-active");
+  resetAddFileState();
+});
+elements.mtreeTargetFileSelect.addEventListener("change", (event) => {
+  mtreeToolState.selectedTargetFileId = event.target.value;
+  elements.mtreeOutputNameInput.disabled = event.target.value !== "__new__";
+});
+elements.mtreeOutputText.addEventListener("input", (event) => {
+  mtreeToolState.draftSection = event.target.value;
+  refreshMtreeDraftPresentation();
+});
+elements.mtreeOutputText.addEventListener("scroll", syncMtreeOutputScroll);
+elements.mtreeOutputText.addEventListener("keydown", handleIndentKeydown);
+elements.mtreeKeepButton.addEventListener("click", keepMtreeDraft);
+elements.mtreeUndoButton.addEventListener("click", undoMtreeDraft);
+elements.mtreeCreateButton.addEventListener("click", upsertModuleMapMarkdown);
+
+[
+  elements.mtreeSimplifyInput,
+  elements.mtreeContinuationInput,
+  elements.mtreeIncludeNavigationInput,
+  elements.mtreeIncludeModulesInput,
+  elements.mtreeIncludeParentsInput,
+  elements.mtreeIncludeChildrenInput,
+  elements.mtreeIncludeDescriptionsInput,
+  elements.mtreeIncludeEmptyInput
+].forEach((input) => {
+  input.addEventListener("change", regenerateModuleMapWithNotification);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key.toLowerCase() !== "s" || (!event.ctrlKey && !event.metaKey) || event.altKey) {
+    return;
+  }
+  event.preventDefault();
+  void handleSaveCommand();
+});
+
+bindPaneDropTarget(elements.sourcePane, "source");
+bindPaneDropTarget(elements.sourceTabStrip, "source");
+bindPaneDropTarget(elements.previewPane, "preview");
+bindPaneDropTarget(elements.previewTabStrip, "preview");
+bindTabStripReorderTarget(elements.sourceTabStrip, "source");
+bindTabStripReorderTarget(elements.previewTabStrip, "preview");
+
+function toggleExplorer() {
+  settings.explorer = settings.explorer === "collapsed" ? "expanded" : "collapsed";
+  elements.explorerSelect.value = settings.explorer;
+  persistSettings();
+  logDebug("action", "Explorer toggled", settings.explorer);
+}
+
+function togglePreview() {
+  settings.preview = settings.preview === "hidden" ? "shown" : "hidden";
+  elements.previewSelect.value = settings.preview;
+  persistSettings();
+  logDebug("action", "Preview toggled", settings.preview);
+}
+
+elements.toggleExplorerMenuButton.addEventListener("click", toggleExplorer);
+elements.togglePreviewButton.addEventListener("click", togglePreview);
+elements.explorerToggleButton.addEventListener("click", toggleExplorer);
+elements.previewToggleActivityButton.addEventListener("click", togglePreview);
+elements.previewCollapseButton.addEventListener("click", togglePreview);
+
+elements.settingsButton.addEventListener("click", () => {
+  logDebug("action", "Settings dialog opened");
+  elements.settingsDialog.showModal();
+});
+
+elements.openSettingsMenuButton.addEventListener("click", () => {
+  logDebug("action", "Settings dialog opened from menu");
+  elements.settingsDialog.showModal();
+});
+
+elements.toggleDebugMenuButton.addEventListener("click", () => {
+  settings.debugPanel = !settings.debugPanel;
+  persistSettings();
+  logDebug("action", settings.debugPanel ? "Debug panel enabled" : "Debug panel disabled");
+});
+
+debugTabs.forEach((tab) => {
+  tab.element.addEventListener("click", () => {
+    debugState.activeTab = tab.id;
+    renderDebugPanel();
+  });
+});
+
+elements.debugCopyButton.addEventListener("click", () => {
+  void copyDebugLogToClipboard().catch((error) => notify(error.message));
+});
+
+elements.debugClearButton.addEventListener("click", () => {
+  debugState.entries = [];
+  renderDebugPanel();
+});
+
+elements.themeSelect.addEventListener("change", (event) => {
+  settings.theme = event.target.value;
+  saveSettings(settings);
+  applyTheme(settings);
+  logDebug("action", "Theme changed", settings.theme);
+});
+
+elements.explorerSelect.addEventListener("change", (event) => {
+  settings.explorer = event.target.value;
+  persistSettings();
+  logDebug("action", "Explorer setting changed", settings.explorer);
+});
+
+elements.previewSelect.addEventListener("change", (event) => {
+  settings.preview = event.target.value;
+  persistSettings();
+  logDebug("action", "Preview setting changed", settings.preview);
+});
+
+elements.wordWrapSelect.addEventListener("change", (event) => {
+  settings.wordWrap = event.target.value === "on";
+  persistSettings();
+  render(controller.getProject());
+  logDebug("action", "Word wrap changed", settings.wordWrap ? "on" : "off");
+});
+
+elements.indentStyleSelect.addEventListener("change", (event) => {
+  settings.indentStyle = event.target.value;
+  persistSettings();
+  logDebug("action", "Indent style changed", settings.indentStyle);
+});
+
+window.addEventListener("resize", () => {
+  renderEditorDecorations(elements.textarea.value);
+  syncEditorScroll();
+});
+
+elements.serverUrlInput.addEventListener("change", (event) => {
+  settings.serverUrl = event.target.value.trim();
+  saveSettings(settings);
+});
+
+elements.serverPinInput.addEventListener("change", (event) => {
+  settings.serverPin = event.target.value;
+  saveSettings(settings);
+});
+
+elements.displayNameInput.addEventListener("change", (event) => {
+  settings.displayName = event.target.value.trim();
+  saveSettings(settings);
+});
+
+elements.pingServerButton.addEventListener("click", async () => {
+  try {
+    logDebug("action", "Server ping requested", elements.serverUrlInput.value.trim());
+    const result = await pingServer(elements.serverUrlInput.value);
+    settings.serverUrl = elements.serverUrlInput.value.trim();
+    saveSettings(settings);
+    syncState.status = "reachable";
+    syncState.detail = typeof result === "string" ? result : (result.message || "Server responded to ping.");
+    logDebug("response", "Server ping succeeded", syncState.detail);
+    render(controller.getProject());
+  } catch (error) {
+    syncState.status = "offline";
+    syncState.detail = error.message;
+    logDebug("response", "Server ping failed", error.message);
+    render(controller.getProject());
+  }
+});
+
+elements.connectServerButton.addEventListener("click", async () => {
+  try {
+    logDebug("action", "Server connect requested", elements.serverUrlInput.value.trim());
+    await collaboration.connect(elements.serverUrlInput.value, elements.serverPinInput.value, elements.displayNameInput.value);
+    settings.serverUrl = elements.serverUrlInput.value.trim();
+    settings.serverPin = elements.serverPinInput.value;
+    settings.displayName = elements.displayNameInput.value.trim();
+    saveSettings(settings);
+    logDebug("response", "Server connected", settings.displayName || "anonymous");
+  } catch (error) {
+    syncState.status = "offline";
+    syncState.detail = error.message;
+    logDebug("response", "Server connect failed", error.message);
+    render(controller.getProject());
+  }
+});
+
+window.addEventListener("beforeunload", (event) => {
+  const activeFile = controller.getActiveFile();
+  if (activeFile?.dirty) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
+
+registerOfflineShell();

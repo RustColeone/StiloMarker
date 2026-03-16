@@ -1,0 +1,12 @@
+{
+  "name": "mdnotes",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node tools/serve.mjs",
+    "selftest": "node tools/selftest.mjs",
+    "backend:start": "python server/mdnotes_server.py",
+    "backend:selftest": "python server/mdnotes_server.py --selftest"
+  }
+}
