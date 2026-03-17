@@ -9,6 +9,7 @@ import { registerOfflineShell } from "./services/offline-service.js";
 import { applyTheme, loadSettings, saveSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
 import { pingServer } from "./services/sync-service.js";
+import { loadTemplateProject } from "./services/template-service.js";
 import { appendUrlDbEntry, formatUrlDbEntryBody, moveUrlDbEntry, moveUrlDbEntryBetweenFiles, parseUrlDb, parseUrlDbEntryBody, removeUrlDbEntry, serializeUrlDb, updateUrlDbEntry } from "./services/urldb-service.js";
 import { createZip, downloadBlob } from "./services/zip-service.js";
 import { query } from "./ui/dom.js";
@@ -157,7 +158,8 @@ const elements = {
 };
 
 const settings = loadSettings();
-const controller = createProjectController(loadProject() ?? seedDefaultProject());
+const storedProject = loadProject();
+const controller = createProjectController(storedProject ?? seedDefaultProject());
 let sourceOpenTabIds = controller.getProject().activeFileId ? [controller.getProject().activeFileId] : [];
 let previewOpenTabIds = controller.getProject().activeFileId ? [controller.getProject().activeFileId] : [];
 let previewFileId = controller.getProject().activeFileId ?? null;
@@ -3082,6 +3084,19 @@ function render(project) {
 }
 
 controller.subscribe(render);
+
+if (!storedProject) {
+  void loadTemplateProject()
+    .then((project) => {
+      controller.replaceProject(project);
+      selectionNodeId = project.activeFileId ?? project.rootId;
+      initializePaneState(project);
+      logDebug("action", "Default template loaded", project.name);
+    })
+    .catch((error) => {
+      logDebug("response", "Default template load failed", error.message);
+    });
+}
 
 logDebug("response", "Debug log initialized", `panel=${settings.debugPanel ? "visible" : "hidden"}`);
 
