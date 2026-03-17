@@ -253,7 +253,6 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       if (node.kind === "file") {
         row.draggable = true;
         row.addEventListener("dragstart", (event) => {
-          onSelectNode?.({ nodeId: node.id, entryId: null });
           onDragFileStart?.(node.id, event);
         });
       }
@@ -312,7 +311,6 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
           childRow.title = entry.description ? `${entry.name}\n${entry.url}\n${entry.description}` : `${entry.name}\n${entry.url}`;
           childRow.draggable = true;
           childRow.addEventListener("dragstart", (event) => {
-            onSelectNode?.({ nodeId: node.id, entryId: entry.id });
             onDragUrlDbEntryStart?.(node.id, entry.id, event);
           });
 

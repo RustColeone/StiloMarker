@@ -204,13 +204,22 @@
 - Simplified create-file and create-folder behavior so new items are created immediately with sequential default names like `new markdown 1.md` and renamed later if needed.
 - Added a clearer fallback for blocked remote image downloads by steering those cases toward `.urldb` entries instead of leaving a raw `NetworkError`.
 
+### 2026-03-16
+- Refined explorer row behavior so only the small disclosure icon toggles directory and URL-album expansion; clicking the row itself now selects the item without implicitly expanding or collapsing it.
+- Reworked explorer selection state so folders, files, and derived `.urldb` entries all participate in the same visible highlight model, and clicking empty explorer space clears selection back to the root context.
+- Filtered the explorer context menu by target type so users only see actions that are relevant to the item they right-clicked.
+- Replaced the three-step bookmark-entry prompt chain with a single dialog that captures name, URL, and description together.
+- Added explicit bordered styling for the bookmark-entry dialog fields so the controls read clearly as editable inputs.
+- Tightened explorer drag/drop so dragging a file row into the source or preview pane opens that file in the corresponding pane, while dragging a bookmark entry into source now opens the entry body instead of only its parent file.
+- Added drop-target highlighting on the source and preview panes so valid drag destinations are visually obvious during pane drag operations.
+
 ### Current URL Album and Dialog Scope
 - Supported: `.urldb` import/export/save, explorer expansion, entry preview, entry drag/drop into markdown, body-only entry editing in source, entry rename/delete, and workbench-native notice/confirm/input dialogs.
 - Limitation: `.urldb` entries are explorer-derived children rather than true standalone nodes in the canonical project tree, so they are managed through file transforms rather than their own persisted node records.
 
 ## Validation
 
-### 2026-03-12 to 2026-03-15
+### 2026-03-12 to 2026-03-16
 - Re-ran `npm run selftest` after each major frontend expansion, including tab split behavior, HTML preview fixes, image asset support, debug dock work, `.urldb` support, and dialog-based workflows.
 - Kept editor diagnostics clean across the main runtime, explorer view, styles, project model, and new `.urldb` service during each implementation round.
 - Extended the self-test to cover `.urldb` parsing and serialization helpers, the expanded static shell markers, and the newer debug dock and dialog entry points.

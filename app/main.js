@@ -96,6 +96,7 @@ const elements = {
   settingsMenu: query("#settings-menu"),
   openSettingsMenuButton: query("#open-settings-menu-button"),
   toggleDebugMenuButton: query("#toggle-debug-menu-button"),
+  toggleLogButton: query("#toggle-log-button"),
   newUrlDbButton: query("#new-urldb-button"),
   themeSelect: query("#theme-select"),
   explorerSelect: query("#explorer-select"),
@@ -151,6 +152,7 @@ const elements = {
   debugTabResponses: query("#debug-tab-responses"),
   debugCopyButton: query("#debug-copy-button"),
   debugClearButton: query("#debug-clear-button"),
+  logCollapseButton: query("#log-collapse-button"),
   debugLogList: query("#debug-log-list")
 };
 
@@ -346,10 +348,6 @@ function resolveProjectAssetUrl(project, sourceFileId, url) {
 }
 
 function logDebug(kind, message, detail = "") {
-  if (!settings.debugPanel) {
-    return;
-  }
-
   debugState.entries.push({
     kind,
     message,
@@ -477,7 +475,7 @@ function renderDebugPanel() {
   if (visibleEntries.length === 0) {
     const empty = document.createElement("div");
     empty.className = "debug-log-entry is-empty";
-    empty.textContent = "Debug logging is enabled. Matching interactions will appear here.";
+    empty.textContent = "Log capture is enabled. Matching interactions will appear here.";
     elements.debugLogList.append(empty);
     return;
   }
@@ -814,6 +812,7 @@ const explorer = createExplorerView({
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = "copyMove";
     }
+    logDebug("action", "Explorer drag started", getPath(controller.getProject(), fileId));
   },
   onDragUrlDbEntryStart(fileId, entryId, event) {
     const project = controller.getProject();
@@ -1247,7 +1246,13 @@ function getEditorLineHeight() {
   return Number.isFinite(lineHeight) ? lineHeight : 20.8;
 }
 
+function syncEditorViewportMetrics() {
+  const scrollbarWidth = Math.max(0, elements.textarea.offsetWidth - elements.textarea.clientWidth);
+  elements.editorScroll.style.setProperty("--editor-scrollbar-width", `${scrollbarWidth}px`);
+}
+
 function renderEditorDecorations(value) {
+  syncEditorViewportMetrics();
   const normalized = value.replace(/\r\n/g, "\n");
   const lines = normalized.split("\n");
   const activeFile = controller.getActiveFile();
@@ -1256,22 +1261,25 @@ function renderEditorDecorations(value) {
     : activeFile?.name.endsWith(".urldb")
       ? highlightUrlDbSource(normalized)
       : highlightMarkdownSource(normalized);
-  elements.editorHighlight.innerHTML = `${highlightMarkup}<div class="editor-line"> </div>`;
+  elements.editorHighlight.innerHTML = `${highlightMarkup}<div class="editor-line is-empty">&nbsp;</div>`;
 
   const renderedLines = Array.from(elements.editorHighlight.querySelectorAll(".editor-line")).slice(0, Math.max(1, lines.length));
   const minimumLineHeight = getEditorLineHeight();
   const gutterMarkup = renderedLines.map((line, index) => {
-    const height = Math.max(minimumLineHeight, Math.ceil(line.getBoundingClientRect().height));
-    return `<div class="editor-gutter-line" style="height:${height}px">${index + 1}</div>`;
+    const height = Math.max(minimumLineHeight, line.getBoundingClientRect().height);
+    return `<div class="editor-gutter-line" style="height:${height.toFixed(3)}px">${index + 1}</div>`;
   }).join("");
-  elements.editorGutter.innerHTML = gutterMarkup;
+  elements.editorGutter.innerHTML = `<div class="editor-gutter-content">${gutterMarkup}</div>`;
 }
 
 function syncEditorScroll() {
   const scrollTop = elements.textarea.scrollTop;
   const scrollLeft = elements.textarea.scrollLeft;
   elements.editorHighlight.style.transform = `translate(${-scrollLeft}px, ${-scrollTop}px)`;
-  elements.editorGutter.style.transform = `translateY(${-scrollTop}px)`;
+  const gutterContent = elements.editorGutter.firstElementChild;
+  if (gutterContent) {
+    gutterContent.style.transform = `translateY(${-scrollTop}px)`;
+  }
 }
 
 function forwardEditorWheel(event) {
@@ -1500,17 +1508,41 @@ function openFileFromExplorer(fileId) {
   }
 }
 
-function openDroppedFileInPane(fileId, pane) {
+function canOpenFileInPane(fileId, pane) {
   const project = controller.getProject();
   const node = project.nodes[fileId];
   if (!node || node.kind !== "file") {
+    return false;
+  }
+
+  if (pane === "preview") {
+    return isPreviewableFileName(node.name);
+  }
+
+  return true;
+}
+
+function setPaneDropActive(pane, isActive) {
+  const target = pane === "preview" ? elements.previewPane : elements.sourcePane;
+  target.classList.toggle("is-drop-active", isActive);
+}
+
+function clearPaneDropState() {
+  elements.sourcePane.classList.remove("is-drop-active");
+  elements.previewPane.classList.remove("is-drop-active");
+}
+
+function openDroppedFileInPane(fileId, pane) {
+  if (!canOpenFileInPane(fileId, pane)) {
     return;
   }
   if (pane === "preview") {
     setPreviewFile(fileId);
+    logDebug("action", "File dropped into preview pane", getPath(controller.getProject(), fileId));
     return;
   }
   setActiveSourceFile(fileId);
+  logDebug("action", "File dropped into source pane", getPath(controller.getProject(), fileId));
 }
 
 function openUrlDbEntryInPane(fileId, entryId, pane) {
@@ -1528,7 +1560,8 @@ function openUrlDbEntryInPane(fileId, entryId, pane) {
     return;
   }
 
-  setActiveSourceFile(fileId);
+  setActiveSourceUrlDbEntry(fileId, entryId);
+  logDebug("action", "Bookmark entry dropped into source pane", `${getPath(project, fileId)} :: ${entryId}`);
 }
 
 async function saveActiveWorkspaceFile() {
@@ -1561,26 +1594,40 @@ async function handleSaveCommand() {
 }
 
 function bindPaneDropTarget(target, pane) {
+  // dragover: getData() is blocked by spec during dragover for security — use types instead.
   target.addEventListener("dragover", (event) => {
-    const fileId = event.dataTransfer?.getData("text/mdnotes-file-id");
-    const urlDbEntry = event.dataTransfer?.getData("text/mdnotes-urldb-entry");
-    if (!fileId && !urlDbEntry) {
+    const types = event.dataTransfer?.types ?? [];
+    const hasFile = types.includes("text/mdnotes-file-id");
+    const hasEntry = types.includes("text/mdnotes-urldb-entry");
+    if (!hasFile && !hasEntry) {
+      setPaneDropActive(pane, false);
       return;
     }
     event.preventDefault();
     if (event.dataTransfer) {
       event.dataTransfer.dropEffect = "copy";
     }
+    setPaneDropActive(pane, true);
+  });
+
+  target.addEventListener("dragleave", (event) => {
+    if (event.currentTarget?.contains(event.relatedTarget)) {
+      return;
+    }
+    setPaneDropActive(pane, false);
   });
 
   target.addEventListener("drop", (event) => {
+    setPaneDropActive(pane, false);
     const fileId = event.dataTransfer?.getData("text/mdnotes-file-id");
     const urlDbPayload = event.dataTransfer?.getData("text/mdnotes-urldb-entry");
-    if (!fileId && !urlDbPayload) {
+    logDebug("action", `Drop on ${pane} pane`, fileId ? `file=${fileId}` : `entry=${urlDbPayload}`);
+    if ((!fileId || !canOpenFileInPane(fileId, pane)) && !urlDbPayload) {
+      logDebug("response", `Drop on ${pane} pane rejected`, fileId ? `canOpen=${canOpenFileInPane(fileId, pane)}` : "no payload");
       return;
     }
     event.preventDefault();
-    if (fileId) {
+    if (fileId && canOpenFileInPane(fileId, pane)) {
       openDroppedFileInPane(fileId, pane);
       return;
     }
@@ -1589,7 +1636,7 @@ function bindPaneDropTarget(target, pane) {
       const parsed = JSON.parse(urlDbPayload);
       openUrlDbEntryInPane(parsed.fileId, parsed.entryId, pane);
     } catch {
-      // Ignore malformed derived explorer payloads.
+      logDebug("response", `Drop on ${pane} pane: malformed urldb payload`);
     }
   });
 }
@@ -1983,10 +2030,20 @@ function applyWorkspaceSettings() {
   elements.textarea.wrap = settings.wordWrap ? "soft" : "off";
   elements.previewCollapseButton.setAttribute("aria-expanded", settings.preview === "shown" ? "true" : "false");
   elements.debugPanel.hidden = !settings.debugPanel;
-  elements.toggleDebugMenuButton.textContent = settings.debugPanel ? "Hide Debug Panel" : "Show Debug Panel";
+  elements.toggleDebugMenuButton.textContent = settings.debugPanel ? "Hide Log Panel" : "Show Log Panel";
   elements.explorerFilterButton.classList.toggle("is-active", settings.explorerFilter !== "all");
   renderDebugPanel();
 }
+
+const editorResizeObserver = typeof ResizeObserver === "function"
+  ? new ResizeObserver(() => {
+    renderEditorDecorations(elements.textarea.value);
+    syncEditorScroll();
+  })
+  : null;
+
+editorResizeObserver?.observe(elements.editorScroll);
+editorResizeObserver?.observe(elements.sourcePane);
 
 function startPointerResize(event, onMove) {
   event.preventDefault();
@@ -2047,6 +2104,8 @@ elements.debugSplitter.addEventListener("pointerdown", (event) => {
     const nextHeight = clamp(bottom - moveEvent.clientY, 120, Math.max(180, workspaceRect.height - 220));
     settings.debugPanelHeight = Math.round(nextHeight);
     persistSettings();
+    renderEditorDecorations(elements.textarea.value);
+    syncEditorScroll();
   });
 });
 
@@ -2265,6 +2324,12 @@ async function addDroppedImageAndInsert(file, textarea) {
 }
 
 async function handleEditorDrop(event) {
+  const internalFileId = event.dataTransfer?.getData("text/mdnotes-file-id");
+  if (internalFileId) {
+    openDroppedFileInPane(internalFileId, "source");
+    return;
+  }
+
   const activeFile = controller.getActiveFile();
   if (!activeFile || !isTextFileName(activeFile.name)) {
     return;
@@ -2283,20 +2348,6 @@ async function handleEditorDrop(event) {
       }
     } catch {
       // Ignore malformed bookmark payloads.
-    }
-    return;
-  }
-
-  const internalFileId = event.dataTransfer?.getData("text/mdnotes-file-id");
-  if (internalFileId) {
-    const project = controller.getProject();
-    const targetFile = project.nodes[internalFileId];
-    if (targetFile?.kind === "file") {
-      const insertText = activeFile.name.endsWith(".md")
-        ? createMarkdownReference(activeFile, targetFile)
-        : getRelativePath(getPath(project, activeFile.id), getPath(project, targetFile.id));
-      insertReferenceAtCursor(insertText);
-      logDebug("action", "Explorer reference inserted", getPath(project, targetFile.id));
     }
     return;
   }
@@ -2535,6 +2586,8 @@ function render(project) {
 }
 
 controller.subscribe(render);
+
+logDebug("response", "Debug log initialized", `panel=${settings.debugPanel ? "visible" : "hidden"}`);
 
 function publishSnapshot() {
   if (collaboration.isConnected()) {
@@ -2778,6 +2831,12 @@ elements.textarea.addEventListener("scroll", syncEditorScroll);
 elements.textarea.addEventListener("keydown", handleEditorKeydown);
 elements.textarea.addEventListener("click", () => hideEditorAutocomplete());
 elements.textarea.addEventListener("dragover", (event) => {
+  const types = event.dataTransfer?.types ?? [];
+  // Explorer file drags: let the pane-level handler accept them (don't steal the event here).
+  if (types.includes("text/mdnotes-file-id")) {
+    return;
+  }
+  // Bookmark / external-file drags into the editor surface: accept only in .md files.
   if (!controller.getActiveFile()?.name.endsWith(".md")) {
     return;
   }
@@ -2989,6 +3048,9 @@ bindPaneDropTarget(elements.previewTabStrip, "preview");
 bindTabStripReorderTarget(elements.sourceTabStrip, "source");
 bindTabStripReorderTarget(elements.previewTabStrip, "preview");
 
+document.addEventListener("dragend", clearPaneDropState);
+document.addEventListener("drop", clearPaneDropState);
+
 function toggleExplorer() {
   settings.explorer = settings.explorer === "collapsed" ? "expanded" : "collapsed";
   elements.explorerSelect.value = settings.explorer;
@@ -3003,11 +3065,19 @@ function togglePreview() {
   logDebug("action", "Preview toggled", settings.preview);
 }
 
+function toggleLogPanel() {
+  settings.debugPanel = !settings.debugPanel;
+  persistSettings();
+  logDebug("action", settings.debugPanel ? "Log panel enabled" : "Log panel disabled");
+}
+
 elements.toggleExplorerMenuButton.addEventListener("click", toggleExplorer);
 elements.togglePreviewButton.addEventListener("click", togglePreview);
+elements.toggleLogButton.addEventListener("click", toggleLogPanel);
 elements.explorerToggleButton.addEventListener("click", toggleExplorer);
 elements.previewToggleActivityButton.addEventListener("click", togglePreview);
 elements.previewCollapseButton.addEventListener("click", togglePreview);
+elements.logCollapseButton.addEventListener("click", toggleLogPanel);
 
 elements.settingsButton.addEventListener("click", () => {
   logDebug("action", "Settings dialog opened");
@@ -3019,11 +3089,7 @@ elements.openSettingsMenuButton.addEventListener("click", () => {
   elements.settingsDialog.showModal();
 });
 
-elements.toggleDebugMenuButton.addEventListener("click", () => {
-  settings.debugPanel = !settings.debugPanel;
-  persistSettings();
-  logDebug("action", settings.debugPanel ? "Debug panel enabled" : "Debug panel disabled");
-});
+elements.toggleDebugMenuButton.addEventListener("click", toggleLogPanel);
 
 debugTabs.forEach((tab) => {
   tab.element.addEventListener("click", () => {

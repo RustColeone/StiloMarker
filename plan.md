@@ -1,49 +1,61 @@
-## Plan: MDNotes Minimal-JS Implementation
+## Plan: MDNotes Current Roadmap
 
-Build the product as a static HTML, CSS, and ES module application first so it can ship directly on GitHub Pages with minimal runtime overhead. Keep the architecture split into domain, services, and UI layers so the optional Python sync server and future `.mtree` compiler can be added without rewriting the frontend.
+Keep the product as a static HTML, CSS, and ES module workbench that can run on GitHub Pages or through the optional Python backend. Preserve the current architecture split between domain, services, and UI so collaboration, filesystem support, `.mtree`, and `.urldb` behavior can continue evolving without coupling everything into one runtime module.
 
-## Implementation Phases
+## Current Implemented Baseline
 
-### Phase 1: Static App Shell and Core Domain
-- Create a dependency-light static app entry point with a VS Code-inspired shell.
-- Define the canonical in-memory project tree and file operation rules.
-- Add a local cache adapter and browser capability detection.
-- Leave self-test entry points for core domain behavior.
+- Static minimal-JS workbench shell with VS Code-style layout
+- Canonical project tree with `.md`, `.mtree`, `.urldb`, and image asset support
+- Explorer with context-sensitive actions, quick-add, filtering, image previews, and derived `.urldb` entries
+- Source and preview panes with separate tab state and drag-to-reorder for pane tabs
+- Lightweight markdown rendering with HTML passthrough, image rendering, MathJax support, and PDF export
+- Chromium live-directory open/save plus non-Chromium import/export fallback
+- ZIP import/export support
+- Offline shell via service worker
+- Python-backed collaboration transport with text patch synchronization
+- Docked debug panel with filtered tabs and clipboard export
+- In-app dialogs for notice, confirm, rename/input, add-file, and bookmark entry creation
+- Node-based self-test coverage for the frontend services and shell markers
 
-### Phase 2: Explorer, Editor, and Preview
-- Implement the left explorer tree with context-menu-based create, rename, delete, and export actions.
-- Implement a Markdown source editor with live preview.
-- Support `.md` and `.mtree` files only.
-- Persist editor/theme/session state locally.
+## Next Phases
 
-### Phase 3: Browser File Access and Export
-- Add Chromium directory open/save support through the File System Access API.
-- Add non-Chromium single-file import and in-browser editing fallback.
-- Add single-file export and zip export for folders/projects.
-- Keep zip import as a later increment if needed.
+### Phase A: Collaboration Hardening
+- Review current text-patch synchronization under rapid concurrent edits and identify failure cases that still force full state reloads.
+- Decide whether the current ordered patch transport is sufficient or whether the next increment should move toward richer merge semantics.
+- Improve collaboration diagnostics so conflicts and reconnect flows are easier to understand from the frontend.
 
-### Phase 4: Offline App and Sync Boundaries
-- Add service-worker-based offline shell support.
-- Introduce a thin sync adapter boundary for a future Python LAN backend.
-- Leave clear extension points for event-based collaboration and `.mtree` actions.
+### Phase B: URL Album Model Decision
+- Decide whether `.urldb` entries should remain explorer-derived children backed by file transforms or become explicit subnodes in the canonical domain model.
+- If they remain derived, tighten the editing and preview experience around that constraint.
+- If they become first-class subnodes, redesign persistence and sync so `.urldb` entry operations are explicit rather than file-rewrite-based.
+
+### Phase C: Explorer and Workbench Polish
+- Continue refining selection, context-menu, and drag/drop behaviors so the workbench feels predictable across folders, files, images, and `.urldb` entries.
+- Evaluate whether multi-select is worth adding or whether it would complicate the minimal-JS interaction model too much.
+- Revisit any remaining browser-native flows, especially PDF save, only if the replacement is materially better and browser-compatible.
+
+### Phase D: Backend-Focused Increment
+- Shift effort toward the Python backend once the frontend interaction model is stable enough.
+- Clarify the backend roadmap for session durability, LAN deployment ergonomics, and collaboration resilience.
+- Keep the backend contract aligned with the frontend's current file model, including `.urldb` and image assets.
 
 ## Architecture Rules
+
 - Keep domain logic free of DOM and browser APIs.
-- Keep filesystem and storage behind service adapters.
-- Keep UI modules thin and event-driven.
-- Prefer plain browser APIs over external libraries unless complexity justifies otherwise.
+- Keep filesystem, storage, sync, and `.urldb` transforms behind service adapters.
+- Keep UI modules event-driven and avoid hiding core project state inside DOM-only structures.
+- Prefer plain browser APIs over external libraries unless the complexity reduction is substantial and justified.
 
-## Initial Deliverables
-- Static app shell
-- Project tree domain model
-- Explorer UI
-- Source editor and preview
-- Theme settings
-- Single-file export and zip export
-- Node-based self-test script
+## Active Priorities
 
-## Deferred Items
-- Zip import
-- Full LAN sync server
-- `.mtree` compilation
-- Advanced explorer behaviors like drag-and-drop reorder and multi-select
+- Collaboration correctness under concurrent editing
+- Final decision on `.urldb` entry representation
+- Continued explorer UX tightening without introducing unnecessary framework complexity
+- Maintaining self-test coverage as the frontend and backend continue to evolve
+
+## Deferred or Optional Work
+
+- Full rich-text editing or WYSIWYG mode
+- Heavy parser-based syntax highlighting
+- CRDT or OT transport unless collaboration requirements justify the added complexity
+- Framework migration away from the current minimal-JS architecture

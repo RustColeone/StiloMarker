@@ -53,6 +53,7 @@
             <div id="view-menu" class="menu-popover" hidden>
               <button id="toggle-explorer-menu-button" type="button">Toggle Explorer</button>
               <button id="toggle-preview-button" type="button">Toggle Preview</button>
+              <button id="toggle-log-button" type="button">Toggle Log</button>
             </div>
           </div>
 
@@ -60,7 +61,7 @@
             <button id="settings-menu-button" class="menu-trigger" type="button">Settings</button>
             <div id="settings-menu" class="menu-popover" hidden>
               <button id="open-settings-menu-button" type="button">Open Settings</button>
-              <button id="toggle-debug-menu-button" type="button">Toggle Debug Panel</button>
+              <button id="toggle-debug-menu-button" type="button">Toggle Log Panel</button>
             </div>
           </div>
         </nav>
@@ -138,19 +139,20 @@
 
           <div id="debug-splitter" class="panel-splitter debug-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize debug panel"></div>
 
-          <section id="debug-panel" class="debug-panel" aria-label="Debug panel" hidden>
+          <section id="debug-panel" class="debug-panel" aria-label="Log panel" hidden>
             <div class="debug-panel-header">
               <div class="debug-panel-heading">
-                <div class="eyebrow">Debug</div>
-                <div id="debug-tab-strip" class="debug-tab-strip" role="tablist" aria-label="Debug tabs">
+                <div class="eyebrow">Log</div>
+                <div id="debug-tab-strip" class="debug-tab-strip" role="tablist" aria-label="Log tabs">
                   <button id="debug-tab-all" class="debug-tab is-active" type="button" role="tab" aria-selected="true">All</button>
                   <button id="debug-tab-actions" class="debug-tab" type="button" role="tab" aria-selected="false">Actions</button>
                   <button id="debug-tab-responses" class="debug-tab" type="button" role="tab" aria-selected="false">Responses</button>
                 </div>
               </div>
               <div class="debug-panel-actions">
-                <button id="debug-copy-button" type="button">Copy All</button>
+                <button id="debug-copy-button" type="button">Copy</button>
                 <button id="debug-clear-button" type="button">Clear</button>
+                <button id="log-collapse-button" class="debug-collapse-button" type="button" aria-label="Collapse log" title="Collapse log">×</button>
               </div>
             </div>
             <div id="debug-log-list" class="debug-log-list"></div>
