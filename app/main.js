@@ -9,7 +9,7 @@ import { registerOfflineShell } from "./services/offline-service.js";
 import { applyTheme, loadSettings, saveSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
 import { pingServer } from "./services/sync-service.js";
-import { appendUrlDbEntry, formatUrlDbEntryBody, moveUrlDbEntry, moveUrlDbEntryBetweenFiles, parseUrlDb, parseUrlDbEntryBody, removeUrlDbEntry, updateUrlDbEntry } from "./services/urldb-service.js";
+import { appendUrlDbEntry, formatUrlDbEntryBody, moveUrlDbEntry, moveUrlDbEntryBetweenFiles, parseUrlDb, parseUrlDbEntryBody, removeUrlDbEntry, serializeUrlDb, updateUrlDbEntry } from "./services/urldb-service.js";
 import { createZip, downloadBlob } from "./services/zip-service.js";
 import { query } from "./ui/dom.js";
 import { createExplorerView } from "./ui/explorer-view.js";
@@ -203,6 +203,10 @@ const debugState = {
   entries: [],
   maxEntries: 300,
   activeTab: "all"
+};
+
+const explorerClipboard = {
+  payload: null
 };
 
 const debugTabs = [
@@ -731,6 +735,27 @@ function suggestUniqueFileName(project, parentId, name) {
   return candidate;
 }
 
+function suggestUniqueFolderName(project, parentId, name) {
+  let candidate = name;
+  let counter = 2;
+  while (findChildByName(project, parentId, candidate)) {
+    candidate = `${name}-${counter}`;
+    counter += 1;
+  }
+  return candidate;
+}
+
+function suggestUniqueUrlDbEntryName(entries, name) {
+  let candidate = name;
+  let counter = 2;
+  const normalized = () => candidate.toLowerCase();
+  while (entries.some((entry) => entry.name.toLowerCase() === normalized())) {
+    candidate = `${name}-${counter}`;
+    counter += 1;
+  }
+  return candidate;
+}
+
 function createMarkdownReference(activeFile, targetFile) {
   const activePath = getPath(controller.getProject(), activeFile.id);
   const targetPath = getPath(controller.getProject(), targetFile.id);
@@ -801,10 +826,13 @@ const explorer = createExplorerView({
     sourceUrlDbEntry = target.entryId ? { fileId: target.nodeId, entryId: target.entryId } : null;
     render(controller.getProject());
   },
-  onAction(action, target) {
+  canPasteTarget(target) {
+    return canPasteIntoExplorerTarget(target);
+  },
+  onAction(action, target, options) {
     selectionNodeId = target.nodeId;
     sourceUrlDbEntry = target.entryId ? { fileId: target.nodeId, entryId: target.entryId } : null;
-    void handleExplorerAction(action, target);
+    return handleExplorerAction(action, target, options);
   },
   onDragFileStart(fileId, event) {
     event.dataTransfer?.setData("text/mdnotes-file-id", fileId);
@@ -2480,6 +2508,182 @@ function getSelectedParent(project) {
   return project.nodes[selectedNode.parentId];
 }
 
+function getPasteTargetParent(project, targetNodeId) {
+  const node = project.nodes[targetNodeId] ?? project.nodes[project.rootId];
+  if (!node) {
+    return null;
+  }
+  if (node.kind === "folder") {
+    return node;
+  }
+  return project.nodes[node.parentId] ?? null;
+}
+
+function canPasteIntoExplorerTarget(target) {
+  const payload = explorerClipboard.payload;
+  if (!payload) {
+    return false;
+  }
+
+  const project = controller.getProject();
+  const node = project.nodes[target?.nodeId] ?? project.nodes[project.rootId];
+  if (!node) {
+    return false;
+  }
+
+  if (payload.kind === "node") {
+    return !target?.entryId && node.kind === "folder";
+  }
+
+  if (payload.kind === "urldb-entry") {
+    return node.kind === "file" && isUrlDbFileName(node.name);
+  }
+
+  return false;
+}
+
+function copyExplorerTarget(target) {
+  const project = controller.getProject();
+  if (target.entryId) {
+    const file = project.nodes[target.nodeId];
+    const entry = file?.kind === "file" ? getUrlDbEntryById(file.content, target.entryId) : null;
+    if (!entry) {
+      return false;
+    }
+    explorerClipboard.payload = {
+      kind: "urldb-entry",
+      fileId: target.nodeId,
+      entryId: target.entryId,
+      entry: structuredClone(entry)
+    };
+    logDebug("action", "Explorer copied bookmark", `${getPath(project, target.nodeId)} :: ${entry.name}`);
+    return true;
+  }
+
+  const node = project.nodes[target.nodeId];
+  if (!node || node.id === project.rootId) {
+    return false;
+  }
+  explorerClipboard.payload = {
+    kind: "node",
+    nodeId: node.id
+  };
+  logDebug("action", "Explorer copied item", getPath(project, node.id));
+  return true;
+}
+
+function duplicateNodeTree(sourceProject, sourceNodeId, targetParentId) {
+  const sourceNode = sourceProject.nodes[sourceNodeId];
+  if (!sourceNode) {
+    throw new Error("Copied item no longer exists.");
+  }
+
+  if (sourceNode.kind === "file") {
+    const before = controller.getProject();
+    const fileName = suggestUniqueFileName(before, targetParentId, sourceNode.name);
+    controller.createFile(targetParentId, fileName, sourceNode.content);
+    return findChildByName(controller.getProject(), targetParentId, fileName)?.id ?? null;
+  }
+
+  const before = controller.getProject();
+  const folderName = suggestUniqueFolderName(before, targetParentId, sourceNode.name);
+  controller.createFolder(targetParentId, folderName);
+  const createdFolder = findChildByName(controller.getProject(), targetParentId, folderName);
+  if (!createdFolder || createdFolder.kind !== "folder") {
+    return null;
+  }
+
+  sourceNode.children.forEach((childId) => {
+    duplicateNodeTree(sourceProject, childId, createdFolder.id);
+  });
+  return createdFolder.id;
+}
+
+function pasteNodeClipboard(target) {
+  const payload = explorerClipboard.payload;
+  if (!payload || payload.kind !== "node") {
+    return false;
+  }
+
+  const sourceProject = controller.getProject();
+  const parent = getPasteTargetParent(sourceProject, target.nodeId);
+  if (!parent) {
+    return false;
+  }
+
+  const createdId = duplicateNodeTree(sourceProject, payload.nodeId, parent.id);
+  if (!createdId) {
+    return false;
+  }
+
+  selectionNodeId = createdId;
+  sourceUrlDbEntry = null;
+  const createdNode = controller.getProject().nodes[createdId];
+  if (createdNode?.kind === "file") {
+    setActiveSourceFile(createdId);
+    if (isPreviewableFileName(createdNode.name)) {
+      setPreviewFile(createdId);
+    }
+  }
+  publishSnapshot();
+  logDebug("action", "Explorer pasted item", getPath(controller.getProject(), createdId));
+  return true;
+}
+
+function pasteUrlDbEntryClipboard(target) {
+  const payload = explorerClipboard.payload;
+  if (!payload || payload.kind !== "urldb-entry") {
+    return false;
+  }
+
+  const project = controller.getProject();
+  const targetFile = project.nodes[target.nodeId];
+  if (!targetFile || targetFile.kind !== "file" || !isUrlDbFileName(targetFile.name)) {
+    return false;
+  }
+
+  const entries = getUrlDbEntries(targetFile.content);
+  const insertionIndex = target.entryId
+    ? (() => {
+      const index = entries.findIndex((entry) => entry.id === target.entryId);
+      return index < 0 ? entries.length : index + 1;
+    })()
+    : entries.length;
+  const entryDraft = {
+    ...payload.entry,
+    name: suggestUniqueUrlDbEntryName(entries, payload.entry.name)
+  };
+  const nextEntries = [...entries];
+  nextEntries.splice(insertionIndex, 0, entryDraft);
+  const nextContent = serializeUrlDb(nextEntries);
+  controller.updateContent(targetFile.id, nextContent);
+  publishOperation({ type: "update-file", path: getPath(project, targetFile.id), content: nextContent });
+  const pastedEntry = getUrlDbEntries(nextContent).find((entry) => entry.name === entryDraft.name);
+  if (pastedEntry) {
+    setActiveSourceUrlDbEntry(targetFile.id, pastedEntry.id);
+    previewFileId = targetFile.id;
+    previewUrlDbEntry = pastedEntry.id;
+  }
+  logDebug("action", "Explorer pasted bookmark", `${getPath(controller.getProject(), targetFile.id)} :: ${entryDraft.name}`);
+  return true;
+}
+
+function pasteExplorerClipboard(target) {
+  if (!canPasteIntoExplorerTarget(target)) {
+    return false;
+  }
+
+  if (explorerClipboard.payload?.kind === "node") {
+    return pasteNodeClipboard(target);
+  }
+
+  if (explorerClipboard.payload?.kind === "urldb-entry") {
+    return pasteUrlDbEntryClipboard(target);
+  }
+
+  return false;
+}
+
 function setAddFileStatus(message) {
   elements.addFileStatusText.textContent = message;
 }
@@ -3031,14 +3235,29 @@ function exportNode(nodeId) {
   downloadBlob(createZip(collectFileEntries(project, node.id)), `${node.name || project.name}.zip`);
 }
 
-async function handleExplorerAction(action, target) {
+async function handleExplorerAction(action, target, options = {}) {
+  if (options.dryRun) {
+    return false;
+  }
+
   const nodeId = target.nodeId;
   selectionNodeId = nodeId;
+  sourceUrlDbEntry = target.entryId ? { fileId: nodeId, entryId: target.entryId } : null;
   logDebug("action", "Explorer action", action);
   if (action.startsWith("filter-")) {
     settings.explorerFilter = action.replace("filter-", "");
     persistSettings();
     render(controller.getProject());
+    return;
+  }
+  if (action === "copy") {
+    copyExplorerTarget(target);
+    return;
+  }
+  if (action === "paste") {
+    if (!pasteExplorerClipboard(target)) {
+      notify("Nothing valid to paste here.");
+    }
     return;
   }
   if (action === "new-folder") {

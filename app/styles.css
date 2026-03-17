@@ -547,11 +547,7 @@ p {
 }
 
 .tree-row[draggable="true"] {
-  cursor: grab;
-}
-
-.tree-row[draggable="true"]:active {
-  cursor: grabbing;
+  cursor: pointer;
 }
 
 .tree-row:hover {
@@ -586,6 +582,15 @@ p {
 
 .is-asset-row .tree-label::after {
   content: "image";
+  margin-left: 8px;
+  color: var(--text-dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.is-remote-asset-row .tree-label::after {
+  content: "url image";
   margin-left: 8px;
   color: var(--text-dim);
   font-size: 10px;

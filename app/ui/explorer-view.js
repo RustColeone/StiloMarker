@@ -20,7 +20,7 @@ function getFileIconClass(node) {
   return "is-file";
 }
 
-function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenUrlDbEntry, onToggleFolder, onSelectNode, onAction, onDragFileStart, onDragUrlDbEntryStart, getFilterMode, getAssetPreviewSrc, getUrlDbEntries, getSelectedTarget }) {
+function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenUrlDbEntry, onToggleFolder, onSelectNode, onAction, canPasteTarget, onDragFileStart, onDragUrlDbEntryStart, getFilterMode, getAssetPreviewSrc, getUrlDbEntries, getSelectedTarget }) {
   let menuTarget = null;
   let currentProject = null;
   let activeMenuMode = null;
@@ -68,11 +68,17 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
   }
 
   function getMenuEntries(node, mode = "default", target = null) {
+    const pasteEnabled = canPasteTarget?.(target) === true;
     if (target?.entryId) {
-      return [
+      const entries = [
+        ["Copy", "copy"],
         ["Rename", "rename-entry"],
         ["Delete", "delete-entry"]
       ];
+      if (pasteEnabled) {
+        entries.splice(1, 0, ["Paste", "paste"]);
+      }
+      return entries;
     }
 
     const createEntries = [
@@ -88,7 +94,14 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
     }
 
     if (!node || node.id === ROOT_ID || node.kind === "folder") {
-      const entries = [...createEntries];
+      const entries = [];
+      if (node && node.id !== ROOT_ID) {
+        entries.push(["Copy", "copy"]);
+      }
+      if (pasteEnabled) {
+        entries.push(["Paste", "paste"]);
+      }
+      entries.push(...createEntries);
       if (node && node.id !== ROOT_ID) {
         entries.push(["Rename", "rename"]);
         entries.push(["Delete", "delete"]);
@@ -98,45 +111,70 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
     }
 
     if (node.kind === "file" && node.name.endsWith(".md")) {
-      return [
+      const entries = [
+        ["Copy", "copy"],
         ["Rename", "rename"],
         ["Delete", "delete"],
         ["Export", "export"]
       ];
+      if (pasteEnabled) {
+        entries.splice(1, 0, ["Paste", "paste"]);
+      }
+      return entries;
     }
 
     if (node?.kind === "file" && node.name.endsWith(".mtree")) {
-      return [
+      const entries = [
+        ["Copy", "copy"],
         ["Generate Module Map", "generate-module-map"],
         ["Rename", "rename"],
         ["Delete", "delete"],
         ["Export", "export"]
       ];
+      if (pasteEnabled) {
+        entries.splice(1, 0, ["Paste", "paste"]);
+      }
+      return entries;
     }
 
     if (node?.kind === "file" && isUrlDbFileName(node.name)) {
-      return [
+      const entries = [
+        ["Copy", "copy"],
         ["Add Bookmark Entry", "add-bookmark-entry"],
         ["Rename", "rename"],
         ["Delete", "delete"],
         ["Export", "export"]
       ];
+      if (pasteEnabled) {
+        entries.splice(1, 0, ["Paste", "paste"]);
+      }
+      return entries;
     }
 
     if (node?.kind === "file" && /\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(node.name)) {
-      return [
+      const entries = [
+        ["Copy", "copy"],
         ["Replace File", "replace-file"],
         ["Rename", "rename"],
         ["Delete", "delete"],
         ["Export", "export"]
       ];
+      if (pasteEnabled) {
+        entries.splice(1, 0, ["Paste", "paste"]);
+      }
+      return entries;
     }
 
-    return [
+    const entries = [
+      ["Copy", "copy"],
       ["Rename", "rename"],
       ["Delete", "delete"],
       ["Export", "export"]
     ];
+    if (pasteEnabled) {
+      entries.splice(1, 0, ["Paste", "paste"]);
+    }
+    return entries;
   }
 
   function getFilterEntries() {
@@ -164,7 +202,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       button.addEventListener("click", () => {
         const actionTarget = menuTarget;
         hideMenu();
-        onAction(action, actionTarget);
+        onAction(action, actionTarget, { dryRun: false });
       });
       contextMenu.append(button);
     });
@@ -221,8 +259,8 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
     previewTooltip.hidden = false;
   }
 
-  function attachAssetPreview(row, previewSource, label) {
-    row.classList.add("is-asset-row");
+  function attachAssetPreview(row, previewSource, label, assetClass = "is-asset-row") {
+    row.classList.add(assetClass);
     row.addEventListener("mouseenter", () => showAssetPreview(previewSource, label, row));
     row.addEventListener("mouseleave", hidePreviewTooltip);
   }
@@ -334,7 +372,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
           childLabel.textContent = entry.name;
           childRow.append(childLabel);
 
-          attachAssetPreview(childRow, entry.url, entry.name);
+          attachAssetPreview(childRow, entry.url, entry.name, "is-remote-asset-row");
           childRow.addEventListener("click", () => {
             onSelectNode?.({ nodeId: node.id, entryId: entry.id });
             onOpenUrlDbEntry?.(node.id, entry.id);
