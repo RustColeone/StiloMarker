@@ -531,6 +531,11 @@ p {
   padding: 6px 0;
 }
 
+.explorer-tree.is-drop-into-root {
+  box-shadow: inset 0 0 0 1px var(--accent);
+  background: linear-gradient(to bottom, transparent, var(--accent-soft));
+}
+
 .tree-row {
   display: flex;
   align-items: center;
@@ -555,6 +560,19 @@ p {
 
 .tree-row.is-active {
   background: var(--accent-soft);
+}
+
+.tree-row.is-drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.tree-row.is-drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.tree-row.is-drop-into {
+  background: color-mix(in srgb, var(--accent-soft) 82%, transparent);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .tree-label {

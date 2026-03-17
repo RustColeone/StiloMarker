@@ -1,4 +1,4 @@
-import { findChildByName, getNode, getNodeIdByPath, getPath, isAllowedFileName, isImageFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
+import { ROOT_ID, findChildByName, getNode, getNodeIdByPath, getPath, isAllowedFileName, isImageFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
 import { createProjectController, seedDefaultProject } from "./domain/project-service.js";
 import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
 import { createCollaborationRuntime } from "./services/collaboration-service.js";
@@ -9,7 +9,7 @@ import { registerOfflineShell } from "./services/offline-service.js";
 import { applyTheme, loadSettings, saveSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
 import { pingServer } from "./services/sync-service.js";
-import { appendUrlDbEntry, formatUrlDbEntryBody, parseUrlDb, parseUrlDbEntryBody, removeUrlDbEntry, updateUrlDbEntry } from "./services/urldb-service.js";
+import { appendUrlDbEntry, formatUrlDbEntryBody, moveUrlDbEntry, moveUrlDbEntryBetweenFiles, parseUrlDb, parseUrlDbEntryBody, removeUrlDbEntry, updateUrlDbEntry } from "./services/urldb-service.js";
 import { createZip, downloadBlob } from "./services/zip-service.js";
 import { query } from "./ui/dom.js";
 import { createExplorerView } from "./ui/explorer-view.js";
@@ -1532,6 +1532,298 @@ function clearPaneDropState() {
   elements.previewPane.classList.remove("is-drop-active");
 }
 
+function clearExplorerDropState() {
+  elements.explorerTree.classList.remove("is-drop-into-root");
+  elements.explorerTree.querySelectorAll(".is-drop-before, .is-drop-after, .is-drop-into").forEach((row) => {
+    row.classList.remove("is-drop-before", "is-drop-after", "is-drop-into");
+  });
+}
+
+function setExplorerDropState(row, placement) {
+  clearExplorerDropState();
+  if (!placement) {
+    return;
+  }
+  if (!row) {
+    elements.explorerTree.classList.add("is-drop-into-root");
+    return;
+  }
+  row.classList.add(`is-drop-${placement}`);
+}
+
+function getExplorerDropPayloadKind(types) {
+  if (types.includes("text/mdnotes-file-id")) {
+    return "file";
+  }
+  if (types.includes("text/mdnotes-urldb-entry")) {
+    return "urldb-entry";
+  }
+  return null;
+}
+
+function getExplorerDropPlacement(row, node, entryId, payloadKind, event) {
+  if (payloadKind === "urldb-entry") {
+    if (entryId) {
+      const rect = row.getBoundingClientRect();
+      return event.clientY < rect.top + (rect.height / 2) ? "before" : "after";
+    }
+    return node.kind === "file" && isUrlDbFileName(node.name) ? "into" : null;
+  }
+
+  if (payloadKind !== "file") {
+    return null;
+  }
+
+  const rect = row.getBoundingClientRect();
+  if (node.kind === "folder") {
+    const topEdge = rect.top + (rect.height * 0.25);
+    const bottomEdge = rect.bottom - (rect.height * 0.25);
+    if (event.clientY < topEdge) {
+      return "before";
+    }
+    if (event.clientY > bottomEdge) {
+      return "after";
+    }
+    return "into";
+  }
+
+  return event.clientY < rect.top + (rect.height / 2) ? "before" : "after";
+}
+
+function resolveNodeDropLocation(project, targetNodeId, placement) {
+  if (!targetNodeId) {
+    const root = project.nodes[ROOT_ID];
+    return { parentId: ROOT_ID, index: root?.children.length ?? 0 };
+  }
+
+  const targetNode = project.nodes[targetNodeId];
+  if (!targetNode) {
+    return null;
+  }
+
+  if (placement === "into") {
+    if (targetNode.kind !== "folder") {
+      return null;
+    }
+    return { parentId: targetNode.id, index: targetNode.children.length };
+  }
+
+  const parent = project.nodes[targetNode.parentId];
+  if (!parent || parent.kind !== "folder") {
+    return null;
+  }
+
+  const targetIndex = parent.children.indexOf(targetNode.id);
+  if (targetIndex < 0) {
+    return null;
+  }
+
+  return {
+    parentId: parent.id,
+    index: placement === "after" ? targetIndex + 1 : targetIndex
+  };
+}
+
+function moveExplorerFileNode(fileId, targetNodeId, placement) {
+  const project = controller.getProject();
+  const draggedNode = project.nodes[fileId];
+  if (!draggedNode || draggedNode.kind !== "file") {
+    return false;
+  }
+
+  const destination = resolveNodeDropLocation(project, targetNodeId, placement);
+  if (!destination) {
+    return false;
+  }
+
+  const sourceParent = project.nodes[draggedNode.parentId];
+  const sourceIndex = sourceParent?.children.indexOf(fileId) ?? -1;
+  if (sourceIndex < 0) {
+    return false;
+  }
+
+  const normalizedIndex = sourceParent?.id === destination.parentId && sourceIndex < destination.index
+    ? destination.index - 1
+    : destination.index;
+  if (draggedNode.parentId === destination.parentId && sourceIndex === normalizedIndex) {
+    return false;
+  }
+
+  controller.move(fileId, destination.parentId, destination.index);
+  selectionNodeId = fileId;
+  sourceUrlDbEntry = null;
+  logDebug("action", "Explorer node moved", `${getPath(controller.getProject(), fileId)} -> ${getPath(controller.getProject(), destination.parentId)}`);
+  return true;
+}
+
+function applyFileContentUpdates(updates) {
+  const nextProject = structuredClone(controller.getProject());
+  updates.forEach(({ fileId, content }) => {
+    const file = nextProject.nodes[fileId];
+    if (!file || file.kind !== "file") {
+      throw new Error(`File not found: ${fileId}`);
+    }
+    file.content = content;
+    file.dirty = true;
+  });
+  controller.replaceProject(nextProject);
+}
+
+function moveExplorerUrlDbEntry(sourceFileId, sourceEntryId, targetNodeId, targetEntryId, placement) {
+  const project = controller.getProject();
+  const sourceFile = project.nodes[sourceFileId];
+  const targetFile = targetNodeId ? project.nodes[targetNodeId] : null;
+  if (!sourceFile || sourceFile.kind !== "file" || !isUrlDbFileName(sourceFile.name)) {
+    return false;
+  }
+  if (!targetFile || targetFile.kind !== "file" || !isUrlDbFileName(targetFile.name)) {
+    return false;
+  }
+
+  const sourceEntry = getUrlDbEntryById(sourceFile.content, sourceEntryId);
+  if (!sourceEntry) {
+    return false;
+  }
+
+  const targetEntries = getUrlDbEntries(targetFile.content);
+  const targetIndex = targetEntryId
+    ? (() => {
+      const index = targetEntries.findIndex((entry) => entry.id === targetEntryId);
+      if (index < 0) {
+        return null;
+      }
+      return placement === "after" ? index + 1 : index;
+    })()
+    : targetEntries.length;
+
+  if (targetIndex === null) {
+    return false;
+  }
+
+  let nextTargetContent = targetFile.content;
+  if (sourceFileId === targetNodeId) {
+    const sourceEntries = getUrlDbEntries(sourceFile.content);
+    const sourceIndex = sourceEntries.findIndex((entry) => entry.id === sourceEntryId);
+    if (sourceIndex < 0) {
+      return false;
+    }
+    const normalizedIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
+    if (sourceIndex === normalizedIndex) {
+      return false;
+    }
+    nextTargetContent = moveUrlDbEntry(sourceFile.content, sourceEntryId, normalizedIndex);
+    applyFileContentUpdates([{ fileId: sourceFileId, content: nextTargetContent }]);
+  } else {
+    const moved = moveUrlDbEntryBetweenFiles(sourceFile.content, sourceEntryId, targetFile.content, targetIndex);
+    nextTargetContent = moved.targetContent;
+    applyFileContentUpdates([
+      { fileId: sourceFileId, content: moved.sourceContent },
+      { fileId: targetNodeId, content: moved.targetContent }
+    ]);
+  }
+
+  const nextTargetEntries = getUrlDbEntries(nextTargetContent);
+  const movedEntry = nextTargetEntries.find((entry) => entry.name === sourceEntry.name);
+  if (movedEntry) {
+    setActiveSourceUrlDbEntry(targetNodeId, movedEntry.id);
+  } else {
+    selectionNodeId = targetNodeId;
+    sourceUrlDbEntry = null;
+    controller.setActiveFile(targetNodeId);
+  }
+  if (previewFileId === sourceFileId || previewFileId === targetNodeId) {
+    previewFileId = targetNodeId;
+    previewUrlDbEntry = movedEntry?.id ?? null;
+  }
+  logDebug("action", "Bookmark entry moved", `${getPath(controller.getProject(), targetNodeId)} :: ${sourceEntry.name}`);
+  return true;
+}
+
+function bindExplorerDropTarget() {
+  elements.explorerTree.addEventListener("dragover", (event) => {
+    const payloadKind = getExplorerDropPayloadKind(event.dataTransfer?.types ?? []);
+    if (!payloadKind) {
+      clearExplorerDropState();
+      return;
+    }
+
+    const row = event.target.closest(".tree-row");
+    if (!row) {
+      if (payloadKind === "file") {
+        event.preventDefault();
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = "move";
+        }
+        setExplorerDropState(null, "into");
+        return;
+      }
+      clearExplorerDropState();
+      return;
+    }
+
+    const project = controller.getProject();
+    const node = project.nodes[row.dataset.nodeId];
+    if (!node) {
+      clearExplorerDropState();
+      return;
+    }
+
+    const placement = getExplorerDropPlacement(row, node, row.dataset.entryId || null, payloadKind, event);
+    if (!placement) {
+      clearExplorerDropState();
+      return;
+    }
+
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "move";
+    }
+    setExplorerDropState(row, placement);
+  });
+
+  elements.explorerTree.addEventListener("dragleave", (event) => {
+    if (event.currentTarget?.contains(event.relatedTarget)) {
+      return;
+    }
+    clearExplorerDropState();
+  });
+
+  elements.explorerTree.addEventListener("drop", (event) => {
+    clearExplorerDropState();
+    const fileId = event.dataTransfer?.getData("text/mdnotes-file-id");
+    const entryPayload = event.dataTransfer?.getData("text/mdnotes-urldb-entry");
+    if (!fileId && !entryPayload) {
+      return;
+    }
+
+    const row = event.target.closest(".tree-row");
+    const project = controller.getProject();
+    const targetNodeId = row?.dataset.nodeId ?? null;
+    const targetEntryId = row?.dataset.entryId ?? null;
+    const targetNode = targetNodeId ? project.nodes[targetNodeId] : null;
+    const placement = row && targetNode
+      ? getExplorerDropPlacement(row, targetNode, targetEntryId, fileId ? "file" : "urldb-entry", event)
+      : (fileId ? "into" : null);
+
+    if (!placement) {
+      return;
+    }
+
+    event.preventDefault();
+    try {
+      if (fileId) {
+        moveExplorerFileNode(fileId, targetNodeId, placement);
+        return;
+      }
+
+      const parsed = JSON.parse(entryPayload);
+      moveExplorerUrlDbEntry(parsed.fileId, parsed.entryId, targetNodeId, targetEntryId, placement);
+    } catch (error) {
+      notify(error.message);
+    }
+  });
+}
+
 function openDroppedFileInPane(fileId, pane) {
   if (!canOpenFileInPane(fileId, pane)) {
     return;
@@ -3045,11 +3337,18 @@ bindPaneDropTarget(elements.sourcePane, "source");
 bindPaneDropTarget(elements.sourceTabStrip, "source");
 bindPaneDropTarget(elements.previewPane, "preview");
 bindPaneDropTarget(elements.previewTabStrip, "preview");
+bindExplorerDropTarget();
 bindTabStripReorderTarget(elements.sourceTabStrip, "source");
 bindTabStripReorderTarget(elements.previewTabStrip, "preview");
 
-document.addEventListener("dragend", clearPaneDropState);
-document.addEventListener("drop", clearPaneDropState);
+document.addEventListener("dragend", () => {
+  clearPaneDropState();
+  clearExplorerDropState();
+});
+document.addEventListener("drop", () => {
+  clearPaneDropState();
+  clearExplorerDropState();
+});
 
 function toggleExplorer() {
   settings.explorer = settings.explorer === "collapsed" ? "expanded" : "collapsed";

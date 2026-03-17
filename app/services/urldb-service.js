@@ -152,4 +152,42 @@ function removeUrlDbEntry(content, entryId) {
   return serializeUrlDb(nextEntries);
 }
 
-export { appendUrlDbEntry, formatUrlDbEntryBody, parseUrlDb, parseUrlDbEntryBody, removeUrlDbEntry, serializeUrlDb, updateUrlDbEntry };
+function moveUrlDbEntry(content, entryId, targetIndex) {
+  const entries = parseUrlDb(content);
+  const sourceIndex = entries.findIndex((entry) => entry.id === entryId);
+  if (sourceIndex < 0) {
+    throw new Error("Bookmark entry not found.");
+  }
+
+  const [entry] = entries.splice(sourceIndex, 1);
+  const clampedIndex = Math.max(0, Math.min(Number(targetIndex), entries.length));
+  entries.splice(clampedIndex, 0, entry);
+  return serializeUrlDb(entries);
+}
+
+function moveUrlDbEntryBetweenFiles(sourceContent, entryId, targetContent, targetIndex = null) {
+  const sourceEntries = parseUrlDb(sourceContent);
+  const targetEntries = parseUrlDb(targetContent);
+  const sourceIndex = sourceEntries.findIndex((entry) => entry.id === entryId);
+  if (sourceIndex < 0) {
+    throw new Error("Bookmark entry not found.");
+  }
+
+  const [entry] = sourceEntries.splice(sourceIndex, 1);
+  if (targetEntries.some((current) => current.name.toLowerCase() === entry.name.toLowerCase())) {
+    throw new Error(`A bookmark named \"${entry.name}\" already exists in this album.`);
+  }
+
+  const clampedIndex = targetIndex === null
+    ? targetEntries.length
+    : Math.max(0, Math.min(Number(targetIndex), targetEntries.length));
+  targetEntries.splice(clampedIndex, 0, entry);
+
+  return {
+    sourceContent: serializeUrlDb(sourceEntries),
+    targetContent: serializeUrlDb(targetEntries),
+    movedEntryName: entry.name
+  };
+}
+
+export { appendUrlDbEntry, formatUrlDbEntryBody, moveUrlDbEntry, moveUrlDbEntryBetweenFiles, parseUrlDb, parseUrlDbEntryBody, removeUrlDbEntry, serializeUrlDb, updateUrlDbEntry };

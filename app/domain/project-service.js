@@ -6,6 +6,7 @@ import {
   createProject,
   getNode,
   markFileSaved,
+  moveNode,
   removeNodeRecursive,
   renameNode,
   setActiveFile,
@@ -63,6 +64,9 @@ function createProjectController(initialProject = seedDefaultProject()) {
     },
     remove(nodeId) {
       return apply((current) => removeNodeRecursive(current, nodeId));
+    },
+    move(nodeId, targetParentId, targetIndex = null) {
+      return apply((current) => moveNode(current, nodeId, targetParentId, targetIndex));
     },
     setActiveFile(fileId) {
       return apply((current) => setActiveFile(current, fileId));

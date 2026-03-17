@@ -243,6 +243,45 @@ function removeNodeRecursive(project, nodeId) {
   return next;
 }
 
+function moveNode(project, nodeId, targetParentId, targetIndex = null) {
+  const next = cloneProject(project);
+  const node = getNode(next, nodeId);
+  if (nodeId === ROOT_ID) {
+    throw new Error("Cannot move the root folder.");
+  }
+
+  const targetParent = getNode(next, targetParentId);
+  if (targetParent.kind !== "folder") {
+    throw new Error("Items can only be moved into folders.");
+  }
+
+  let ancestor = targetParent;
+  while (ancestor.parentId) {
+    if (ancestor.id === nodeId) {
+      throw new Error("Cannot move an item into itself.");
+    }
+    ancestor = getNode(next, ancestor.parentId);
+  }
+
+  ensureUniqueName(next, targetParentId, node.name, node.id);
+
+  const sourceParent = getNode(next, node.parentId);
+  const sourceIndex = sourceParent.children.indexOf(nodeId);
+  sourceParent.children = sourceParent.children.filter((childId) => childId !== nodeId);
+
+  const insertionParent = getNode(next, targetParentId);
+  const clampedIndex = targetIndex === null
+    ? insertionParent.children.length
+    : Math.max(0, Math.min(targetIndex, insertionParent.children.length));
+  const normalizedIndex = sourceParent.id === insertionParent.id && sourceIndex >= 0 && sourceIndex < clampedIndex
+    ? clampedIndex - 1
+    : clampedIndex;
+
+  insertionParent.children.splice(normalizedIndex, 0, nodeId);
+  node.parentId = targetParentId;
+  return next;
+}
+
 function toggleFolder(project, nodeId) {
   const next = cloneProject(project);
   const node = getNode(next, nodeId);
@@ -276,14 +315,8 @@ function listVisibleNodes(project, startId = ROOT_ID, depth = 0, rows = []) {
   }
 
   if (node.kind === "folder" && node.expanded) {
-    const children = node.children.map((childId) => getNode(project, childId));
-    children
-      .sort((left, right) => {
-        if (left.kind !== right.kind) {
-          return left.kind === "folder" ? -1 : 1;
-        }
-        return left.name.localeCompare(right.name);
-      })
+    node.children
+      .map((childId) => getNode(project, childId))
       .forEach((child) => listVisibleNodes(project, child.id, depth + (startId === ROOT_ID ? 0 : 1), rows));
   }
 
@@ -346,6 +379,18 @@ function applySyncOperation(project, operation) {
     return removeNodeRecursive(project, nodeId);
   }
 
+  if (operation.type === "move-node") {
+    const nodeId = getNodeIdByPath(project, operation.path);
+    if (!nodeId) {
+      throw new Error(`Node path not found: ${operation.path}`);
+    }
+    const parentId = operation.parentPath ? getNodeIdByPath(project, operation.parentPath) : ROOT_ID;
+    if (!parentId) {
+      throw new Error(`Parent path not found: ${operation.parentPath}`);
+    }
+    return moveNode(project, nodeId, parentId, operation.index ?? null);
+  }
+
   if (operation.type === "update-file") {
     const nodeId = getNodeIdByPath(project, operation.path);
     if (!nodeId) {
@@ -396,6 +441,7 @@ export {
   isUrlDbFileName,
   listVisibleNodes,
   markFileSaved,
+  moveNode,
   removeNodeRecursive,
   renameNode,
   serializeProject,
