@@ -20,7 +20,7 @@ function getFileIconClass(node) {
   return "is-file";
 }
 
-function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenUrlDbEntry, onToggleFolder, onSelectNode, onAction, canPasteTarget, onDragFileStart, onDragUrlDbEntryStart, getFilterMode, getAssetPreviewSrc, getUrlDbEntries, getSelectedTarget }) {
+function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenUrlDbEntry, onToggleFolder, onSelectNode, onAction, canPasteTarget, onDragNodeStart, onDragUrlDbEntryStart, getFilterMode, getAssetPreviewSrc, getUrlDbEntries, getSelectedTarget }) {
   let menuTarget = null;
   let currentProject = null;
   let activeMenuMode = null;
@@ -288,10 +288,10 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       row.dataset.nodeId = node.id;
       row.title = path;
 
-      if (node.kind === "file") {
+      if (node.kind === "file" || node.kind === "folder") {
         row.draggable = true;
         row.addEventListener("dragstart", (event) => {
-          onDragFileStart?.(node.id, event);
+          onDragNodeStart?.(node.id, event);
         });
       }
 

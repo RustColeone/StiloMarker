@@ -836,13 +836,21 @@ const explorer = createExplorerView({
     sourceUrlDbEntry = target.entryId ? { fileId: target.nodeId, entryId: target.entryId } : null;
     return handleExplorerAction(action, target, options);
   },
-  onDragFileStart(fileId, event) {
-    event.dataTransfer?.setData("text/mdnotes-file-id", fileId);
-    event.dataTransfer?.setData("text/plain", fileId);
+  onDragNodeStart(nodeId, event) {
+    const project = controller.getProject();
+    const node = project.nodes[nodeId];
+    if (!node) {
+      return;
+    }
+    event.dataTransfer?.setData("text/mdnotes-node-id", nodeId);
+    if (node.kind === "file") {
+      event.dataTransfer?.setData("text/mdnotes-file-id", nodeId);
+      event.dataTransfer?.setData("text/plain", nodeId);
+    }
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = "copyMove";
     }
-    logDebug("action", "Explorer drag started", getPath(controller.getProject(), fileId));
+    logDebug("action", "Explorer drag started", getPath(project, nodeId));
   },
   onDragUrlDbEntryStart(fileId, entryId, event) {
     const project = controller.getProject();
@@ -950,6 +958,7 @@ function populateMtreeTargetPicker(selectedFileId = "__new__") {
 
 function refreshMtreeDraftPresentation() {
   const draft = mtreeToolState.draftSection || "";
+  syncMtreeViewportMetrics();
   elements.mtreeOutputHighlight.innerHTML = `${highlightMarkdownSource(draft)}<div class="editor-line"> </div>`;
   elements.mtreeRenderPreview.innerHTML = renderMarkdown(draft);
   void typesetPreview(draft, elements.mtreeRenderPreview);
@@ -962,6 +971,11 @@ function renderMtreeDraft() {
   const draft = mtreeToolState.draftSection || "";
   elements.mtreeOutputText.value = draft;
   refreshMtreeDraftPresentation();
+}
+
+function syncMtreeViewportMetrics() {
+  const scrollbarWidth = Math.max(0, elements.mtreeOutputText.offsetWidth - elements.mtreeOutputText.clientWidth);
+  elements.mtreeOutputText.style.setProperty("--mtree-scrollbar-width", `${scrollbarWidth}px`);
 }
 
 function syncMtreeOutputScroll() {
@@ -1582,6 +1596,9 @@ function setExplorerDropState(row, placement) {
 }
 
 function getExplorerDropPayloadKind(types) {
+  if (types.includes("text/mdnotes-node-id")) {
+    return "node";
+  }
   if (types.includes("text/mdnotes-file-id")) {
     return "file";
   }
@@ -1600,7 +1617,7 @@ function getExplorerDropPlacement(row, node, entryId, payloadKind, event) {
     return node.kind === "file" && isUrlDbFileName(node.name) ? "into" : null;
   }
 
-  if (payloadKind !== "file") {
+  if (payloadKind !== "file" && payloadKind !== "node") {
     return null;
   }
 
@@ -1654,10 +1671,10 @@ function resolveNodeDropLocation(project, targetNodeId, placement) {
   };
 }
 
-function moveExplorerFileNode(fileId, targetNodeId, placement) {
+function moveExplorerNode(nodeId, targetNodeId, placement) {
   const project = controller.getProject();
-  const draggedNode = project.nodes[fileId];
-  if (!draggedNode || draggedNode.kind !== "file") {
+  const draggedNode = project.nodes[nodeId];
+  if (!draggedNode || (draggedNode.kind !== "file" && draggedNode.kind !== "folder")) {
     return false;
   }
 
@@ -1667,7 +1684,7 @@ function moveExplorerFileNode(fileId, targetNodeId, placement) {
   }
 
   const sourceParent = project.nodes[draggedNode.parentId];
-  const sourceIndex = sourceParent?.children.indexOf(fileId) ?? -1;
+  const sourceIndex = sourceParent?.children.indexOf(nodeId) ?? -1;
   if (sourceIndex < 0) {
     return false;
   }
@@ -1679,10 +1696,10 @@ function moveExplorerFileNode(fileId, targetNodeId, placement) {
     return false;
   }
 
-  controller.move(fileId, destination.parentId, destination.index);
-  selectionNodeId = fileId;
+  controller.move(nodeId, destination.parentId, destination.index);
+  selectionNodeId = nodeId;
   sourceUrlDbEntry = null;
-  logDebug("action", "Explorer node moved", `${getPath(controller.getProject(), fileId)} -> ${getPath(controller.getProject(), destination.parentId)}`);
+  logDebug("action", "Explorer node moved", `${getPath(controller.getProject(), nodeId)} -> ${getPath(controller.getProject(), destination.parentId)}`);
   return true;
 }
 
@@ -1779,7 +1796,7 @@ function bindExplorerDropTarget() {
 
     const row = event.target.closest(".tree-row");
     if (!row) {
-      if (payloadKind === "file") {
+      if (payloadKind === "file" || payloadKind === "node") {
         event.preventDefault();
         if (event.dataTransfer) {
           event.dataTransfer.dropEffect = "move";
@@ -1820,9 +1837,10 @@ function bindExplorerDropTarget() {
 
   elements.explorerTree.addEventListener("drop", (event) => {
     clearExplorerDropState();
+    const nodeId = event.dataTransfer?.getData("text/mdnotes-node-id");
     const fileId = event.dataTransfer?.getData("text/mdnotes-file-id");
     const entryPayload = event.dataTransfer?.getData("text/mdnotes-urldb-entry");
-    if (!fileId && !entryPayload) {
+    if (!nodeId && !entryPayload) {
       return;
     }
 
@@ -1832,8 +1850,8 @@ function bindExplorerDropTarget() {
     const targetEntryId = row?.dataset.entryId ?? null;
     const targetNode = targetNodeId ? project.nodes[targetNodeId] : null;
     const placement = row && targetNode
-      ? getExplorerDropPlacement(row, targetNode, targetEntryId, fileId ? "file" : "urldb-entry", event)
-      : (fileId ? "into" : null);
+      ? getExplorerDropPlacement(row, targetNode, targetEntryId, entryPayload ? "urldb-entry" : "node", event)
+      : (nodeId ? "into" : null);
 
     if (!placement) {
       return;
@@ -1841,8 +1859,8 @@ function bindExplorerDropTarget() {
 
     event.preventDefault();
     try {
-      if (fileId) {
-        moveExplorerFileNode(fileId, targetNodeId, placement);
+      if (nodeId) {
+        moveExplorerNode(nodeId, targetNodeId, placement);
         return;
       }
 
@@ -3542,6 +3560,12 @@ elements.mtreeOutputText.addEventListener("input", (event) => {
 });
 elements.mtreeOutputText.addEventListener("scroll", syncMtreeOutputScroll);
 elements.mtreeOutputText.addEventListener("keydown", handleIndentKeydown);
+if (typeof ResizeObserver === "function") {
+  new ResizeObserver(() => {
+    syncMtreeViewportMetrics();
+    syncMtreeOutputScroll();
+  }).observe(elements.mtreeOutputText);
+}
 elements.mtreeKeepButton.addEventListener("click", keepMtreeDraft);
 elements.mtreeUndoButton.addEventListener("click", undoMtreeDraft);
 elements.mtreeCreateButton.addEventListener("click", upsertModuleMapMarkdown);

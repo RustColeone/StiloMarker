@@ -1447,11 +1447,32 @@ p {
   overflow: hidden;
 }
 
+.mtree-tools-grid > .settings-section {
+  min-height: 0;
+}
+
+.mtree-tools-grid > .settings-section:first-child {
+  overflow: auto;
+}
+
+.mtree-tools-grid > .settings-section:last-child {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: stretch;
+}
+
 .mtree-pane-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
+  min-width: 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mtree-pane-header h3 {
+  min-width: 0;
 }
 
 .mtree-editor-actions {
@@ -1468,29 +1489,38 @@ p {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
-  min-height: min(56vh, 560px);
+  min-height: 0;
   overflow: hidden;
 }
 
 .mtree-editor-pane,
 .mtree-render-preview {
+  display: grid;
   min-width: 0;
   min-height: 0;
   border: 1px solid var(--border);
   background: var(--surface-0);
 }
 
+.mtree-editor-pane {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.mtree-render-preview {
+  display: block;
+}
+
 .mtree-editor-surface {
   position: relative;
-  min-height: 100%;
-  overflow: auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   background: var(--editor);
 }
 
 .mtree-output-highlight,
 .mtree-output-text {
   width: 100%;
-  min-height: min(56vh, 560px);
   padding: 12px;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -1500,9 +1530,13 @@ p {
 
 .mtree-output-highlight {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  min-height: 100%;
   margin: 0;
-  overflow: hidden;
+  padding-right: calc(12px + var(--mtree-scrollbar-width, 0px));
+  overflow: visible;
   pointer-events: none;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1512,24 +1546,28 @@ p {
 .mtree-output-text {
   position: relative;
   display: block;
+  min-height: 0;
+  height: 100%;
   resize: none;
   border: 0;
   background: transparent;
   color: transparent;
   caret-color: var(--text);
   white-space: pre-wrap;
+  overflow: auto;
   overflow-wrap: anywhere;
   z-index: 1;
 }
 
 .mtree-render-preview {
   padding: 12px;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .mtree-warning-list {
-  max-height: none;
-  overflow: hidden;
+  min-height: 80px;
+  max-height: 220px;
+  overflow: auto;
   align-content: start;
 }
 
@@ -1540,6 +1578,7 @@ p {
 .mtree-tools-form {
   min-width: min(96vw, 1100px);
   max-height: min(92vh, 900px);
+  min-height: min(88vh, 820px);
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
 }
