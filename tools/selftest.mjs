@@ -316,7 +316,7 @@ async function run() {
 
   const page = await readFile(resolve(root, "index.html"), "utf8");
   assert.match(page, /id="explorer-tree"/);
-  assert.match(page, /id="editor-textarea"/);
+  assert.match(page, /id="editor-content"/);
   assert.match(page, /id="file-menu-button"/);
   assert.match(page, /id="explorer-toggle-button"/);
   assert.match(page, /id="presence-strip"/);

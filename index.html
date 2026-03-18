@@ -110,15 +110,19 @@
           <section id="editor-grid" class="editor-grid">
             <div id="source-pane" class="editor-pane">
                 <div class="pane-header">
-                  <label for="editor-textarea" class="pane-label">Source</label>
+                  <div class="pane-label" id="source-pane-label">Source</div>
                   <div id="source-tab-strip" class="tab-strip pane-tab-strip" aria-label="Open source tabs"></div>
                   <button id="preview-toggle-activity-button" class="pane-action source-preview-toggle" type="button" aria-label="Show preview" title="Show preview">◫</button>
                 </div>
               <div class="editor-surface">
                 <div id="editor-gutter" class="editor-gutter" aria-hidden="true"></div>
                 <div id="editor-scroll" class="editor-scroll">
-                  <pre id="editor-highlight" class="editor-highlight" aria-hidden="true"></pre>
-                  <textarea id="editor-textarea" spellcheck="false" placeholder="Select or create a .md or .mtree file"></textarea>
+                  <div id="editor-content" class="editor-content"
+                       contenteditable="true" spellcheck="false"
+                       role="textbox" aria-multiline="true" aria-label="Source editor"
+                       autocorrect="off" autocapitalize="off"
+                       data-placeholder="Select or create a .md or .mtree file"></div>
+                  <div id="editor-drop-caret" class="editor-drop-caret" aria-hidden="true" hidden></div>
                 </div>
                 <div id="editor-autocomplete" class="editor-autocomplete" hidden>
                   <div id="editor-autocomplete-label" class="subtle-label">Suggestions</div>

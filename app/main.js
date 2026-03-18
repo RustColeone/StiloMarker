@@ -34,8 +34,8 @@ const elements = {
   projectNameLabel: query("#project-name-label"),
   editorGutter: query("#editor-gutter"),
   editorScroll: query("#editor-scroll"),
-  editorHighlight: query("#editor-highlight"),
-  textarea: query("#editor-textarea"),
+  editorContent: query("#editor-content"),
+  editorDropCaret: query("#editor-drop-caret"),
   editorAutocomplete: query("#editor-autocomplete"),
   editorAutocompleteLabel: query("#editor-autocomplete-label"),
   editorAutocompleteList: query("#editor-autocomplete-list"),
@@ -200,6 +200,22 @@ const autocompleteState = {
   range: null,
   kind: ""
 };
+
+const editorDragState = {
+  selection: null,
+  dropOffset: null
+};
+
+// Undo/redo history for the contenteditable editor.
+// Each entry: { text: string, start: number, end: number }
+const editorHistory = {
+  stack: [],
+  index: -1,
+  maxSize: 400
+};
+
+let editorIsComposing = false;
+let lastRenderedFileId = null;
 
 const debugState = {
   entries: [],
@@ -585,14 +601,14 @@ function buildProjectFileSuggestions(project, activeFileId, kind = "path") {
     .sort((left, right) => left.detail.localeCompare(right.detail));
 }
 
-function findAutocompleteContext(textarea, force = false) {
+function findAutocompleteContext(force = false) {
   const activeFile = controller.getActiveFile();
   if (!activeFile || !isTextFileName(activeFile.name)) {
     return null;
   }
 
-  const value = textarea.value;
-  const cursor = textarea.selectionStart;
+  const value = getEditorText();
+  const cursor = getEditorSelection().start;
   const before = value.slice(0, cursor);
   const lineStart = before.lastIndexOf("\n") + 1;
   const linePrefix = before.slice(lineStart);
@@ -672,7 +688,7 @@ function renderEditorAutocomplete() {
 }
 
 function showEditorAutocomplete(force = false) {
-  const context = findAutocompleteContext(elements.textarea, force);
+  const context = findAutocompleteContext(force);
   if (!context) {
     hideEditorAutocomplete();
     return;
@@ -696,14 +712,241 @@ function showEditorAutocomplete(force = false) {
   renderEditorAutocomplete();
 }
 
-function replaceTextareaRange(start, end, nextText) {
-  const value = elements.textarea.value;
-  elements.textarea.value = `${value.slice(0, start)}${nextText}${value.slice(end)}`;
-  const nextCursor = start + nextText.length;
-  elements.textarea.selectionStart = nextCursor;
-  elements.textarea.selectionEnd = nextCursor;
-  elements.textarea.dispatchEvent(new Event("input", { bubbles: true }));
+// ---------------------------------------------------------------------------
+// Contenteditable editor core API
+// ---------------------------------------------------------------------------
+
+/** Return the plain-text content of the editor by reading each logical-line
+ *  div's textContent and joining with newlines. */
+function getEditorText() {
+  const lines = elements.editorContent.querySelectorAll(":scope > .editor-line");
+  if (lines.length === 0) return "";
+  return Array.from(lines).map((line) => line.textContent).join("\n");
 }
+
+/** Walk text nodes inside `root` counting characters until `targetOffset` is
+ *  reached, then return the hosting DOM node + in-node offset. */
+function findTextNodeAt(root, targetOffset) {
+  if (root.nodeType === Node.TEXT_NODE) {
+    return { node: root, offset: Math.min(targetOffset, root.textContent.length) };
+  }
+  let consumed = 0;
+  for (const child of root.childNodes) {
+    // A <br> in an empty line represents zero characters but IS a valid cursor
+    // position.  If we're right at that spot, position before the <br>.
+    if (child.nodeName === "BR") {
+      if (targetOffset === consumed) {
+        return { node: root, offset: Array.from(root.childNodes).indexOf(child) };
+      }
+      continue;
+    }
+    const childLen = child.textContent.length;
+    if (consumed + childLen >= targetOffset) {
+      return findTextNodeAt(child, targetOffset - consumed);
+    }
+    consumed += childLen;
+  }
+  return { node: root, offset: root.childNodes.length };
+}
+
+/** Convert an integer plain-text offset to a { node, offset } DOM position
+ *  inside the contenteditable. */
+function textOffsetToDomPosition(textOffset) {
+  const lineEls = Array.from(
+    elements.editorContent.querySelectorAll(":scope > .editor-line")
+  );
+  let remaining = textOffset;
+  for (const line of lineEls) {
+    const lineLen = line.textContent.length;
+    if (remaining <= lineLen) {
+      return findTextNodeAt(line, remaining);
+    }
+    remaining -= lineLen + 1; // +1 for the newline between lines
+    if (remaining < 0) {
+      // Offset landed exactly on a newline separator — position at end of the
+      // previous line.
+      return { node: line, offset: line.childNodes.length };
+    }
+  }
+  // Past all content — position at end of last line.
+  const last = lineEls[lineEls.length - 1];
+  if (last) return { node: last, offset: last.childNodes.length };
+  return { node: elements.editorContent, offset: elements.editorContent.childNodes.length };
+}
+
+/** Convert a DOM (container, domOffset) position to an integer plain-text
+ *  offset relative to the start of the editor content. */
+function domPositionToTextOffset(container, domOffset) {
+  // Find the ancestor .editor-line that is a direct child of the editor.
+  let lineEl = container.nodeType === Node.TEXT_NODE
+    ? container.parentElement
+    : container;
+  while (lineEl && lineEl.parentElement !== elements.editorContent) {
+    lineEl = lineEl.parentElement;
+  }
+  if (!lineEl) return 0;
+
+  const lineEls = Array.from(
+    elements.editorContent.querySelectorAll(":scope > .editor-line")
+  );
+  const lineIndex = lineEls.indexOf(lineEl);
+  if (lineIndex < 0) return 0;
+
+  // Characters contributed by all preceding lines + their newlines.
+  let offset = 0;
+  for (let i = 0; i < lineIndex; i += 1) {
+    offset += lineEls[i].textContent.length + 1;
+  }
+  // Then the in-line character offset using the existing tree-walker helper.
+  offset += getOffsetWithinTextRoot(lineEl, container, domOffset);
+  return offset;
+}
+
+/** Return the current editor selection as integer plain-text {start, end}. */
+function getEditorSelection() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return { start: 0, end: 0 };
+  const range = sel.getRangeAt(0);
+  if (!elements.editorContent.contains(range.startContainer)) return { start: 0, end: 0 };
+  const start = domPositionToTextOffset(range.startContainer, range.startOffset);
+  const end = range.collapsed
+    ? start
+    : domPositionToTextOffset(range.endContainer, range.endOffset);
+  return { start, end };
+}
+
+/** Move the browser selection to cover [start, end] in the editor plain text. */
+function setEditorSelection(start, end) {
+  if (!elements.editorContent.isConnected) return;
+  try {
+    const startPos = textOffsetToDomPosition(start);
+    const endPos = start === end ? startPos : textOffsetToDomPosition(end);
+    const range = document.createRange();
+    range.setStart(startPos.node, startPos.offset);
+    range.setEnd(endPos.node, endPos.offset);
+    const sel = window.getSelection();
+    if (sel) {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  } catch {
+    // Ignore rare out-of-bound errors (e.g. during rapid file switches).
+  }
+}
+
+/** Re-render the syntax-highlighted DOM from plain text, then restore the
+ *  given selection.  All programmatic edits go through this. */
+function applyEditorRender(text, selStart, selEnd) {
+  renderEditorContent(text);
+  setEditorSelection(selStart, selEnd);
+}
+
+/** Push a history snapshot.  Call at logical "checkpoints" (space, enter,
+ *  punctuation, paste, indent, drag-drop). */
+function pushEditorHistoryCheckpoint() {
+  const text = getEditorText();
+  const { start, end } = getEditorSelection();
+  // Trim any forward (redo) entries once a new branch starts.
+  editorHistory.stack.splice(editorHistory.index + 1);
+  const last = editorHistory.stack[editorHistory.index];
+  if (last && last.text === text) return; // no change — skip
+  editorHistory.stack.push({ text, start, end });
+  if (editorHistory.stack.length > editorHistory.maxSize) {
+    editorHistory.stack.shift();
+  }
+  editorHistory.index = editorHistory.stack.length - 1;
+}
+
+function editorUndo() {
+  if (editorHistory.index <= 0) return;
+  editorHistory.index -= 1;
+  const state = editorHistory.stack[editorHistory.index];
+  applyEditorRender(state.text, state.start, state.end);
+  notifyEditorChanged(state.text);
+}
+
+function editorRedo() {
+  if (editorHistory.index >= editorHistory.stack.length - 1) return;
+  editorHistory.index += 1;
+  const state = editorHistory.stack[editorHistory.index];
+  applyEditorRender(state.text, state.start, state.end);
+  notifyEditorChanged(state.text);
+}
+
+/** Apply a programmatic text change (autocomplete, indent, drag-drop, etc.)
+ *  Pushes a history checkpoint, performs the edit, and fires the content
+ *  update callback so the domain model stays in sync. */
+function applyEditorEdit(newText, newStart, newEnd) {
+  pushEditorHistoryCheckpoint(); // snapshot BEFORE the edit
+  applyEditorRender(newText, newStart, newEnd);
+  notifyEditorChanged(newText);
+  pushEditorHistoryCheckpoint(); // snapshot AFTER
+}
+
+/** Load a file's content into the editor, resetting undo history.
+ *  Does NOT notify the domain model — used exclusively by updateStatus
+ *  when the active file changes so we don't trigger a render feedback loop. */
+function loadEditorContent(text) {
+  editorHistory.stack = [];
+  editorHistory.index = -1;
+  renderEditorContent(text);
+  setEditorSelection(0, 0);
+  pushEditorHistoryCheckpoint(); // seed initial undo state
+}
+
+/** Convenience: replace a [start, end) range in the current editor text. */
+function replaceEditorRange(start, end, insertText, nextStart = null, nextEnd = null) {
+  const value = getEditorText();
+  const newText = `${value.slice(0, start)}${insertText}${value.slice(end)}`;
+  const defaultCursor = start + insertText.length;
+  applyEditorEdit(newText, nextStart ?? defaultCursor, nextEnd ?? (nextStart ?? defaultCursor));
+}
+
+/** Notify the domain model that the editor content changed.
+ *  Split from the render path so collaboration can be wired here later
+ *  without touching the rendering logic. */
+function notifyEditorChanged(text) {
+  const activeFile = controller.getActiveFile();
+  if (!activeFile || !isTextFileName(activeFile.name)) return;
+  const selectedEntry = getSelectedUrlDbEntry(controller.getProject());
+  let nextContent = text;
+  if (selectedEntry) {
+    const parsed = parseUrlDbEntryBody(text);
+    nextContent = updateUrlDbEntry(activeFile.content, selectedEntry.entry.id, parsed);
+  }
+  controller.updateContent(activeFile.id, nextContent);
+  if (collaboration.isConnected()) {
+    collaboration.scheduleTextPatch(getPath(controller.getProject(), activeFile.id), activeFile.content, nextContent);
+  }
+  // TODO: wire collaboration text-patch here once sync strategy is decided.
+}
+
+// Keep applyTextareaValue as a shim used only by the MTREE output textarea
+// (which is a real <textarea>, not the contenteditable).
+function applyTextareaValue(textarea, nextValue, selectionStart, selectionEnd = selectionStart) {
+  textarea.value = nextValue;
+  textarea.selectionStart = selectionStart;
+  textarea.selectionEnd = selectionEnd;
+  textarea.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function dispatchTextareaInput(textarea, inputType = "insertText") {
+  if (typeof InputEvent === "function") {
+    textarea.dispatchEvent(new InputEvent("input", { bubbles: true, inputType }));
+    return;
+  }
+  textarea.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function replaceTextareaRange(textarea, start, end, nextText, nextSelectionStart = null, nextSelectionEnd = null) {
+  const defaultCursor = start + nextText.length;
+  const selectionStart = nextSelectionStart ?? defaultCursor;
+  const selectionEnd = nextSelectionEnd ?? selectionStart;
+  textarea.setRangeText(nextText, start, end, "end");
+  textarea.setSelectionRange(selectionStart, selectionEnd);
+  dispatchTextareaInput(textarea, start === end ? "insertText" : "insertReplacementText");
+}
+
 
 function acceptEditorAutocomplete(index = autocompleteState.activeIndex) {
   const item = autocompleteState.items[index];
@@ -712,14 +955,14 @@ function acceptEditorAutocomplete(index = autocompleteState.activeIndex) {
     hideEditorAutocomplete();
     return;
   }
-
-  replaceTextareaRange(range.start, range.end, item.insertText);
+  replaceEditorRange(range.start, range.end, item.insertText);
   logDebug("action", "Autocomplete accepted", item.detail);
   hideEditorAutocomplete();
 }
 
 function insertReferenceAtCursor(referenceText) {
-  replaceTextareaRange(elements.textarea.selectionStart, elements.textarea.selectionEnd, referenceText);
+  const { start, end } = getEditorSelection();
+  replaceEditorRange(start, end, referenceText);
 }
 
 function suggestUniqueFileName(project, parentId, name) {
@@ -1286,18 +1529,100 @@ function highlightMarkdownSource(value) {
 }
 
 function getEditorLineHeight() {
-  const lineHeight = Number.parseFloat(globalThis.getComputedStyle(elements.textarea).lineHeight);
+  const lineHeight = Number.parseFloat(globalThis.getComputedStyle(elements.editorContent).lineHeight);
   return Number.isFinite(lineHeight) ? lineHeight : 20.8;
 }
 
-function syncEditorViewportMetrics() {
-  const scrollbarWidth = Math.max(0, elements.textarea.offsetWidth - elements.textarea.clientWidth);
-  elements.editorScroll.style.setProperty("--editor-scrollbar-width", `${scrollbarWidth}px`);
+function getLeadingIndentColumns(line) {
+  let columns = 0;
+  for (const character of line) {
+    if (character === "\t") {
+      columns += getIndentColumnWidth();
+      continue;
+    }
+    if (character === " ") {
+      columns += 1;
+      continue;
+    }
+    break;
+  }
+  return columns;
 }
 
-function renderEditorDecorations(value) {
-  syncEditorViewportMetrics();
-  const normalized = value.replace(/\r\n/g, "\n");
+function getOffsetWithinTextRoot(root, container, offset) {
+  if (!root) {
+    return 0;
+  }
+
+  if (container.nodeType === Node.TEXT_NODE) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let total = 0;
+    while (walker.nextNode()) {
+      const current = walker.currentNode;
+      if (current === container) {
+        return total + Math.min(offset, current.textContent?.length ?? 0);
+      }
+      total += current.textContent?.length ?? 0;
+    }
+    return total;
+  }
+
+  const childNodes = Array.from(container.childNodes).slice(0, offset);
+  return childNodes.reduce((total, child) => total + (child.textContent?.length ?? 0), 0);
+}
+
+function getEditorTextOffsetFromPoint(clientX, clientY) {
+  const activeFile = controller.getActiveFile();
+  if (!activeFile || !isTextFileName(activeFile.name)) {
+    return getEditorSelection().start;
+  }
+  const caretRange = document.caretRangeFromPoint?.(clientX, clientY);
+  const caretPosition = document.caretPositionFromPoint?.(clientX, clientY);
+  const container = caretRange?.startContainer ?? caretPosition?.offsetNode;
+  const posOffset = caretRange?.startOffset ?? caretPosition?.offset;
+  if (!container) {
+    return getEditorSelection().start;
+  }
+  return domPositionToTextOffset(container, posOffset ?? 0);
+}
+
+function clearEditorDropCaret() {
+  editorDragState.dropOffset = null;
+  elements.editorDropCaret.hidden = true;
+}
+
+function showEditorDropCaret(clientX, clientY) {
+  const offset = getEditorTextOffsetFromPoint(clientX, clientY);
+  editorDragState.dropOffset = offset;
+
+  const markerRange = document.createRange();
+  const caretRange = document.caretRangeFromPoint?.(clientX, clientY);
+  const caretPosition = document.caretPositionFromPoint?.(clientX, clientY);
+  const container = caretRange?.startContainer ?? caretPosition?.offsetNode;
+  const positionOffset = caretRange?.startOffset ?? caretPosition?.offset;
+  if (!container) {
+    clearEditorDropCaret();
+    return;
+  }
+  markerRange.setStart(container, positionOffset);
+  markerRange.setEnd(container, positionOffset);
+  const rect = markerRange.getBoundingClientRect();
+  const hostRect = elements.editorScroll.getBoundingClientRect();
+  const height = rect.height || getEditorLineHeight();
+  elements.editorDropCaret.style.left = `${elements.editorContent.scrollLeft + rect.left - hostRect.left}px`;
+  elements.editorDropCaret.style.top = `${elements.editorContent.scrollTop + rect.top - hostRect.top}px`;
+  elements.editorDropCaret.style.height = `${height}px`;
+  elements.editorDropCaret.hidden = false;
+}
+
+function syncEditorViewportMetrics() {
+  // No-op retained for call-site compatibility; layout is now native.
+}
+
+/** Re-render syntax-highlighted DOM from plain text and rebuild the gutter.
+ *  Does NOT modify the selection — callers are responsible for restoring it. */
+function renderEditorContent(text) {
+  const normalized = text.replace(/\r\n/g, "\n");
   const lines = normalized.split("\n");
   const activeFile = controller.getActiveFile();
   const highlightMarkup = activeFile?.name.endsWith(".mtree")
@@ -1305,21 +1630,53 @@ function renderEditorDecorations(value) {
     : activeFile?.name.endsWith(".urldb")
       ? highlightUrlDbSource(normalized)
       : highlightMarkdownSource(normalized);
-  elements.editorHighlight.innerHTML = `${highlightMarkup}<div class="editor-line is-empty">&nbsp;</div>`;
 
-  const renderedLines = Array.from(elements.editorHighlight.querySelectorAll(".editor-line")).slice(0, Math.max(1, lines.length));
+  elements.editorContent.innerHTML = highlightMarkup;
+
+  // Ensure every empty line has a <br> so the browser renders it at full height
+  // and allows cursor placement.
+  const allLines = Array.from(elements.editorContent.querySelectorAll(":scope > .editor-line"));
+  allLines.forEach((line) => {
+    if (line.childNodes.length === 0 ||
+        (line.childNodes.length === 1 &&
+         line.firstChild?.nodeName !== "BR" &&
+         line.firstChild?.textContent === "")) {
+      line.innerHTML = "<br>";
+    }
+  });
+
+  const renderedLines = allLines.slice(0, Math.max(1, lines.length));
   const minimumLineHeight = getEditorLineHeight();
+
+  renderedLines.forEach((line, index) => {
+    line.dataset.lineIndex = String(index);
+    const indentCols = getLeadingIndentColumns(lines[index] ?? "");
+    line.style.setProperty("--wrapped-indent-columns", String(indentCols));
+    line.classList.toggle("has-wrapped-indent", indentCols > 0);
+  });
+
+  // Rebuild the gutter.
   const gutterMarkup = renderedLines.map((line, index) => {
     const height = Math.max(minimumLineHeight, line.getBoundingClientRect().height);
     return `<div class="editor-gutter-line" style="height:${height.toFixed(3)}px">${index + 1}</div>`;
   }).join("");
   elements.editorGutter.innerHTML = `<div class="editor-gutter-content">${gutterMarkup}</div>`;
+
+  // Sync gutter scroll position.
+  syncEditorScroll();
+
+  // Keep placeholder visible when content is empty.
+  elements.editorContent.dataset.empty = normalized.length === 0 ? "true" : "false";
+}
+
+// Alias kept so existing call sites that pass `elements.textarea.value` still
+// work; TEXT is ignored but extracted from the DOM instead.
+function renderEditorDecorations(_text) {
+  renderEditorContent(getEditorText());
 }
 
 function syncEditorScroll() {
-  const scrollTop = elements.textarea.scrollTop;
-  const scrollLeft = elements.textarea.scrollLeft;
-  elements.editorHighlight.style.transform = `translate(${-scrollLeft}px, ${-scrollTop}px)`;
+  const scrollTop = elements.editorContent.scrollTop;
   const gutterContent = elements.editorGutter.firstElementChild;
   if (gutterContent) {
     gutterContent.style.transform = `translateY(${-scrollTop}px)`;
@@ -1332,8 +1689,8 @@ function forwardEditorWheel(event) {
   if (!hasVertical && !hasHorizontal) {
     return;
   }
-  elements.textarea.scrollTop += event.deltaY;
-  elements.textarea.scrollLeft += event.deltaX;
+  elements.editorContent.scrollTop += event.deltaY;
+  elements.editorContent.scrollLeft += event.deltaX;
   syncEditorScroll();
   event.preventDefault();
 }
@@ -1346,17 +1703,130 @@ function getIndentText() {
   return settings.indentStyle === "spaces" ? "    " : "\t";
 }
 
-function insertIndentIntoTextarea(textarea) {
+function getIndentColumnWidth() {
+  return settings.indentStyle === "spaces" ? 4 : 4;
+}
+
+function getLineSelectionRange(value, selectionStart, selectionEnd) {
+  const lineStart = value.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
+  let lineEnd = value.indexOf("\n", selectionEnd);
+  if (lineEnd < 0) {
+    lineEnd = value.length;
+  }
+  return { lineStart, lineEnd };
+}
+
+/** Indent/unindent selected lines in the main contenteditable editor. */
+function adjustSelectedLinesIndent(direction) {
+  const value = getEditorText();
+  const { start: selectionStart, end: selectionEnd } = getEditorSelection();
   const indentText = getIndentText();
+  const { lineStart, lineEnd } = getLineSelectionRange(value, selectionStart, selectionEnd);
+  const selectedText = value.slice(lineStart, lineEnd);
+  const lines = selectedText.split("\n");
+
+  if (direction > 0) {
+    const nextLines = lines.map((line) => `${indentText}${line}`);
+    const nextText = nextLines.join("\n");
+    const nextSelectionStart = selectionStart + indentText.length;
+    const nextSelectionEnd = selectionEnd + (indentText.length * lines.length);
+    replaceEditorRange(lineStart, lineEnd, nextText, nextSelectionStart, nextSelectionEnd);
+    return;
+  }
+
+  let removedBeforeSelectionStart = 0;
+  let removedTotal = 0;
+  const nextLines = lines.map((line, index) => {
+    let removed = 0;
+    if (line.startsWith("\t")) {
+      removed = 1;
+    } else if (line.startsWith(indentText)) {
+      removed = indentText.length;
+    } else {
+      const leadingSpaces = (line.match(/^ +/)?.[0].length) ?? 0;
+      removed = Math.min(leadingSpaces, indentText.length);
+    }
+
+    if (removed > 0) {
+      removedTotal += removed;
+      if (index === 0) {
+        removedBeforeSelectionStart = removed;
+      }
+      return line.slice(removed);
+    }
+    return line;
+  });
+
+  const nextText = nextLines.join("\n");
+  const nextSelectionStart = Math.max(lineStart, selectionStart - removedBeforeSelectionStart);
+  const nextSelectionEnd = Math.max(nextSelectionStart, selectionEnd - removedTotal);
+  replaceEditorRange(lineStart, lineEnd, nextText, nextSelectionStart, nextSelectionEnd);
+}
+
+/** Indent/unindent selected lines in a plain <textarea> (used by MTREE dialog). */
+function adjustTextareaLinesIndent(textarea, direction) {
   const value = textarea.value;
   const selectionStart = textarea.selectionStart;
   const selectionEnd = textarea.selectionEnd;
-  const nextValue = `${value.slice(0, selectionStart)}${indentText}${value.slice(selectionEnd)}`;
-  textarea.value = nextValue;
+  const indentText = getIndentText();
+  const { lineStart, lineEnd } = getLineSelectionRange(value, selectionStart, selectionEnd);
+  const selectedText = value.slice(lineStart, lineEnd);
+  const lines = selectedText.split("\n");
+
+  if (direction > 0) {
+    const nextLines = lines.map((line) => `${indentText}${line}`);
+    const nextText = nextLines.join("\n");
+    const nextSelectionStart = selectionStart + indentText.length;
+    const nextSelectionEnd = selectionEnd + (indentText.length * lines.length);
+    replaceTextareaRange(textarea, lineStart, lineEnd, nextText, nextSelectionStart, nextSelectionEnd);
+    return;
+  }
+
+  let removedBeforeSelectionStart = 0;
+  let removedTotal = 0;
+  const nextLines = lines.map((line, index) => {
+    let removed = 0;
+    if (line.startsWith("\t")) {
+      removed = 1;
+    } else if (line.startsWith(indentText)) {
+      removed = indentText.length;
+    } else {
+      const leadingSpaces = (line.match(/^ +/)?.[0].length) ?? 0;
+      removed = Math.min(leadingSpaces, indentText.length);
+    }
+
+    if (removed > 0) {
+      removedTotal += removed;
+      if (index === 0) {
+        removedBeforeSelectionStart = removed;
+      }
+      return line.slice(removed);
+    }
+    return line;
+  });
+
+  const nextText = nextLines.join("\n");
+  const nextSelectionStart = Math.max(lineStart, selectionStart - removedBeforeSelectionStart);
+  const nextSelectionEnd = Math.max(nextSelectionStart, selectionEnd - removedTotal);
+  replaceTextareaRange(textarea, lineStart, lineEnd, nextText, nextSelectionStart, nextSelectionEnd);
+}
+
+/** Insert an indent at the caret in the main contenteditable editor. */
+function insertIndentAtCursor() {
+  const indentText = getIndentText();
+  const { start, end } = getEditorSelection();
+  replaceEditorRange(start, end, indentText, start + indentText.length, start + indentText.length);
+}
+
+/** Insert an indent at the caret in a plain <textarea> (used by MTREE dialog). */
+function insertIndentIntoTextarea(textarea) {
+  const indentText = getIndentText();
+  const selectionStart = textarea.selectionStart;
+  const selectionEnd = textarea.selectionEnd;
   const nextCaret = selectionStart + indentText.length;
-  textarea.selectionStart = nextCaret;
-  textarea.selectionEnd = nextCaret;
-  textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  textarea.setRangeText(indentText, selectionStart, selectionEnd, "end");
+  textarea.setSelectionRange(nextCaret, nextCaret);
+  dispatchTextareaInput(textarea, selectionStart === selectionEnd ? "insertText" : "insertReplacementText");
 }
 
 function handleIndentKeydown(event) {
@@ -1364,10 +1834,40 @@ function handleIndentKeydown(event) {
     return;
   }
   event.preventDefault();
-  insertIndentIntoTextarea(event.currentTarget);
+  const target = event.currentTarget;
+  if (target.tagName === "TEXTAREA") {
+    // MTREE output textarea uses the plain-DOM helpers.
+    if (target.selectionStart !== target.selectionEnd || event.shiftKey) {
+      adjustTextareaLinesIndent(target, event.shiftKey ? -1 : 1);
+      return;
+    }
+    insertIndentIntoTextarea(target);
+  } else {
+    // Main contenteditable editor.
+    const { start, end } = getEditorSelection();
+    if (start !== end || event.shiftKey) {
+      adjustSelectedLinesIndent(event.shiftKey ? -1 : 1);
+      return;
+    }
+    insertIndentAtCursor();
+  }
 }
 
 function handleEditorKeydown(event) {
+  // Custom undo/redo — must intercept before the browser's native handler,
+  // because innerHTML-rerender destroys the browser's native undo stack.
+  if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "z") {
+    event.preventDefault();
+    editorUndo();
+    return;
+  }
+  if ((event.ctrlKey || event.metaKey) &&
+      (event.key.toLowerCase() === "y" || (event.shiftKey && event.key.toLowerCase() === "z"))) {
+    event.preventDefault();
+    editorRedo();
+    return;
+  }
+
   if ((event.ctrlKey || event.metaKey) && event.key === " ") {
     event.preventDefault();
     showEditorAutocomplete(true);
@@ -2367,7 +2867,7 @@ function applyWorkspaceSettings() {
   elements.app.style.setProperty("--preview-width", `${settings.previewWidth}px`);
   elements.app.style.setProperty("--debug-height", `${settings.debugPanelHeight}px`);
   elements.app.style.setProperty("--indent-tab-size", "4");
-  elements.textarea.wrap = settings.wordWrap ? "soft" : "off";
+  // Word-wrap is CSS-driven via data-word-wrap; no textarea.wrap needed.
   elements.previewCollapseButton.setAttribute("aria-expanded", settings.preview === "shown" ? "true" : "false");
   elements.debugPanel.hidden = !settings.debugPanel;
   elements.toggleDebugMenuButton.textContent = settings.debugPanel ? "Hide Log Panel" : "Show Log Panel";
@@ -2377,7 +2877,7 @@ function applyWorkspaceSettings() {
 
 const editorResizeObserver = typeof ResizeObserver === "function"
   ? new ResizeObserver(() => {
-    renderEditorDecorations(elements.textarea.value);
+    renderEditorContent(getEditorText());
     syncEditorScroll();
   })
   : null;
@@ -2412,7 +2912,7 @@ elements.workspaceSplitter.addEventListener("pointerdown", (event) => {
     const nextWidth = clamp(moveEvent.clientX - shellRect.left - activityWidth, 180, Math.max(240, shellRect.width - 320));
     settings.sidebarWidth = Math.round(nextWidth);
     persistSettings();
-    renderEditorDecorations(elements.textarea.value);
+    renderEditorContent(getEditorText());
     syncEditorScroll();
   });
 });
@@ -2427,7 +2927,7 @@ elements.editorSplitter.addEventListener("pointerdown", (event) => {
     const nextWidth = clamp(gridRect.right - moveEvent.clientX, 280, Math.max(320, gridRect.width - 280));
     settings.previewWidth = Math.round(nextWidth);
     persistSettings();
-    renderEditorDecorations(elements.textarea.value);
+    renderEditorContent(getEditorText());
     syncEditorScroll();
   });
 });
@@ -2444,7 +2944,7 @@ elements.debugSplitter.addEventListener("pointerdown", (event) => {
     const nextHeight = clamp(bottom - moveEvent.clientY, 120, Math.max(180, workspaceRect.height - 220));
     settings.debugPanelHeight = Math.round(nextHeight);
     persistSettings();
-    renderEditorDecorations(elements.textarea.value);
+    renderEditorContent(getEditorText());
     syncEditorScroll();
   });
 });
@@ -2809,7 +3309,7 @@ async function handleAddFileTransfer(transfer) {
   }
 }
 
-async function addDroppedImageAndInsert(file, textarea) {
+async function addDroppedImageAndInsert(file) {
   const activeFile = controller.getActiveFile();
   if (!activeFile || !activeFile.name.endsWith(".md")) {
     return false;
@@ -2833,13 +3333,46 @@ async function addDroppedImageAndInsert(file, textarea) {
     return false;
   }
 
-  textarea.focus();
-  insertReferenceAtCursor(createMarkdownReference(activeFile, createdFile));
+  const dropOffset = editorDragState.dropOffset ?? getEditorSelection().start;
+  elements.editorContent.focus();
+  const ref = createMarkdownReference(activeFile, createdFile);
+  replaceEditorRange(dropOffset, dropOffset, ref, dropOffset + ref.length, dropOffset + ref.length);
   logDebug("action", "Dropped image inserted", fileName);
   return true;
 }
 
+function moveOrInsertDraggedSelection(payload, insertOffset) {
+  const value = getEditorText();
+  const sourceStart = Number(payload.start);
+  const sourceEnd = Number(payload.end);
+  const text = String(payload.text ?? "");
+  if (!Number.isInteger(sourceStart) || !Number.isInteger(sourceEnd) || sourceStart < 0 || sourceEnd < sourceStart) {
+    return false;
+  }
+  if (value.slice(sourceStart, sourceEnd) !== text) {
+    replaceEditorRange(insertOffset, insertOffset, text, insertOffset + text.length, insertOffset + text.length);
+    return true;
+  }
+  if (insertOffset >= sourceStart && insertOffset <= sourceEnd) {
+    setEditorSelection(sourceStart, sourceEnd);
+    return false;
+  }
+
+  const withoutSelection = `${value.slice(0, sourceStart)}${value.slice(sourceEnd)}`;
+  const adjustedOffset = insertOffset > sourceEnd ? insertOffset - (sourceEnd - sourceStart) : insertOffset;
+  const nextValue = `${withoutSelection.slice(0, adjustedOffset)}${text}${withoutSelection.slice(adjustedOffset)}`;
+  const nextCursor = adjustedOffset + text.length;
+  applyEditorEdit(nextValue, nextCursor, nextCursor);
+  return true;
+}
+
+function insertEditorTextAtDrop(text, event) {
+  const insertOffset = editorDragState.dropOffset ?? getEditorTextOffsetFromPoint(event.clientX, event.clientY);
+  replaceEditorRange(insertOffset, insertOffset, text, insertOffset + text.length, insertOffset + text.length);
+}
+
 async function handleEditorDrop(event) {
+  clearEditorDropCaret();
   const internalFileId = event.dataTransfer?.getData("text/mdnotes-file-id");
   if (internalFileId) {
     openDroppedFileInPane(internalFileId, "source");
@@ -2851,6 +3384,16 @@ async function handleEditorDrop(event) {
     return;
   }
 
+  const draggedSelection = event.dataTransfer?.getData("text/mdnotes-editor-selection");
+  if (draggedSelection) {
+    try {
+      moveOrInsertDraggedSelection(JSON.parse(draggedSelection), editorDragState.dropOffset ?? getEditorTextOffsetFromPoint(event.clientX, event.clientY));
+    } catch {
+      // Ignore malformed editor drag payloads.
+    }
+    return;
+  }
+
   const urlDbPayload = event.dataTransfer?.getData("text/mdnotes-urldb-entry");
   if (urlDbPayload && activeFile.name.endsWith(".md")) {
     try {
@@ -2859,7 +3402,7 @@ async function handleEditorDrop(event) {
       const sourceFile = project.nodes[parsed.fileId];
       const entry = sourceFile?.kind === "file" ? getUrlDbEntryById(sourceFile.content, parsed.entryId) : null;
       if (entry) {
-        insertReferenceAtCursor(createMarkdownImageReference(entry.name, entry.url));
+        insertEditorTextAtDrop(createMarkdownImageReference(entry.name, entry.url), event);
         logDebug("action", "Bookmark image inserted", `${entry.name} :: ${entry.url}`);
       }
     } catch {
@@ -2868,9 +3411,15 @@ async function handleEditorDrop(event) {
     return;
   }
 
+  const droppedText = event.dataTransfer?.getData("text/plain");
+  if (droppedText) {
+    insertEditorTextAtDrop(droppedText, event);
+    return;
+  }
+
   const file = event.dataTransfer?.files?.[0];
   if (file && isImageFileName(file.name) && activeFile.name.endsWith(".md")) {
-    await addDroppedImageAndInsert(file, event.currentTarget);
+    await addDroppedImageAndInsert(file);
   }
 }
 
@@ -3063,10 +3612,12 @@ function updateStatus(project) {
   const previewFile = previewFileId ? project.nodes[previewFileId] : null;
   const selectedEntry = getSelectedUrlDbEntry(project);
   if (!activeFile) {
-    elements.textarea.readOnly = false;
-    elements.textarea.placeholder = "Select or create a .md, .mtree, .urldb, or image file";
-    elements.textarea.value = "";
-    renderEditorDecorations("");
+    elements.editorContent.contentEditable = "true";
+    elements.editorContent.dataset.placeholder = "Select or create a .md, .mtree, .urldb, or image file";
+    if (lastRenderedFileId !== null) {
+      lastRenderedFileId = null;
+      loadEditorContent("");
+    }
     syncEditorScroll();
     const previewState = renderPreviewContent(elements.preview, project, previewFile);
     if (previewState.shouldTypeset) {
@@ -3076,19 +3627,23 @@ function updateStatus(project) {
   }
 
   const isTextFile = isTextFileName(activeFile.name);
-  elements.textarea.readOnly = !isTextFile;
-  elements.textarea.placeholder = isTextFile
+  elements.editorContent.contentEditable = isTextFile ? "true" : "false";
+  elements.editorContent.dataset.placeholder = isTextFile
     ? "Select or create a .md, .mtree, .urldb, or image file"
     : "Image assets are preview-only in the source pane.";
-  if (elements.textarea !== document.activeElement) {
-    elements.textarea.value = isTextFile
+  const fileChanged = activeFile.id !== lastRenderedFileId;
+  if (fileChanged || elements.editorContent !== document.activeElement) {
+    lastRenderedFileId = activeFile.id;
+    const nextText = isTextFile
       ? selectedEntry
         ? formatUrlDbEntryBody(selectedEntry.entry)
         : activeFile.content
       : `[${activeFile.name}]\n\nThis image asset is preview-only in the source pane.\nUse the preview pane to inspect it or Explorer > Add File to replace it.`;
+    loadEditorContent(nextText);
+  } else {
+    renderEditorContent(getEditorText());
+    syncEditorScroll();
   }
-  renderEditorDecorations(elements.textarea.value);
-  syncEditorScroll();
   const previewState = renderPreviewContent(elements.preview, project, previewFile);
   if (previewState.shouldTypeset) {
     void typesetPreview(previewState.content);
@@ -3347,54 +3902,108 @@ async function handleExplorerAction(action, target, options = {}) {
   }
 }
 
-elements.textarea.addEventListener("input", (event) => {
+elements.editorContent.addEventListener("compositionstart", () => {
+  editorIsComposing = true;
+});
+
+elements.editorContent.addEventListener("compositionend", () => {
+  editorIsComposing = false;
+  // After IME commit, sync the plain-text representation to the model.
+  notifyEditorChanged(getEditorText());
+  showEditorAutocomplete();
+});
+
+elements.editorContent.addEventListener("input", (event) => {
+  if (editorIsComposing) {
+    return;
+  }
   const activeFile = controller.getActiveFile();
   if (!activeFile || !isTextFileName(activeFile.name)) {
     hideEditorAutocomplete();
     return;
   }
-  const selectedEntry = getSelectedUrlDbEntry(controller.getProject());
-  let nextContent = event.target.value;
-  let previousContent = activeFile.content;
-
-  if (selectedEntry) {
-    const parsed = parseUrlDbEntryBody(nextContent);
-    nextContent = updateUrlDbEntry(activeFile.content, selectedEntry.entry.id, parsed);
+  const currentText = getEditorText();
+  const { start, end } = getEditorSelection();
+  notifyEditorChanged(currentText);
+  // Push a history checkpoint at natural "boundary" input types so Ctrl+Z
+  // is chunky (word/paragraph) rather than character-by-character.
+  const inputType = (event instanceof InputEvent ? event.inputType : "") ?? "";
+  const isBoundary =
+    inputType === "insertParagraph" ||
+    inputType === "insertLineBreak" ||
+    inputType === "insertFromPaste" ||
+    inputType === "deleteByCut" ||
+    inputType === "insertFromDrop" ||
+    inputType.startsWith("deleteWord") ||
+    inputType.startsWith("deleteLine");
+  if (isBoundary) {
+    pushEditorHistoryCheckpoint();
   }
-
-  renderEditorDecorations(event.target.value);
-  syncEditorScroll();
-  controller.updateContent(activeFile.id, nextContent);
+  // Re-render syntax highlighting; must restore selection afterward because
+  // innerHTML replacement destroys the native caret.
+  renderEditorContent(currentText);
+  setEditorSelection(start, end);
   showEditorAutocomplete();
-  if (collaboration.isConnected()) {
-    collaboration.scheduleTextPatch(getPath(controller.getProject(), activeFile.id), previousContent, nextContent);
-  }
 });
 
-elements.textarea.addEventListener("scroll", syncEditorScroll);
-elements.textarea.addEventListener("keydown", handleEditorKeydown);
-elements.textarea.addEventListener("click", () => hideEditorAutocomplete());
-elements.textarea.addEventListener("dragover", (event) => {
+elements.editorContent.addEventListener("scroll", syncEditorScroll);
+elements.editorContent.addEventListener("keydown", handleEditorKeydown);
+elements.editorContent.addEventListener("click", () => hideEditorAutocomplete());
+elements.editorContent.addEventListener("dragstart", (event) => {
+  const { start: selectionStart, end: selectionEnd } = getEditorSelection();
+  if (selectionStart === selectionEnd) {
+    editorDragState.selection = null;
+    return;
+  }
+  const text = getEditorText().slice(selectionStart, selectionEnd);
+  editorDragState.selection = { start: selectionStart, end: selectionEnd, text };
+  event.dataTransfer?.setData("text/mdnotes-editor-selection", JSON.stringify(editorDragState.selection));
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "copyMove";
+  }
+});
+elements.editorContent.addEventListener("dragend", () => {
+  editorDragState.selection = null;
+  clearEditorDropCaret();
+});
+elements.editorContent.addEventListener("dragover", (event) => {
   const types = event.dataTransfer?.types ?? [];
   // Explorer file drags: let the pane-level handler accept them (don't steal the event here).
-  if (types.includes("text/mdnotes-file-id")) {
+  if (types.includes("text/mdnotes-file-id") || types.includes("text/mdnotes-node-id")) {
+    clearEditorDropCaret();
     return;
   }
-  // Bookmark / external-file drags into the editor surface: accept only in .md files.
-  if (!controller.getActiveFile()?.name.endsWith(".md")) {
+
+  const activeFile = controller.getActiveFile();
+  const supportsTextDrop = Boolean(activeFile && isTextFileName(activeFile.name));
+  const supportsImageUrlDrop = Boolean(activeFile?.name.endsWith(".md") && types.includes("text/mdnotes-urldb-entry"));
+  const supportsTextPayload = types.includes("text/plain") || types.includes("text/mdnotes-editor-selection");
+  if ((!supportsTextDrop || !supportsTextPayload) && !supportsImageUrlDrop) {
+    clearEditorDropCaret();
     return;
   }
+
   event.preventDefault();
   event.stopPropagation();
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = types.includes("text/mdnotes-editor-selection") ? "move" : "copy";
+  }
+  showEditorDropCaret(event.clientX, event.clientY);
 });
-elements.textarea.addEventListener("drop", (event) => {
+elements.editorContent.addEventListener("dragleave", (event) => {
+  if (event.currentTarget.contains(event.relatedTarget)) {
+    return;
+  }
+  clearEditorDropCaret();
+});
+elements.editorContent.addEventListener("drop", (event) => {
   event.preventDefault();
   event.stopPropagation();
   void handleEditorDrop(event).catch((error) => notify(error.message));
 });
 elements.editorGutter.addEventListener("wheel", forwardEditorWheel, { passive: false });
 elements.editorScroll.addEventListener("wheel", (event) => {
-  if (event.target === elements.textarea) {
+  if (event.target === elements.editorContent) {
     return;
   }
   forwardEditorWheel(event);
@@ -3602,10 +4211,12 @@ bindTabStripReorderTarget(elements.previewTabStrip, "preview");
 document.addEventListener("dragend", () => {
   clearPaneDropState();
   clearExplorerDropState();
+  clearEditorDropCaret();
 });
 document.addEventListener("drop", () => {
   clearPaneDropState();
   clearExplorerDropState();
+  clearEditorDropCaret();
 });
 
 function toggleExplorer() {
@@ -3697,7 +4308,7 @@ elements.indentStyleSelect.addEventListener("change", (event) => {
 });
 
 window.addEventListener("resize", () => {
-  renderEditorDecorations(elements.textarea.value);
+  renderEditorContent(getEditorText());
   syncEditorScroll();
 });
 

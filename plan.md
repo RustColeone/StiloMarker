@@ -53,6 +53,38 @@ Keep the product as a static HTML, CSS, and ES module workbench that can run on 
 - Continued explorer UX tightening without introducing unnecessary framework complexity
 - Maintaining self-test coverage as the frontend and backend continue to evolve
 
+## Open Technical Problem: Wrapped-Line Indentation Visual
+
+### Goal
+When a long indented line wraps in the source editor, its continuation rows should visually appear indented to match the leading whitespace of that line (e.g. `\tA...B` wrapping before `B` should display `B` as if it were also under the tab stop, not snapped back to column 0).
+
+### Root Constraint
+The source editor uses two sibling layers with identical CSS: a native `<textarea>` (transparent, real caret and input) and a `<pre>` highlight overlay (colours only, no interaction). Both must produce **bit-for-bit identical text flow** — same font, size, line-height, padding, tab-size, white-space, overflow-wrap — so the highlight layer tracks the real caret accurately.
+
+Any CSS that shifts overlay text (`padding-left`, `text-indent`, `margin-left` on `.editor-line`) changes where the browser wraps lines in the overlay **without** changing the textarea. This creates a visual mismatch: the cursor, click targets, and typed characters land in different columns from where the eye expects them.
+
+### Options Analysed
+
+**Option A — Indent guide line (no text shift)**
+Draw a thin vertical rule on the highlight overlay at the indentation column position for any line that physically wraps, using an absolutely-positioned pseudo-element. The text is never moved; the guide simply shows the reader where the indent level is. Caret and click placement remain perfectly accurate. This is the VS Code "indent guides" pattern.
+- Pro: zero caret mismatch, always-on (no focus-state switching), minimal code.
+- Con: continuation text still starts at column 0 visually; the guide is a hint, not a true indent.
+
+**Option B — Per-continuation-row span injection**
+Detect how many visual rows each logical source line occupies (by measuring rendered height vs. one line-height), then inject invisible spacer `<span>` elements at the start of each continuation row inside the overlay.
+- Pro: continuation rows are visually indented.
+- Con: the overlay word-wrap boundary shifts, so carets still misalign. Also means overlay text content diverges from source text, which breaks the offset-mapping used by drag-drop and autocomplete.
+
+**Option C — Switch to `contenteditable`**
+Replace the `<textarea>` with a `contenteditable` block, giving full DOM control over per-row CSS and caret placement.
+- Pro: true hanging indent with correct caret behavior is achievable.
+- Con: significant architectural rewrite; all input, selection, undo, autocomplete, and paste handling must be rebuilt. Deferred under the minimal-JS rule until the collaboration and `.urldb` model work is stable.
+
+### Current Decision
+Pursue **Option A** as the pragmatic correct solution given the current architecture. Remove the `inactive`-only fake hanging indent (it breaks on every click), and replace it with an always-visible indent guide line on the overlay. This has no caret mismatch, no focus-state switching complexity, and is visually honest about what the architecture can deliver. Revisit Option C only if the workbench moves toward a richer editing model in a later phase.
+
+---
+
 ## Deferred or Optional Work
 
 - Full rich-text editing or WYSIWYG mode
