@@ -61,6 +61,7 @@ function renderMarkdown(markdown, options = {}) {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
   const output = [];
   let inCodeBlock = false;
+  let codeBuffer = [];
   let listBuffer = [];
 
   function flushList() {
@@ -76,17 +77,17 @@ function renderMarkdown(markdown, options = {}) {
     if (line.startsWith("```")) {
       flushList();
       if (inCodeBlock) {
-        output.push("</code></pre>");
+        output.push(`<pre><code>${codeBuffer.join("\n")}</code></pre>`);
         inCodeBlock = false;
+        codeBuffer = [];
       } else {
-        output.push("<pre><code>");
         inCodeBlock = true;
       }
       continue;
     }
 
     if (inCodeBlock) {
-      output.push(`${escapeHtml(rawLine)}\n`);
+      codeBuffer.push(escapeHtml(rawLine));
       continue;
     }
 
@@ -126,7 +127,7 @@ function renderMarkdown(markdown, options = {}) {
   flushList();
 
   if (inCodeBlock) {
-    output.push("</code></pre>");
+    output.push(`<pre><code>${codeBuffer.join("\n")}</code></pre>`);
   }
 
   return output.join("\n");
