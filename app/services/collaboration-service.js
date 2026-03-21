@@ -4,13 +4,16 @@ function fingerprintProject(project) {
   return JSON.stringify(sanitizeProjectForSync(project));
 }
 
-function createCollaborationRuntime({ getProject, replaceProject, applyOperation, onStatusChange }) {
+function createCollaborationRuntime({ getProject, replaceProject, applyOperation, onStatusChange, onRemoteCursor, onPatchConfirmed }) {
   let connection = null;
   let isApplyingRemote = false;
   let pendingTextPatches = new Map();
   let pendingSnapshotTimer = null;
   let lastFingerprint = "";
   let presence = [];
+  // OT state: revision we last confirmed with the server, and in-flight patch ops
+  let localRevision = 0;
+  let inFlightPatches = new Map(); // path -> { baseRevision, start, end, text, removedText }
 
   function emitStatus(status, detail) {
     onStatusChange({
@@ -20,13 +23,15 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       revision: connection?.revision ?? 0,
       sessionId: connection?.sessionId ?? null,
       displayName: connection?.displayName ?? null,
-      clientId: connection?.clientId ?? null
+      clientId: connection?.clientId ?? null,
+      role: connection?.role ?? null
     });
   }
 
   function clearScheduledSyncs() {
     pendingTextPatches.forEach((entry) => window.clearTimeout(entry.timer));
     pendingTextPatches.clear();
+    inFlightPatches.clear();
     if (pendingSnapshotTimer) {
       window.clearTimeout(pendingSnapshotTimer);
       pendingSnapshotTimer = null;
@@ -65,9 +70,19 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     }
 
     const result = await pushOperation(connection.serverUrl, connection.token, operation);
-    connection.revision = result.revision ?? connection.revision;
+    localRevision = result.revision ?? localRevision;
+    connection.revision = localRevision;
+    // Once the server confirms this op, it's no longer in-flight.
+    if (operation.path) {
+      inFlightPatches.delete(operation.path);
+    }
     lastFingerprint = fingerprintProject(getProject());
     emitStatus("connected", `Connected. Revision ${connection.revision}.`);
+    // Text is now confirmed on the server — broadcast the definitive cursor
+    // position so peers see where we ended up after the edit.
+    if (typeof onPatchConfirmed === "function") {
+      onPatchConfirmed();
+    }
   }
 
   async function reloadFromServer(detail) {
@@ -87,6 +102,18 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     emitStatus("connected", detail || `Connected. Reloaded revision ${connection.revision}.`);
   }
 
+  /**
+   * Mirror of the server's _transform_offset: adjust one offset through a
+   * single already-applied operation described by (appliedStart, appliedEnd,
+   * insertedLength).
+   */
+  function transformOffset(offset, appliedStart, appliedEnd, insertedLength) {
+    const removedLength = appliedEnd - appliedStart;
+    if (offset <= appliedStart) return offset;
+    if (offset <= appliedEnd) return appliedStart + insertedLength;
+    return offset + insertedLength - removedLength;
+  }
+
   function scheduleTextPatch(path, previousContent, nextContent) {
     if (!connection || isApplyingRemote) {
       return;
@@ -95,6 +122,50 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     if (previousContent === nextContent) {
       return;
     }
+
+    const existingEntry = pendingTextPatches.get(path);
+    if (existingEntry) {
+      // A patch is already queued for this path. Cancel its timer and extend
+      // the debounce window, but keep the original previousContent so the
+      // resulting operation covers the entire accumulated change.
+      window.clearTimeout(existingEntry.timer);
+      const base = existingEntry.baseContent;
+      const timer = window.setTimeout(() => {
+        pendingTextPatches.delete(path);
+        const op = buildPatchOp(path, base, nextContent);
+        if (op) {
+          publishOperation(op).catch(async (error) => {
+            if (error.status === 409) {
+              await reloadFromServer(error.message || "Text patch conflicted with a remote change.");
+              return;
+            }
+            disconnect(error.message || "Sync failed.");
+          });
+        }
+      }, 250);
+      pendingTextPatches.set(path, { timer, baseContent: base });
+      return;
+    }
+
+    // First call in this debounce window - record the base content.
+    const timer = window.setTimeout(() => {
+      pendingTextPatches.delete(path);
+      const op = buildPatchOp(path, previousContent, nextContent);
+      if (op) {
+        publishOperation(op).catch(async (error) => {
+          if (error.status === 409) {
+            await reloadFromServer(error.message || "Text patch conflicted with a remote change.");
+            return;
+          }
+          disconnect(error.message || "Sync failed.");
+        });
+      }
+    }, 250);
+    pendingTextPatches.set(path, { timer, baseContent: previousContent });
+  }
+
+  function buildPatchOp(path, previousContent, nextContent) {
+    if (previousContent === nextContent) return null;
 
     let start = 0;
     while (start < previousContent.length && start < nextContent.length && previousContent[start] === nextContent[start]) {
@@ -108,31 +179,37 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       nextEnd -= 1;
     }
 
+    const removedText = previousContent.slice(start, previousEnd);
+    const insertText = nextContent.slice(start, nextEnd);
+
     const operation = {
       type: "patch-file",
       path,
       start,
       end: previousEnd,
-      removedText: previousContent.slice(start, previousEnd),
-      text: nextContent.slice(start, nextEnd)
+      removedText,
+      text: insertText,
+      baseRevision: localRevision
     };
 
-    const existingEntry = pendingTextPatches.get(path);
-    if (existingEntry) {
-      window.clearTimeout(existingEntry.timer);
-    }
+    // Track in-flight for OT rebase.
+    inFlightPatches.set(path, { baseRevision: localRevision, start, end: previousEnd, text: insertText, removedText });
+    return operation;
+  }
 
-    const timer = window.setTimeout(() => {
-      pendingTextPatches.delete(path);
-      publishOperation(operation).catch(async (error) => {
-        if (error.status === 409) {
-          await reloadFromServer(error.message || "Text patch conflicted with a remote change.");
-          return;
-        }
-        disconnect(error.message || "Sync failed.");
-      });
-    }, 250);
-    pendingTextPatches.set(path, { timer, operation });
+  let awarenessTimer = null;
+  function scheduleAwareness(fileId, selStart, selEnd) {
+    if (!connection) return;
+    if (awarenessTimer) window.clearTimeout(awarenessTimer);
+    awarenessTimer = window.setTimeout(() => {
+      awarenessTimer = null;
+      if (!connection) return;
+      fetch(`${connection.serverUrl}/api/session/presence?token=${encodeURIComponent(connection.token)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileId, selStart, selEnd })
+      }).catch(() => { /* non-critical — ignore */ });
+    }, 100);
   }
 
   function scheduleSnapshot(project) {
@@ -164,21 +241,26 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       displayName: (session.displayName ?? displayName.trim()) || session.clientId,
       sessionId: session.sessionId ?? "default",
       revision: session.revision ?? 0,
+      role: session.role ?? "client",
       eventSource: null
     };
+    localRevision = connection.revision;
 
     const snapshot = await fetchSessionState(serverUrl, connection.token);
     presence = snapshot.presence ?? [];
-    if (snapshot.project) {
+    if (connection.role === "master") {
+      // Master always asserts their local project as the canonical server state.
+      await publishSnapshot(getProject());
+      emitStatus("connected", "Connected as master. Project pushed to server.");
+    } else if (snapshot.project) {
       isApplyingRemote = true;
       replaceProject(snapshot.project);
       isApplyingRemote = false;
       lastFingerprint = fingerprintProject(snapshot.project);
       connection.revision = snapshot.revision ?? connection.revision;
-      emitStatus("connected", `Connected. Pulled server revision ${connection.revision}.`);
+      emitStatus("connected", `Connected as client. Pulled server revision ${connection.revision}.`);
     } else {
-      await pushCurrentProject();
-      emitStatus("connected", "Connected. Uploaded local project to server.");
+      emitStatus("connected", "Connected as client. Server has no project yet.");
     }
 
     connection.eventSource = openEventStream(
@@ -191,15 +273,53 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
 
         if (event.type === "operation" && event.operation) {
           if (event.clientId === connection.clientId) {
-            connection.revision = event.revision ?? connection.revision;
+            localRevision = event.revision ?? localRevision;
+            connection.revision = localRevision;
             emitStatus("connected", `Connected. Revision ${connection.revision}.`);
             return;
           }
+          // OT diamond: when we have an in-flight (unconfirmed) pending patch on the
+          // same file as the incoming remote op, we must:
+          //   1. Transform the INCOMING op through our pending op so it lands at the
+          //      correct position in our local model (which already has pending applied).
+          //   2. Transform our PENDING op through the incoming op so our next send has
+          //      positions relative to the new server-canonical state.
+          let opToApply = event.operation;
+          if (event.operation.type === "patch-file" && event.operation.path) {
+            const pending = inFlightPatches.get(event.operation.path);
+            if (pending) {
+              // Save originals before mutating pending.
+              const pendStart = pending.start;
+              const pendEnd   = pending.end;
+              const pendInsLen = String(pending.text ?? "").length;
+              // 1. Adjust incoming op positions to our local-model coordinate space.
+              opToApply = {
+                ...event.operation,
+                start: transformOffset(Number(event.operation.start), pendStart, pendEnd, pendInsLen),
+                end:   transformOffset(Number(event.operation.end),   pendStart, pendEnd, pendInsLen),
+              };
+              // 2. Advance pending positions past the incoming op.
+              const remStart = Number(event.operation.start);
+              const remEnd   = Number(event.operation.end);
+              const remInsLen = String(event.operation.text ?? "").length;
+              pending.start = transformOffset(pendStart, remStart, remEnd, remInsLen);
+              pending.end   = transformOffset(pendEnd,   remStart, remEnd, remInsLen);
+            }
+          }
           isApplyingRemote = true;
-          applyOperation(event.operation);
-          isApplyingRemote = false;
+          try {
+            applyOperation(event.clientId, opToApply);
+          } catch (err) {
+            isApplyingRemote = false;
+            // Model has diverged from server — reload authoritative state.
+            reloadFromServer(`Sync conflict at revision ${event.revision} — reloading.`).catch(() => {});
+            return;
+          } finally {
+            isApplyingRemote = false;
+          }
           lastFingerprint = fingerprintProject(getProject());
-          connection.revision = event.revision ?? connection.revision;
+          localRevision = event.revision ?? localRevision;
+          connection.revision = localRevision;
           emitStatus("connected", `Connected. Applied remote operation at revision ${connection.revision}.`);
           return;
         }
@@ -222,6 +342,13 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
         if (event.type === "presence") {
           presence = event.presence ?? [];
           emitStatus(connection ? "connected" : "reachable", event.message || `Presence updated. ${presence.length} active.`);
+          return;
+        }
+
+        if (event.type === "cursor") {
+          if (typeof onRemoteCursor === "function") {
+            onRemoteCursor(event);
+          }
         }
       },
       () => {
@@ -239,6 +366,14 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     publishSnapshot,
     scheduleTextPatch,
     scheduleSnapshot,
+    scheduleAwareness,
+    reloadFromServer,
+    hasPendingPatch(fileId) {
+      return pendingTextPatches.has(fileId);
+    },
+    getRole() {
+      return connection?.role ?? null;
+    },
     isConnected() {
       return Boolean(connection);
     },

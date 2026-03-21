@@ -101,6 +101,10 @@
             </div>
             <p id="session-detail-text" class="subtle-label">Not connected to a shared session.</p>
             <div id="presence-strip" class="presence-strip"></div>
+            <div id="workspace-mode-row" class="workspace-mode-row" hidden>
+              <span class="subtle-label">Workspace</span>
+              <button id="workspace-mode-toggle" class="workspace-mode-toggle" type="button">⟳ Synced</button>
+            </div>
           </section>
         </aside>
 
@@ -123,6 +127,7 @@
                        autocorrect="off" autocapitalize="off"
                        data-placeholder="Select or create a .md or .mtree file"></div>
                   <div id="editor-drop-caret" class="editor-drop-caret" aria-hidden="true" hidden></div>
+                  <div id="editor-cursors" class="editor-cursors" aria-hidden="true"></div>
                 </div>
                 <div id="editor-autocomplete" class="editor-autocomplete" hidden>
                   <div id="editor-autocomplete-label" class="subtle-label">Suggestions</div>

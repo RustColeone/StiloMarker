@@ -239,3 +239,50 @@
 ### Recommended Next Increment
 - Tighten backend-side collaboration behavior around richer concurrent editing cases and decide whether `.urldb` entries should remain explorer-derived children or graduate into explicit domain-level subnodes.
 - Consider replacing remaining browser-native flows that are still unavoidable, such as final PDF save through the print dialog, only if a browser-compatible alternative is worth the added complexity.
+
+## Phase 14 — Server-Authoritative OT Collaboration
+
+### Overview
+Replaced the earlier last-write-wins text-patch approach with a server-authoritative Operational Transformation layer so concurrent edits from multiple clients converge instead of conflicting or forcing a full state reload.
+
+### Server Changes (`server/mdnotes_server.py`)
+
+- Added an **operation log ring buffer** (`operation_log`, max 2000 entries) to `CollaborationBroker`. Each entry records `{ revision, path, start, end, insertedLength }` for every applied `patch-file` op.
+- Added `_transform_offset(offset, applied_start, applied_end, inserted_length)` — a pure function that adjusts a single character offset through one already-applied operation. Three cases: before the edit (unchanged), inside the removed region (snapped to insertion point), after the edit (shifted by net delta).
+- Added `_rebase_patch(path, start, end, base_revision)` — walks the operation log for matching-path entries with revision > `base_revision` and threads `_transform_offset` through each in order, producing a transformed `(start, end)` pair.
+- Rewrote `_apply_text_patch` to accept an optional `base_revision` argument. When the client is behind, `_rebase_patch` transforms the incoming offsets before application. If the removed text no longer matches after rebase (a concurrent delete erased the region), the op degrades to a pure insertion so the typed text is always preserved.
+- Updated the `patch-file` branch in `_apply_operation` to extract `baseRevision` from the operation payload and pass it through `_apply_text_patch`. After applying, the transformed `(start, end, insertedLength)` are appended to `operation_log` via `_record_operation`.
+- Modified `_broadcast` to accept an optional `exclude_token` parameter so cursor events are not echoed back to the sender.
+- Added `broadcast_cursor(token, file_id, sel_start, sel_end)` on `CollaborationBroker` — authenticates the caller, assembles a `{ type: "cursor", clientId, displayName, fileId, selStart, selEnd }` event, and fans it out to all other subscribers.
+- Added `POST /api/session/presence` route and `_handle_post_presence` handler that decode `{ fileId, selStart, selEnd }` and delegate to `broadcast_cursor`.
+
+### Client Changes (`app/services/collaboration-service.js`)
+
+- Added `localRevision` (initialized from `connection.revision` on connect) to track the last server-confirmed revision.
+- Added `inFlightPatches` map (`path → { baseRevision, start, end, text, removedText }`) to hold unacknowledged local patches that may need to be rebased if a concurrent remote op arrives before ACK.
+- Added `transformOffset(offset, appliedStart, appliedEnd, insertedLength)` — the JavaScript mirror of the server-side function used to rebase in-flight patches against arriving remote ops.
+- Updated `scheduleTextPatch` to embed `baseRevision: localRevision` in every outgoing `patch-file` operation and record it in `inFlightPatches`.
+- Updated `publishOperation` to set `localRevision = result.revision` on success and evict the confirmed op from `inFlightPatches`.
+- Updated the `"operation"` SSE event handler to: (a) rebase any matching `inFlightPatches` entry through the incoming op before applying it locally, and (b) advance `localRevision` from `event.revision`.
+- Added `scheduleAwareness(fileId, selStart, selEnd)` — debounced 100 ms, POSTs `{ fileId, selStart, selEnd }` to `POST /api/session/presence`.
+- Added `"cursor"` event handling in the SSE stream: dispatches to the `onRemoteCursor` callback supplied by the host.
+
+### UI Changes (`app/main.js`, `index.html`, `app/styles.css`)
+
+- Added `#editor-cursors` overlay `<div>` inside `#editor-scroll` in `index.html` as the rendering layer for remote peer carets.
+- Added `.editor-cursors`, `.remote-cursor`, and `.remote-cursor-label` rules to `styles.css` for absolutely-positioned cursor lines and floating name labels.
+- Added `renderRemoteCursors(cursors)` in `main.js` — for each cursor on the active file, uses `textOffsetToDomPosition` + `Range.getBoundingClientRect()` to compute viewport-relative coordinates within `#editor-scroll`, then creates a positioned `div.remote-cursor` with a `div.remote-cursor-label` child. Uses a stable per-`clientId` color from a fixed six-color palette.
+- Added `onRemoteCursor(event)` handler that updates a `remoteCursorsByClient` map and re-renders the overlay.
+- Added `attachSelectionChangeListener()` which wires a `document.selectionchange` listener that calls `collaboration.scheduleAwareness` on local cursor movement. Called once immediately after `createCollaborationRuntime`.
+- Clear the cursor overlay (`renderRemoteCursors([])`) when the active file changes to avoid showing stale carets for a different file.
+- Passed `onRemoteCursor` into `createCollaborationRuntime`.
+
+### Self-Test Coverage
+
+- Python selftest: `baseRevision` field added to the existing `patch-file` test. New OT convergence test: two clients both send `baseRevision: 2` with overlapping insertions at offset 13; server transforms the second through the first, and the final file contains both `" A"` and `" B"`.
+- JS selftest (`tools/selftest.mjs`): Added assertions for `baseRevision`, `localRevision`, `inFlightPatches`, `transformOffset`, `scheduleAwareness` in `collaboration-service.js`; for `operation_log`, `_transform_offset`, `_rebase_patch`, `broadcast_cursor`, `/api/session/presence` in the Python backend; and for `id="editor-cursors"` in `index.html`.
+
+### Scope
+
+- Supported: concurrent text edits from multiple clients that converge on a single canonical file content without forcing a full state reload; real-time cursor/selection broadcasting visible as labeled colored caret overlays in the editor.
+- Limitation: operation log is in-memory only and does not survive server restarts (clients reconnecting after a restart receive the current revision without history). Cursor overlays are position-accurate at the time of rendering but do not track to scroll changes in real time (they are re-placed on the next incoming cursor event). The `inFlightPatches` map holds at most one pending patch per file path; rapid sequential edits coalesce into the most recent entry before the debounce fires.

@@ -320,6 +320,8 @@ async function run() {
   assert.match(page, /id="file-menu-button"/);
   assert.match(page, /id="explorer-toggle-button"/);
   assert.match(page, /id="presence-strip"/);
+  assert.match(page, /id="workspace-mode-toggle"/);
+  assert.match(page, /id="workspace-mode-row"/);
   assert.match(page, /accept="\.md,\.mtree,\.urldb,\.png,\.jpg,\.jpeg,\.gif,\.svg,\.webp,\.bmp,\.zip"/);
   assert.match(page, /id="server-indicator"/);
   assert.match(page, /id="display-name-input"/);
@@ -349,6 +351,7 @@ async function run() {
   assert.match(page, /id="mtree-undo-button"/);
   assert.match(page, /id="source-pane"/);
   assert.match(page, /id="preview-pane"/);
+  assert.match(page, /id="editor-cursors"/);
 
   const mainSource = await readFile(resolve(root, "app/main.js"), "utf8");
   assert.match(mainSource, /registerOfflineShell\(\)/);
@@ -370,12 +373,25 @@ async function run() {
   assert.match(mainSource, /settingsMenuButton/);
   assert.match(mainSource, /toggleQuickAddMenu/);
   assert.match(mainSource, /toggleFilterMenu/);
+  // Workspace mode toggle
+  assert.match(mainSource, /workspaceMode/);
+  assert.match(mainSource, /privateProjectSnapshot/);
+  assert.match(mainSource, /switchWorkspaceMode/);
 
   const collaborationSource = await readFile(resolve(root, "app/services/collaboration-service.js"), "utf8");
   assert.match(collaborationSource, /publishOperation/);
   assert.match(collaborationSource, /openEventStream/);
   assert.match(collaborationSource, /presence/);
   assert.match(collaborationSource, /reloadFromServer/);
+  // OT additions
+  assert.match(collaborationSource, /baseRevision/);
+  assert.match(collaborationSource, /localRevision/);
+  assert.match(collaborationSource, /inFlightPatches/);
+  assert.match(collaborationSource, /transformOffset/);
+  assert.match(collaborationSource, /scheduleAwareness/);
+  // Role-aware connect
+  assert.match(collaborationSource, /getRole/);
+  assert.match(collaborationSource, /session\.role/);
 
   const serviceWorkerSource = await readFile(resolve(root, "service-worker.js"), "utf8");
   assert.match(serviceWorkerSource, /mdnotes-shell-v1/);
@@ -388,6 +404,16 @@ async function run() {
   assert.match(backendSource, /patch-file/);
   assert.match(backendSource, /Persisting collaborative state/);
   assert.match(backendSource, /Backend self-test passed\./);
+  // OT additions
+  assert.match(backendSource, /operation_log/);
+  assert.match(backendSource, /_transform_offset/);
+  assert.match(backendSource, /_rebase_patch/);
+  assert.match(backendSource, /broadcast_cursor/);
+  assert.match(backendSource, /api\/session\/presence/);
+  // Master PIN
+  assert.match(backendSource, /master_pin/);
+  assert.match(backendSource, /master_tokens/);
+  assert.match(backendSource, /master-pin/);
 
   console.log("Self-test passed.");
 }

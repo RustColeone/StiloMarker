@@ -36,6 +36,7 @@ const elements = {
   editorScroll: query("#editor-scroll"),
   editorContent: query("#editor-content"),
   editorDropCaret: query("#editor-drop-caret"),
+  editorCursors: query("#editor-cursors"),
   editorAutocomplete: query("#editor-autocomplete"),
   editorAutocompleteLabel: query("#editor-autocomplete-label"),
   editorAutocompleteList: query("#editor-autocomplete-list"),
@@ -113,6 +114,8 @@ const elements = {
   sessionDetailText: query("#session-detail-text"),
   presenceList: query("#presence-list"),
   presenceStrip: query("#presence-strip"),
+  workspaceModeRow: query("#workspace-mode-row"),
+  workspaceModeToggle: query("#workspace-mode-toggle"),
   sessionIdLabel: query("#session-id-label"),
   explorerToggleButton: query("#explorer-toggle-button"),
   fileMenuButton: query("#file-menu-button"),
@@ -175,8 +178,15 @@ const syncState = {
   sessionId: null,
   revision: 0,
   displayName: null,
-  clientId: null
+  clientId: null,
+  role: null
 };
+
+// "private" = user's local workspace; "synced" = connected server workspace.
+let workspaceMode = "private";
+let privateProjectSnapshot = null;
+// Forward declaration — assigned after `collaboration` is created.
+let switchWorkspaceMode;
 
 const mtreeToolState = {
   sourceFileId: null,
@@ -915,10 +925,126 @@ function notifyEditorChanged(text) {
     nextContent = updateUrlDbEntry(activeFile.content, selectedEntry.entry.id, parsed);
   }
   controller.updateContent(activeFile.id, nextContent);
-  if (collaboration.isConnected()) {
+  if (collaboration.isConnected() && workspaceMode === "synced") {
     collaboration.scheduleTextPatch(getPath(controller.getProject(), activeFile.id), activeFile.content, nextContent);
   }
   // TODO: wire collaboration text-patch here once sync strategy is decided.
+}
+
+// Stable palette for coloring remote cursor lines + labels by client index.
+const CURSOR_COLORS = ["#e06c75", "#61afef", "#98c379", "#e5c07b", "#c678dd", "#56b6c2", "#d19a66"];
+
+function clientColor(clientId) {
+  let hash = 0;
+  for (let i = 0; i < clientId.length; i++) {
+    hash = (hash * 31 + clientId.charCodeAt(i)) >>> 0;
+  }
+  return CURSOR_COLORS[hash % CURSOR_COLORS.length];
+}
+
+/** Render remote peer cursor overlays inside #editor-cursors.
+ *  `cursors` is an array of { clientId, displayName, fileId, selStart, selEnd }.
+ *  Only cursors for the currently active file are shown.
+ *  When selEnd > selStart a per-line selection highlight is drawn in addition
+ *  to the caret so peers can see highlighted text. */
+function renderRemoteCursors(cursors) {
+  const activeFile = controller.getActiveFile();
+  const container = elements.editorCursors;
+  container.textContent = "";
+  if (!activeFile) return;
+
+  const scrollEl = elements.editorScroll;
+  const scrollRect = elements.editorScroll.getBoundingClientRect();
+
+  for (const cursor of cursors) {
+    if (cursor.fileId !== activeFile.id) continue;
+    const color = clientColor(cursor.clientId);
+    const selStart = Number(cursor.selStart);
+    const selEnd = Number(cursor.selEnd);
+    const hasSelection = selEnd > selStart;
+
+    try {
+      // --- Draw selection highlight (one rect per visual line) ---
+      if (hasSelection) {
+        const startPos = textOffsetToDomPosition(selStart);
+        const endPos = textOffsetToDomPosition(selEnd);
+        const selRange = document.createRange();
+        selRange.setStart(startPos.node, startPos.offset);
+        selRange.setEnd(endPos.node, endPos.offset);
+        const rects = Array.from(selRange.getClientRects());
+        for (const rect of rects) {
+          if (rect.width === 0 && rect.height === 0) continue;
+          const highlightEl = document.createElement("div");
+          highlightEl.className = "remote-selection";
+          highlightEl.style.top = `${rect.top - scrollRect.top + scrollEl.scrollTop}px`;
+          highlightEl.style.left = `${rect.left - scrollRect.left + scrollEl.scrollLeft}px`;
+          highlightEl.style.width = `${rect.width}px`;
+          highlightEl.style.height = `${rect.height}px`;
+          highlightEl.style.background = color;
+          container.appendChild(highlightEl);
+        }
+      }
+
+      // --- Draw caret at the end (anchor) of the selection ---
+      const caretOffset = selEnd;
+      const pos = textOffsetToDomPosition(caretOffset);
+      const anchorRange = document.createRange();
+      anchorRange.setStart(pos.node, pos.offset);
+      anchorRange.collapse(true);
+      const rect = anchorRange.getBoundingClientRect();
+
+      const top = rect.top - scrollRect.top + scrollEl.scrollTop;
+      const left = rect.left - scrollRect.left + scrollEl.scrollLeft;
+      const height = rect.height || 18;
+
+      const cursorEl = document.createElement("div");
+      cursorEl.className = "remote-cursor";
+      cursorEl.style.top = `${top}px`;
+      cursorEl.style.left = `${left}px`;
+      cursorEl.style.height = `${height}px`;
+      cursorEl.style.background = color;
+
+      const label = document.createElement("div");
+      label.className = "remote-cursor-label";
+      label.style.background = color;
+      label.textContent = cursor.displayName || cursor.clientId;
+      cursorEl.appendChild(label);
+
+      container.appendChild(cursorEl);
+    } catch {
+      // ignore positioning errors (file re-renders, rapid navigation, etc.)
+    }
+  }
+}
+
+// Cache of the latest remote cursor events by clientId so we can re-render
+// when the user scrolls or file content changes.
+const remoteCursorsByClient = new Map();
+
+function onRemoteCursor(event) {
+  if (!event.clientId) return;
+  remoteCursorsByClient.set(event.clientId, event);
+  renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
+}
+
+// Broadcast local selection to peers on selectionchange (debounced).
+// Note: this listener is registered after `collaboration` is created (see below).
+let _selectionChangeListenerAttached = false;
+function attachSelectionChangeListener() {
+  if (_selectionChangeListenerAttached) return;
+  _selectionChangeListenerAttached = true;
+  document.addEventListener("selectionchange", () => {
+    if (!collaboration.isConnected()) return;
+    const activeFile = controller.getActiveFile();
+    if (!activeFile) return;
+    const sel = getEditorSelection();
+    // Suppress cursor broadcast while a text patch is pending for this file —
+    // peers would see a stale position (before the text arrives).  The cursor
+    // is sent automatically once the patch is confirmed by the server.
+    const path = getPath(controller.getProject(), activeFile.id);
+    if (collaboration.hasPendingPatch(path)) return;
+    collaboration.scheduleAwareness(activeFile.id, sel.start, sel.end);
+  });
 }
 
 // Keep applyTextareaValue as a shim used only by the MTREE output textarea
@@ -1027,10 +1153,25 @@ const collaboration = createCollaborationRuntime({
   replaceProject(project) {
     controller.replaceProject(project);
   },
-  applyOperation(operation) {
-    controller.applySyncOperation(operation);
+  applyOperation(clientId, operation) {
+    try {
+      controller.applySyncOperation(operation);
+      // After a remote patch lands, immediately advance that peer's cached
+      // cursor to the end of their insertion so it stays visible and correct
+      // without waiting for their next selectionchange broadcast.
+      if (operation.type === "patch-file" && clientId) {
+        const cached = remoteCursorsByClient.get(clientId);
+        if (cached) {
+          const newPos = Number(operation.start) + String(operation.text ?? "").length;
+          remoteCursorsByClient.set(clientId, { ...cached, selStart: newPos, selEnd: newPos });
+        }
+      }
+    } catch (err) {
+      collaboration?.reloadFromServer("Sync conflict — reloading from server.").catch(() => {});
+    }
   },
   onStatusChange(nextState) {
+    const wasConnected = syncState.status === "connected";
     syncState.status = nextState.status;
     syncState.detail = nextState.detail;
     syncState.presence = nextState.presence ?? [];
@@ -1038,8 +1179,66 @@ const collaboration = createCollaborationRuntime({
     syncState.revision = nextState.revision ?? 0;
     syncState.displayName = nextState.displayName ?? null;
     syncState.clientId = nextState.clientId ?? null;
+    syncState.role = nextState.role ?? null;
+    // Auto-switch workspace mode on connect/disconnect.
+    if (!wasConnected && nextState.status === "connected" && workspaceMode === "private") {
+      if (syncState.role === "client") {
+        // Client just connected: save private snapshot and pull server state.
+        switchWorkspaceMode?.("synced");
+        return;
+      }
+      if (syncState.role === "master") {
+        // Master just connected: enter synced mode without reloading from server.
+        // The master already pushed its own project as the authoritative state;
+        // calling reloadFromServer here would just fetch it back unnecessarily.
+        privateProjectSnapshot = controller.getProject();
+        workspaceMode = "synced";
+        render(controller.getProject());
+        return;
+      }
+    }
+    if (nextState.status === "offline" && workspaceMode === "synced") {
+      // Lost connection: restore the user's private workspace.
+      switchWorkspaceMode?.("private");
+      return;
+    }
+    render(controller.getProject());
+  },
+  onRemoteCursor(event) {
+    onRemoteCursor(event);
+  },
+  onPatchConfirmed() {
+    // Text confirmed by server — now safe to send the definitive cursor position.
+    const activeFile = controller.getActiveFile();
+    if (activeFile && collaboration.isConnected()) {
+      const sel = getEditorSelection();
+      collaboration.scheduleAwareness(activeFile.id, sel.start, sel.end);
+    }
+  }
+});
+
+attachSelectionChangeListener();
+
+// Assign the forward-declared switchWorkspaceMode now that `collaboration` exists.
+switchWorkspaceMode = function (nextMode) {
+  if (nextMode === workspaceMode) return;
+  if (nextMode === "synced") {
+    privateProjectSnapshot = controller.getProject();
+    workspaceMode = nextMode;
+    // reloadFromServer replaces the project internally, triggering render.
+    collaboration.reloadFromServer("Switched to synced workspace.").catch(() => {});
+  } else {
+    workspaceMode = nextMode;
+    if (privateProjectSnapshot) {
+      controller.replaceProject(privateProjectSnapshot);
+    }
+    privateProjectSnapshot = null;
     render(controller.getProject());
   }
+};
+
+elements.workspaceModeToggle?.addEventListener("click", () => {
+  switchWorkspaceMode(workspaceMode === "synced" ? "private" : "synced");
 });
 
 const explorer = createExplorerView({
@@ -1419,11 +1618,11 @@ function highlightMtreeSource(value) {
   const lines = value.replace(/\r\n/g, "\n").split("\n");
 
   return lines.map((rawLine) => {
-    const escaped = escapeEditorHtml(rawLine || " ");
+    const escaped = escapeEditorHtml(rawLine);
     const trimmed = rawLine.trimStart();
 
     if (!trimmed) {
-      return '<div class="editor-line"> </div>';
+      return '<div class="editor-line"></div>';
     }
 
     if (trimmed.startsWith("#")) {
@@ -1464,11 +1663,11 @@ function highlightUrlDbSource(value) {
   const lines = value.replace(/\r\n/g, "\n").split("\n");
 
   return lines.map((rawLine) => {
-    const escaped = escapeEditorHtml(rawLine || " ");
+    const escaped = escapeEditorHtml(rawLine);
     const trimmed = rawLine.trimStart();
 
     if (!trimmed) {
-      return '<div class="editor-line"> </div>';
+      return '<div class="editor-line"></div>';
     }
 
     if (trimmed.startsWith("#")) {
@@ -1497,7 +1696,7 @@ function highlightMarkdownSource(value) {
   let inFence = false;
 
   return lines.map((rawLine) => {
-    const escaped = escapeEditorHtml(rawLine || " ");
+    const escaped = escapeEditorHtml(rawLine);
     const trimmed = rawLine.trimStart();
 
     if (trimmed.startsWith("```")) {
@@ -3597,10 +3796,26 @@ function updateStatus(project) {
       : "Server offline";
   elements.serverStatusText.textContent = syncState.detail;
   elements.sessionDetailText.textContent = syncState.sessionId
-    ? `Session ${syncState.sessionId} at revision ${syncState.revision}${syncState.displayName ? ` as ${syncState.displayName}` : ""}.`
+    ? `Session ${syncState.sessionId} at revision ${syncState.revision}${syncState.displayName ? ` as ${syncState.displayName}` : ""}${syncState.role ? ` (${syncState.role})` : ""}.`
     : "Not connected to a shared session.";
   elements.sessionIdLabel.textContent = syncState.sessionId ? `${syncState.sessionId} · r${syncState.revision}` : "Offline";
   elements.presenceSummaryText.textContent = collaboratorCount === 1 ? "1 collaborator online" : `${collaboratorCount} collaborators online`;
+
+  if (elements.workspaceModeRow) {
+    // Only clients get the private/synced toggle — the master IS the workspace.
+    const showToggle = syncState.status === "connected" && syncState.role === "client";
+    if (showToggle) {
+      elements.workspaceModeRow.removeAttribute("hidden");
+      if (elements.workspaceModeToggle) {
+        elements.workspaceModeToggle.textContent = workspaceMode === "synced" ? "⟳ Synced" : "◑ Private";
+        elements.workspaceModeToggle.title = workspaceMode === "synced"
+          ? "Click to switch to your private local workspace"
+          : "Click to switch back to the shared synced workspace";
+      }
+    } else {
+      elements.workspaceModeRow.setAttribute("hidden", "");
+    }
+  }
 
   setStatusDot(elements.sourceIndicator, liveDirectory ? "is-success" : "is-warning");
   setStatusDot(elements.browserIndicator, browserSupported ? "is-success" : "is-warning");
@@ -3632,6 +3847,10 @@ function updateStatus(project) {
     ? "Select or create a .md, .mtree, .urldb, or image file"
     : "Image assets are preview-only in the source pane.";
   const fileChanged = activeFile.id !== lastRenderedFileId;
+  if (fileChanged) {
+    // Clear stale remote cursors when the viewed file changes.
+    renderRemoteCursors([]);
+  }
   if (fileChanged || elements.editorContent !== document.activeElement) {
     lastRenderedFileId = activeFile.id;
     const nextText = isTextFile
@@ -3641,7 +3860,26 @@ function updateStatus(project) {
       : `[${activeFile.name}]\n\nThis image asset is preview-only in the source pane.\nUse the preview pane to inspect it or Explorer > Add File to replace it.`;
     loadEditorContent(nextText);
   } else {
-    renderEditorContent(getEditorText());
+    // Editor has focus and same file is open.
+    // Read the canonical text from the model (NOT from the DOM) so that
+    // remote operations — which update the model but not the DOM — are
+    // always reflected in the editor.
+    const modelText = isTextFile
+      ? selectedEntry ? formatUrlDbEntryBody(selectedEntry.entry) : activeFile.content
+      : "";
+    const domText = getEditorText();
+    if (modelText !== domText) {
+      // Model and DOM diverged (e.g. a remote patch just landed).
+      // Re-render from the model and restore the cursor as best we can.
+      const { start, end } = getEditorSelection();
+      renderEditorContent(modelText);
+      setEditorSelection(start, end);
+      // Reposition remote cursor overlays after the DOM re-render.
+      renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
+    }
+    // If model === DOM the user's own keystrokes are already in the DOM;
+    // the input handler will call renderEditorContent + setEditorSelection
+    // itself — skip re-rendering here so we never destroy the caret.
     syncEditorScroll();
   }
   const previewState = renderPreviewContent(elements.preview, project, previewFile);
@@ -3674,13 +3912,13 @@ if (!storedProject) {
 logDebug("response", "Debug log initialized", `panel=${settings.debugPanel ? "visible" : "hidden"}`);
 
 function publishSnapshot() {
-  if (collaboration.isConnected()) {
+  if (collaboration.isConnected() && workspaceMode === "synced") {
     collaboration.scheduleSnapshot(controller.getProject());
   }
 }
 
 function publishOperation(operation) {
-  if (!collaboration.isConnected()) {
+  if (!collaboration.isConnected() || workspaceMode !== "synced") {
     return;
   }
   collaboration.publishOperation(operation).catch((error) => {
@@ -3908,8 +4146,13 @@ elements.editorContent.addEventListener("compositionstart", () => {
 
 elements.editorContent.addEventListener("compositionend", () => {
   editorIsComposing = false;
-  // After IME commit, sync the plain-text representation to the model.
+  // After IME commit, sync the plain-text representation to the model and
+  // restore the cursor position (which the render cycle would otherwise drop).
+  const { start, end } = getEditorSelection();
   notifyEditorChanged(getEditorText());
+  // The render triggered by notifyEditorChanged may have re-rendered the DOM
+  // (if a remote op landed simultaneously); restore cursor explicitly.
+  setEditorSelection(start, end);
   showEditorAutocomplete();
 });
 
@@ -3943,6 +4186,8 @@ elements.editorContent.addEventListener("input", (event) => {
   // innerHTML replacement destroys the native caret.
   renderEditorContent(currentText);
   setEditorSelection(start, end);
+  // Reposition remote cursor overlays now that the DOM has changed.
+  renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
   showEditorAutocomplete();
 });
 

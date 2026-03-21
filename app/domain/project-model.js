@@ -76,7 +76,7 @@ function createProject(name = "Notes") {
   };
 }
 
-function applyTextPatch(content, operation) {
+function applyTextPatch(content, operation, { skipConflictCheck = false } = {}) {
   const start = Number(operation.start);
   const end = Number(operation.end);
   const insertText = String(operation.text ?? "");
@@ -86,9 +86,11 @@ function applyTextPatch(content, operation) {
     throw new Error("Invalid text patch range.");
   }
 
-  const currentSlice = content.slice(start, end);
-  if (currentSlice !== removedText) {
-    throw new Error("Text patch conflict detected.");
+  if (!skipConflictCheck) {
+    const currentSlice = content.slice(start, end);
+    if (currentSlice !== removedText) {
+      throw new Error("Text patch conflict detected.");
+    }
   }
 
   return `${content.slice(0, start)}${insertText}${content.slice(end)}`;
@@ -411,7 +413,7 @@ function applySyncOperation(project, operation) {
       throw new Error("Only files can receive text patches.");
     }
 
-    const patchedContent = applyTextPatch(file.content, operation);
+    const patchedContent = applyTextPatch(file.content, operation, { skipConflictCheck: true });
     const next = updateFileContent(project, nodeId, patchedContent);
     return markFileSaved(next, nodeId);
   }
