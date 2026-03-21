@@ -428,6 +428,22 @@
       </form>
     </dialog>
 
+    <dialog id="accept-connection-dialog" class="app-dialog">
+      <form method="dialog" class="app-dialog-form">
+        <header class="dialog-header">
+          <div>
+            <div class="eyebrow">Collaboration</div>
+            <h2>Connect to Server?</h2>
+          </div>
+          <p id="accept-connection-message" class="subtle-label">If you join as a peer, the host&#8217;s workspace will replace your current content.</p>
+        </header>
+        <menu class="dialog-actions">
+          <button value="cancel" type="submit">Cancel</button>
+          <button id="accept-connection-accept-button" value="accept" type="submit">Connect</button>
+        </menu>
+      </form>
+    </dialog>
+
     <dialog id="notice-dialog" class="app-dialog">
       <form method="dialog" class="app-dialog-form">
         <header class="dialog-header">

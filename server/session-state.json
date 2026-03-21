@@ -1,0 +1,31 @@
+{
+  "project": {
+    "id": "server-project",
+    "name": "Workspace",
+    "sourceMode": "memory",
+    "rootId": "root",
+    "activeFileId": "file-45abf8e3-0f00-4094-93fd-820d367df345",
+    "nodes": {
+      "root": {
+        "id": "root",
+        "kind": "folder",
+        "name": "Workspace",
+        "parentId": null,
+        "children": [
+          "file-45abf8e3-0f00-4094-93fd-820d367df345"
+        ],
+        "expanded": true
+      },
+      "file-45abf8e3-0f00-4094-93fd-820d367df345": {
+        "id": "file-45abf8e3-0f00-4094-93fd-820d367df345",
+        "kind": "file",
+        "name": "note.md",
+        "parentId": "root",
+        "content": "# proper notes here \nHow is this holding up? good\ngood?\n\n\ngoof! ",
+        "dirty": false,
+        "sourceVersion": 23
+      }
+    }
+  },
+  "revision": 76
+}
