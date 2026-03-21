@@ -111,6 +111,10 @@ const elements = {
   pingServerButton: query("#ping-server-button"),
   connectServerButton: query("#connect-server-button"),
   serverStatusText: query("#server-status-text"),
+  serverStatusPanel: query("#server-status-text")?.closest(".settings-status-panel"),
+  acceptConnectionDialog: query("#accept-connection-dialog"),
+  acceptConnectionMessage: query("#accept-connection-message"),
+  acceptConnectionAcceptButton: query("#accept-connection-accept-button"),
   sessionDetailText: query("#session-detail-text"),
   presenceList: query("#presence-list"),
   presenceStrip: query("#presence-strip"),
@@ -399,6 +403,33 @@ function getSelectedTarget() {
     return { nodeId: sourceUrlDbEntry.fileId, entryId: sourceUrlDbEntry.entryId };
   }
   return { nodeId: selectionNodeId, entryId: null };
+}
+
+/** Flash the server status panel border green (success) or red (error). */
+function flashStatusPanel(type) {
+  const panel = elements.serverStatusPanel;
+  if (!panel) return;
+  panel.classList.remove("settings-status-panel--flash-success", "settings-status-panel--flash-error");
+  void panel.offsetWidth; // force reflow so restarting mid-animation works
+  panel.classList.add(type === "success"
+    ? "settings-status-panel--flash-success"
+    : "settings-status-panel--flash-error");
+}
+
+/** Shown before connecting — resolves true if the user confirms. */
+function showAcceptConnectionDialog() {
+  return new Promise((resolve) => {
+    if (elements.acceptConnectionMessage) {
+      elements.acceptConnectionMessage.textContent =
+        "If you join as a peer, the host\u2019s workspace will replace your current content. Export your work first if you want to keep it.";
+    }
+    const handleClose = () => {
+      elements.acceptConnectionDialog.removeEventListener("close", handleClose);
+      resolve(elements.acceptConnectionDialog.returnValue === "accept");
+    };
+    elements.acceptConnectionDialog.addEventListener("close", handleClose, { once: true });
+    elements.acceptConnectionDialog.showModal();
+  });
 }
 
 function showNoticeDialog(message, title = "Message") {
@@ -1183,7 +1214,7 @@ const collaboration = createCollaborationRuntime({
     // Auto-switch workspace mode on connect/disconnect.
     if (!wasConnected && nextState.status === "connected" && workspaceMode === "private") {
       if (syncState.role === "client") {
-        // Client just connected: save private snapshot and pull server state.
+        // User already confirmed before connect() was called; just sync.
         switchWorkspaceMode?.("synced");
         return;
       }
@@ -4156,6 +4187,61 @@ elements.editorContent.addEventListener("compositionend", () => {
   showEditorAutocomplete();
 });
 
+// Intercept editing operations BEFORE the browser mutates the DOM so we can
+// maintain the .editor-line structure that getEditorText() depends on.
+// Without this, select-all+type erases the structure and paste loses \n.
+elements.editorContent.addEventListener("beforeinput", (event) => {
+  if (editorIsComposing) return;
+  const activeFile = controller.getActiveFile();
+  if (!activeFile || !isTextFileName(activeFile.name)) return;
+
+  const { start, end } = getEditorSelection();
+  const hasSelection = start !== end;
+
+  // Paste: always intercept — browser creates non-.editor-line divs for
+  // multi-line content which causes \n to be silently dropped.
+  if (event.inputType === "insertFromPaste") {
+    event.preventDefault();
+    const text = (event.dataTransfer?.getData("text/plain") ?? "").replace(/\r\n/g, "\n");
+    replaceEditorRange(start, end, text);
+    renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
+    showEditorAutocomplete();
+    return;
+  }
+
+  // Non-empty selection: browser may collapse or destroy .editor-line divs
+  // when the operation spans multiple lines. Take over completely.
+  if (hasSelection) {
+    if (event.inputType === "insertText") {
+      event.preventDefault();
+      replaceEditorRange(start, end, event.data ?? "");
+      renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
+      showEditorAutocomplete();
+      return;
+    }
+    if (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak") {
+      event.preventDefault();
+      replaceEditorRange(start, end, "\n");
+      renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
+      return;
+    }
+    if (
+      event.inputType === "deleteByCut" ||
+      event.inputType === "deleteContentBackward" ||
+      event.inputType === "deleteContentForward" ||
+      event.inputType.startsWith("deleteWord") ||
+      event.inputType.startsWith("deleteLine") ||
+      event.inputType.startsWith("deleteHardLine") ||
+      event.inputType.startsWith("deleteSoftLine")
+    ) {
+      event.preventDefault();
+      replaceEditorRange(start, end, "");
+      renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
+      return;
+    }
+  }
+});
+
 elements.editorContent.addEventListener("input", (event) => {
   if (editorIsComposing) {
     return;
@@ -4581,16 +4667,21 @@ elements.pingServerButton.addEventListener("click", async () => {
     syncState.status = "reachable";
     syncState.detail = typeof result === "string" ? result : (result.message || "Server responded to ping.");
     logDebug("response", "Server ping succeeded", syncState.detail);
+    flashStatusPanel("success");
     render(controller.getProject());
   } catch (error) {
     syncState.status = "offline";
     syncState.detail = error.message;
     logDebug("response", "Server ping failed", error.message);
+    flashStatusPanel("error");
     render(controller.getProject());
   }
 });
 
 elements.connectServerButton.addEventListener("click", async () => {
+  // Ask the user to confirm before making any network call or touching the workspace.
+  const confirmed = await showAcceptConnectionDialog();
+  if (!confirmed) return;
   try {
     logDebug("action", "Server connect requested", elements.serverUrlInput.value.trim());
     await collaboration.connect(elements.serverUrlInput.value, elements.serverPinInput.value, elements.displayNameInput.value);
@@ -4598,11 +4689,13 @@ elements.connectServerButton.addEventListener("click", async () => {
     settings.serverPin = elements.serverPinInput.value;
     settings.displayName = elements.displayNameInput.value.trim();
     saveSettings(settings);
+    flashStatusPanel("success");
     logDebug("response", "Server connected", settings.displayName || "anonymous");
   } catch (error) {
     syncState.status = "offline";
     syncState.detail = error.message;
     logDebug("response", "Server connect failed", error.message);
+    flashStatusPanel("error");
     render(controller.getProject());
   }
 });

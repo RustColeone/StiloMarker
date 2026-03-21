@@ -1463,12 +1463,32 @@ p {
   color: #ffffff;
 }
 
+@keyframes flash-border-success {
+  0%   { border-color: #2ea043; box-shadow: 0 0 0 2px rgba(46,160,67,0.35); }
+  60%  { border-color: #2ea043; box-shadow: 0 0 0 2px rgba(46,160,67,0.35); }
+  100% { border-color: var(--border); box-shadow: none; }
+}
+
+@keyframes flash-border-error {
+  0%   { border-color: #f85149; box-shadow: 0 0 0 2px rgba(248,81,73,0.35); }
+  60%  { border-color: #f85149; box-shadow: 0 0 0 2px rgba(248,81,73,0.35); }
+  100% { border-color: var(--border); box-shadow: none; }
+}
+
 .settings-status-panel {
   display: grid;
   gap: 4px;
   padding: 8px;
   border: 1px solid var(--border);
   background: var(--surface-0);
+}
+
+.settings-status-panel--flash-success {
+  animation: flash-border-success 1.4s ease-out forwards;
+}
+
+.settings-status-panel--flash-error {
+  animation: flash-border-error 1.4s ease-out forwards;
 }
 
 .presence-list {
