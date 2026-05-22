@@ -17,10 +17,14 @@ function getFileIconClass(node) {
     return "is-urldb";
   }
 
+  if (node.name.endsWith(".bmap")) {
+    return "is-bmap";
+  }
+
   return "is-file";
 }
 
-function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenUrlDbEntry, onToggleFolder, onSelectNode, onAction, canPasteTarget, onDragNodeStart, onDragUrlDbEntryStart, getFilterMode, getAssetPreviewSrc, getUrlDbEntries, getSelectedTarget }) {
+function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenUrlDbEntry, onToggleFolder, onSelectNode, onAction, canPasteTarget, canPreviewFile, onDragNodeStart, onDragUrlDbEntryStart, getFilterMode, getAssetPreviewSrc, getUrlDbEntries, getSelectedTarget }) {
   let menuTarget = null;
   let currentProject = null;
   let activeMenuMode = null;
@@ -86,6 +90,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       ["New Markdown", "new-md"],
       ["New MTREE", "new-mtree"],
       ["New URL Album", "new-urldb"],
+      ["New Diagram", "new-bmap"],
       ["Add File", "add-file"]
     ];
 
@@ -110,71 +115,30 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       return entries;
     }
 
-    if (node.kind === "file" && node.name.endsWith(".md")) {
-      const entries = [
-        ["Copy", "copy"],
-        ["Rename", "rename"],
-        ["Delete", "delete"],
-        ["Export", "export"]
-      ];
-      if (pasteEnabled) {
-        entries.splice(1, 0, ["Paste", "paste"]);
+    if (node?.kind === "file") {
+      const openEntries = [["Open Source", "open-source"]];
+      if (canPreviewFile?.(node.id)) {
+        openEntries.push(["Open Preview", "open-preview"]);
       }
-      return entries;
-    }
 
-    if (node?.kind === "file" && node.name.endsWith(".mtree")) {
-      const entries = [
-        ["Copy", "copy"],
-        ["Generate Module Map", "generate-module-map"],
-        ["Rename", "rename"],
-        ["Delete", "delete"],
-        ["Export", "export"]
-      ];
-      if (pasteEnabled) {
-        entries.splice(1, 0, ["Paste", "paste"]);
+      let typeEntries;
+      if (node.name.endsWith(".md")) {
+        typeEntries = [["Copy", "copy"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
+      } else if (node.name.endsWith(".mtree")) {
+        typeEntries = [["Copy", "copy"], ["Generate Module Map", "generate-module-map"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
+      } else if (isUrlDbFileName(node.name)) {
+        typeEntries = [["Copy", "copy"], ["Add Bookmark Entry", "add-bookmark-entry"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
+      } else if (/\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(node.name)) {
+        typeEntries = [["Copy", "copy"], ["Replace File", "replace-file"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
+      } else {
+        typeEntries = [["Copy", "copy"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
       }
-      return entries;
-    }
 
-    if (node?.kind === "file" && isUrlDbFileName(node.name)) {
-      const entries = [
-        ["Copy", "copy"],
-        ["Add Bookmark Entry", "add-bookmark-entry"],
-        ["Rename", "rename"],
-        ["Delete", "delete"],
-        ["Export", "export"]
-      ];
       if (pasteEnabled) {
-        entries.splice(1, 0, ["Paste", "paste"]);
+        typeEntries.splice(1, 0, ["Paste", "paste"]);
       }
-      return entries;
+      return [...openEntries, ...typeEntries];
     }
-
-    if (node?.kind === "file" && /\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(node.name)) {
-      const entries = [
-        ["Copy", "copy"],
-        ["Replace File", "replace-file"],
-        ["Rename", "rename"],
-        ["Delete", "delete"],
-        ["Export", "export"]
-      ];
-      if (pasteEnabled) {
-        entries.splice(1, 0, ["Paste", "paste"]);
-      }
-      return entries;
-    }
-
-    const entries = [
-      ["Copy", "copy"],
-      ["Rename", "rename"],
-      ["Delete", "delete"],
-      ["Export", "export"]
-    ];
-    if (pasteEnabled) {
-      entries.splice(1, 0, ["Paste", "paste"]);
-    }
-    return entries;
   }
 
   function getFilterEntries() {

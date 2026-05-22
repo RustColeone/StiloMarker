@@ -7,6 +7,7 @@ const MIME_TYPES = {
   ".md": "text/markdown;charset=utf-8",
   ".mtree": "text/plain;charset=utf-8",
   ".urldb": "text/plain;charset=utf-8",
+  ".bmap": "text/plain;charset=utf-8",
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",

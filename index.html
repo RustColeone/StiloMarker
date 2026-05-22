@@ -45,6 +45,7 @@
               <button id="new-markdown-button" type="button">New Markdown</button>
               <button id="new-mtree-button" type="button">New MTREE</button>
               <button id="new-urldb-button" type="button">New URL Album</button>
+              <button id="new-bmap-button" type="button">New Diagram</button>
             </div>
           </div>
 
@@ -62,13 +63,14 @@
             <div id="settings-menu" class="menu-popover" hidden>
               <button id="open-settings-menu-button" type="button">Open Settings</button>
               <button id="toggle-debug-menu-button" type="button">Toggle Log Panel</button>
+              <button id="clear-cache-menu-button" class="menu-danger-button" type="button">Clear All Cache</button>
             </div>
           </div>
         </nav>
 
         <div class="window-caption" aria-hidden="true">Markdown IDE</div>
 
-        <input id="import-file-input" type="file" accept=".md,.mtree,.urldb,.png,.jpg,.jpeg,.gif,.svg,.webp,.bmp,.zip" hidden>
+        <input id="import-file-input" type="file" accept=".md,.mtree,.urldb,.bmap,.png,.jpg,.jpeg,.gif,.svg,.webp,.bmp,.zip" hidden>
         <input id="replace-file-input" type="file" accept=".png,.jpg,.jpeg,.gif,.svg,.webp,.bmp" hidden>
       </header>
 
@@ -405,7 +407,7 @@
               <p class="subtle-label">You can also paste an image, paste a URL, or choose a local file.</p>
               <p id="add-file-source-text" class="subtle-label">No staged file yet.</p>
               <button id="add-file-picker-button" type="button">Choose File</button>
-              <input id="add-file-picker-input" type="file" accept=".md,.mtree,.urldb,.png,.jpg,.jpeg,.gif,.svg,.webp,.bmp" hidden>
+              <input id="add-file-picker-input" type="file" accept=".md,.mtree,.urldb,.bmap,.png,.jpg,.jpeg,.gif,.svg,.webp,.bmp" hidden>
             </div>
           </section>
 

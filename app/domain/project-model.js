@@ -1,5 +1,5 @@
 const ROOT_ID = "root";
-const TEXT_FILE_EXTENSIONS = [".md", ".mtree", ".urldb"];
+const TEXT_FILE_EXTENSIONS = [".md", ".mtree", ".urldb", ".bmap"];
 const IMAGE_FILE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"];
 const ALLOWED_FILE_EXTENSIONS = [...TEXT_FILE_EXTENSIONS, ...IMAGE_FILE_EXTENSIONS];
 
@@ -18,6 +18,10 @@ function isAllowedFileName(name) {
 
 function isTextFileName(name) {
   return TEXT_FILE_EXTENSIONS.includes(getExtension(name));
+}
+
+function isBmapFileName(name) {
+  return getExtension(name) === ".bmap";
 }
 
 function isUrlDbFileName(name) {
@@ -439,6 +443,7 @@ export {
   getPath,
   isImageFileName,
   isAllowedFileName,
+  isBmapFileName,
   isTextFileName,
   isUrlDbFileName,
   listVisibleNodes,

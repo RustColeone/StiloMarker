@@ -284,6 +284,15 @@ p {
   background: var(--accent-soft);
 }
 
+.menu-popover button.menu-danger-button {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.menu-popover button.menu-danger-button:hover {
+  background: rgba(199, 78, 57, 0.14);
+}
+
 .workspace-shell {
   min-height: 0;
   display: grid;
@@ -657,6 +666,7 @@ p {
 .tree-icon.is-mtree,
 .tree-icon.is-urldb,
 .tree-icon.is-remote-image,
+.tree-icon.is-bmap,
 .tree-icon.is-file {
   border: 1px solid var(--border-strong);
   background: var(--surface-0);
@@ -682,6 +692,7 @@ p {
 .tree-icon.is-mtree::before,
 .tree-icon.is-urldb::before,
 .tree-icon.is-remote-image::before,
+.tree-icon.is-bmap::before,
 .tree-icon.is-file::before {
   content: "";
   position: absolute;
@@ -698,6 +709,7 @@ p {
 .tree-icon.is-md::after,
 .tree-icon.is-mtree::after,
 .tree-icon.is-urldb::after,
+.tree-icon.is-bmap::after,
 .tree-icon.is-remote-image::after {
   position: absolute;
   inset: 2px 1px 1px;
@@ -728,6 +740,16 @@ p {
   content: "IMG";
   color: var(--accent-strong);
   font-size: 6px;
+}
+
+.tree-icon.is-bmap {
+  border-color: #3dba72;
+  background: rgba(61, 186, 114, 0.14);
+}
+
+.tree-icon.is-bmap::after {
+  content: "BM";
+  color: #3dba72;
 }
 
 .icon-button {
@@ -889,13 +911,6 @@ p {
   border-left: 0;
   border-bottom: 0;
 }
-.editor-tab[draggable="true"] {
-  cursor: grab;
-}
-
-.editor-tab[draggable="true"]:active {
-  cursor: grabbing;
-}
 
 .editor-tab.is-active {
   background: var(--editor);
@@ -954,11 +969,17 @@ p {
   margin-left: 2px;
   color: var(--text-dim);
   font-size: 12px;
+  cursor: pointer;
 }
 
 .editor-tab:hover .tab-close,
 .editor-tab.is-active .tab-close {
   color: var(--text);
+}
+
+.editor-tab:hover .tab-close:hover,
+.editor-tab.is-active .tab-close:hover {
+  color: var(--danger);
 }
 
 .editor-grid {
@@ -1325,6 +1346,32 @@ p {
 .token-mtree-description {
   color: #6a9955;
 }
+
+/* ── color swatch (shared across file types) ─────────────────────────────── */
+.token-color-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 2px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+/* ── .bmap syntax tokens ──────────────────────────────────────────────────── */
+.token-bmap-comment       { color: #6a9955; }
+.token-bmap-selector      { color: #4ec9b0; font-weight: 600; }
+.token-bmap-brace         { color: #c586c0; }
+.token-bmap-key           { color: #9cdcfe; }
+.token-bmap-style-key     { color: #ce9178; }
+.token-bmap-sep           { color: var(--text-dim); }
+.token-bmap-value         { color: #d4d4d4; }
+.token-bmap-keyword       { color: #569cd6; }
+.token-bmap-color         { color: #ce9178; }
+.token-bmap-number        { color: #b5cea8; }
+.token-bmap-endpoint-node { color: #dcdcaa; }
+.token-bmap-endpoint-side { color: #b5cea8; }
 
 .preview-output {
   overflow: auto;
@@ -1949,4 +1996,301 @@ menu {
 
 .preview-output {
   height: 100%;
+}
+
+/* ──────────────────────────────────────────────
+   .bmap Diagram Canvas
+   ────────────────────────────────────────────── */
+
+.bmap-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--surface-0);
+  background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
+  background-size: 24px 24px;
+  cursor: grab;
+  user-select: none;
+}
+
+.bmap-canvas:active {
+  cursor: grabbing;
+}
+
+.bmap-inner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+.bmap-nodes-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+/* ── Nodes ── */
+
+.bmap-node {
+  position: absolute;
+  min-width: 120px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  cursor: default;
+  overflow: visible;
+}
+
+.bmap-node-circle {
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+/* ── Snap points ── */
+
+.bmap-snap {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface-0);
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.bmap-node:hover .bmap-snap {
+  opacity: 1;
+}
+
+/* side 0 = top */
+.bmap-snap-0 {
+  top: 0;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+/* side 1 = right */
+.bmap-snap-1 {
+  top: 50%;
+  right: 0;
+  transform: translate(50%, -50%);
+}
+
+/* side 2 = bottom */
+.bmap-snap-2 {
+  bottom: 0;
+  left: 50%;
+  transform: translate(-50%, 50%);
+}
+
+/* side 3 = left */
+.bmap-snap-3 {
+  top: 50%;
+  left: 0;
+  transform: translate(-50%, -50%);
+}
+
+/* ── Node interior ── */
+
+.bmap-node-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.bmap-node-name {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bmap-node-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.bmap-node-action {
+  padding: 1px 4px;
+  font-size: 10px;
+  line-height: 1.4;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.bmap-node:hover .bmap-node-action {
+  opacity: 1;
+}
+
+.bmap-node-action:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.bmap-node-text {
+  padding: 4px 8px 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── Floating file-preview popup ── */
+
+.bmap-file-popup {
+  position: fixed;
+  z-index: 60;
+  width: 300px;
+  max-height: 440px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--menu);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+
+.bmap-popup-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+  flex-shrink: 0;
+}
+
+.bmap-popup-title {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.bmap-popup-close {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.bmap-popup-close:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.bmap-popup-togglebar {
+  display: flex;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-0);
+  flex-shrink: 0;
+}
+
+.bmap-popup-mode-btn {
+  padding: 2px 8px;
+  font-size: 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.bmap-popup-mode-btn.is-active {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.bmap-popup-body {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.bmap-popup-body-msg {
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.bmap-popup-content {
+  zoom: 0.5;
+  padding: 8px 12px;
+  overflow-wrap: break-word;
+}
+
+.bmap-popup-content pre {
+  overflow-x: auto;
+}
+
+/* ── Zoom/pan controls ── */
+
+.bmap-controls {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 10;
+}
+
+.bmap-control-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bmap-control-btn:hover {
+  background: var(--surface-2);
 }
