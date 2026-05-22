@@ -1,11 +1,11 @@
-import { ROOT_ID, findChildByName, getNode, getNodeIdByPath, getPath, isAllowedFileName, isImageFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
+import { ROOT_ID, findChildByName, getNode, getNodeIdByPath, getPath, isAllowedFileName, isBmapFileName, isImageFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
 import { createProjectController, seedDefaultProject } from "./domain/project-service.js";
 import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
 import { createCollaborationRuntime } from "./services/collaboration-service.js";
 import { dataUrlToBlob, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent } from "./services/file-content-service.js";
 import { renderMarkdown } from "./services/markdown-service.js";
 import { buildModuleMapSection, replaceOrAppendModuleMap } from "./services/mtree-module-map-service.js";
-import { registerOfflineShell } from "./services/offline-service.js";
+import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
 import { applyTheme, loadSettings, saveSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
 import { pingServer } from "./services/sync-service.js";
@@ -14,6 +14,8 @@ import { appendUrlDbEntry, formatUrlDbEntryBody, moveUrlDbEntry, moveUrlDbEntryB
 import { createZip, downloadBlob } from "./services/zip-service.js";
 import { query } from "./ui/dom.js";
 import { createExplorerView } from "./ui/explorer-view.js";
+import { createBmapView } from "./ui/bmap-view.js";
+import { createDefaultBmap } from "./services/bmap-service.js";
 
 const elements = {
   app: query("#app"),
@@ -98,8 +100,8 @@ const elements = {
   settingsMenu: query("#settings-menu"),
   openSettingsMenuButton: query("#open-settings-menu-button"),
   toggleDebugMenuButton: query("#toggle-debug-menu-button"),
+  clearCacheMenuButton: query("#clear-cache-menu-button"),
   toggleLogButton: query("#toggle-log-button"),
-  newUrlDbButton: query("#new-urldb-button"),
   themeSelect: query("#theme-select"),
   explorerSelect: query("#explorer-select"),
   previewSelect: query("#preview-select"),
@@ -141,6 +143,8 @@ const elements = {
   deleteSelectedButton: query("#delete-selected-button"),
   newMarkdownButton: query("#new-markdown-button"),
   newMtreeButton: query("#new-mtree-button"),
+  newUrlDbButton: query("#new-urldb-button"),
+  newBmapButton: query("#new-bmap-button"),
   exportSelectedButton: query("#export-selected-button"),
   toggleExplorerMenuButton: query("#toggle-explorer-menu-button"),
   togglePreviewButton: query("#toggle-preview-button"),
@@ -230,6 +234,11 @@ const editorHistory = {
 
 let editorIsComposing = false;
 let lastRenderedFileId = null;
+let pendingExternalEditorSelection = null;
+// Set to true while applyEditorRender is executing so that the synchronous
+// updateStatus callback triggered by notifyEditorChanged does not mistake a
+// transient focus state during innerHTML replacement for "editor lost focus".
+let _editorUpdating = false;
 
 const debugState = {
   entries: [],
@@ -268,7 +277,7 @@ function escapeHtmlAttribute(value) {
 }
 
 function isPreviewableFileName(name) {
-  return name.endsWith(".md") || isImageFileName(name) || isUrlDbFileName(name);
+  return name.endsWith(".md") || isImageFileName(name) || isUrlDbFileName(name) || isBmapFileName(name);
 }
 
 function looksLikeUrl(value) {
@@ -331,8 +340,10 @@ function getNextDefaultFileName(project, parentId, kind) {
     ? "new markdown"
     : kind === "mtree"
       ? "new mtree"
-      : "new url album";
-  const extension = kind === "md" ? ".md" : kind === "mtree" ? ".mtree" : ".urldb";
+      : kind === "bmap"
+        ? "new diagram"
+        : "new url album";
+  const extension = kind === "md" ? ".md" : kind === "mtree" ? ".mtree" : kind === "bmap" ? ".bmap" : ".urldb";
   let index = 1;
   let candidate = slugTitle(label, index, extension);
   while (findChildByName(project, parentId, candidate)) {
@@ -396,6 +407,70 @@ function logDebug(kind, message, detail = "") {
   }
 
   renderDebugPanel();
+}
+
+function getEditorLineIndexAtOffset(textOffset) {
+  const lineEls = Array.from(
+    elements.editorContent.querySelectorAll(":scope > .editor-line")
+  );
+  let remaining = Math.max(0, textOffset);
+  for (let index = 0; index < lineEls.length; index += 1) {
+    const lineLen = lineEls[index].textContent.length;
+    if (remaining <= lineLen) {
+      return index;
+    }
+    remaining -= lineLen + 1;
+  }
+  return Math.max(0, lineEls.length - 1);
+}
+
+function formatEditorDebugValue(value) {
+  return String(value ?? "")
+    .replaceAll("\\", "\\\\")
+    .replaceAll("\n", "\\n")
+    .replaceAll("\t", "\\t");
+}
+
+function getEditorTraceDetail(extra = {}) {
+  const selection = window.getSelection();
+  const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  const { start, end } = getEditorSelection();
+  const lineEls = Array.from(
+    elements.editorContent.querySelectorAll(":scope > .editor-line")
+  );
+  const lineIndex = getEditorLineIndexAtOffset(start);
+  const line = lineEls[lineIndex] ?? null;
+  const nextLine = lineEls[lineIndex + 1] ?? null;
+  const container = range?.startContainer ?? null;
+  const containerName = container?.nodeType === Node.TEXT_NODE
+    ? "#text"
+    : container?.nodeName?.toLowerCase() ?? "null";
+  const containerText = container?.nodeType === Node.TEXT_NODE
+    ? container.textContent ?? ""
+    : "";
+
+  const detail = {
+    file: controller.getActiveFile()?.name ?? "",
+    active: document.activeElement === elements.editorContent ? "editor" : document.activeElement?.nodeName?.toLowerCase() ?? "null",
+    sel: `${start}-${end}`,
+    dom: `${containerName}@${range?.startOffset ?? 0}`,
+    domText: formatEditorDebugValue(containerText),
+    line: lineIndex,
+    lineText: formatEditorDebugValue(line?.textContent ?? ""),
+    lineHtml: formatEditorDebugValue(line?.innerHTML ?? ""),
+    nextLineText: formatEditorDebugValue(nextLine?.textContent ?? ""),
+    autocomplete: elements.editorAutocomplete.hidden ? "hidden" : "visible",
+    history: `${editorHistory.index}/${editorHistory.stack.length}`,
+    ...extra
+  };
+
+  return Object.entries(detail)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(" ; ");
+}
+
+function traceEditorEvent(message, extra = {}) {
+  logDebug("editor", message, getEditorTraceDetail(extra));
 }
 
 function getSelectedTarget() {
@@ -642,10 +717,237 @@ function buildProjectFileSuggestions(project, activeFileId, kind = "path") {
     .sort((left, right) => left.detail.localeCompare(right.detail));
 }
 
+// ── .bmap autocomplete helpers ──────────────────────────────────────────────
+
+/** Determine block depth and type at a given cursor position in a .bmap source. */
+function findBmapBlockContext(before) {
+  let depth = 0;
+  let currentBlockType = null;
+  const re = /\.(node|connect)\s*\{|\{|\}/g;
+  let m;
+  while ((m = re.exec(before)) !== null) {
+    if (m[1]) {
+      if (depth === 0) currentBlockType = m[1];
+      depth++;
+    } else if (m[0] === "{") {
+      depth++;
+    } else {
+      depth--;
+      if (depth <= 0) { depth = 0; currentBlockType = null; }
+    }
+  }
+  return { depth, blockType: currentBlockType, inStylesBlock: depth >= 2 };
+}
+
+/** Build an autocomplete context object for .bmap files. */
+function findBmapAutocompleteContext(force) {
+  const value = getEditorText();
+  const cursor = getEditorSelection().start;
+  const before = value.slice(0, cursor);
+  const lineStart = before.lastIndexOf("\n") + 1;
+  const linePrefix = before.slice(lineStart);
+  const trimmedPrefix = linePrefix.trimStart();
+  const { depth, blockType, inStylesBlock } = findBmapBlockContext(before);
+
+  // Inside styles sub-block (depth >= 2)
+  if (inStylesBlock) {
+    const styleKvMatch = linePrefix.match(/^\s*([\w-]+)\s*:\s*(\w*)$/);
+    if (styleKvMatch) {
+      const key = styleKvMatch[1].toLowerCase();
+      const token = styleKvMatch[2];
+      if (key === "mode")   return { kind: "bmap-mode-value",   token, start: cursor - token.length, end: cursor };
+      if (key === "arrow")  return { kind: "bmap-arrow-value",  token, start: cursor - token.length, end: cursor };
+      if (key === "dashed") return { kind: "bmap-dashed-value", token, start: cursor - token.length, end: cursor };
+    }
+    const propKeyMatch = linePrefix.match(/^\s*([\w-]*)$/);
+    if (propKeyMatch && (propKeyMatch[1] || force)) {
+      const token = propKeyMatch[1];
+      return { kind: "bmap-style-prop", token, start: cursor - token.length, end: cursor };
+    }
+    return null;
+  }
+
+  // Inside a .node or .connect block (depth === 1)
+  if (depth === 1 && blockType) {
+    if (blockType === "connect") {
+      const sideIdxMatch = linePrefix.match(/^\s*(from|to)\s*:\s*\S+\.side\.(\d*)$/);
+      if (sideIdxMatch) {
+        const token = sideIdxMatch[2];
+        return { kind: "bmap-side-index", token, start: cursor - token.length, end: cursor };
+      }
+      const sideKeyMatch = linePrefix.match(/^\s*(from|to)\s*:\s*\S+\.(\w*)$/);
+      if (sideKeyMatch) {
+        const token = sideKeyMatch[2];
+        return { kind: "bmap-side-key", token, start: cursor - token.length, end: cursor };
+      }
+      const endpointMatch = linePrefix.match(/^\s*(from|to)\s*:\s*([A-Za-z0-9_-]*)$/);
+      if (endpointMatch) {
+        const token = endpointMatch[2];
+        return { kind: "bmap-endpoint-node", token, start: cursor - token.length, end: cursor };
+      }
+    }
+    const shapeMatch = linePrefix.match(/^\s*shape\s*:\s*(\w*)$/);
+    if (shapeMatch) {
+      const token = shapeMatch[1];
+      return { kind: "bmap-shape-value", token, start: cursor - token.length, end: cursor };
+    }
+    if (blockType === "node") {
+      const fileMatch = linePrefix.match(/^\s*file\s*:\s*(.*)$/);
+      if (fileMatch) {
+        const token = fileMatch[1];
+        return { kind: "bmap-file-value", token, start: cursor - token.length, end: cursor };
+      }
+    }
+    const propKeyMatch = linePrefix.match(/^\s*([\w-]*)$/);
+    if (propKeyMatch && (propKeyMatch[1] || force)) {
+      const token = propKeyMatch[1];
+      const kind = blockType === "node" ? "bmap-node-prop" : "bmap-connect-prop";
+      return { kind, token, start: cursor - token.length, end: cursor };
+    }
+    return null;
+  }
+
+  // Top level (depth === 0): suggest block types after a leading "."
+  if (depth === 0) {
+    const blockTypeMatch = linePrefix.match(/^\s*\.(\w*)$/);
+    if (blockTypeMatch) {
+      const token = blockTypeMatch[1];
+      return { kind: "bmap-block-type", token, start: cursor - token.length, end: cursor };
+    }
+    if (force && !trimmedPrefix) {
+      return { kind: "bmap-block-type", token: "", start: cursor, end: cursor };
+    }
+  }
+
+  return null;
+}
+
+const BMAP_AUTOCOMPLETE_LABELS = {
+  "bmap-block-type":    "Block type",
+  "bmap-node-prop":     "Node properties",
+  "bmap-connect-prop":  "Connect properties",
+  "bmap-style-prop":    "Style properties",
+  "bmap-shape-value":   "Shape",
+  "bmap-mode-value":    "Connector mode",
+  "bmap-arrow-value":   "Arrow style",
+  "bmap-dashed-value":  "Dashed line",
+  "bmap-side-key":      "Side segment",
+  "bmap-side-index":    "Side — 0 top · 1 right · 2 bottom · 3 left",
+  "bmap-endpoint-node": "Node ID",
+  "bmap-file-value":    "Project files",
+};
+
+function getBmapAutocompleteItems(context, project, activeFile) {
+  const token = context.token.toLowerCase();
+  const filter = (items) =>
+    items.filter((item) => !token || item.label.toLowerCase().startsWith(token) || item.insertText.toLowerCase().startsWith(token));
+
+  switch (context.kind) {
+    case "bmap-block-type":
+      return filter([
+        { label: "node",    detail: "Diagram node — id, name, pos, shape, file, styles", insertText: "node {\n  id: \n  name: \n  pos: {x: 0, y: 0}\n}" },
+        { label: "connect", detail: "Connector between two nodes",                        insertText: "connect {\n  from: .side.1\n  to: .side.3\n}" },
+      ]);
+
+    case "bmap-node-prop":
+      return filter([
+        { label: "id:",     detail: "Unique node identifier",                        insertText: "id: " },
+        { label: "name:",   detail: "Display label shown in the node header",        insertText: "name: " },
+        { label: "text:",   detail: "Secondary description text in the node body",   insertText: "text: " },
+        { label: "shape:",  detail: "Node shape: rect or circle",                    insertText: "shape: " },
+        { label: "pos:",    detail: "Position as {x: N, y: N}",                      insertText: "pos: {x: 0, y: 0}" },
+        { label: "file:",   detail: "Link to a project file (shown via ⊞ preview)", insertText: "file: " },
+        { label: "styles:", detail: "CSS style overrides block",                     insertText: "styles: {\n  \n}" },
+      ]);
+
+    case "bmap-connect-prop":
+      return filter([
+        { label: "from:",   detail: "Source endpoint — nodeId.side.N", insertText: "from: " },
+        { label: "to:",     detail: "Target endpoint — nodeId.side.N", insertText: "to: " },
+        { label: "styles:", detail: "Connector appearance block",       insertText: "styles: {\n  \n}" },
+      ]);
+
+    case "bmap-style-prop":
+      return filter([
+        { label: "background:",   detail: "Fill color, e.g. #fff8dc",           insertText: "background: " },
+        { label: "border:",       detail: "Border shorthand, e.g. 1px solid #aaa", insertText: "border: " },
+        { label: "border-radius:", detail: "Corner radius",                      insertText: "border-radius: " },
+        { label: "color:",        detail: "Text or stroke color",                insertText: "color: " },
+        { label: "font-size:",    detail: "Font size, e.g. 12px",               insertText: "font-size: " },
+        { label: "font-weight:",  detail: "Font weight: bold or normal",        insertText: "font-weight: " },
+        { label: "width:",        detail: "Node width in px",                   insertText: "width: " },
+        { label: "opacity:",      detail: "Opacity 0–1",                        insertText: "opacity: " },
+        { label: "mode:",         detail: "bezier or straight",                 insertText: "mode: " },
+        { label: "arrow:",        detail: "end, start, both, or none",          insertText: "arrow: " },
+        { label: "dashed:",       detail: "true or false",                      insertText: "dashed: " },
+        { label: "thickness:",    detail: "Stroke width in px",                 insertText: "thickness: " },
+      ]);
+
+    case "bmap-shape-value":
+      return filter([
+        { label: "rect",   detail: "Rounded rectangle (default)", insertText: "rect" },
+        { label: "circle", detail: "Circle / oval",               insertText: "circle" },
+      ]);
+
+    case "bmap-mode-value":
+      return filter([
+        { label: "bezier",   detail: "Curved connector (default)", insertText: "bezier" },
+        { label: "straight", detail: "Straight line connector",    insertText: "straight" },
+      ]);
+
+    case "bmap-arrow-value":
+      return filter([
+        { label: "end",   detail: "Arrow at destination (default)", insertText: "end" },
+        { label: "start", detail: "Arrow at source",                insertText: "start" },
+        { label: "both",  detail: "Arrows at both ends",            insertText: "both" },
+        { label: "none",  detail: "No arrowheads",                  insertText: "none" },
+      ]);
+
+    case "bmap-dashed-value":
+      return filter([
+        { label: "false", detail: "Solid line (default)", insertText: "false" },
+        { label: "true",  detail: "Dashed line",          insertText: "true" },
+      ]);
+
+    case "bmap-side-key":
+      return [{ label: "side", detail: "Side segment — follow with .N (0=top 1=right 2=bottom 3=left)", insertText: "side" }];
+
+    case "bmap-side-index":
+      return filter([
+        { label: "0", detail: "Top",    insertText: "0" },
+        { label: "1", detail: "Right",  insertText: "1" },
+        { label: "2", detail: "Bottom", insertText: "2" },
+        { label: "3", detail: "Left",   insertText: "3" },
+      ]);
+
+    case "bmap-endpoint-node": {
+      const content = activeFile?.content ?? "";
+      const nodeIds = [...content.matchAll(/^\s*id\s*:\s*(\S+)/gm)].map((nm) => nm[1]);
+      return filter(nodeIds.map((id) => ({
+        label: id,
+        detail: "Node ID — follow with .side.N",
+        insertText: id,
+      })));
+    }
+
+    case "bmap-file-value":
+      return buildProjectFileSuggestions(project, activeFile?.id ?? null, "path")
+        .filter((item) => !token || item.insertText.toLowerCase().includes(token) || item.label.toLowerCase().includes(token));
+
+    default:
+      return [];
+  }
+}
+
+// ── end .bmap autocomplete helpers ──────────────────────────────────────────
+
 function findAutocompleteContext(force = false) {
   const activeFile = controller.getActiveFile();
   if (!activeFile || !isTextFileName(activeFile.name)) {
     return null;
+  }
+  if (isBmapFileName(activeFile.name)) {
+    return findBmapAutocompleteContext(force);
   }
 
   const value = getEditorText();
@@ -738,8 +1040,15 @@ function showEditorAutocomplete(force = false) {
   const activeFile = controller.getActiveFile();
   const project = controller.getProject();
   const tokenLower = context.token.toLowerCase();
-  const items = buildProjectFileSuggestions(project, activeFile?.id ?? null, context.kind)
-    .filter((item) => !tokenLower || item.insertText.toLowerCase().includes(tokenLower) || item.detail.toLowerCase().includes(tokenLower));
+
+  let items;
+  if (context.kind.startsWith("bmap-")) {
+    items = getBmapAutocompleteItems(context, project, activeFile);
+  } else {
+    items = buildProjectFileSuggestions(project, activeFile?.id ?? null, context.kind)
+      .filter((item) => !tokenLower || item.insertText.toLowerCase().includes(tokenLower) || item.detail.toLowerCase().includes(tokenLower));
+  }
+
   if (items.length === 0) {
     hideEditorAutocomplete();
     return;
@@ -749,7 +1058,9 @@ function showEditorAutocomplete(force = false) {
   autocompleteState.activeIndex = 0;
   autocompleteState.range = { start: context.start, end: context.end };
   autocompleteState.kind = context.kind;
-  elements.editorAutocompleteLabel.textContent = context.kind === "image" ? "Image paths" : "Project paths";
+  elements.editorAutocompleteLabel.textContent = context.kind.startsWith("bmap-")
+    ? (BMAP_AUTOCOMPLETE_LABELS[context.kind] ?? "bmap")
+    : context.kind === "image" ? "Image paths" : "Project paths";
   renderEditorAutocomplete();
 }
 
@@ -878,19 +1189,31 @@ function setEditorSelection(start, end) {
 /** Re-render the syntax-highlighted DOM from plain text, then restore the
  *  given selection.  All programmatic edits go through this. */
 function applyEditorRender(text, selStart, selEnd) {
-  renderEditorContent(text);
-  setEditorSelection(selStart, selEnd);
+  _editorUpdating = true;
+  try {
+    renderEditorContent(text);
+    // Setting innerHTML can cause the contenteditable to lose focus in some
+    // browsers.  Restore focus explicitly so that the subsequent
+    // notifyEditorChanged → updateStatus call still sees the editor as the
+    // active element and does not reset the cursor via loadEditorContent.
+    if (document.activeElement !== elements.editorContent) {
+      elements.editorContent.focus({ preventScroll: true });
+    }
+    setEditorSelection(selStart, selEnd);
+  } finally {
+    _editorUpdating = false;
+  }
 }
 
 /** Push a history snapshot.  Call at logical "checkpoints" (space, enter,
  *  punctuation, paste, indent, drag-drop). */
-function pushEditorHistoryCheckpoint() {
-  const text = getEditorText();
-  const { start, end } = getEditorSelection();
+function pushEditorHistoryState(text, start, end) {
   // Trim any forward (redo) entries once a new branch starts.
   editorHistory.stack.splice(editorHistory.index + 1);
   const last = editorHistory.stack[editorHistory.index];
-  if (last && last.text === text) return; // no change — skip
+  if (last && last.text === text && last.start === start && last.end === end) {
+    return;
+  }
   editorHistory.stack.push({ text, start, end });
   if (editorHistory.stack.length > editorHistory.maxSize) {
     editorHistory.stack.shift();
@@ -898,20 +1221,69 @@ function pushEditorHistoryCheckpoint() {
   editorHistory.index = editorHistory.stack.length - 1;
 }
 
+function clampEditorSelection(text, start, end = start) {
+  const limit = text.length;
+  const nextStart = Math.max(0, Math.min(start, limit));
+  const nextEnd = Math.max(nextStart, Math.min(end, limit));
+  return { start: nextStart, end: nextEnd };
+}
+
+function resetEditorHistory(text, start = 0, end = start) {
+  const selection = clampEditorSelection(text, start, end);
+  editorHistory.stack = [{ text, start: selection.start, end: selection.end }];
+  editorHistory.index = 0;
+  return selection;
+}
+
+function transformEditorOffset(offset, appliedStart, appliedEnd, insertedLength) {
+  if (offset <= appliedStart) return offset;
+  if (offset <= appliedEnd) return appliedStart + insertedLength;
+  return offset + insertedLength - (appliedEnd - appliedStart);
+}
+
+function transformEditorSelection(selection, appliedStart, appliedEnd, insertedLength) {
+  return {
+    start: transformEditorOffset(selection.start, appliedStart, appliedEnd, insertedLength),
+    end: transformEditorOffset(selection.end, appliedStart, appliedEnd, insertedLength)
+  };
+}
+
+function queueExternalEditorSelection(fileId, selection) {
+  pendingExternalEditorSelection = { fileId, start: selection.start, end: selection.end };
+}
+
+function consumeExternalEditorSelection(fileId, text, fallbackStart, fallbackEnd = fallbackStart) {
+  const selection = pendingExternalEditorSelection?.fileId === fileId
+    ? pendingExternalEditorSelection
+    : { start: fallbackStart, end: fallbackEnd };
+  pendingExternalEditorSelection = null;
+  return clampEditorSelection(text, selection.start, selection.end);
+}
+
+function pushEditorHistoryCheckpoint() {
+  const text = getEditorText();
+  const { start, end } = getEditorSelection();
+  pushEditorHistoryState(text, start, end);
+}
+
 function editorUndo() {
   if (editorHistory.index <= 0) return;
+  traceEditorEvent("Undo requested");
   editorHistory.index -= 1;
   const state = editorHistory.stack[editorHistory.index];
   applyEditorRender(state.text, state.start, state.end);
   notifyEditorChanged(state.text);
+  traceEditorEvent("Undo applied", { restored: `${state.start}-${state.end}` });
 }
 
 function editorRedo() {
   if (editorHistory.index >= editorHistory.stack.length - 1) return;
+  traceEditorEvent("Redo requested");
   editorHistory.index += 1;
   const state = editorHistory.stack[editorHistory.index];
   applyEditorRender(state.text, state.start, state.end);
   notifyEditorChanged(state.text);
+  traceEditorEvent("Redo applied", { restored: `${state.start}-${state.end}` });
 }
 
 /** Apply a programmatic text change (autocomplete, indent, drag-drop, etc.)
@@ -920,19 +1292,19 @@ function editorRedo() {
 function applyEditorEdit(newText, newStart, newEnd) {
   pushEditorHistoryCheckpoint(); // snapshot BEFORE the edit
   applyEditorRender(newText, newStart, newEnd);
+  pushEditorHistoryState(newText, newStart, newEnd); // snapshot AFTER the edit
   notifyEditorChanged(newText);
-  pushEditorHistoryCheckpoint(); // snapshot AFTER
 }
 
 /** Load a file's content into the editor, resetting undo history.
  *  Does NOT notify the domain model — used exclusively by updateStatus
  *  when the active file changes so we don't trigger a render feedback loop. */
-function loadEditorContent(text) {
-  editorHistory.stack = [];
-  editorHistory.index = -1;
+function loadEditorContent(text, start = 0, end = start) {
+  const selection = resetEditorHistory(text, start, end);
+  pendingExternalEditorSelection = null;
+  hideEditorAutocomplete();
   renderEditorContent(text);
-  setEditorSelection(0, 0);
-  pushEditorHistoryCheckpoint(); // seed initial undo state
+  setEditorSelection(selection.start, selection.end);
 }
 
 /** Convenience: replace a [start, end) range in the current editor text. */
@@ -1186,6 +1558,21 @@ const collaboration = createCollaborationRuntime({
   },
   applyOperation(clientId, operation) {
     try {
+      const activeFile = controller.getActiveFile();
+      const activePath = activeFile ? getPath(controller.getProject(), activeFile.id) : null;
+      if (
+        operation.type === "patch-file" &&
+        activeFile &&
+        activePath === operation.path &&
+        elements.editorContent === document.activeElement
+      ) {
+        const selection = getEditorSelection();
+        const insertedLength = String(operation.text ?? "").length;
+        queueExternalEditorSelection(
+          activeFile.id,
+          transformEditorSelection(selection, Number(operation.start), Number(operation.end), insertedLength)
+        );
+      }
       controller.applySyncOperation(operation);
       // After a remote patch lands, immediately advance that peer's cached
       // cursor to the end of their insertion so it stays visible and correct
@@ -1303,6 +1690,10 @@ const explorer = createExplorerView({
   },
   canPasteTarget(target) {
     return canPasteIntoExplorerTarget(target);
+  },
+  canPreviewFile(nodeId) {
+    const node = controller.getProject().nodes[nodeId];
+    return node?.kind === "file" && isPreviewableFileName(node.name);
   },
   onAction(action, target, options) {
     selectionNodeId = target.nodeId;
@@ -1645,6 +2036,13 @@ function applyInlineHighlighting(value) {
     .replace(/(^|[^*])(\*[^*]+\*)/g, '$1<span class="token-emphasis">$2</span>');
 }
 
+function renderWhitespaceOnlyEditorLine(rawLine) {
+  if (rawLine.length === 0) {
+    return '<div class="editor-line"></div>';
+  }
+  return `<div class="editor-line">${escapeEditorHtml(rawLine)}</div>`;
+}
+
 function highlightMtreeSource(value) {
   const lines = value.replace(/\r\n/g, "\n").split("\n");
 
@@ -1653,7 +2051,7 @@ function highlightMtreeSource(value) {
     const trimmed = rawLine.trimStart();
 
     if (!trimmed) {
-      return '<div class="editor-line"></div>';
+      return renderWhitespaceOnlyEditorLine(rawLine);
     }
 
     if (trimmed.startsWith("#")) {
@@ -1698,7 +2096,7 @@ function highlightUrlDbSource(value) {
     const trimmed = rawLine.trimStart();
 
     if (!trimmed) {
-      return '<div class="editor-line"></div>';
+      return renderWhitespaceOnlyEditorLine(rawLine);
     }
 
     if (trimmed.startsWith("#")) {
@@ -1722,6 +2120,103 @@ function highlightUrlDbSource(value) {
   }).join("");
 }
 
+function highlightBmapValue(rawVal) {
+  const trimmed = rawVal.trim();
+  if (!trimmed) return "";
+
+  // Opening brace for styles: { sub-block
+  if (trimmed === "{") {
+    return `<span class="token-bmap-brace">${escapeEditorHtml(rawVal)}</span>`;
+  }
+
+  // Inline object: {x: 120, y: 80}
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    const leading = escapeEditorHtml(rawVal.slice(0, rawVal.indexOf("{")));
+    const inner = trimmed.slice(1, -1);
+    const highlightedInner = inner.replace(/([a-zA-Z]\w*)(\s*:\s*)(-?\d+\.?\d*)/g, (m, k, sep, v) =>
+      `<span class="token-bmap-style-key">${escapeEditorHtml(k)}</span><span class="token-bmap-sep">${escapeEditorHtml(sep)}</span><span class="token-bmap-number">${escapeEditorHtml(v)}</span>`
+    );
+    return `${leading}<span class="token-bmap-brace">{</span>${highlightedInner}<span class="token-bmap-brace">}</span>`;
+  }
+
+  // Keywords
+  const BMAP_KEYWORDS = new Set(["rect", "circle", "bezier", "straight", "end", "start", "both", "none", "true", "false"]);
+  if (BMAP_KEYWORDS.has(trimmed)) {
+    return `<span class="token-bmap-keyword">${escapeEditorHtml(rawVal)}</span>`;
+  }
+
+  // Connector endpoint: nodeId.side.N
+  const endpointMatch = trimmed.match(/^(\S+?)\.side\.([0-3])$/);
+  if (endpointMatch) {
+    const [, nodeId, idx] = endpointMatch;
+    const leading = escapeEditorHtml(rawVal.slice(0, rawVal.indexOf(nodeId)));
+    return `${leading}<span class="token-bmap-endpoint-node">${escapeEditorHtml(nodeId)}</span><span class="token-bmap-sep">.side.</span><span class="token-bmap-endpoint-side">${escapeEditorHtml(idx)}</span>`;
+  }
+
+  // Scan for hex color values (may appear mid-string, e.g., "1px solid #aaa")
+  const colorPattern = /#([0-9a-fA-F]{3,8})\b/g;
+  const parts = [];
+  let lastIdx = 0;
+  let m;
+  while ((m = colorPattern.exec(rawVal)) !== null) {
+    if (m.index > lastIdx) {
+      parts.push(`<span class="token-bmap-value">${escapeEditorHtml(rawVal.slice(lastIdx, m.index))}</span>`);
+    }
+    const hex = m[0];
+    parts.push(`<span class="token-color-swatch" style="background:${escapeHtmlAttribute(hex)}"></span><span class="token-bmap-color">${escapeEditorHtml(hex)}</span>`);
+    lastIdx = m.index + hex.length;
+  }
+  if (parts.length > 0) {
+    if (lastIdx < rawVal.length) {
+      parts.push(`<span class="token-bmap-value">${escapeEditorHtml(rawVal.slice(lastIdx))}</span>`);
+    }
+    return parts.join("");
+  }
+
+  // Plain number (with optional unit)
+  if (/^\s*-?\d+(\.\d+)?(px|em|rem|%|pt)?\s*$/.test(rawVal)) {
+    return `<span class="token-bmap-number">${escapeEditorHtml(rawVal)}</span>`;
+  }
+
+  return `<span class="token-bmap-value">${escapeEditorHtml(rawVal)}</span>`;
+}
+
+function highlightBmapSource(value) {
+  const lines = value.replace(/\r\n/g, "\n").split("\n");
+  return lines.map((rawLine) => {
+    const trimmed = rawLine.trimStart();
+    const indent = escapeEditorHtml(rawLine.slice(0, rawLine.length - trimmed.length));
+
+    if (!trimmed) return renderWhitespaceOnlyEditorLine(rawLine);
+
+    // Comment
+    if (trimmed.startsWith("//")) {
+      return `<div class="editor-line"><span class="token-bmap-comment">${escapeEditorHtml(rawLine)}</span></div>`;
+    }
+
+    // Block opener: .node { or .connect {
+    const blockOpenMatch = trimmed.match(/^(\.(node|connect))(\s*\{.*)$/);
+    if (blockOpenMatch) {
+      const [, selector, , rest] = blockOpenMatch;
+      return `<div class="editor-line">${indent}<span class="token-bmap-selector">${escapeEditorHtml(selector)}</span><span class="token-bmap-brace">${escapeEditorHtml(rest)}</span></div>`;
+    }
+
+    // Closing brace
+    if (trimmed === "}") {
+      return `<div class="editor-line">${indent}<span class="token-bmap-brace">}</span></div>`;
+    }
+
+    // Key: value line
+    const kvMatch = trimmed.match(/^([a-zA-Z][\w-]*)(\s*:\s*)(.*)$/);
+    if (kvMatch) {
+      const [, key, sep, val] = kvMatch;
+      return `<div class="editor-line">${indent}<span class="token-bmap-key">${escapeEditorHtml(key)}</span><span class="token-bmap-sep">${escapeEditorHtml(sep)}</span>${highlightBmapValue(val)}</div>`;
+    }
+
+    return `<div class="editor-line">${escapeEditorHtml(rawLine)}</div>`;
+  }).join("");
+}
+
 function highlightMarkdownSource(value) {
   const lines = value.replace(/\r\n/g, "\n").split("\n");
   let inFence = false;
@@ -1729,6 +2224,10 @@ function highlightMarkdownSource(value) {
   return lines.map((rawLine) => {
     const escaped = escapeEditorHtml(rawLine);
     const trimmed = rawLine.trimStart();
+
+    if (!trimmed) {
+      return renderWhitespaceOnlyEditorLine(rawLine);
+    }
 
     if (trimmed.startsWith("```")) {
       inFence = !inFence;
@@ -1859,7 +2358,9 @@ function renderEditorContent(text) {
     ? highlightMtreeSource(normalized)
     : activeFile?.name.endsWith(".urldb")
       ? highlightUrlDbSource(normalized)
-      : highlightMarkdownSource(normalized);
+      : isBmapFileName(activeFile?.name ?? "")
+        ? highlightBmapSource(normalized)
+        : highlightMarkdownSource(normalized);
 
   elements.editorContent.innerHTML = highlightMarkup;
 
@@ -2045,7 +2546,9 @@ function adjustTextareaLinesIndent(textarea, direction) {
 function insertIndentAtCursor() {
   const indentText = getIndentText();
   const { start, end } = getEditorSelection();
+  traceEditorEvent("Tab indent before", { indent: formatEditorDebugValue(indentText) });
   replaceEditorRange(start, end, indentText, start + indentText.length, start + indentText.length);
+  traceEditorEvent("Tab indent after", { indent: formatEditorDebugValue(indentText) });
 }
 
 /** Insert an indent at the caret in a plain <textarea> (used by MTREE dialog). */
@@ -2063,6 +2566,7 @@ function handleIndentKeydown(event) {
   if (event.key !== "Tab" || event.ctrlKey || event.metaKey || event.altKey) {
     return;
   }
+  traceEditorEvent("Tab keydown", { shift: event.shiftKey ? "yes" : "no" });
   event.preventDefault();
   const target = event.currentTarget;
   if (target.tagName === "TEXTAREA") {
@@ -2084,6 +2588,12 @@ function handleIndentKeydown(event) {
 }
 
 function handleEditorKeydown(event) {
+  if (event.key === " " || event.key === "Enter") {
+    traceEditorEvent("Keydown", { key: event.key === " " ? "Space" : event.key });
+  }
+  if (event.key === "Tab") {
+    traceEditorEvent("Keydown", { key: "Tab" });
+  }
   // Custom undo/redo — must intercept before the browser's native handler,
   // because innerHTML-rerender destroys the browser's native undo stack.
   if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "z") {
@@ -2105,6 +2615,11 @@ function handleEditorKeydown(event) {
   }
 
   if (!elements.editorAutocomplete.hidden) {
+    // Space dismisses autocomplete so the user can keep typing freely.
+    if (event.key === " ") {
+      hideEditorAutocomplete();
+      // Do not preventDefault — the space character should still be inserted.
+    }
     if (event.key === "ArrowDown") {
       event.preventDefault();
       autocompleteState.activeIndex = (autocompleteState.activeIndex + 1) % autocompleteState.items.length;
@@ -2119,6 +2634,7 @@ function handleEditorKeydown(event) {
     }
     if (event.key === "Enter" || (event.key === "Tab" && !event.shiftKey)) {
       event.preventDefault();
+      traceEditorEvent("Autocomplete accepted from keydown", { key: event.key });
       acceptEditorAutocomplete();
       return;
     }
@@ -2980,6 +3496,34 @@ function renderPreviewContent(target, project, file) {
 
   if (file.name.endsWith(".mtree")) {
     target.innerHTML = `<pre><code>${escapeEditorHtml(file.content)}</code></pre>`;
+    return { shouldTypeset: false, content: "" };
+  }
+
+  if (isBmapFileName(file.name)) {
+    const bmapView = createBmapView({
+      container: target,
+      onOpenLinkedFile(filePath) {
+        const basePath = getPath(project, file.id);
+        const baseSegments = basePath.split("/").filter(Boolean);
+        baseSegments.pop();
+        const resolvedPath = normalizePath([...baseSegments, filePath].join("/"));
+        const nodeId = getNodeIdByPath(project, resolvedPath);
+        if (nodeId) {
+          openFileFromExplorer(nodeId);
+        }
+      },
+      resolveFileContent(filePath) {
+        const basePath = getPath(project, file.id);
+        const baseSegments = basePath.split("/").filter(Boolean);
+        baseSegments.pop();
+        const resolvedPath = normalizePath([...baseSegments, filePath].join("/"));
+        const nodeId = getNodeIdByPath(project, resolvedPath);
+        if (!nodeId) return null;
+        const node = project.nodes[nodeId];
+        return (node?.kind === "file") ? (node.content ?? null) : null;
+      },
+    });
+    bmapView.render(file.content);
     return { shouldTypeset: false, content: "" };
   }
 
@@ -3877,40 +4421,38 @@ function updateStatus(project) {
   elements.editorContent.dataset.placeholder = isTextFile
     ? "Select or create a .md, .mtree, .urldb, or image file"
     : "Image assets are preview-only in the source pane.";
+  const nextText = isTextFile
+    ? selectedEntry
+      ? formatUrlDbEntryBody(selectedEntry.entry)
+      : activeFile.content
+    : `[${activeFile.name}]\n\nThis image asset is preview-only in the source pane.\nUse the preview pane to inspect it or Explorer > Add File to replace it.`;
   const fileChanged = activeFile.id !== lastRenderedFileId;
+  const editorHasFocus = elements.editorContent === document.activeElement;
   if (fileChanged) {
     // Clear stale remote cursors when the viewed file changes.
     renderRemoteCursors([]);
   }
-  if (fileChanged || elements.editorContent !== document.activeElement) {
+  if (!_editorUpdating && fileChanged) {
     lastRenderedFileId = activeFile.id;
-    const nextText = isTextFile
-      ? selectedEntry
-        ? formatUrlDbEntryBody(selectedEntry.entry)
-        : activeFile.content
-      : `[${activeFile.name}]\n\nThis image asset is preview-only in the source pane.\nUse the preview pane to inspect it or Explorer > Add File to replace it.`;
     loadEditorContent(nextText);
   } else {
-    // Editor has focus and same file is open.
-    // Read the canonical text from the model (NOT from the DOM) so that
-    // remote operations — which update the model but not the DOM — are
-    // always reflected in the editor.
-    const modelText = isTextFile
-      ? selectedEntry ? formatUrlDbEntryBody(selectedEntry.entry) : activeFile.content
-      : "";
     const domText = getEditorText();
-    if (modelText !== domText) {
-      // Model and DOM diverged (e.g. a remote patch just landed).
-      // Re-render from the model and restore the cursor as best we can.
-      const { start, end } = getEditorSelection();
-      renderEditorContent(modelText);
-      setEditorSelection(start, end);
+    if (nextText !== domText) {
+      if (editorHasFocus) {
+        // External same-file changes invalidate snapshot-based undo history.
+        // Keep the caret stable when possible, then fence the history stack at
+        // the new synchronized content so Ctrl+Z cannot replay stale text.
+        const { start, end } = getEditorSelection();
+        const nextSelection = consumeExternalEditorSelection(activeFile.id, nextText, start, end);
+        hideEditorAutocomplete();
+        applyEditorRender(nextText, nextSelection.start, nextSelection.end);
+        resetEditorHistory(nextText, nextSelection.start, nextSelection.end);
+      } else {
+        loadEditorContent(nextText);
+      }
       // Reposition remote cursor overlays after the DOM re-render.
       renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
     }
-    // If model === DOM the user's own keystrokes are already in the DOM;
-    // the input handler will call renderEditorContent + setEditorSelection
-    // itself — skip re-rendering here so we never destroy the caret.
     syncEditorScroll();
   }
   const previewState = renderPreviewContent(elements.preview, project, previewFile);
@@ -3971,8 +4513,9 @@ function createItem(kind) {
     }
 
     const name = getNextDefaultFileName(project, parent.id, kind);
-    controller.createFile(parent.id, name, "");
-    publishOperation({ type: "create-file", parentPath, name, content: "" });
+    const content = kind === "bmap" ? createDefaultBmap() : "";
+    controller.createFile(parent.id, name, content);
+    publishOperation({ type: "create-file", parentPath, name, content });
   } catch (error) {
     notify(error.message);
   }
@@ -4101,6 +4644,14 @@ async function handleExplorerAction(action, target, options = {}) {
   selectionNodeId = nodeId;
   sourceUrlDbEntry = target.entryId ? { fileId: nodeId, entryId: target.entryId } : null;
   logDebug("action", "Explorer action", action);
+  if (action === "open-source") {
+    setActiveSourceFile(nodeId);
+    return;
+  }
+  if (action === "open-preview") {
+    setPreviewFile(nodeId);
+    return;
+  }
   if (action.startsWith("filter-")) {
     settings.explorerFilter = action.replace("filter-", "");
     persistSettings();
@@ -4131,6 +4682,10 @@ async function handleExplorerAction(action, target, options = {}) {
   }
   if (action === "new-urldb") {
     createItem("urldb");
+    return;
+  }
+  if (action === "new-bmap") {
+    createItem("bmap");
     return;
   }
   if (action === "add-file") {
@@ -4195,6 +4750,17 @@ elements.editorContent.addEventListener("beforeinput", (event) => {
   const activeFile = controller.getActiveFile();
   if (!activeFile || !isTextFileName(activeFile.name)) return;
 
+  if (
+    event.inputType === "insertParagraph" ||
+    event.inputType === "insertLineBreak" ||
+    (event.inputType === "insertText" && /^\s+$/.test(event.data ?? ""))
+  ) {
+    traceEditorEvent("beforeinput", {
+      inputType: event.inputType,
+      data: formatEditorDebugValue(event.data ?? "")
+    });
+  }
+
   const { start, end } = getEditorSelection();
   const hasSelection = start !== end;
 
@@ -4209,6 +4775,18 @@ elements.editorContent.addEventListener("beforeinput", (event) => {
     return;
   }
 
+  // Always intercept Enter — letting the browser handle it natively creates a
+  // plain <div> (not .editor-line) inside the contenteditable.  That element
+  // is invisible to getEditorText() and causes getEditorSelection() to return
+  // offset 0, which corrupts every subsequent edit (Space, Tab, backspace…).
+  if (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak") {
+    event.preventDefault();
+    replaceEditorRange(start, end, "\n");
+    renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
+    hideEditorAutocomplete();
+    return;
+  }
+
   // Non-empty selection: browser may collapse or destroy .editor-line divs
   // when the operation spans multiple lines. Take over completely.
   if (hasSelection) {
@@ -4217,12 +4795,6 @@ elements.editorContent.addEventListener("beforeinput", (event) => {
       replaceEditorRange(start, end, event.data ?? "");
       renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
       showEditorAutocomplete();
-      return;
-    }
-    if (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak") {
-      event.preventDefault();
-      replaceEditorRange(start, end, "\n");
-      renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
       return;
     }
     if (
@@ -4240,6 +4812,31 @@ elements.editorContent.addEventListener("beforeinput", (event) => {
       return;
     }
   }
+
+  // No selection, single-char delete: intercept when the cursor is right at
+  // a line boundary so the browser doesn't merge two .editor-line divs into
+  // one (which would drop the \n from getEditorText() and corrupt the model).
+  if (!hasSelection) {
+    const value = getEditorText();
+    if (event.inputType === "deleteContentBackward") {
+      // Backspace at the very start of a line (start > 0 and char before is \n)
+      if (start > 0 && value[start - 1] === "\n") {
+        event.preventDefault();
+        replaceEditorRange(start - 1, start, "");
+        renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
+        return;
+      }
+    }
+    if (event.inputType === "deleteContentForward") {
+      // Delete at the very end of a line (char at cursor is \n)
+      if (start < value.length && value[start] === "\n") {
+        event.preventDefault();
+        replaceEditorRange(start, start + 1, "");
+        renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
+        return;
+      }
+    }
+  }
 });
 
 elements.editorContent.addEventListener("input", (event) => {
@@ -4253,25 +4850,41 @@ elements.editorContent.addEventListener("input", (event) => {
   }
   const currentText = getEditorText();
   const { start, end } = getEditorSelection();
-  notifyEditorChanged(currentText);
-  // Push a history checkpoint at natural "boundary" input types so Ctrl+Z
-  // is chunky (word/paragraph) rather than character-by-character.
   const inputType = (event instanceof InputEvent ? event.inputType : "") ?? "";
-  const isBoundary =
+  if (
     inputType === "insertParagraph" ||
     inputType === "insertLineBreak" ||
-    inputType === "insertFromPaste" ||
-    inputType === "deleteByCut" ||
-    inputType === "insertFromDrop" ||
-    inputType.startsWith("deleteWord") ||
-    inputType.startsWith("deleteLine");
-  if (isBoundary) {
-    pushEditorHistoryCheckpoint();
+    (inputType === "insertText" && /^\s+$/.test(event.data ?? ""))
+  ) {
+    traceEditorEvent("input", {
+      inputType,
+      data: formatEditorDebugValue(event.data ?? "")
+    });
   }
+  // Record every native text edit, including spaces, before the synchronous
+  // model update path can disturb DOM focus/selection state.
+  pushEditorHistoryState(currentText, start, end);
+  notifyEditorChanged(currentText);
   // Re-render syntax highlighting; must restore selection afterward because
   // innerHTML replacement destroys the native caret.
   renderEditorContent(currentText);
+  // Restore focus if innerHTML replacement caused the contenteditable to lose
+  // focus (observed in some browsers); this keeps the caret in place for the
+  // next keystroke rather than falling back to page-level focus.
+  if (document.activeElement !== elements.editorContent) {
+    elements.editorContent.focus({ preventScroll: true });
+  }
   setEditorSelection(start, end);
+  if (
+    inputType === "insertParagraph" ||
+    inputType === "insertLineBreak" ||
+    (inputType === "insertText" && /^\s+$/.test(event.data ?? ""))
+  ) {
+    traceEditorEvent("input rendered", {
+      inputType,
+      data: formatEditorDebugValue(event.data ?? "")
+    });
+  }
   // Reposition remote cursor overlays now that the DOM has changed.
   renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
   showEditorAutocomplete();
@@ -4437,6 +5050,7 @@ elements.deleteSelectedButton.addEventListener("click", () => {
 elements.newMarkdownButton.addEventListener("click", () => createItem("md"));
 elements.newMtreeButton.addEventListener("click", () => createItem("mtree"));
 elements.newUrlDbButton.addEventListener("click", () => createItem("urldb"));
+elements.newBmapButton.addEventListener("click", () => createItem("bmap"));
 elements.addFilePickerButton.addEventListener("click", () => elements.addFilePickerInput.click());
 elements.addFilePickerInput.addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
@@ -4570,6 +5184,33 @@ function toggleLogPanel() {
   logDebug("action", settings.debugPanel ? "Log panel enabled" : "Log panel disabled");
 }
 
+async function clearAllCache() {
+  const confirmed = await showConfirmDialog({
+    title: "Clear Cached App Data",
+    message: "This clears the app's cached shell files and unregisters its service worker, then reloads the page. Your workspace content and settings will stay intact.",
+    acceptLabel: "Clear Cache"
+  });
+  if (!confirmed) {
+    logDebug("response", "Cache clear cancelled");
+    return;
+  }
+
+  elements.settingsMenu.hidden = true;
+  try {
+    const result = await clearOfflineShellData();
+    logDebug(
+      "action",
+      "App cache cleared",
+      `caches=${result.deletedCacheKeys.length} ; registrations=${result.unregisteredScopes.length}`
+    );
+    window.location.reload();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logDebug("response", "Cache clear failed", message);
+    notify(`Failed to clear cache: ${message}`);
+  }
+}
+
 elements.toggleExplorerMenuButton.addEventListener("click", toggleExplorer);
 elements.togglePreviewButton.addEventListener("click", togglePreview);
 elements.toggleLogButton.addEventListener("click", toggleLogPanel);
@@ -4589,6 +5230,9 @@ elements.openSettingsMenuButton.addEventListener("click", () => {
 });
 
 elements.toggleDebugMenuButton.addEventListener("click", toggleLogPanel);
+elements.clearCacheMenuButton.addEventListener("click", () => {
+  void clearAllCache();
+});
 
 debugTabs.forEach((tab) => {
   tab.element.addEventListener("click", () => {

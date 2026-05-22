@@ -322,7 +322,7 @@ async function run() {
   assert.match(page, /id="presence-strip"/);
   assert.match(page, /id="workspace-mode-toggle"/);
   assert.match(page, /id="workspace-mode-row"/);
-  assert.match(page, /accept="\.md,\.mtree,\.urldb,\.png,\.jpg,\.jpeg,\.gif,\.svg,\.webp,\.bmp,\.zip"/);
+  assert.match(page, /accept="\.md,\.mtree,\.urldb,\.bmap,\.png,\.jpg,\.jpeg,\.gif,\.svg,\.webp,\.bmp,\.zip"/);
   assert.match(page, /id="server-indicator"/);
   assert.match(page, /id="display-name-input"/);
   assert.match(page, /id="explorer-context-menu"/);
@@ -333,6 +333,7 @@ async function run() {
   assert.match(page, /id="replace-file-input"/);
   assert.match(page, /id="settings-menu-button"/);
   assert.match(page, /id="toggle-debug-menu-button"/);
+  assert.match(page, /id="clear-cache-menu-button"/);
   assert.match(page, /id="debug-panel"/);
   assert.match(page, /id="debug-splitter"/);
   assert.match(page, /id="debug-copy-button"/);

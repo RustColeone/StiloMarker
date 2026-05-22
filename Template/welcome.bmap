@@ -1,0 +1,103 @@
+.node {
+  id: start
+  name: Welcome to .bmap Diagrams
+  text: Visual brainstorming in Stlio Marker
+  shape: rect
+  pos: {x: 60, y: 60}
+  styles: {
+    background: #fffbe6
+    border: 1px solid #e8b339
+    border-radius: 8px
+    width: 240px
+  }
+}
+
+.node {
+  id: source
+  name: Source Pane
+  text: Edit raw .bmap text here
+  shape: rect
+  pos: {x: 380, y: 30}
+  styles: {
+    background: #f0f0ff
+    border: 1px solid #7b68ee
+    border-radius: 8px
+    width: 200px
+  }
+}
+
+.node {
+  id: preview
+  name: Preview Pane
+  text: See the rendered diagram here
+  shape: rect
+  pos: {x: 380, y: 150}
+  styles: {
+    background: #e6f4ff
+    border: 1px solid #1677ff
+    border-radius: 8px
+    width: 200px
+  }
+}
+
+.node {
+  id: file
+  name: Linked Notes
+  text: Each node can link to a .md file
+  shape: circle
+  pos: {x: 680, y: 85}
+  file: welcome.md
+  styles: {
+    background: #f0fff4
+    border: 1px solid #3dba72
+    width: 160px
+  }
+}
+
+.connect {
+  from: start.side.1
+  to: source.side.3
+  styles: {
+    mode: bezier
+    arrow: end
+    dashed: false
+    thickness: 2
+    color: #7b68ee
+  }
+}
+
+.connect {
+  from: start.side.1
+  to: preview.side.3
+  styles: {
+    mode: bezier
+    arrow: end
+    dashed: false
+    thickness: 2
+    color: #1677ff
+  }
+}
+
+.connect {
+  from: source.side.2
+  to: preview.side.0
+  styles: {
+    mode: straight
+    arrow: both
+    dashed: true
+    thickness: 1
+    color: #aaaaaa
+  }
+}
+
+.connect {
+  from: preview.side.1
+  to: file.side.3
+  styles: {
+    mode: bezier
+    arrow: end
+    dashed: false
+    thickness: 2
+    color: #3dba72
+  }
+}
