@@ -177,6 +177,7 @@ let previewFileId = controller.getProject().activeFileId ?? null;
 let previewUrlDbEntry = null;
 let sourceUrlDbEntry = null;
 let mathJaxLoadPromise = null;
+let previewBmapView = null;
 
 let selectionNodeId = controller.getProject().activeFileId ?? controller.getProject().rootId;
 const syncState = {
@@ -297,6 +298,21 @@ function normalizePath(path) {
     nextSegments.push(segment);
   });
   return nextSegments.join("/");
+}
+
+function getRelativeProjectPath(fromFilePath, toFilePath) {
+  const fromSegments = fromFilePath.split("/").filter(Boolean);
+  const toSegments = toFilePath.split("/").filter(Boolean);
+  fromSegments.pop();
+
+  while (fromSegments.length > 0 && toSegments.length > 0 && fromSegments[0] === toSegments[0]) {
+    fromSegments.shift();
+    toSegments.shift();
+  }
+
+  const upSegments = fromSegments.map(() => "..");
+  const relative = [...upSegments, ...toSegments].join("/");
+  return relative || toFilePath.split("/").filter(Boolean).pop() || "";
 }
 
 function inferNameFromUrl(value) {
@@ -3500,10 +3516,14 @@ function renderPreviewContent(target, project, file) {
   }
 
   if (isBmapFileName(file.name)) {
-    const bmapView = createBmapView({
-      container: target,
+    if (!previewBmapView) {
+      previewBmapView = createBmapView({ container: target });
+    }
+    const basePath = getPath(project, file.id);
+    previewBmapView.render({
+      documentKey: file.id,
+      source: file.content,
       onOpenLinkedFile(filePath) {
-        const basePath = getPath(project, file.id);
         const baseSegments = basePath.split("/").filter(Boolean);
         baseSegments.pop();
         const resolvedPath = normalizePath([...baseSegments, filePath].join("/"));
@@ -3513,17 +3533,42 @@ function renderPreviewContent(target, project, file) {
         }
       },
       resolveFileContent(filePath) {
-        const basePath = getPath(project, file.id);
         const baseSegments = basePath.split("/").filter(Boolean);
         baseSegments.pop();
         const resolvedPath = normalizePath([...baseSegments, filePath].join("/"));
         const nodeId = getNodeIdByPath(project, resolvedPath);
-        if (!nodeId) return null;
+        if (!nodeId) {
+          return null;
+        }
         const node = project.nodes[nodeId];
-        return (node?.kind === "file") ? (node.content ?? null) : null;
+        return node?.kind === "file" ? (node.content ?? null) : null;
       },
+      listProjectFiles() {
+        return Object.values(project.nodes)
+          .filter((node) => node?.kind === "file" && node.id !== file.id)
+          .map((node) => {
+            const path = getPath(project, node.id);
+            return {
+              fileId: node.id,
+              kind: isImageFileName(node.name) ? "image" : "file",
+              label: path,
+              path: getRelativeProjectPath(basePath, path)
+            };
+          })
+          .sort((left, right) => left.label.localeCompare(right.label));
+      },
+      resolveRelativeFilePath(targetFileId) {
+        const targetNode = project.nodes[targetFileId];
+        if (!targetNode || targetNode.kind !== "file" || targetNode.id === file.id) {
+          return null;
+        }
+        return getRelativeProjectPath(basePath, getPath(project, targetNode.id));
+      },
+      onCommit(nextSource, detail) {
+        updateFileContentFromPreview(file.id, nextSource, detail?.reason ?? "bmap preview edit");
+      },
+      logDebug,
     });
-    bmapView.render(file.content);
     return { shouldTypeset: false, content: "" };
   }
 
@@ -4497,6 +4542,25 @@ function publishOperation(operation) {
   collaboration.publishOperation(operation).catch((error) => {
     notify(error.message);
   });
+}
+
+function updateFileContentFromPreview(fileId, nextContent, reason = "preview edit") {
+  const project = controller.getProject();
+  const file = project.nodes[fileId];
+  if (!file || file.kind !== "file") {
+    return;
+  }
+  if (file.content === nextContent) {
+    return;
+  }
+
+  controller.updateContent(fileId, nextContent);
+  publishOperation({
+    type: "update-file",
+    path: getPath(project, fileId),
+    content: nextContent
+  });
+  logDebug("action", "Bmap preview updated", reason);
 }
 
 function createItem(kind) {
