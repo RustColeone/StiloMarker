@@ -9,6 +9,128 @@
  * Snap side indices: 0=top, 1=right, 2=bottom, 3=left
  */
 
+const BMAP_DEFAULT_RECT_WIDTH = 220;
+const BMAP_DEFAULT_RECT_HEIGHT = 92;
+const BMAP_DEFAULT_CIRCLE_SIZE = 160;
+
+const DEFAULT_NODE_STYLES = {
+  rect: {
+    background: "#fffbe6",
+    border: "1px solid #e8b339",
+    "border-radius": "8px",
+    width: String(BMAP_DEFAULT_RECT_WIDTH),
+    height: String(BMAP_DEFAULT_RECT_HEIGHT)
+  },
+  circle: {
+    background: "#f0fff4",
+    border: "1px solid #3dba72",
+    width: String(BMAP_DEFAULT_CIRCLE_SIZE),
+    height: String(BMAP_DEFAULT_CIRCLE_SIZE)
+  }
+};
+
+const DEFAULT_CONNECTOR_STYLES = {
+  mode: "bezier",
+  arrow: "end",
+  dashed: false,
+  thickness: 2,
+  color: "#1677ff"
+};
+
+function toBmapInteger(value, fallback = 0, minimum = Number.NEGATIVE_INFINITY) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.max(minimum, parsed);
+}
+
+function coerceBmapShape(shape) {
+  return String(shape ?? "rect").trim().toLowerCase() === "circle" ? "circle" : "rect";
+}
+
+function normalizeBmapStyles(styles) {
+  const next = {};
+  for (const [key, value] of Object.entries(styles ?? {})) {
+    if (value == null) {
+      continue;
+    }
+    const trimmed = String(value).trim();
+    if (!trimmed) {
+      continue;
+    }
+    next[key] = trimmed;
+  }
+  return next;
+}
+
+function getBmapNodeDimensions(node) {
+  const shape = coerceBmapShape(node?.shape);
+  const defaultWidth = shape === "circle" ? BMAP_DEFAULT_CIRCLE_SIZE : BMAP_DEFAULT_RECT_WIDTH;
+  const defaultHeight = shape === "circle" ? defaultWidth : BMAP_DEFAULT_RECT_HEIGHT;
+  const width = toBmapInteger(node?.styles?.width, defaultWidth, 1);
+  const height = toBmapInteger(node?.styles?.height, defaultHeight, 1);
+  return { width, height };
+}
+
+function cloneBmapAst(ast) {
+  return {
+    nodes: (ast?.nodes ?? []).map((node) => ({
+      ...node,
+      pos: { ...node.pos },
+      styles: { ...(node.styles ?? {}) }
+    })),
+    connectors: (ast?.connectors ?? []).map((connector) => ({
+      ...connector,
+      styles: { ...(connector.styles ?? {}) }
+    })),
+    parseErrors: [...(ast?.parseErrors ?? [])]
+  };
+}
+
+function createBmapNode({ id, name = "", text = "", shape = "rect", pos = { x: 0, y: 0 }, file = null, styles = {} }) {
+  const nextShape = coerceBmapShape(shape);
+  return {
+    id: String(id ?? "").trim(),
+    name: String(name ?? "").trim(),
+    text: String(text ?? "").trim(),
+    shape: nextShape,
+    pos: {
+      x: toBmapInteger(pos?.x, 0),
+      y: toBmapInteger(pos?.y, 0)
+    },
+    file: file ? String(file).trim() : null,
+    styles: {
+      ...DEFAULT_NODE_STYLES[nextShape],
+      ...normalizeBmapStyles(styles)
+    }
+  };
+}
+
+function createBmapConnector({ from = "", to = "", styles = {} }) {
+  return {
+    from: String(from ?? "").trim(),
+    to: String(to ?? "").trim(),
+    styles: {
+      ...DEFAULT_CONNECTOR_STYLES,
+      ...styles,
+      dashed: String(styles?.dashed ?? DEFAULT_CONNECTOR_STYLES.dashed).trim() === "true" || styles?.dashed === true,
+      thickness: toBmapInteger(styles?.thickness, DEFAULT_CONNECTOR_STYLES.thickness, 1),
+      color: String(styles?.color ?? DEFAULT_CONNECTOR_STYLES.color).trim(),
+      mode: String(styles?.mode ?? DEFAULT_CONNECTOR_STYLES.mode).trim(),
+      arrow: String(styles?.arrow ?? DEFAULT_CONNECTOR_STYLES.arrow).trim()
+    }
+  };
+}
+
+function normalizeBmapAst(ast) {
+  return {
+    nodes: (ast?.nodes ?? []).map((node) => createBmapNode(node)),
+    connectors: (ast?.connectors ?? []).map((connector) => createBmapConnector(connector)),
+    parseErrors: [...(ast?.parseErrors ?? [])]
+  };
+}
+
 /**
  * Parse a nested property object from a string.
  * Handles both comma-separated inline form ({x: 120, y: 80}) and multi-line form.
@@ -121,37 +243,30 @@ function parseBmap(source) {
     const props = parseBlockProperties(blockBody);
 
     if (blockType === "node") {
-      nodes.push({
+      nodes.push(createBmapNode({
         id: String(props.id ?? `node-${nodes.length + 1}`).trim(),
-        name: String(props.name ?? "").trim(),
-        text: String(props.text ?? "").trim(),
-        shape: String(props.shape ?? "rect").trim(),
+        name: props.name,
+        text: props.text,
+        shape: props.shape,
         pos: {
-          x: Number(props.pos?.x ?? 0) || 0,
-          y: Number(props.pos?.y ?? 0) || 0,
+          x: props.pos?.x ?? 0,
+          y: props.pos?.y ?? 0,
         },
         file: props.file ? String(props.file).trim() : null,
         styles: typeof props.styles === "object" ? props.styles : {},
-      });
+      }));
     } else if (blockType === "connect") {
-      connectors.push({
-        from: String(props.from ?? "").trim(),
-        to: String(props.to ?? "").trim(),
-        styles: {
-          mode: String(props.styles?.mode ?? "bezier").trim(),
-          arrow: String(props.styles?.arrow ?? "end").trim(),
-          dashed: String(props.styles?.dashed ?? "false").trim() === "true",
-          thickness: Number(props.styles?.thickness ?? 2) || 2,
-          color: String(props.styles?.color ?? "#888888").trim(),
-        },
-      });
+      connectors.push(createBmapConnector({
+        from: props.from,
+        to: props.to,
+        styles: props.styles ?? {},
+      }));
     }
 
     // Advance past this block so we don't re-enter it
     blockPattern.lastIndex = i;
   }
-
-  return { nodes, connectors, parseErrors };
+  return normalizeBmapAst({ nodes, connectors, parseErrors });
 }
 
 /**
@@ -160,16 +275,22 @@ function parseBmap(source) {
  * @returns {string}
  */
 function serializeBmap({ nodes, connectors }) {
+  const normalized = normalizeBmapAst({ nodes, connectors, parseErrors: [] });
   const parts = [];
 
-  for (const node of nodes) {
+  for (const node of normalized.nodes) {
+    const { width, height } = getBmapNodeDimensions(node);
+    const styleEntries = Object.entries({
+      ...normalizeBmapStyles(node.styles),
+      width: String(width),
+      height: String(height)
+    });
     const lines = [".node {", `  id: ${node.id}`];
     if (node.name) lines.push(`  name: ${node.name}`);
     if (node.text) lines.push(`  text: ${node.text}`);
     lines.push(`  shape: ${node.shape ?? "rect"}`);
     lines.push(`  pos: {x: ${node.pos?.x ?? 0}, y: ${node.pos?.y ?? 0}}`);
     if (node.file) lines.push(`  file: ${node.file}`);
-    const styleEntries = Object.entries(node.styles ?? {});
     if (styleEntries.length > 0) {
       lines.push("  styles: {");
       for (const [k, v] of styleEntries) lines.push(`    ${k}: ${v}`);
@@ -179,7 +300,7 @@ function serializeBmap({ nodes, connectors }) {
     parts.push(lines.join("\n"));
   }
 
-  for (const conn of connectors) {
+  for (const conn of normalized.connectors) {
     const s = conn.styles ?? {};
     const lines = [
       ".connect {",
@@ -216,6 +337,7 @@ function createDefaultBmap() {
     border: 1px solid #e8b339
     border-radius: 8px
     width: 220px
+    height: 92px
   }
 }
 
@@ -230,6 +352,7 @@ function createDefaultBmap() {
     border: 1px solid #1677ff
     border-radius: 8px
     width: 220px
+    height: 92px
   }
 }
 
@@ -254,4 +377,17 @@ function isBmapFileName(name) {
   return name.toLowerCase().endsWith(".bmap");
 }
 
-export { parseBmap, serializeBmap, createDefaultBmap, isBmapFileName };
+export {
+  BMAP_DEFAULT_CIRCLE_SIZE,
+  BMAP_DEFAULT_RECT_HEIGHT,
+  BMAP_DEFAULT_RECT_WIDTH,
+  cloneBmapAst,
+  createBmapConnector,
+  createBmapNode,
+  createDefaultBmap,
+  getBmapNodeDimensions,
+  isBmapFileName,
+  normalizeBmapAst,
+  parseBmap,
+  serializeBmap,
+};

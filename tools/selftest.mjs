@@ -31,6 +31,7 @@ async function run() {
   const projectModel = await import(pathToFileURL(resolve(root, "app/domain/project-model.js")).href);
   const zipService = await import(pathToFileURL(resolve(root, "app/services/zip-service.js")).href);
   const markdownService = await import(pathToFileURL(resolve(root, "app/services/markdown-service.js")).href);
+  const bmapService = await import(pathToFileURL(resolve(root, "app/services/bmap-service.js")).href);
   const mtreeService = await import(pathToFileURL(resolve(root, "app/services/mtree-module-map-service.js")).href);
   const urldbService = await import(pathToFileURL(resolve(root, "app/services/urldb-service.js")).href);
   const fsAccessService = await import(pathToFileURL(resolve(root, "app/services/fs-access-service.js")).href);
@@ -164,6 +165,46 @@ async function run() {
   assert.ok(!htmlWithRawMarkup.includes("&lt;!-- MODULE_MAP_END --&gt;"));
   assert.match(htmlWithRawMarkup, /<!-- MODULE_MAP_END -->/);
   assert.match(htmlWithRawMarkup, /<div class="callout">Block HTML<\/div>/);
+
+  const defaultBmap = bmapService.createDefaultBmap();
+  const parsedBmap = bmapService.parseBmap(defaultBmap);
+  assert.equal(parsedBmap.parseErrors.length, 0);
+  assert.equal(parsedBmap.nodes.length, 2);
+  assert.equal(parsedBmap.connectors.length, 1);
+
+  const normalizedRectNode = bmapService.createBmapNode({
+    id: "node-test",
+    shape: "rect",
+    pos: { x: "12.8", y: "-4.2" },
+    styles: { width: "199.9px", height: "101.6px" }
+  });
+  assert.deepEqual(normalizedRectNode.pos, { x: 12, y: -4 });
+  assert.deepEqual(bmapService.getBmapNodeDimensions(normalizedRectNode), { width: 199, height: 101 });
+
+  const normalizedCircleNode = bmapService.createBmapNode({
+    id: "node-circle",
+    shape: "circle",
+    styles: { width: "144.4px", height: "220px" }
+  });
+  assert.deepEqual(bmapService.getBmapNodeDimensions(normalizedCircleNode), { width: 144, height: 220 });
+
+  const normalizedConnector = bmapService.createBmapConnector({
+    from: "node-1.side.1",
+    to: "node-2.side.3",
+    styles: { dashed: "true", thickness: "3.9px", color: "#ff5500", mode: "straight", arrow: "both" }
+  });
+  assert.equal(normalizedConnector.styles.dashed, true);
+  assert.equal(normalizedConnector.styles.thickness, 3);
+  assert.equal(normalizedConnector.styles.mode, "straight");
+  assert.equal(normalizedConnector.styles.arrow, "both");
+
+  const serializedBmap = bmapService.serializeBmap({
+    nodes: [normalizedRectNode],
+    connectors: [normalizedConnector]
+  });
+  assert.match(serializedBmap, /height: 101/);
+  assert.match(serializedBmap, /thickness: 3/);
+  assert.equal(bmapService.isBmapFileName("diagram.bmap"), true);
 
   const moduleMap = mtreeService.buildModuleMapSection("Core; Root module\n\tChild; Child module\n");
   assert.match(moduleMap.section, /## Module Map/);
@@ -378,6 +419,13 @@ async function run() {
   assert.match(mainSource, /workspaceMode/);
   assert.match(mainSource, /privateProjectSnapshot/);
   assert.match(mainSource, /switchWorkspaceMode/);
+
+  const bmapViewSource = await readFile(resolve(root, "app/ui/bmap-view.js"), "utf8");
+  assert.match(bmapViewSource, /const MIN_SNAP_STEP = 10/);
+  assert.match(bmapViewSource, /let interactionMode = "edit"/);
+  assert.match(bmapViewSource, /function toggleInspectorCollapsed\(\)/);
+  assert.match(bmapViewSource, /Snap \$\{snapStep\}/);
+  assert.match(bmapViewSource, /setInteractionMode\(/);
 
   const collaborationSource = await readFile(resolve(root, "app/services/collaboration-service.js"), "utf8");
   assert.match(collaborationSource, /publishOperation/);

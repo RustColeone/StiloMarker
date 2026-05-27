@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v1";
+const CACHE_NAME = "mdnotes-shell-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -6,12 +6,20 @@ const APP_SHELL = [
   "./app/styles.css",
   "./app/domain/project-model.js",
   "./app/domain/project-service.js",
+  "./app/services/bmap-service.js",
+  "./app/services/collaboration-service.js",
+  "./app/services/file-content-service.js",
   "./app/services/fs-access-service.js",
   "./app/services/markdown-service.js",
+  "./app/services/mtree-module-map-service.js",
   "./app/services/offline-service.js",
   "./app/services/settings-service.js",
   "./app/services/storage-service.js",
+  "./app/services/sync-service.js",
+  "./app/services/template-service.js",
+  "./app/services/urldb-service.js",
   "./app/services/zip-service.js",
+  "./app/ui/bmap-view.js",
   "./app/ui/dom.js",
   "./app/ui/explorer-view.js"
 ];
@@ -53,6 +61,15 @@ self.addEventListener("fetch", (event) => {
       return fetch(event.request)
         .then((networkResponse) => {
           if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== "basic") {
+            return networkResponse;
+          }
+
+          // Never cache an HTML response for a non-HTML URL (SPA fallback poisoning).
+          const ct = networkResponse.headers.get("content-type") || "";
+          const isHtmlResponse = ct.includes("text/html");
+          const isHtmlUrl = new URL(event.request.url).pathname.endsWith(".html")
+            || new URL(event.request.url).pathname === "/";
+          if (isHtmlResponse && !isHtmlUrl) {
             return networkResponse;
           }
 
