@@ -3981,12 +3981,23 @@ function printPreviewAsPdf() {
 }
 
 function applyWorkspaceSettings() {
+  const computedStyles = globalThis.getComputedStyle?.(elements.app);
+  const splitterSize = Number.parseFloat(computedStyles?.getPropertyValue("--splitter-size") ?? "4") || 4;
+  const editorGridWidth = elements.editorGrid.getBoundingClientRect().width;
+  const hasEditorGridWidth = Number.isFinite(editorGridWidth) && editorGridWidth > 0;
+  const defaultSplitPreviewWidth = hasEditorGridWidth
+    ? Math.round(clamp((editorGridWidth - splitterSize) / 2, 280, Math.max(320, editorGridWidth - 280)))
+    : 420;
+  const previewWidth = settings.previewWidthCustomized
+    ? settings.previewWidth
+    : defaultSplitPreviewWidth;
+
   elements.app.dataset.explorer = settings.explorer;
   elements.app.dataset.preview = settings.preview;
   elements.app.dataset.wordWrap = settings.wordWrap ? "on" : "off";
   elements.app.dataset.debug = settings.debugPanel ? "on" : "off";
   elements.app.style.setProperty("--sidebar-width", `${settings.sidebarWidth}px`);
-  elements.app.style.setProperty("--preview-width", `${settings.previewWidth}px`);
+  elements.app.style.setProperty("--preview-width", `${previewWidth}px`);
   elements.app.style.setProperty("--debug-height", `${settings.debugPanelHeight}px`);
   elements.app.style.setProperty("--indent-tab-size", "4");
   // Word-wrap is CSS-driven via data-word-wrap; no textarea.wrap needed.
@@ -4047,6 +4058,7 @@ elements.editorSplitter.addEventListener("pointerdown", (event) => {
   startPointerResize(event, (moveEvent) => {
     const gridRect = elements.editorGrid.getBoundingClientRect();
     const nextWidth = clamp(gridRect.right - moveEvent.clientX, 280, Math.max(320, gridRect.width - 280));
+    settings.previewWidthCustomized = true;
     settings.previewWidth = Math.round(nextWidth);
     persistSettings();
     renderEditorContent(getEditorText());
