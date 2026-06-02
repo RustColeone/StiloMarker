@@ -12,6 +12,8 @@ This file captures deferred feature work that should be revisited after the upco
 
 ### 1. Linked Notes and Backlinks Panel
 
+[Link Text](Nothing.md)
+
 Goal:
 - Add outgoing links, backlinks, and missing-link detection for markdown notes.
 

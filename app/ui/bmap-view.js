@@ -49,6 +49,9 @@ const SAFE_STYLE_PROPS = new Set([
 let popupEl = null;
 let popupClickOff = null;
 let popupEscOff = null;
+let popupZoom = 1;
+
+const POPUP_ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5];
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -244,13 +247,70 @@ function showBmapFilePopup(anchorElement, filePath, fileContent) {
   titleEl.className = "bmap-popup-title";
   titleEl.textContent = filePath;
   titleEl.title = filePath;
+
+  const zoomLabel = document.createElement("span");
+  zoomLabel.className = "bmap-popup-zoom-label";
+  zoomLabel.textContent = `${Math.round(popupZoom * 100)}%`;
+
+  function applyZoom(contentArea) {
+    contentArea.style.zoom = popupZoom;
+    zoomLabel.textContent = `${Math.round(popupZoom * 100)}%`;
+  }
+
+  let contentAreaRef = null;
+
+  const zoomOutBtn = document.createElement("button");
+  zoomOutBtn.type = "button";
+  zoomOutBtn.className = "bmap-popup-zoom-btn";
+  zoomOutBtn.textContent = "−";
+  zoomOutBtn.title = "Zoom out";
+  zoomOutBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const idx = POPUP_ZOOM_STEPS.indexOf(popupZoom);
+    if (idx > 0) {
+      popupZoom = POPUP_ZOOM_STEPS[idx - 1];
+      if (contentAreaRef) applyZoom(contentAreaRef);
+    }
+  });
+
+  const zoomInBtn = document.createElement("button");
+  zoomInBtn.type = "button";
+  zoomInBtn.className = "bmap-popup-zoom-btn";
+  zoomInBtn.textContent = "+";
+  zoomInBtn.title = "Zoom in";
+  zoomInBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const idx = POPUP_ZOOM_STEPS.indexOf(popupZoom);
+    if (idx < POPUP_ZOOM_STEPS.length - 1) {
+      popupZoom = POPUP_ZOOM_STEPS[idx + 1];
+      if (contentAreaRef) applyZoom(contentAreaRef);
+    }
+  });
+
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
   closeBtn.className = "bmap-popup-close";
   closeBtn.textContent = "×";
   closeBtn.title = "Close";
   closeBtn.addEventListener("click", setPopupHidden);
-  titleBar.append(titleEl, closeBtn);
+  titleBar.append(titleEl, zoomOutBtn, zoomLabel, zoomInBtn, closeBtn);
+
+  let dragOffset = null;
+  titleBar.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || e.target.closest("button")) return;
+    e.preventDefault();
+    const rect = popupEl.getBoundingClientRect();
+    dragOffset = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    titleBar.setPointerCapture(e.pointerId);
+  });
+  titleBar.addEventListener("pointermove", (e) => {
+    if (!dragOffset) return;
+    popupEl.style.left = `${e.clientX - dragOffset.x}px`;
+    popupEl.style.top = `${e.clientY - dragOffset.y}px`;
+  });
+  titleBar.addEventListener("pointerup", () => { dragOffset = null; });
+  titleBar.addEventListener("pointercancel", () => { dragOffset = null; });
+
   popupEl.append(titleBar);
 
   const body = document.createElement("div");
@@ -263,6 +323,8 @@ function showBmapFilePopup(anchorElement, filePath, fileContent) {
   } else if (fileContent.startsWith("data:image/")) {
     const contentArea = document.createElement("div");
     contentArea.className = "bmap-popup-content";
+    contentAreaRef = contentArea;
+    applyZoom(contentArea);
     const image = document.createElement("img");
     image.src = fileContent;
     image.style.maxWidth = "100%";
@@ -283,6 +345,8 @@ function showBmapFilePopup(anchorElement, filePath, fileContent) {
     rawBtn.textContent = "Raw";
     const contentArea = document.createElement("div");
     contentArea.className = "bmap-popup-content";
+    contentAreaRef = contentArea;
+    applyZoom(contentArea);
 
     function showMode(mode) {
       contentArea.replaceChildren();
@@ -345,6 +409,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
   let sourceText = "";
   let ast = normalizeBmapAst({ nodes: [], connectors: [], parseErrors: [] });
   let selected = null;
+  let nodeClipboard = null;
   let pan = { x: 40, y: 40 };
   let zoom = 1;
   let gesture = null;
@@ -557,6 +622,45 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       selected = null;
       renderScene();
       commitAst("bmap:delete-connector");
+    }
+  }
+
+  function handleCanvasKeydown(event) {
+    if (event.key === "Delete" || event.key === "Backspace") {
+      if (selected) {
+        deleteSelected();
+      }
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key === "c") {
+      const node = getSelectedNode();
+      if (node) {
+        nodeClipboard = JSON.parse(JSON.stringify(node));
+      }
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key === "v") {
+      if (!isEditingEnabled() || !nodeClipboard) {
+        return;
+      }
+      const existingIds = new Set(ast.nodes.map((n) => n.id));
+      let newId = `${nodeClipboard.id}-copy`;
+      let counter = 1;
+      while (existingIds.has(newId)) {
+        newId = `${nodeClipboard.id}-copy-${counter++}`;
+      }
+      const newNode = createBmapNode({
+        ...nodeClipboard,
+        id: newId,
+        pos: {
+          x: snapValue(nodeClipboard.pos.x + snapStep * 2, snapStep),
+          y: snapValue(nodeClipboard.pos.y + snapStep * 2, snapStep),
+        },
+      });
+      ast.nodes.push(newNode);
+      selected = { type: "node", id: newNode.id };
+      renderScene();
+      commitAst("bmap:paste-node");
     }
   }
 
@@ -865,13 +969,15 @@ function createBmapView({ container, ...defaultOptions } = {}) {
 
     const inspector = document.createElement("aside");
     inspector.className = "bmap-inspector";
+    const snappedWidth = snapSizeValue(width, snapStep);
+    const snappedHeight = snapSizeValue(height, snapStep);
     inspector.innerHTML = `
       <div class="bmap-inspector-header">
         <h3>Node</h3>
         <div class="subtle-label">${escapeHtml(node.id)}</div>
       </div>
       ${isReadOnly ? '<div class="bmap-inspector-note">Read-only mode is on. Switch back to editing to modify this node.</div>' : ""}
-      <form class="bmap-inspector-form">
+      <form class="bmap-inspector-form" novalidate>
         <fieldset class="bmap-inspector-fieldset"${isReadOnly ? " disabled" : ""}>
         <label class="bmap-field">
           <span>Name</span>
@@ -914,11 +1020,11 @@ function createBmapView({ container, ...defaultOptions } = {}) {
         <div class="bmap-field-row">
           <label class="bmap-field">
             <span>Width</span>
-            <input name="width" type="number" step="${snapStep}" min="${minSize}" value="${width}">
+            <input name="width" type="number" step="${snapStep}" min="${minSize}" value="${snappedWidth}">
           </label>
           <label class="bmap-field">
             <span>Height</span>
-            <input name="height" type="number" step="${snapStep}" min="${minSize}" value="${height}">
+            <input name="height" type="number" step="${snapStep}" min="${minSize}" value="${snappedHeight}">
           </label>
         </div>
         <div class="bmap-field-row">
@@ -1119,7 +1225,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
         <div class="subtle-label">${escapeHtml(connector.from)} → ${escapeHtml(connector.to)}</div>
       </div>
       ${isReadOnly ? '<div class="bmap-inspector-note">Read-only mode is on. Switch back to editing to modify this connector.</div>' : ""}
-      <form class="bmap-inspector-form">
+      <form class="bmap-inspector-form" novalidate>
         <fieldset class="bmap-inspector-fieldset"${isReadOnly ? " disabled" : ""}>
         <div class="bmap-field-row">
           <label class="bmap-field">
@@ -1620,8 +1726,14 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       startPan(event);
     });
 
+    workspace.addEventListener("keydown", (event) => {
+      if (event.target.closest("form")) {
+        return;
+      }
+      handleCanvasKeydown(event);
+    });
+
     canvas.addEventListener("wheel", (event) => {
-      event.preventDefault();
       const previousZoom = zoom;
       zoom = clamp(zoom + (event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP), MIN_ZOOM, MAX_ZOOM);
       const rect = canvas.getBoundingClientRect();

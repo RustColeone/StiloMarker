@@ -1,6 +1,6 @@
-# STLIO MARKER
+# STILO MARKER
 
-STLIO MARKER is a browser-based Markdown workspace for writing notes, organizing files, previewing content, and managing image URL albums in one page.
+STILO MARKER is a browser-based Markdown workspace for writing notes, organizing files, previewing content, and managing image URL albums in one page.
 
 It supports:
 
@@ -61,7 +61,7 @@ npm run backend:start
 npm run backend:selftest
 ```
 
-## How To Use STLIO MARKER
+## How To Use STILO MARKER
 
 ## 1. Create Or Open A Workspace
 
@@ -71,7 +71,7 @@ Use the top menu bar:
 - `File > Open Directory` to work against a real folder on disk
 - `File > Import File or Zip` to load existing content
 
-If you use `Open Directory`, changes can be saved back to the selected folder. In non-Chromium browsers, STLIO MARKER falls back to in-browser storage and export.
+If you use `Open Directory`, changes can be saved back to the selected folder. In non-Chromium browsers, STILO MARKER falls back to in-browser storage and export.
 
 ## 2. Create Content
 
@@ -182,7 +182,7 @@ The collaboration sidebar shows session status and presence.
 
 ## 9. View And Debug
 
-STLIO MARKER includes a built-in log panel.
+STILO MARKER includes a built-in log panel.
 
 Use:
 

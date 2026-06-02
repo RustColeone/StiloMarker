@@ -10,7 +10,7 @@
  */
 
 const BMAP_DEFAULT_RECT_WIDTH = 220;
-const BMAP_DEFAULT_RECT_HEIGHT = 92;
+const BMAP_DEFAULT_RECT_HEIGHT = 90;
 const BMAP_DEFAULT_CIRCLE_SIZE = 160;
 
 const DEFAULT_NODE_STYLES = {
@@ -196,10 +196,10 @@ function parseBlockProperties(text) {
       props[key] = parseNestedObject(inner);
       i = j;
     } else {
-      // Simple string value until end of line
+      // Simple string value until end of line; \n in source becomes real newline
       const valStart = i;
       while (i < normalized.length && normalized[i] !== "\n") i++;
-      if (key) props[key] = normalized.slice(valStart, i).trim();
+      if (key) props[key] = normalized.slice(valStart, i).trim().replace(/\\n/g, "\n");
     }
   }
 
@@ -286,8 +286,8 @@ function serializeBmap({ nodes, connectors }) {
       height: String(height)
     });
     const lines = [".node {", `  id: ${node.id}`];
-    if (node.name) lines.push(`  name: ${node.name}`);
-    if (node.text) lines.push(`  text: ${node.text}`);
+    if (node.name) lines.push(`  name: ${node.name.replace(/\n/g, "\\n")}`);
+    if (node.text) lines.push(`  text: ${node.text.replace(/\n/g, "\\n")}`);
     lines.push(`  shape: ${node.shape ?? "rect"}`);
     lines.push(`  pos: {x: ${node.pos?.x ?? 0}, y: ${node.pos?.y ?? 0}}`);
     if (node.file) lines.push(`  file: ${node.file}`);
@@ -337,7 +337,7 @@ function createDefaultBmap() {
     border: 1px solid #e8b339
     border-radius: 8px
     width: 220px
-    height: 92px
+    height: 90px
   }
 }
 
@@ -352,7 +352,7 @@ function createDefaultBmap() {
     border: 1px solid #1677ff
     border-radius: 8px
     width: 220px
-    height: 92px
+    height: 90px
   }
 }
 

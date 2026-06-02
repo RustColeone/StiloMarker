@@ -3,7 +3,7 @@ import { createProjectController, seedDefaultProject } from "./domain/project-se
 import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
 import { createCollaborationRuntime } from "./services/collaboration-service.js";
 import { dataUrlToBlob, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent } from "./services/file-content-service.js";
-import { renderMarkdown } from "./services/markdown-service.js";
+import { extractMarkdownLinks, renderMarkdown } from "./services/markdown-service.js";
 import { buildModuleMapSection, replaceOrAppendModuleMap } from "./services/mtree-module-map-service.js";
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
 import { applyTheme, loadSettings, saveSettings } from "./services/settings-service.js";
@@ -2047,7 +2047,10 @@ function escapeEditorHtml(value) {
 function applyInlineHighlighting(value) {
   return value
     .replace(/(`[^`]*`)/g, '<span class="token-inline-code">$1</span>')
-    .replace(/(\[[^\]]+\]\([^)]+\))/g, '<span class="token-link">$1</span>')
+    .replace(/\[([^\]]*)\]\(([^)]*)\)/g, (_, text, href) => {
+      const attrHref = href.replace(/"/g, '&quot;');
+      return `<span class="token-link" data-href="${attrHref}">[${text}](${href})</span>`;
+    })
     .replace(/(\*\*[^*]+\*\*)/g, '<span class="token-strong">$1</span>')
     .replace(/(^|[^*])(\*[^*]+\*)/g, '$1<span class="token-emphasis">$2</span>');
 }
@@ -2420,6 +2423,280 @@ function renderEditorContent(text) {
 // work; TEXT is ignored but extracted from the DOM instead.
 function renderEditorDecorations(_text) {
   renderEditorContent(getEditorText());
+}
+
+// ── Link hover tooltip ───────────────────────────────────────────────────────
+
+const editorLinkTooltip = (() => {
+  const el = document.createElement("div");
+  el.className = "editor-link-tooltip";
+  el.hidden = true;
+  el.setAttribute("aria-hidden", "true");
+
+  const header = document.createElement("div");
+  header.className = "editor-link-tooltip-header";
+
+  const nameEl = document.createElement("span");
+  nameEl.className = "editor-link-tooltip-name";
+
+  const hintEl = document.createElement("span");
+  hintEl.className = "editor-link-tooltip-hint";
+  hintEl.textContent = "Follow Link (Ctrl+Click)";
+
+  header.append(nameEl, hintEl);
+
+  const previewEl = document.createElement("div");
+  previewEl.className = "editor-link-tooltip-preview preview-output";
+
+  el.append(header, previewEl);
+  document.body.append(el);
+  return { el, nameEl, hintEl, previewEl };
+})();
+
+let _linkTooltipTimer = null;
+let _linkTooltipHideTimer = null;
+let _linkTooltipCurrentHref = null;
+let _lastHoveredLinkEl = null;
+
+function resolveEditorLinkHref(href) {
+  const project = controller.getProject();
+  const activeFile = controller.getActiveFile();
+  if (!activeFile || !href) return null;
+  if (/^(https?:\/\/|mailto:|data:|blob:|#|\/)/i.test(href)) return null;
+  const basePath = getPath(project, activeFile.id);
+  const baseSegments = basePath.split("/").filter(Boolean);
+  baseSegments.pop();
+  const resolvedPath = normalizePath([...baseSegments, href].join("/"));
+  const nodeId = getNodeIdByPath(project, resolvedPath);
+  const node = nodeId ? project.nodes[nodeId] : null;
+  return node?.kind === "file" ? { nodeId, node, path: resolvedPath } : null;
+}
+
+function openLinkFromEditor(href) {
+  if (!href) return;
+  if (/^https?:\/\//i.test(href)) {
+    window.open(href, "_blank", "noreferrer");
+    return;
+  }
+  const resolved = resolveEditorLinkHref(href);
+  if (!resolved) {
+    notify(`Cannot resolve link: ${href}`);
+    return;
+  }
+  openFileFromExplorer(resolved.nodeId);
+}
+
+function showLinkTooltipContent(linkEl) {
+  const href = linkEl.dataset.href ?? "";
+  _linkTooltipCurrentHref = href;
+
+  const project = controller.getProject();
+  const resolved = resolveEditorLinkHref(href);
+
+  if (!resolved) {
+    editorLinkTooltip.nameEl.textContent = href || "(empty link)";
+    if (/^https?:\/\//i.test(href)) {
+      editorLinkTooltip.nameEl.className = "editor-link-tooltip-name";
+      editorLinkTooltip.hintEl.textContent = "External — Ctrl+Click to open in browser";
+      if (/\.(png|jpe?g|gif|webp|svg|bmp)(\?.*)?$/i.test(href)) {
+        editorLinkTooltip.previewEl.innerHTML = `<img src="${escapeHtmlAttribute(href)}" alt="" style="max-width:100%;height:auto">`;
+        editorLinkTooltip.previewEl.hidden = false;
+      } else {
+        editorLinkTooltip.previewEl.innerHTML = "";
+        editorLinkTooltip.previewEl.hidden = true;
+      }
+    } else {
+      editorLinkTooltip.nameEl.className = "editor-link-tooltip-name is-unresolved";
+      editorLinkTooltip.hintEl.textContent = "File not found in project";
+      editorLinkTooltip.previewEl.innerHTML = "";
+      editorLinkTooltip.previewEl.hidden = true;
+    }
+    return;
+  }
+
+  const { node, nodeId } = resolved;
+  editorLinkTooltip.nameEl.textContent = resolved.path;
+  editorLinkTooltip.nameEl.className = "editor-link-tooltip-name";
+  editorLinkTooltip.hintEl.textContent = "Follow Link (Ctrl+Click)";
+  editorLinkTooltip.previewEl.hidden = false;
+
+  if (node.name.endsWith(".md")) {
+    editorLinkTooltip.previewEl.innerHTML = renderMarkdown(node.content, {
+      resolveUrl(url) { return resolveProjectAssetUrl(project, nodeId, url); }
+    });
+  } else if (isImageFileName(node.name)) {
+    editorLinkTooltip.previewEl.innerHTML = `<img src="${escapeHtmlAttribute(node.content)}" alt="${escapeHtmlAttribute(node.name)}" style="max-width:100%;height:auto">`;
+  } else {
+    editorLinkTooltip.previewEl.innerHTML = `<pre><code>${escapeEditorHtml(node.content ?? "")}</code></pre>`;
+  }
+}
+
+function positionLinkTooltip(clientX, clientY) {
+  const el = editorLinkTooltip.el;
+  const vpW = window.innerWidth;
+  const vpH = window.innerHeight;
+  const ttW = 380;
+  const ttMaxH = 320;
+  let left = clientX + 14;
+  let top = clientY + 18;
+  if (left + ttW > vpW - 8) left = clientX - ttW - 14;
+  if (top + ttMaxH > vpH - 8) top = Math.max(8, clientY - ttMaxH - 8);
+  el.style.left = `${Math.max(4, left)}px`;
+  el.style.top = `${Math.max(4, top)}px`;
+}
+
+function showLinkTooltip(linkEl, clientX, clientY) {
+  clearTimeout(_linkTooltipTimer);
+  clearTimeout(_linkTooltipHideTimer);
+  const href = linkEl.dataset.href ?? "";
+  if (!href) return;
+  _linkTooltipTimer = setTimeout(() => {
+    if (_lastHoveredLinkEl !== linkEl) return;
+    showLinkTooltipContent(linkEl);
+    editorLinkTooltip.el.hidden = false;
+    positionLinkTooltip(clientX, clientY);
+  }, 400);
+}
+
+function hideLinkTooltip(immediate = false) {
+  clearTimeout(_linkTooltipTimer);
+  if (immediate) {
+    editorLinkTooltip.el.hidden = true;
+    _linkTooltipCurrentHref = null;
+    return;
+  }
+  clearTimeout(_linkTooltipHideTimer);
+  _linkTooltipHideTimer = setTimeout(() => {
+    if (!editorLinkTooltip.el.matches(":hover")) {
+      editorLinkTooltip.el.hidden = true;
+      _linkTooltipCurrentHref = null;
+    }
+  }, 120);
+}
+
+function handleEditorLinkHover(event) {
+  const activeFile = controller.getActiveFile();
+  if (!activeFile?.name.endsWith(".md")) {
+    if (!editorLinkTooltip.el.hidden) hideLinkTooltip(true);
+    _lastHoveredLinkEl = null;
+    return;
+  }
+  const linkEl = event.target?.closest?.(".token-link[data-href]") ?? null;
+  if (linkEl !== _lastHoveredLinkEl) {
+    _lastHoveredLinkEl = linkEl;
+    if (linkEl) {
+      showLinkTooltip(linkEl, event.clientX, event.clientY);
+    } else if (!editorLinkTooltip.el.matches(":hover")) {
+      hideLinkTooltip();
+    }
+  }
+}
+
+function handleEditorMouseLeave() {
+  _lastHoveredLinkEl = null;
+  hideLinkTooltip();
+}
+
+editorLinkTooltip.el.addEventListener("mouseleave", () => hideLinkTooltip(true));
+
+// ── Links panel (outgoing + backlinks) ───────────────────────────────────────
+
+const linksPanelEl = document.getElementById("links-panel");
+const outgoingLinksListEl = document.getElementById("outgoing-links-list");
+const backlinksListEl = document.getElementById("backlinks-list");
+
+function renderLinksPanel(project, activeFile) {
+  if (!linksPanelEl) return;
+  if (!activeFile || !activeFile.name.endsWith(".md")) {
+    linksPanelEl.hidden = true;
+    return;
+  }
+  linksPanelEl.hidden = false;
+
+  const activePath = getPath(project, activeFile.id);
+  const activeSegments = activePath.split("/").filter(Boolean);
+  activeSegments.pop();
+
+  // Outgoing links
+  const outgoingLinks = extractMarkdownLinks(activeFile.content);
+  outgoingLinksListEl.replaceChildren();
+  if (outgoingLinks.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "links-item links-item-empty";
+    empty.textContent = "No outgoing links";
+    outgoingLinksListEl.append(empty);
+  } else {
+    outgoingLinks.forEach(({ label, href }) => {
+      const item = document.createElement("div");
+      item.className = "links-item";
+      const isExternal = /^(https?:\/\/|mailto:)/i.test(href);
+      let resolvedId = null;
+      if (!isExternal) {
+        const resolvedPath = normalizePath([...activeSegments, href].join("/"));
+        resolvedId = getNodeIdByPath(project, resolvedPath);
+      }
+      const missing = !isExternal && !resolvedId;
+      item.classList.toggle("links-item-unresolved", missing);
+
+      const labelEl = document.createElement("span");
+      labelEl.className = "links-item-label";
+      labelEl.textContent = label !== href ? label : "";
+
+      const hrefEl = document.createElement("span");
+      hrefEl.className = "links-item-href";
+      hrefEl.textContent = href;
+
+      item.append(labelEl, hrefEl);
+
+      if (resolvedId) {
+        item.title = getPath(project, resolvedId);
+        item.classList.add("links-item-clickable");
+        item.addEventListener("click", () => openFileFromExplorer(resolvedId));
+      } else if (isExternal) {
+        item.classList.add("links-item-clickable");
+        item.addEventListener("click", () => window.open(href, "_blank", "noreferrer"));
+      }
+      outgoingLinksListEl.append(item);
+    });
+  }
+
+  // Backlinks — scan all .md files for links pointing to the active file
+  const backlinks = [];
+  Object.values(project.nodes).forEach((node) => {
+    if (node.kind !== "file" || !node.name.endsWith(".md") || node.id === activeFile.id) return;
+    const nodePath = getPath(project, node.id);
+    const nodeSegments = nodePath.split("/").filter(Boolean);
+    nodeSegments.pop();
+    const links = extractMarkdownLinks(node.content);
+    const matchCount = links.filter(({ href }) => {
+      if (/^(https?:\/\/|mailto:)/i.test(href)) return false;
+      return normalizePath([...nodeSegments, href].join("/")) === activePath;
+    }).length;
+    if (matchCount > 0) backlinks.push({ node, nodePath, matchCount });
+  });
+
+  backlinksListEl.replaceChildren();
+  if (backlinks.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "links-item links-item-empty";
+    empty.textContent = "No backlinks";
+    backlinksListEl.append(empty);
+  } else {
+    backlinks.forEach(({ node, nodePath, matchCount }) => {
+      const item = document.createElement("div");
+      item.className = "links-item links-item-clickable";
+      item.title = nodePath;
+      const labelEl = document.createElement("span");
+      labelEl.className = "links-item-label";
+      labelEl.textContent = node.name;
+      const countEl = document.createElement("span");
+      countEl.className = "links-item-count";
+      countEl.textContent = matchCount > 1 ? `${matchCount}×` : "";
+      item.append(labelEl, countEl);
+      item.addEventListener("click", () => openFileFromExplorer(node.id));
+      backlinksListEl.append(item);
+    });
+  }
 }
 
 function syncEditorScroll() {
@@ -2809,7 +3086,12 @@ function openFileFromExplorer(fileId) {
   }
   logDebug("action", "File opened", getPath(project, fileId));
   setActiveSourceFile(fileId);
-  if (previewFileId === null && isPreviewableFileName(node.name)) {
+  if (isBmapFileName(node.name)) {
+    setPreviewFile(fileId);
+    if (settings.preview === "hidden") {
+      togglePreview();
+    }
+  } else if (previewFileId === null && isPreviewableFileName(node.name)) {
     setPreviewFile(fileId);
   }
 }
@@ -3575,6 +3857,27 @@ function renderPreviewContent(target, project, file) {
   target.innerHTML = renderMarkdown(file.content, {
     resolveUrl(url) {
       return resolveProjectAssetUrl(project, file.id, url);
+    },
+    resolveLink(token) {
+      const url = token.href;
+      if (token.type === "image") {
+        return resolveProjectAssetUrl(project, file.id, url);
+      }
+      if (/^(https?:\/\/|mailto:|data:|blob:)/i.test(url)) {
+        return { href: url, external: true };
+      }
+      if (url.startsWith("#")) {
+        return { href: url, external: false };
+      }
+      const basePath = getPath(project, file.id);
+      const baseSegments = basePath.split("/").filter(Boolean);
+      baseSegments.pop();
+      const resolvedPath = normalizePath([...baseSegments, url].join("/"));
+      const nodeId = getNodeIdByPath(project, resolvedPath);
+      if (nodeId) {
+        return { href: "#", external: false, attributes: { "data-open-file-id": nodeId } };
+      }
+      return { href: "#", external: false, attributes: { "data-unresolved-link": url } };
     }
   });
 
@@ -4458,6 +4761,7 @@ function updateStatus(project) {
     if (previewState.shouldTypeset) {
       void typesetPreview(previewState.content);
     }
+    renderLinksPanel(project, null);
     return;
   }
 
@@ -4504,6 +4808,7 @@ function updateStatus(project) {
   if (previewState.shouldTypeset) {
     void typesetPreview(previewState.content);
   }
+  renderLinksPanel(project, activeFile);
 }
 
 function render(project) {
@@ -4956,7 +5261,34 @@ elements.editorContent.addEventListener("input", (event) => {
 
 elements.editorContent.addEventListener("scroll", syncEditorScroll);
 elements.editorContent.addEventListener("keydown", handleEditorKeydown);
-elements.editorContent.addEventListener("click", () => hideEditorAutocomplete());
+elements.editorContent.addEventListener("mousedown", (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.button === 0) {
+    const linkEl = event.target?.closest?.(".token-link[data-href]");
+    if (linkEl) {
+      event.preventDefault();
+      hideLinkTooltip(true);
+      openLinkFromEditor(linkEl.dataset.href);
+    }
+  }
+});
+elements.editorContent.addEventListener("click", hideEditorAutocomplete);
+elements.editorContent.addEventListener("mousemove", handleEditorLinkHover);
+elements.editorContent.addEventListener("mouseleave", handleEditorMouseLeave);
+
+elements.preview.addEventListener("click", (event) => {
+  const fileLink = event.target.closest("a[data-open-file-id]");
+  if (fileLink) {
+    event.preventDefault();
+    openFileFromExplorer(fileLink.dataset.openFileId);
+    return;
+  }
+  const unresolved = event.target.closest("a[data-unresolved-link]");
+  if (unresolved) {
+    event.preventDefault();
+    notify(`Cannot resolve link: ${unresolved.dataset.unresolvedLink}`);
+  }
+});
+
 elements.editorContent.addEventListener("dragstart", (event) => {
   const { start: selectionStart, end: selectionEnd } = getEditorSelection();
   if (selectionStart === selectionEnd) {
