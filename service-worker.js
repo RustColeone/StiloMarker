@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v2";
+const CACHE_NAME = "mdnotes-shell-v3";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -49,6 +49,12 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) {
+    return;
+  }
+
+  // Template payload should always be refreshed so default starter content stays up to date after deploys.
+  if (url.pathname.includes("/Template/")) {
+    event.respondWith(fetch(event.request, { cache: "no-store" }));
     return;
   }
 

@@ -2,7 +2,7 @@ import { ROOT_ID, addFile, addFolder, createProject, findChildByName, isImageFil
 import { bytesToDataUrl, getMimeTypeForFileName } from "./file-content-service.js";
 
 async function fetchTemplateEntry(path) {
-  const response = await fetch(`./Template/${path}`);
+  const response = await fetch(`./Template/${path}`, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`Template entry not found: ${path}`);
   }
