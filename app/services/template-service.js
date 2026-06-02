@@ -40,7 +40,7 @@ async function loadTemplateProject() {
 
   const manifest = await response.json();
   const entries = Array.isArray(manifest.entries) ? manifest.entries : [];
-  let project = createProject(manifest.projectName || "STLIO MARKER");
+  let project = createProject(manifest.projectName || "STILO MARKER");
 
   for (const entryPath of entries) {
     const segments = String(entryPath).split("/").filter(Boolean);

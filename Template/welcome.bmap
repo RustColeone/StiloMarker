@@ -1,7 +1,7 @@
 .node {
   id: start
   name: Welcome to .bmap Diagrams
-  text: Visual brainstorming in Stlio Marker
+  text: Visual brainstorming in Stilo Marker
   shape: rect
   pos: {x: 60, y: 60}
   styles: {

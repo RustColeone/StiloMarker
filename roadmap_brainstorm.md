@@ -1,6 +1,6 @@
 # Brainstorming Roadmap: Diagram Workspace Format
 
-This document captures a major proposal for Stlio Marker: a visual flow-diagram workspace where each node can be linked to a markdown file for deep detail editing and preview.
+This document captures a major proposal for Stilo Marker: a visual flow-diagram workspace where each node can be linked to a markdown file for deep detail editing and preview.
 
 ## Purpose
 
