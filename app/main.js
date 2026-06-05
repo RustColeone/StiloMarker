@@ -2,6 +2,8 @@ import { ROOT_ID, findChildByName, getNode, getNodeIdByPath, getPath, isAllowedF
 import { createProjectController, seedDefaultProject } from "./domain/project-service.js";
 import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
 import { createCollaborationRuntime } from "./services/collaboration-service.js";
+import { fetchChatStatus, fetchServerChatWorkspace, pushServerChatWorkspace, sendChatRequest, sendGenerationRequest } from "./services/chat-api-service.js";
+import { createChatMessage, createChatThread, deriveChatTitle, loadChatWorkspace, saveChatWorkspace } from "./services/chat-storage-service.js";
 import { dataUrlToBlob, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent } from "./services/file-content-service.js";
 import { extractMarkdownLinks, renderMarkdown } from "./services/markdown-service.js";
 import { buildModuleMapSection, replaceOrAppendModuleMap } from "./services/mtree-module-map-service.js";
@@ -21,10 +23,12 @@ const elements = {
   app: query("#app"),
   workspaceShell: query("#workspace-shell"),
   workspaceSplitter: query("#workspace-splitter"),
+  chatSplitter: query("#chat-splitter"),
   editorGrid: query("#editor-grid"),
   editorSplitter: query("#editor-splitter"),
   debugSplitter: query("#debug-splitter"),
   explorerPanel: query("#explorer-panel"),
+  chatPanel: query("#chat-panel"),
   sourcePane: query("#source-pane"),
   previewPane: query("#preview-pane"),
   sourceTabStrip: query("#source-tab-strip"),
@@ -38,6 +42,7 @@ const elements = {
   editorScroll: query("#editor-scroll"),
   editorContent: query("#editor-content"),
   editorDropCaret: query("#editor-drop-caret"),
+  editorAgentBar: query("#editor-agent-bar"),
   editorCursors: query("#editor-cursors"),
   editorAutocomplete: query("#editor-autocomplete"),
   editorAutocompleteLabel: query("#editor-autocomplete-label"),
@@ -107,6 +112,7 @@ const elements = {
   previewSelect: query("#preview-select"),
   wordWrapSelect: query("#word-wrap-select"),
   indentStyleSelect: query("#indent-style-select"),
+  bmapGenerateScopeSelect: query("#bmap-generate-scope-select"),
   serverUrlInput: query("#server-url-input"),
   serverPinInput: query("#server-pin-input"),
   displayNameInput: query("#display-name-input"),
@@ -148,6 +154,7 @@ const elements = {
   exportSelectedButton: query("#export-selected-button"),
   toggleExplorerMenuButton: query("#toggle-explorer-menu-button"),
   togglePreviewButton: query("#toggle-preview-button"),
+  toggleChatButton: query("#toggle-chat-button"),
   previewCollapseButton: query("#preview-collapse-button"),
   sourceIndicator: query("#source-indicator"),
   sourceStatusText: query("#source-status-text"),
@@ -157,6 +164,7 @@ const elements = {
   serverStatusBarText: query("#server-status-bar-text"),
   presenceSummaryText: query("#presence-summary-text"),
   previewToggleActivityButton: query("#preview-toggle-activity-button"),
+  chatToggleActivityButton: query("#chat-toggle-activity-button"),
   debugPanel: query("#debug-panel"),
   debugTabStrip: query("#debug-tab-strip"),
   debugTabAll: query("#debug-tab-all"),
@@ -165,7 +173,19 @@ const elements = {
   debugCopyButton: query("#debug-copy-button"),
   debugClearButton: query("#debug-clear-button"),
   logCollapseButton: query("#log-collapse-button"),
-  debugLogList: query("#debug-log-list")
+  debugLogList: query("#debug-log-list"),
+  chatStatusText: query("#chat-status-text"),
+  chatNewThreadButton: query("#chat-new-thread-button"),
+  chatCollapseButton: query("#chat-collapse-button"),
+  chatThreadList: query("#chat-thread-list"),
+  chatAddActiveFileButton: query("#chat-add-active-file-button"),
+  chatContextList: query("#chat-context-list"),
+  chatMessageList: query("#chat-message-list"),
+  chatComposeForm: query("#chat-compose-form"),
+  chatInput: query("#chat-input"),
+  chatSendButton: query("#chat-send-button"),
+  chatHistoryToggleButton: query("#chat-history-toggle-button"),
+  chatHistoryPane: query("#chat-history-pane")
 };
 
 const settings = loadSettings();
@@ -213,6 +233,21 @@ const addFileState = {
   sourceLabel: ""
 };
 
+const chatState = {
+  projectId: null,
+  activeThreadId: null,
+  threads: [],
+  configured: false,
+  localOnly: true,
+  provider: null,
+  model: null,
+  status: "idle",
+  detail: "Checking chat backend...",
+  sending: false,
+  activity: [],
+  streamingText: "",
+  shouldScrollToBottom: false
+};
 const autocompleteState = {
   items: [],
   activeIndex: 0,
@@ -275,6 +310,712 @@ function escapeHtmlAttribute(value) {
     .replaceAll('"', "&quot;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 — In-editor decoration state (applied agent ranges only)
+// ---------------------------------------------------------------------------
+
+// path → { lineStart: number, lineEnd: number, batchId: string }
+// Keyed by file path (not node id) for easy lookup inside renderEditorContent.
+const agentPendingDecorations = new Map();
+
+/**
+ * Compute the inclusive line range [start, end] in newContent that differs
+ * from preImage. Returns null when the content is identical.
+ */
+function computeChangedLineRange(preImage, newContent) {
+  const oldLines = preImage.split("\n");
+  const newLines = newContent.split("\n");
+  let start = 0;
+  while (start < oldLines.length && start < newLines.length && oldLines[start] === newLines[start]) {
+    start++;
+  }
+  // If everything up to the shorter length matched and lengths are equal → no change.
+  if (oldLines.length === newLines.length && start === oldLines.length) return null;
+  let oldEnd = oldLines.length;
+  let newEnd = newLines.length;
+  while (oldEnd > start && newEnd > start && oldLines[oldEnd - 1] === newLines[newEnd - 1]) {
+    oldEnd--;
+    newEnd--;
+  }
+  return { lineStart: start, lineEnd: Math.max(start, newEnd - 1) };
+}
+
+/** Record decoration ranges for accepted ops and trigger a re-render. */
+function registerAgentDecorations(ops, batchId) {
+  const project = controller.getProject();
+  for (const op of ops) {
+    if (op.proposalState !== "accepted") continue;
+    if (op.type === "update-file" && typeof op.preImage === "string") {
+      const range = computeChangedLineRange(op.preImage, op.content ?? "");
+      if (range) {
+        agentPendingDecorations.set(op.path, { ...range, batchId });
+      }
+    } else if (op.type === "create-file") {
+      const lineCount = (op.content ?? "").split("\n").length;
+      const path = op.parentPath ? `${op.parentPath}/${op.name}` : op.name;
+      agentPendingDecorations.set(path, { lineStart: 0, lineEnd: Math.max(0, lineCount - 1), batchId });
+    }
+  }
+  // Re-render the editor so decorations are visible immediately.
+  const activeFile = controller.getActiveFile();
+  if (activeFile) {
+    renderEditorContent(activeFile.content);
+  }
+  // Refresh explorer and tabs so pending-edit indicators appear.
+  explorer.render(project, new Set(agentPendingDecorations.keys()));
+  renderTabs(project);
+}
+
+/** Remove all decorations for a given batchId and re-render. */
+function clearAgentDecorations(batchId) {
+  let removed = false;
+  for (const [path, entry] of agentPendingDecorations) {
+    if (entry.batchId === batchId) {
+      agentPendingDecorations.delete(path);
+      removed = true;
+    }
+  }
+  if (removed) {
+    const activeFile = controller.getActiveFile();
+    if (activeFile) renderEditorContent(activeFile.content);
+    // Refresh explorer and tabs so pending-edit indicators are cleared.
+    const project = controller.getProject();
+    explorer.render(project, new Set(agentPendingDecorations.keys()));
+    renderTabs(project);
+  }
+}
+
+/** Update (or hide) the floating in-editor agent action bar. */
+function updateEditorAgentBar() {
+  if (!elements.editorAgentBar) return;
+  const project = controller.getProject();
+  const activeFile = controller.getActiveFile();
+  if (!activeFile) { elements.editorAgentBar.hidden = true; return; }
+  const activeFilePath = getPath(project, activeFile.id);
+  const activeDecoration = agentPendingDecorations.get(activeFilePath);
+
+  if (activeDecoration) {
+    // Agent edits applied to this file — offer Keep / Drop review.
+    const { batchId } = activeDecoration;
+    const found = findBatchMessage(batchId);
+    if (!found) { elements.editorAgentBar.hidden = true; return; }
+    const isOriginator = !found.msg.originatorId || found.msg.originatorId === collaboration.getClientId();
+    const attr = isOriginator ? "" : " disabled";
+    const bid = escapeHtmlAttribute(batchId);
+    elements.editorAgentBar.innerHTML =
+      `<span class="agent-bar-label">Agent edits applied</span>` +
+      `<button class="agent-bar-btn agent-bar-keep" type="button" data-batch-keep="${bid}"${attr} title="Finalise \u2014 keep agent changes">\u2713 Keep</button>` +
+      `<button class="agent-bar-btn agent-bar-drop" type="button" data-batch-drop-final="${bid}"${attr} title="Revert agent changes">\u2717 Drop</button>`;
+    elements.editorAgentBar.hidden = false;
+  } else {
+    elements.editorAgentBar.hidden = true;
+  }
+}
+
+/** Open the source tab for the first decorated file in a batch and scroll to the first tinted line. */
+function jumpToAgentChange(batchId) {
+  const project = controller.getProject();
+  for (const [path, entry] of agentPendingDecorations) {
+    if (entry.batchId !== batchId) continue;
+    const nodeId = getNodeIdByPath(project, path);
+    if (!nodeId) continue;
+    openSourceTab(nodeId);
+    controller.setActiveFile(nodeId);
+    // Scroll after the re-render settles (rAF gives the DOM one paint cycle).
+    requestAnimationFrame(() => {
+      const lines = elements.editorContent.querySelectorAll(".editor-line.is-agent-pending");
+      if (lines.length > 0) {
+        lines[0].scrollIntoView({ block: "center", behavior: "smooth" });
+      }
+    });
+    return;
+  }
+}
+
+
+
+/** Build a simple unified diff hunks array from two text strings. */
+function buildTextDiffHunks(oldText, newText) {
+  const oldLines = oldText.split("\n");
+  const newLines = newText.split("\n");
+  let start = 0;
+  while (start < oldLines.length && start < newLines.length && oldLines[start] === newLines[start]) {
+    start++;
+  }
+  let oldEnd = oldLines.length;
+  let newEnd = newLines.length;
+  while (oldEnd > start && newEnd > start && oldLines[oldEnd - 1] === newLines[newEnd - 1]) {
+    oldEnd--;
+    newEnd--;
+  }
+  const hunks = [];
+  const ctxCount = 2;
+  const ctxStart = Math.max(0, start - ctxCount);
+  for (let i = ctxStart; i < start; i++) {
+    hunks.push({ op: " ", text: oldLines[i] });
+  }
+  for (let i = start; i < oldEnd; i++) {
+    hunks.push({ op: "-", text: oldLines[i] });
+  }
+  for (let i = start; i < newEnd; i++) {
+    hunks.push({ op: "+", text: newLines[i] });
+  }
+  const ctxEnd = Math.min(oldLines.length, oldEnd + ctxCount);
+  for (let i = oldEnd; i < ctxEnd; i++) {
+    hunks.push({ op: " ", text: oldLines[i] });
+  }
+  return hunks;
+}
+
+function renderProposalDiff(op) {
+  if (op.type === "create-file") {
+    const lines = (op.content ?? "").split("\n").slice(0, 20);
+    const more = (op.content ?? "").split("\n").length > 20 ? `<span class="proposal-diff-more">…${(op.content ?? "").split("\n").length - 20} more lines</span>` : "";
+    return `<pre class="proposal-diff-block proposal-diff-add">${lines.map((l) => escapeHtmlAttribute(l)).join("\n")}</pre>${more}`;
+  }
+  if (op.type === "delete-node") {
+    return `<div class="proposal-diff-warning">⚠ This will permanently delete the file or folder.</div>`;
+  }
+  if (op.type === "rename-node") {
+    return `<div class="proposal-diff-rename"><span class="proposal-diff-del">${escapeHtmlAttribute(op.preImage ?? op.path)}</span> → <span class="proposal-diff-add">${escapeHtmlAttribute(op.name ?? "")}</span></div>`;
+  }
+  if (op.type === "move-node") {
+    return `<div class="proposal-diff-rename"><span class="proposal-diff-del">${escapeHtmlAttribute(op.path ?? "")}</span> → <span class="proposal-diff-add">${escapeHtmlAttribute(op.parentPath ?? "(root)")}/${escapeHtmlAttribute(op.path?.split("/").pop() ?? "")}</span></div>`;
+  }
+  if (op.type === "update-file" && typeof op.preImage === "string") {
+    const hunks = buildTextDiffHunks(op.preImage, op.content ?? "");
+    if (hunks.length === 0) {
+      return `<div class="proposal-diff-warning">No content change detected.</div>`;
+    }
+    const lines = hunks.map((h) => {
+      const cls = h.op === "-" ? "proposal-diff-del" : h.op === "+" ? "proposal-diff-add" : "proposal-diff-ctx";
+      return `<div class="proposal-diff-line ${cls}">${escapeHtmlAttribute(h.op + " " + h.text)}</div>`;
+    }).join("");
+    return `<div class="proposal-diff-block">${lines}</div>`;
+  }
+  return "";
+}
+
+const OP_ICONS = {
+  "create-file": "+",
+  "update-file": "~",
+  "rename-node": "r",
+  "delete-node": "×",
+  "create-folder": "+",
+  "move-node": "→"
+};
+
+/** Render a proposal card for an assistant message that has proposedOperations. */
+function renderProposalCard(message, isOriginator) {
+  const ops = message.proposedOperations ?? [];
+  if (ops.length === 0) return "";
+  const batchId = escapeHtmlAttribute(message.batchId ?? "");
+  const state = message.proposalState ?? "pending";
+
+  // Terminal states: read-only summary
+  if (state === "kept") {
+    return `<div class="proposal-card is-${state}" data-batch-id="${batchId}">
+      <div class="proposal-card-header"><span class="proposal-card-title proposal-card-resolved">✓ Edits kept (${ops.length})</span></div>
+    </div>`;
+  }
+  if (state === "dropped") {
+    return `<div class="proposal-card is-${state}" data-batch-id="${batchId}">
+      <div class="proposal-card-header"><span class="proposal-card-title proposal-card-resolved">↩ Edits dropped (${ops.length})</span></div>
+    </div>`;
+  }
+
+  const originatorAttr = isOriginator ? "" : ' disabled title="Only the original requester can act on this proposal"';
+
+  const opRows = ops.map((op) => {
+    const opId = escapeHtmlAttribute(op.proposalId ?? "");
+    const opType = String(op.type ?? "");
+    const opPath = escapeHtmlAttribute(op.path ?? op.name ?? "");
+    const icon = OP_ICONS[opType] ?? "?";
+    const opState = op.proposalState ?? state;
+    const diffHtml = renderProposalDiff(op);
+    const diffSection = diffHtml
+      ? `<details class="proposal-op-diff"><summary>diff</summary><div class="proposal-op-diff-body">${diffHtml}</div></details>`
+      : "";
+
+    if (opState === "stale") {
+      return `<div class="proposal-op is-stale" data-proposal-id="${opId}">
+        <span class="proposal-op-icon">${escapeHtmlAttribute(icon)}</span>
+        <span class="proposal-op-path">${opPath}</span>
+        <span class="proposal-op-badge">stale</span>
+        ${diffSection}
+      </div>`;
+    }
+    return `<div class="proposal-op is-${escapeHtmlAttribute(opState)}" data-proposal-id="${opId}">
+      <span class="proposal-op-icon">${escapeHtmlAttribute(icon)}</span>
+      <span class="proposal-op-path">${opPath}</span>
+      ${diffSection}
+    </div>`;
+  }).join("");
+
+  let batchButtons = "";
+  {
+    const hasDecorations = [...agentPendingDecorations.values()].some((d) => d.batchId === (message.batchId ?? ""));
+    const jumpBtn = hasDecorations
+      ? `<button class="proposal-btn proposal-btn-jump" type="button" data-batch-jump="${batchId}" title="Jump to change in editor">↕</button>`
+      : "";
+    batchButtons = `
+      ${jumpBtn}
+      <button class="proposal-btn proposal-btn-keep" type="button" data-batch-keep="${batchId}"${originatorAttr}>Keep</button>
+      <button class="proposal-btn proposal-btn-drop-final" type="button" data-batch-drop-final="${batchId}"${originatorAttr}>Drop</button>`;
+  }
+
+  const title = `Applied edits (${ops.length}) — review:`;
+
+  return `<div class="proposal-card is-${escapeHtmlAttribute(state)}" data-batch-id="${batchId}">
+    <div class="proposal-card-header">
+      <span class="proposal-card-title">${escapeHtmlAttribute(title)}</span>
+      <div class="proposal-card-actions">${batchButtons}</div>
+    </div>
+    <div class="proposal-card-ops">${opRows}</div>
+  </div>`;
+}
+
+function formatChatTimestamp(value) {
+  if (!Number.isFinite(Number(value))) {
+    return "Now";
+  }
+  return new Date(Number(value)).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function sortChatThreads() {
+  chatState.threads.sort((left, right) => right.updatedAt - left.updatedAt);
+}
+
+function ensureChatWorkspaceLoaded(project) {
+  if (chatState.projectId === project.id) {
+    return;
+  }
+  const workspace = loadChatWorkspace(project.id);
+  chatState.projectId = project.id;
+  chatState.threads = workspace.threads;
+  chatState.activeThreadId = workspace.activeThreadId;
+  sortChatThreads();
+}
+
+function persistChatWorkspaceState(project = controller.getProject()) {
+  if (!project?.id) {
+    return;
+  }
+  sortChatThreads();
+  saveChatWorkspace(project.id, {
+    activeThreadId: chatState.activeThreadId,
+    threads: chatState.threads
+  });
+  // Push to the collaboration server when connected so other session members
+  // see the updated thread list and new messages in real time.
+  const connInfo = collaboration.getConnectionInfo?.();
+  if (connInfo) {
+    pushServerChatWorkspace(connInfo.serverUrl, connInfo.token, {
+      activeThreadId: chatState.activeThreadId,
+      threads: chatState.threads
+    }).catch(() => { /* non-critical — server may be temporarily unavailable */ });
+  }
+}
+
+function getActiveChatThread() {
+  return chatState.threads.find((thread) => thread.id === chatState.activeThreadId) ?? null;
+}
+
+function ensureActiveChatThread() {
+  let thread = getActiveChatThread();
+  if (thread) {
+    return thread;
+  }
+  thread = createChatThread();
+  chatState.threads.unshift(thread);
+  chatState.activeThreadId = thread.id;
+  persistChatWorkspaceState();
+  return thread;
+}
+
+function listChatFiles(project) {
+  return Object.values(project.nodes)
+    .filter((node) => node?.kind === "file")
+    .map((node) => ({
+      id: node.id,
+      name: node.name,
+      path: getPath(project, node.id)
+    }))
+    .sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function resolveChatContextFiles(project, thread) {
+  return (thread?.contextPaths ?? []).map((path) => {
+    const nodeId = getNodeIdByPath(project, path);
+    const node = nodeId ? project.nodes[nodeId] : null;
+    if (!node || node.kind !== "file") {
+      return null;
+    }
+    if (isImageFileName(node.name)) {
+      return {
+        path,
+        kind: "image",
+        content: ""
+      };
+    }
+    return {
+      path,
+      kind: "text",
+      content: typeof node.content === "string" ? node.content : ""
+    };
+  }).filter(Boolean);
+}
+
+/** Human-readable line for one agent progress step. */
+function describeAgentActivity(event) {
+  if (event.type === "status") {
+    return event.iteration > 0 ? "Reviewing the workspace…" : "Reading your request…";
+  }
+  if (event.type === "writing") {
+    const verbs = {
+      create_file: "Drafting new file",
+      update_file: "Editing file",
+      rename_node: "Renaming",
+      delete_node: "Deleting",
+      create_folder: "Creating folder",
+      move_node: "Moving"
+    };
+    const verb = verbs[event.name] || "Working";
+    const chars = Number(event.chars) || 0;
+    return `${verb}… (${chars.toLocaleString()} chars)`;
+  }
+  if (event.type === "tool") {
+    const target = event.target ? `: ${event.target}` : "";
+    const verbs = {
+      list_files: "Listing files",
+      read_file: "Reading file",
+      create_file: "Drafting new file",
+      update_file: "Editing file",
+      rename_node: "Renaming",
+      delete_node: "Deleting",
+      create_folder: "Creating folder",
+      move_node: "Moving"
+    };
+    const verb = verbs[event.name] || event.name || "Working";
+    return `${verb}${target}`;
+  }
+  return "Working…";
+}
+
+/** Render the live agent activity log shown inside the thinking indicator. */
+function renderAgentActivity() {
+  if (!chatState.activity.length) {
+    return `<div class="chat-activity-line">Working…</div>`;
+  }
+  return chatState.activity
+    .slice(-6)
+    .map((line) => `<div class="chat-activity-line">${escapeHtmlAttribute(line)}</div>`)
+    .join("");
+}
+
+function renderChatPanel(project) {
+  ensureChatWorkspaceLoaded(project);
+
+  const activeThread = getActiveChatThread();
+  const statusPrefix = chatState.sending ? "Sending…" : chatState.detail;
+  const statusSuffix = chatState.configured && chatState.provider && chatState.model
+    ? ` · ${chatState.provider} ${chatState.model}`
+    : "";
+  elements.chatStatusText.textContent = `${statusPrefix}${statusSuffix}`.trim();
+
+  elements.chatThreadList.innerHTML = chatState.threads.length
+    ? chatState.threads.map((thread) => {
+      const meta = `${thread.messages.length} msg · ${formatChatTimestamp(thread.updatedAt)}`;
+      return `
+        <button
+          class="chat-thread-button${thread.id === chatState.activeThreadId ? " is-active" : ""}"
+          type="button"
+          data-chat-thread-id="${escapeHtmlAttribute(thread.id)}"
+        >
+          <span class="chat-thread-title">${escapeHtmlAttribute(thread.title)}</span>
+          <span class="chat-thread-meta">${escapeHtmlAttribute(meta)}</span>
+        </button>
+      `;
+    }).join("")
+    : '<div class="chat-empty-state">No conversations yet.<br>Press <strong>+</strong> to start one.</div>';
+
+  // Context chips — empty string collapses the list via CSS :empty rule.
+  elements.chatContextList.innerHTML = activeThread?.contextPaths?.length
+    ? activeThread.contextPaths.map((path) => `
+        <span class="chat-context-chip">
+          <span class="chat-context-chip-label">${escapeHtmlAttribute(path)}</span>
+          <button type="button" data-chat-remove-context="${escapeHtmlAttribute(path)}" aria-label="Remove ${escapeHtmlAttribute(path)}">×</button>
+        </span>
+      `).join("")
+    : "";
+
+  // Messages: render assistant replies as markdown; plain text for user / system.
+  const streamingHtml = chatState.streamingText
+    ? `<div class="chat-stream-preview">${renderMarkdown(chatState.streamingText)}</div>`
+    : "";
+  const thinkingHtml = chatState.sending
+    ? `<div class="chat-thinking" aria-label="Agent is working" aria-live="polite">
+        ${streamingHtml}
+        <div class="chat-thinking-foot">
+          <div class="chat-thinking-dots">
+            <span class="chat-thinking-dot"></span>
+            <span class="chat-thinking-dot"></span>
+            <span class="chat-thinking-dot"></span>
+          </div>
+          ${renderAgentActivity()}
+        </div>
+       </div>`
+    : "";
+
+  elements.chatMessageList.innerHTML = activeThread?.messages?.length
+    ? activeThread.messages.map((message) => {
+      const roleLabel = message.role === "user" ? "You" : message.role === "assistant" ? "Agent" : "System";
+      const contentHtml = message.role === "assistant"
+        ? renderMarkdown(message.content)
+        : escapeHtmlAttribute(message.content);
+      const contextBadgesHtml = message.contextPaths?.length
+        ? `<div class="chat-message-context">${
+            message.contextPaths.map((p) =>
+              `<span class="chat-message-context-file">${escapeHtmlAttribute(p)}</span>`
+            ).join("")
+          }</div>`
+        : "";
+      const isOriginator = !message.originatorId || message.originatorId === collaboration.getClientId();
+      const proposalCardHtml = message.role === "assistant" && message.proposedOperations?.length
+        ? renderProposalCard(message, isOriginator)
+        : "";
+      return `
+        <article class="chat-message${message.error ? " is-error" : ""}" data-role="${escapeHtmlAttribute(message.role)}" data-msg-id="${escapeHtmlAttribute(message.id)}">
+          <div class="chat-message-meta">
+            <span class="chat-message-role">${escapeHtmlAttribute(roleLabel)}</span>
+            <span class="chat-message-time">${escapeHtmlAttribute(formatChatTimestamp(message.createdAt))}</span>
+          </div>
+          <div class="chat-message-content">${contentHtml}</div>
+          ${contextBadgesHtml}
+          ${proposalCardHtml}
+        </article>
+      `;
+    }).join("") + thinkingHtml
+    : '<div class="chat-empty-state">No messages yet.<br>Attach context files below, then send a prompt.</div>';
+
+  const canSend = !chatState.sending && Boolean(elements.chatInput.value.trim());
+  elements.chatSendButton.disabled = !canSend;
+  elements.chatAddActiveFileButton.disabled = !project.activeFileId;
+  elements.chatInput.disabled = chatState.sending;
+
+  if (chatState.shouldScrollToBottom) {
+    elements.chatMessageList.scrollTop = elements.chatMessageList.scrollHeight;
+    chatState.shouldScrollToBottom = false;
+  }
+
+  // Refresh in-editor agent bar whenever proposal state changes.
+  updateEditorAgentBar();
+}
+
+function setActiveChatThread(threadId) {
+  if (!chatState.threads.some((thread) => thread.id === threadId)) {
+    return;
+  }
+  chatState.activeThreadId = threadId;
+  chatState.shouldScrollToBottom = true;
+  persistChatWorkspaceState();
+  renderChatPanel(controller.getProject());
+}
+
+function createNewChatConversation() {
+  const thread = createChatThread();
+  chatState.threads.unshift(thread);
+  chatState.activeThreadId = thread.id;
+  chatState.shouldScrollToBottom = true;
+  persistChatWorkspaceState();
+  renderChatPanel(controller.getProject());
+  elements.chatInput.focus();
+}
+
+function addChatContextPath(path) {
+  const thread = ensureActiveChatThread();
+  if (!path || thread.contextPaths.includes(path)) {
+    renderChatPanel(controller.getProject());
+    return;
+  }
+  thread.contextPaths = [...thread.contextPaths, path];
+  thread.updatedAt = Date.now();
+  sortChatThreads();
+  persistChatWorkspaceState();
+  renderChatPanel(controller.getProject());
+}
+
+function removeChatContextPath(path) {
+  const thread = getActiveChatThread();
+  if (!thread) {
+    return;
+  }
+  thread.contextPaths = thread.contextPaths.filter((entry) => entry !== path);
+  thread.updatedAt = Date.now();
+  sortChatThreads();
+  persistChatWorkspaceState();
+  renderChatPanel(controller.getProject());
+}
+
+function addActiveFileToChatContext() {
+  const project = controller.getProject();
+  if (!project.activeFileId) {
+    notify("Open a file first to add it to the chat context.");
+    return;
+  }
+  addChatContextPath(getPath(project, project.activeFileId));
+}
+
+async function refreshChatStatus({ silent = false } = {}) {
+  chatState.status = "checking";
+  if (!silent) {
+    chatState.detail = "Checking chat backend...";
+    renderChatPanel(controller.getProject());
+  }
+
+  try {
+    const status = await fetchChatStatus(settings.serverUrl);
+    chatState.configured = Boolean(status.configured);
+    chatState.localOnly = status.localOnly !== false;
+    chatState.provider = status.provider ?? null;
+    chatState.model = status.model ?? null;
+    chatState.status = chatState.configured ? "ready" : "unconfigured";
+    chatState.detail = status.message ?? (chatState.configured ? "Chat is ready." : "Chat is not configured.");
+  } catch (error) {
+    chatState.configured = false;
+    chatState.provider = null;
+    chatState.model = null;
+    chatState.status = error?.status === 403 ? "restricted" : "offline";
+    chatState.detail = error instanceof Error ? error.message : String(error);
+  }
+
+  renderChatPanel(controller.getProject());
+}
+
+/** Build a lean project snapshot for the agent: full tree + text content,
+ *  but image file contents stripped (data-URLs are large and the agent can't
+ *  edit images anyway). Lets the agent see the user's real files in local mode. */
+function buildAgentProjectSnapshot(project) {
+  const nodes = {};
+  for (const [id, node] of Object.entries(project.nodes ?? {})) {
+    if (node.kind === "file" && isImageFileName(node.name)) {
+      nodes[id] = { ...node, content: "" };
+    } else {
+      nodes[id] = { ...node };
+    }
+  }
+  return { rootId: project.rootId, nodes };
+}
+
+async function handleChatSubmit() {
+  const prompt = elements.chatInput.value.trim();
+  if (!prompt || chatState.sending) {
+    return;
+  }
+  const project = controller.getProject();
+  const thread = ensureActiveChatThread();
+  const contextFiles = resolveChatContextFiles(project, thread);
+  const contextPaths = (thread.contextPaths ?? []).slice();
+  thread.contextPaths = [];
+  thread.messages.push(createChatMessage("user", prompt, { contextPaths }));
+  thread.title = thread.title === "New Chat" ? deriveChatTitle(prompt) : thread.title;
+  thread.updatedAt = Date.now();
+  sortChatThreads();
+  chatState.activeThreadId = thread.id;
+  chatState.sending = true;
+  chatState.activity = [];
+  chatState.streamingText = "";
+  chatState.shouldScrollToBottom = true;
+  elements.chatInput.value = "";
+  persistChatWorkspaceState(project);
+  renderChatPanel(project);
+
+  try {
+    if (!chatState.configured) {
+      await refreshChatStatus({ silent: true });
+    }
+    if (!chatState.configured) {
+      throw new Error(chatState.detail);
+    }
+
+    const response = await sendChatRequest(settings.serverUrl, {
+      projectName: project.name,
+      messages: thread.messages
+        .filter((message) => message.role === "user" || message.role === "assistant")
+        .map((message) => ({ role: message.role, content: message.content })),
+      contextFiles,
+      project: buildAgentProjectSnapshot(project)
+    }, (event) => {
+      if (event.type === "delta") {
+        chatState.streamingText += event.text || "";
+        chatState.shouldScrollToBottom = true;
+        renderChatPanel(project);
+        return;
+      }
+      // A new model turn starts fresh: clear any streamed text from the prior turn.
+      if (event.type === "status") {
+        chatState.streamingText = "";
+      }
+      const line = describeAgentActivity(event);
+      if (!line) {
+        return;
+      }
+      const last = chatState.activity[chatState.activity.length - 1];
+      // "writing" events repeat with a growing char count \u2014 update the last
+      // line in place instead of flooding the log with near-duplicates.
+      if (event.type === "writing" && typeof last === "string" && last.startsWith(line.split("\u2026")[0])) {
+        chatState.activity[chatState.activity.length - 1] = line;
+        chatState.shouldScrollToBottom = true;
+        renderChatPanel(project);
+        return;
+      }
+      if (line !== last) {
+        chatState.activity.push(line);
+        chatState.shouldScrollToBottom = true;
+        renderChatPanel(project);
+      }
+    });
+
+    chatState.provider = response.provider ?? chatState.provider;
+    chatState.model = response.model ?? chatState.model;
+    const proposals = Array.isArray(response.proposedOperations) ? response.proposedOperations : [];
+    const msgExtra = {};
+    if (proposals.length > 0) {
+      msgExtra.proposedOperations = proposals;
+      msgExtra.batchId = response.batchId ?? null;
+      msgExtra.baseRevision = collaboration.getRevision();
+      msgExtra.proposalState = "pending";
+      msgExtra.originatorId = collaboration.getClientId() ?? null;
+    }
+    const assistantMessage = createChatMessage("assistant", response.message, msgExtra);
+    thread.messages.push(assistantMessage);
+    thread.updatedAt = Date.now();
+    sortChatThreads();
+    persistChatWorkspaceState(project);
+    // Agent edits apply immediately so the user can read them in context and
+    // then decide Keep or Drop (no separate Accept step — Accept and Keep/Drop
+    // were redundant; the user couldn't preview a proposal without applying it).
+    if (proposals.length > 0) {
+      autoApplyProposals(assistantMessage);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    thread.messages.push(createChatMessage("system", message, { error: true }));
+    thread.updatedAt = Date.now();
+    sortChatThreads();
+    persistChatWorkspaceState(project);
+  } finally {
+    chatState.sending = false;
+    chatState.activity = [];
+    chatState.streamingText = "";
+    chatState.shouldScrollToBottom = true;
+    renderChatPanel(project);
+  }
 }
 
 function isPreviewableFileName(name) {
@@ -651,9 +1392,13 @@ async function copyDebugLogToClipboard() {
     return;
   }
 
+  await copyTextToClipboard(text);
+  notify("Debug log copied to clipboard.");
+}
+
+async function copyTextToClipboard(text) {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
-    notify("Debug log copied to clipboard.");
     return;
   }
 
@@ -666,7 +1411,6 @@ async function copyDebugLogToClipboard() {
   fallback.select();
   document.execCommand("copy");
   fallback.remove();
-  notify("Debug log copied to clipboard.");
 }
 
 function notify(message) {
@@ -1564,6 +2308,26 @@ elements.explorerSelect.value = settings.explorer;
 elements.previewSelect.value = settings.preview;
 elements.wordWrapSelect.value = settings.wordWrap ? "on" : "off";
 elements.indentStyleSelect.value = settings.indentStyle;
+elements.bmapGenerateScopeSelect.value = settings.bmapGenerateScope === "all" ? "all" : "connected";
+
+// Per-turn agent checkpoints (Phase 6 / subtask 6.1).
+// batchId → { project: deepClone, baseRevision: number, soleAuthored: boolean }
+// Capped at last 10 turns (subtask 6.5).
+const agentCheckpoints = new Map();
+const CHECKPOINT_MAX = 10;
+
+function captureAgentCheckpoint(batchId, baseRevision) {
+  agentCheckpoints.set(batchId, {
+    project: structuredClone(controller.getProject()),
+    baseRevision,
+    soleAuthored: true
+  });
+  // Trim to last CHECKPOINT_MAX entries.
+  if (agentCheckpoints.size > CHECKPOINT_MAX) {
+    const oldest = agentCheckpoints.keys().next().value;
+    agentCheckpoints.delete(oldest);
+  }
+}
 
 const collaboration = createCollaborationRuntime({
   getProject() {
@@ -1573,6 +2337,13 @@ const collaboration = createCollaborationRuntime({
     controller.replaceProject(project);
   },
   applyOperation(clientId, operation) {
+    // When a foreign peer op arrives, mark all open checkpoints as no-longer
+    // sole-authored so the Drop button can be disabled (Phase 6 / subtask 6.4).
+    if (clientId && clientId !== collaboration.getClientId()) {
+      for (const checkpoint of agentCheckpoints.values()) {
+        checkpoint.soleAuthored = false;
+      }
+    }
     try {
       const activeFile = controller.getActiveFile();
       const activePath = activeFile ? getPath(controller.getProject(), activeFile.id) : null;
@@ -1614,6 +2385,21 @@ const collaboration = createCollaborationRuntime({
     syncState.displayName = nextState.displayName ?? null;
     syncState.clientId = nextState.clientId ?? null;
     syncState.role = nextState.role ?? null;
+    // When first connecting, load the shared chat workspace from the server so
+    // all session members share the same conversation history.
+    if (!wasConnected && nextState.status === "connected") {
+      const connInfo = collaboration.getConnectionInfo?.();
+      if (connInfo) {
+        fetchServerChatWorkspace(connInfo.serverUrl, connInfo.token).then((workspace) => {
+          if (workspace?.threads?.length) {
+            chatState.threads = workspace.threads;
+            chatState.activeThreadId = workspace.activeThreadId ?? chatState.activeThreadId;
+            sortChatThreads();
+            renderChatPanel(controller.getProject());
+          }
+        }).catch(() => { /* non-critical */ });
+      }
+    }
     // Auto-switch workspace mode on connect/disconnect.
     if (!wasConnected && nextState.status === "connected" && workspaceMode === "private") {
       if (syncState.role === "client") {
@@ -1648,6 +2434,19 @@ const collaboration = createCollaborationRuntime({
       const sel = getEditorSelection();
       collaboration.scheduleAwareness(activeFile.id, sel.start, sel.end);
     }
+  },
+  onChatWorkspaceUpdate(workspace) {
+    // A peer pushed a chat workspace update — apply it locally and re-render.
+    if (!workspace || !Array.isArray(workspace.threads)) return;
+    chatState.threads = workspace.threads;
+    chatState.activeThreadId = workspace.activeThreadId ?? chatState.activeThreadId;
+    chatState.shouldScrollToBottom = true;
+    sortChatThreads();
+    saveChatWorkspace(chatState.projectId ?? "", {
+      activeThreadId: chatState.activeThreadId,
+      threads: chatState.threads
+    });
+    renderChatPanel(controller.getProject());
   }
 });
 
@@ -2405,10 +3204,24 @@ function renderEditorContent(text) {
     line.classList.toggle("has-wrapped-indent", indentCols > 0);
   });
 
+  // Phase 5: apply agent-pending decoration to the relevant lines.
+  const activeFilePath = controller.getActiveFile()
+    ? getPath(controller.getProject(), controller.getActiveFile().id)
+    : null;
+  const activeDecoration = activeFilePath ? agentPendingDecorations.get(activeFilePath) : null;
+  if (activeDecoration) {
+    const { lineStart, lineEnd } = activeDecoration;
+    renderedLines.forEach((line, index) => {
+      line.classList.toggle("is-agent-pending", index >= lineStart && index <= lineEnd);
+    });
+  }
+
   // Rebuild the gutter.
   const gutterMarkup = renderedLines.map((line, index) => {
     const height = Math.max(minimumLineHeight, line.getBoundingClientRect().height);
-    return `<div class="editor-gutter-line" style="height:${height.toFixed(3)}px">${index + 1}</div>`;
+    const isDecorated = activeDecoration && index >= activeDecoration.lineStart && index <= activeDecoration.lineEnd;
+    const marker = isDecorated ? `<span class="editor-gutter-agent-mark" aria-hidden="true">◦</span>` : "";
+    return `<div class="editor-gutter-line${isDecorated ? " is-agent-pending" : ""}" style="height:${height.toFixed(3)}px">${marker}${index + 1}</div>`;
   }).join("");
   elements.editorGutter.innerHTML = `<div class="editor-gutter-content">${gutterMarkup}</div>`;
 
@@ -2417,6 +3230,9 @@ function renderEditorContent(text) {
 
   // Keep placeholder visible when content is empty.
   elements.editorContent.dataset.empty = normalized.length === 0 ? "true" : "false";
+
+  // Update the floating in-editor agent action bar.
+  updateEditorAgentBar();
 }
 
 // Alias kept so existing call sites that pass `elements.textarea.value` still
@@ -3618,7 +4434,15 @@ function renderTabStrip({ strip, pane, project, tabIds, activeFileId, emptyText,
     close.textContent = "×";
     close.setAttribute("aria-hidden", "true");
 
-    tab.append(icon, title, dirty, close);
+    const filePath = getPath(project, fileId);
+    if (agentPendingDecorations.has(filePath)) {
+      const badge = document.createElement("span");
+      badge.className = "tab-agent-badge";
+      badge.title = "Pending agent edit — review in chat";
+      tab.append(icon, title, badge, dirty, close);
+    } else {
+      tab.append(icon, title, dirty, close);
+    }
     tab.addEventListener("click", () => onActivate(fileId));
     if (allowReorder) {
       tab.addEventListener("dragstart", (event) => {
@@ -3849,6 +4673,10 @@ function renderPreviewContent(target, project, file) {
       onCommit(nextSource, detail) {
         updateFileContentFromPreview(file.id, nextSource, detail?.reason ?? "bmap preview edit");
       },
+      generateScope: settings.bmapGenerateScope,
+      onQuickGenerate(request) {
+        return quickGenerateBmapFile(file.id, request);
+      },
       logDebug,
     });
     return { shouldTypeset: false, content: "" };
@@ -3994,16 +4822,22 @@ function applyWorkspaceSettings() {
 
   elements.app.dataset.explorer = settings.explorer;
   elements.app.dataset.preview = settings.preview;
+  elements.app.dataset.chat = settings.chatPanel;
   elements.app.dataset.wordWrap = settings.wordWrap ? "on" : "off";
   elements.app.dataset.debug = settings.debugPanel ? "on" : "off";
   elements.app.style.setProperty("--sidebar-width", `${settings.sidebarWidth}px`);
   elements.app.style.setProperty("--preview-width", `${previewWidth}px`);
+  elements.app.style.setProperty("--chat-width", `${settings.chatWidth}px`);
   elements.app.style.setProperty("--debug-height", `${settings.debugPanelHeight}px`);
   elements.app.style.setProperty("--indent-tab-size", "4");
   // Word-wrap is CSS-driven via data-word-wrap; no textarea.wrap needed.
   elements.previewCollapseButton.setAttribute("aria-expanded", settings.preview === "shown" ? "true" : "false");
+  elements.chatCollapseButton.setAttribute("aria-expanded", settings.chatPanel === "shown" ? "true" : "false");
   elements.debugPanel.hidden = !settings.debugPanel;
+  elements.chatPanel.hidden = settings.chatPanel === "hidden";
+  elements.chatToggleActivityButton.classList.toggle("is-active", settings.chatPanel === "shown");
   elements.toggleDebugMenuButton.textContent = settings.debugPanel ? "Hide Log Panel" : "Show Log Panel";
+  elements.toggleChatButton.textContent = settings.chatPanel === "shown" ? "Hide Chat" : "Show Chat";
   elements.explorerFilterButton.classList.toggle("is-active", settings.explorerFilter !== "all");
   renderDebugPanel();
 }
@@ -4066,6 +4900,21 @@ elements.editorSplitter.addEventListener("pointerdown", (event) => {
   });
 });
 
+elements.chatSplitter.addEventListener("pointerdown", (event) => {
+  if (settings.chatPanel === "hidden") {
+    return;
+  }
+
+  startPointerResize(event, (moveEvent) => {
+    const shellRect = elements.workspaceShell.getBoundingClientRect();
+    const nextWidth = clamp(shellRect.right - moveEvent.clientX, 300, Math.max(340, shellRect.width - 360));
+    settings.chatWidth = Math.round(nextWidth);
+    persistSettings();
+    renderEditorContent(getEditorText());
+    syncEditorScroll();
+  });
+});
+
 elements.debugSplitter.addEventListener("pointerdown", (event) => {
   if (!settings.debugPanel) {
     return;
@@ -4102,6 +4951,209 @@ function toggleMenu(button, menu) {
 document.addEventListener("click", (event) => {
   if (!event.target.closest(".menu-group")) {
     closeMenus();
+  }
+});
+
+document.addEventListener("click", async (event) => {
+  const copyButton = event.target.closest("[data-copy-code]");
+  if (!copyButton) {
+    return;
+  }
+  const codeEl = copyButton.closest(".md-code-block")?.querySelector("pre > code");
+  const codeText = codeEl?.textContent ?? "";
+  if (!codeText) {
+    return;
+  }
+  event.preventDefault();
+  try {
+    await copyTextToClipboard(codeText);
+    const originalText = copyButton.textContent || "Copy";
+    copyButton.textContent = "Copied";
+    copyButton.classList.add("is-copied");
+    window.setTimeout(() => {
+      copyButton.textContent = originalText;
+      copyButton.classList.remove("is-copied");
+    }, 1200);
+  } catch {
+    notify("Could not copy code block.");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Proposal card click handlers (Phase 4 / Phase 3 transport)
+// ---------------------------------------------------------------------------
+
+/** Find the thread and message that own a given batchId. */
+function findBatchMessage(batchId) {
+  for (const thread of chatState.threads) {
+    const msg = thread.messages.find((m) => m.batchId === batchId);
+    if (msg) return { thread, msg };
+  }
+  return null;
+}
+
+/** Apply an agent batch immediately on arrival, then surface Keep/Drop review.
+ *  Deletes still get a one-time confirm (Phase 7 safety) since they're destructive,
+ *  but everything is recoverable via Drop (the checkpoint captures pre-apply state). */
+function autoApplyProposals(message) {
+  const ops = message.proposedOperations ?? [];
+  if (ops.length === 0) return;
+
+  const apply = () => {
+    acceptAgentOperations(ops, message);
+    message.proposalState = "accepted";
+    persistChatWorkspaceState(controller.getProject());
+    renderChatPanel(controller.getProject());
+  };
+
+  const hasDeletes = ops.some((op) => op.type === "delete-node");
+  if (hasDeletes) {
+    showConfirmDialog({
+      title: "Delete included",
+      message: "Some of these changes permanently delete files or folders. Apply them now? You can still Drop to undo.",
+      acceptLabel: "Apply"
+    }).then((confirmed) => {
+      if (confirmed) {
+        apply();
+      } else {
+        message.proposalState = "dropped";
+        persistChatWorkspaceState(controller.getProject());
+        renderChatPanel(controller.getProject());
+      }
+    });
+    return;
+  }
+  apply();
+}
+
+/**
+ * Apply a set of agent-proposed operations locally (or via collaboration when
+ * synced). Marks each op's proposalState as "accepted" or "stale".
+ * Phase 3 will add the full synced transport; this covers the local path.
+ */
+function acceptAgentOperations(ops, message) {
+  // Capture baseRevision at accept time (before any op is applied).
+  if (!message.baseRevision) {
+    message.baseRevision = collaboration.getRevision();
+  }
+  // Capture checkpoint BEFORE applying (Phase 6 / subtask 6.1).
+  if (message.batchId) {
+    captureAgentCheckpoint(message.batchId, message.baseRevision);
+  }
+  const project = controller.getProject();
+  for (const op of ops) {
+    // Phase 7: block text ops on image files (safety edge case).
+    const opFileName = op.name ?? op.path?.split("/").pop() ?? "";
+    if ((op.type === "update-file" || op.type === "create-file") && isImageFileName(opFileName)) {
+      op.proposalState = "stale";
+      continue;
+    }
+    // Re-resolve path at accept time to detect staleness (plan §3.2).
+    if (op.path) {
+      const nodeId = getNodeIdByPath(project, op.path);
+      if (!nodeId && op.type !== "create-file" && op.type !== "create-folder") {
+        op.proposalState = "stale";
+        continue;
+      }
+    }
+    const cleanOp = { ...op };
+    delete cleanOp.proposalId;
+    delete cleanOp.preImage;
+    delete cleanOp.proposalState;
+    try {
+      if (collaboration.isConnected() && workspaceMode === "synced") {
+        collaboration.publishOperation(cleanOp).catch((err) => notify(err.message));
+      } else {
+        controller.applySyncOperation(cleanOp);
+      }
+      op.proposalState = "accepted";
+    } catch {
+      op.proposalState = "stale";
+    }
+  }
+  // Register editor decorations for all accepted ops (Phase 5).
+  if (message.batchId) {
+    registerAgentDecorations(ops, message.batchId);
+  }
+}
+
+document.addEventListener("click", (event) => {
+  // Jump to first changed line in editor (Phase 5 / subtask 5.3)
+  const jumpBtn = event.target.closest("[data-batch-jump]");
+  if (jumpBtn) {
+    jumpToAgentChange(jumpBtn.dataset.batchJump);
+    return;
+  }
+
+  // Keep — finalise applied agent edits: clear decorations and mark kept.
+  const keepBtn = event.target.closest("[data-batch-keep]");
+  if (keepBtn) {
+    const batchId = keepBtn.dataset.batchKeep;
+    const found = findBatchMessage(batchId);
+    if (!found) return;
+    found.msg.proposalState = "kept";
+    agentCheckpoints.delete(batchId);  // release checkpoint memory (subtask 6.5)
+    clearAgentDecorations(batchId);    // Phase 5: remove line tints
+    persistChatWorkspaceState(controller.getProject());
+    renderChatPanel(controller.getProject());
+    return;
+  }
+
+  // Drop all (pre-accept dismiss) or Drop post-accept (revert)
+  const dropAllBtn = event.target.closest("[data-batch-drop-all]");
+  const dropFinalBtn = event.target.closest("[data-batch-drop-final]");
+  const dropTarget = dropAllBtn ?? dropFinalBtn;
+  if (dropTarget) {
+    const batchId = dropTarget.dataset.batchDropAll ?? dropTarget.dataset.batchDropFinal;
+    const found = findBatchMessage(batchId);
+    if (!found) return;
+    const { msg } = found;
+    if (msg.proposalState === "accepted") {
+      const checkpoint = agentCheckpoints.get(batchId);
+      const isMaster = collaboration.getRole() === "master";
+      const isSynced = collaboration.isConnected() && workspaceMode === "synced";
+      const soleAuthored = checkpoint?.soleAuthored ?? false;
+
+      if (isSynced && !isMaster && soleAuthored && msg.baseRevision != null) {
+        // Synced non-master sole-author path: server-authoritative revert (Phase 2).
+        collaboration.publishOperation({
+          type: "revert-to-revision",
+          targetRevision: msg.baseRevision
+        }).catch((err) => {
+          notify(`Drop failed: ${err.message}`);
+          return;
+        });
+      } else if (isSynced && !isMaster && !soleAuthored) {
+        notify("Drop unavailable: another collaborator has edited since this batch was applied.");
+        return;
+      } else {
+        // Local / master / offline path: restore from client checkpoint.
+        if (checkpoint) {
+          controller.replaceProject(checkpoint.project);
+        } else {
+          // Fallback: best-effort preImage revert (no checkpoint available).
+          const ops = [...(msg.proposedOperations ?? [])].reverse();
+          for (const op of ops) {
+            if (op.proposalState !== "accepted") continue;
+            if (op.type === "update-file" && typeof op.preImage === "string") {
+              try { controller.applySyncOperation({ type: "update-file", path: op.path, content: op.preImage }); } catch { /* best-effort */ }
+            } else if (op.type === "create-file" || op.type === "create-folder") {
+              try { controller.applySyncOperation({ type: "delete-node", path: op.parentPath ? `${op.parentPath}/${op.name}` : op.name }); } catch { /* best-effort */ }
+            }
+          }
+        }
+        if (isMaster && isSynced && msg.baseRevision != null) {
+          // Master in synced mode: push the reverted state as a replace.
+          publishSnapshot();
+        }
+      }
+      agentCheckpoints.delete(batchId);
+    }
+    msg.proposalState = "dropped";
+    clearAgentDecorations(batchId);    // Phase 5: remove line tints on drop
+    persistChatWorkspaceState(controller.getProject());
+    renderChatPanel(controller.getProject());
+    return;
   }
 });
 
@@ -4774,6 +5826,7 @@ function updateStatus(project) {
       void typesetPreview(previewState.content);
     }
     renderLinksPanel(project, null);
+    renderChatPanel(project);
     return;
   }
 
@@ -4821,10 +5874,11 @@ function updateStatus(project) {
     void typesetPreview(previewState.content);
   }
   renderLinksPanel(project, activeFile);
+  renderChatPanel(project);
 }
 
 function render(project) {
-  explorer.render(project);
+  explorer.render(project, new Set(agentPendingDecorations.keys()));
   updateStatus(project);
   saveProject(project);
 }
@@ -4878,6 +5932,84 @@ function updateFileContentFromPreview(fileId, nextContent, reason = "preview edi
     content: nextContent
   });
   logDebug("action", "Bmap preview updated", reason);
+}
+
+function sanitizeGeneratedFileName(name) {
+  const cleaned = String(name ?? "")
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+  return cleaned || "generated";
+}
+
+let bmapGenerationInFlight = false;
+
+async function quickGenerateBmapFile(bmapFileId, request) {
+  const subject = String(request?.subject ?? "").trim();
+  if (!subject) {
+    notify("This node has no name or text to generate from. Add some content first.");
+    logDebug("action", "Quick Generate skipped", "node has no subject text");
+    return;
+  }
+  if (bmapGenerationInFlight) {
+    logDebug("action", "Quick Generate skipped", "another generation is already in flight");
+    return;
+  }
+
+  const serverUrl = settings.serverUrl?.trim();
+  if (!serverUrl) {
+    notify("Set a Server URL in Settings to use Quick Generate.");
+    logDebug("action", "Quick Generate skipped", "no server URL configured");
+    return;
+  }
+
+  const project = controller.getProject();
+  const bmapNode = project.nodes[bmapFileId];
+  if (!bmapNode || bmapNode.kind !== "file") {
+    return;
+  }
+  const parentId = bmapNode.parentId ?? project.rootId;
+  const parentPath = parentId === project.rootId ? "" : getPath(project, parentId);
+  const baseName = sanitizeGeneratedFileName(request?.nodeName || request?.nodeId || "generated");
+  const fileName = suggestUniqueFileName(project, parentId, `${baseName}.md`);
+  const contextCount = Array.isArray(request?.contextFiles) ? request.contextFiles.length : 0;
+
+  bmapGenerationInFlight = true;
+  logDebug("action", "Quick Generate started", `node="${request?.nodeName}" file="${fileName}" context=${contextCount} scope=${settings.bmapGenerateScope}`);
+  logDebug("request", "POST /api/generate", `subject=${subject.slice(0, 80)}${subject.length > 80 ? "…" : ""}`);
+  try {
+    const result = await sendGenerationRequest(serverUrl, {
+      subject,
+      contextFiles: Array.isArray(request?.contextFiles) ? request.contextFiles : [],
+      bmapOverview: String(request?.bmapOverview ?? ""),
+      projectName: project.name ?? "Workspace"
+    });
+    const content = String(result?.content ?? "").trim();
+    logDebug("response", "Quick Generate response received", `model=${result?.model ?? "?"} provider=${result?.provider ?? "?"} length=${content.length} chars`);
+    if (!content) {
+      notify("Generation returned no content.");
+      logDebug("error", "Quick Generate empty response", "provider returned no content");
+      return;
+    }
+
+    controller.createFile(parentId, fileName, content);
+    publishOperation({ type: "create-file", parentPath, name: fileName, content });
+    logDebug("action", "Quick Generate file created", fileName);
+
+    const created = findChildByName(controller.getProject(), parentId, fileName);
+    if (created && created.kind === "file") {
+      openFileFromExplorer(created.id);
+    }
+    notify(`Generated: ${fileName}`);
+    logDebug("action", "Quick Generate complete", fileName);
+  } catch (error) {
+    notify(error?.message ?? "Generation failed.");
+    logDebug("error", "Quick Generate failed", error?.message ?? String(error));
+  } finally {
+    bmapGenerationInFlight = false;
+  }
 }
 
 function createItem(kind) {
@@ -5586,6 +6718,23 @@ function togglePreview() {
   logDebug("action", "Preview toggled", settings.preview);
 }
 
+function toggleChat() {
+  settings.chatPanel = settings.chatPanel === "hidden" ? "shown" : "hidden";
+  persistSettings();
+  if (settings.chatPanel === "shown") {
+    void refreshChatStatus({ silent: true });
+    renderChatPanel(controller.getProject());
+  }
+  logDebug("action", "Chat toggled", settings.chatPanel);
+}
+
+function toggleChatHistoryPane() {
+  if (!elements.chatHistoryPane) return;
+  const willShow = elements.chatHistoryPane.hidden;
+  elements.chatHistoryPane.hidden = !willShow;
+  elements.chatHistoryToggleButton?.setAttribute("aria-pressed", String(willShow));
+}
+
 function toggleLogPanel() {
   settings.debugPanel = !settings.debugPanel;
   persistSettings();
@@ -5621,11 +6770,64 @@ async function clearAllCache() {
 
 elements.toggleExplorerMenuButton.addEventListener("click", toggleExplorer);
 elements.togglePreviewButton.addEventListener("click", togglePreview);
+elements.toggleChatButton.addEventListener("click", toggleChat);
 elements.toggleLogButton.addEventListener("click", toggleLogPanel);
 elements.explorerToggleButton.addEventListener("click", toggleExplorer);
 elements.previewToggleActivityButton.addEventListener("click", togglePreview);
+elements.chatToggleActivityButton.addEventListener("click", toggleChat);
 elements.previewCollapseButton.addEventListener("click", togglePreview);
+elements.chatCollapseButton.addEventListener("click", toggleChat);
 elements.logCollapseButton.addEventListener("click", toggleLogPanel);
+elements.chatNewThreadButton.addEventListener("click", createNewChatConversation);
+elements.chatHistoryToggleButton?.addEventListener("click", toggleChatHistoryPane);
+elements.chatAddActiveFileButton.addEventListener("click", addActiveFileToChatContext);
+elements.chatComposeForm.addEventListener("dragover", (event) => {
+  if (!event.dataTransfer?.types.includes("text/mdnotes-file-id")) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+  elements.chatComposeForm.classList.add("is-drag-over");
+});
+elements.chatComposeForm.addEventListener("dragleave", (event) => {
+  if (!elements.chatComposeForm.contains(event.relatedTarget)) {
+    elements.chatComposeForm.classList.remove("is-drag-over");
+  }
+});
+elements.chatComposeForm.addEventListener("drop", (event) => {
+  elements.chatComposeForm.classList.remove("is-drag-over");
+  const nodeId = event.dataTransfer?.getData("text/mdnotes-file-id");
+  if (!nodeId) return;
+  event.preventDefault();
+  const path = getPath(controller.getProject(), nodeId);
+  if (path) addChatContextPath(path);
+});
+elements.chatThreadList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-chat-thread-id]");
+  if (!button) {
+    return;
+  }
+  setActiveChatThread(button.dataset.chatThreadId);
+});
+elements.chatContextList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-chat-remove-context]");
+  if (!button) {
+    return;
+  }
+  removeChatContextPath(button.dataset.chatRemoveContext);
+});
+elements.chatComposeForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void handleChatSubmit();
+});
+elements.chatInput.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.shiftKey) {
+    return;
+  }
+  event.preventDefault();
+  void handleChatSubmit();
+});
+elements.chatInput.addEventListener("input", () => {
+  renderChatPanel(controller.getProject());
+});
 
 elements.settingsButton.addEventListener("click", () => {
   logDebug("action", "Settings dialog opened");
@@ -5690,6 +6892,12 @@ elements.indentStyleSelect.addEventListener("change", (event) => {
   logDebug("action", "Indent style changed", settings.indentStyle);
 });
 
+elements.bmapGenerateScopeSelect.addEventListener("change", (event) => {
+  settings.bmapGenerateScope = event.target.value === "all" ? "all" : "connected";
+  persistSettings();
+  logDebug("action", "Bmap generate scope changed", settings.bmapGenerateScope);
+});
+
 window.addEventListener("resize", () => {
   renderEditorContent(getEditorText());
   syncEditorScroll();
@@ -5698,6 +6906,7 @@ window.addEventListener("resize", () => {
 elements.serverUrlInput.addEventListener("change", (event) => {
   settings.serverUrl = event.target.value.trim();
   saveSettings(settings);
+  void refreshChatStatus({ silent: true });
 });
 
 elements.serverPinInput.addEventListener("change", (event) => {
@@ -5720,12 +6929,14 @@ elements.pingServerButton.addEventListener("click", async () => {
     syncState.detail = typeof result === "string" ? result : (result.message || "Server responded to ping.");
     logDebug("response", "Server ping succeeded", syncState.detail);
     flashStatusPanel("success");
+    await refreshChatStatus({ silent: true });
     render(controller.getProject());
   } catch (error) {
     syncState.status = "offline";
     syncState.detail = error.message;
     logDebug("response", "Server ping failed", error.message);
     flashStatusPanel("error");
+    await refreshChatStatus({ silent: true });
     render(controller.getProject());
   }
 });
@@ -5743,11 +6954,13 @@ elements.connectServerButton.addEventListener("click", async () => {
     saveSettings(settings);
     flashStatusPanel("success");
     logDebug("response", "Server connected", settings.displayName || "anonymous");
+    await refreshChatStatus({ silent: true });
   } catch (error) {
     syncState.status = "offline";
     syncState.detail = error.message;
     logDebug("response", "Server connect failed", error.message);
     flashStatusPanel("error");
+    await refreshChatStatus({ silent: true });
     render(controller.getProject());
   }
 });
@@ -5761,3 +6974,4 @@ window.addEventListener("beforeunload", (event) => {
 });
 
 registerOfflineShell();
+void refreshChatStatus({ silent: true });

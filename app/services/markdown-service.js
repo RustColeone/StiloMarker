@@ -423,13 +423,17 @@ function renderMarkdown(markdown, options = {}) {
     }
   }
 
+  function renderCodeBlock(code) {
+    return `<div class="md-code-block"><button class="md-code-copy-button" type="button" data-copy-code="true" aria-label="Copy code block">Copy</button><pre><code>${code}</code></pre></div>`;
+  }
+
   for (const rawLine of lines) {
     const line = rawLine.trimEnd();
 
     if (line.startsWith("```")) {
       flushList();
       if (inCodeBlock) {
-        output.push(`<pre><code>${codeBuffer.join("\n")}</code></pre>`);
+        output.push(renderCodeBlock(codeBuffer.join("\n")));
         inCodeBlock = false;
         codeBuffer = [];
       } else {
@@ -479,7 +483,7 @@ function renderMarkdown(markdown, options = {}) {
   flushList();
 
   if (inCodeBlock) {
-    output.push(`<pre><code>${codeBuffer.join("\n")}</code></pre>`);
+    output.push(renderCodeBlock(codeBuffer.join("\n")));
   }
 
   return output.join("\n");

@@ -46,11 +46,27 @@ Default backend values:
 - Port: `8000`
 - PIN: `2468`
 
+Optional chat backend values:
+
+- `DEEPSEEK_API_KEY` to use the default DeepSeek chat proxy setup
+- `DEEPSEEK_MODEL` to override the default `deepseek-v4-pro`
+- `DEEPSEEK_API_URL` to override the default `https://api.deepseek.com/chat/completions`
+- `DEEPSEEK_ENABLE_THINKING=1` to send DeepSeek thinking mode parameters
+- `DEEPSEEK_REASONING_EFFORT=low|medium|high` when thinking mode is enabled
+- `MDNOTES_CHAT_API_KEY`
+- `MDNOTES_CHAT_MODEL`
+- `MDNOTES_CHAT_API_URL` for other OpenAI-compatible backends
+- `MDNOTES_CHAT_ALLOW_REMOTE=1` only if you explicitly want remote clients to use the chat proxy
+
 You can also override them with environment variables:
 
 - `MDNOTES_HOST`
 - `MDNOTES_PORT`
 - `MDNOTES_PIN`
+
+Chat secrets stay on the backend only. Do not put API keys into the browser settings, project files, or local storage.
+
+DeepSeek is the default provider for the built-in chat proxy in this repo. If `DEEPSEEK_API_KEY` is present, the server will use `deepseek-v4-pro` at `https://api.deepseek.com/chat/completions` unless you override those values explicitly.
 
 ## Available Scripts
 
@@ -180,6 +196,16 @@ Then:
 
 The collaboration sidebar shows session status and presence.
 
+## 9. Chat Panel
+
+Open the Chat panel from `View > Toggle Chat` or the `AI` activity button.
+
+- Chat history is stored locally per workspace in browser storage.
+- Attached context files come from the current workspace state.
+- The browser talks only to the local MDNotes backend.
+- Provider API keys remain server-side through environment variables.
+- By default, the chat proxy rejects non-local clients unless `MDNOTES_CHAT_ALLOW_REMOTE=1` is set.
+
 ## 9. View And Debug
 
 STILO MARKER includes a built-in log panel.
@@ -206,3 +232,8 @@ The log panel is useful for checking drag/drop actions, file operations, and int
 - `Open Directory` works best in Chromium-based browsers.
 - URL album entries are special explorer items and are treated differently from normal files.
 - The app keeps a log panel available for troubleshooting interaction issues.
+
+
+## Reference
+
+For a full technical reference including all file format specifications and detailed usage, see [server/MANUAL.md](server/MANUAL.md).

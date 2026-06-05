@@ -14,8 +14,11 @@ function createDefaultSettings() {
     debugPanel: false,
     sidebarWidth: 280,
     previewWidth: 420,
+    chatPanel: "hidden",
+    chatWidth: 420,
     previewWidthCustomized: false,
-    debugPanelHeight: 180
+    debugPanelHeight: 180,
+    bmapGenerateScope: "connected"
   };
 }
 

@@ -54,6 +54,7 @@
             <div id="view-menu" class="menu-popover" hidden>
               <button id="toggle-explorer-menu-button" type="button">Toggle Explorer</button>
               <button id="toggle-preview-button" type="button">Toggle Preview</button>
+              <button id="toggle-chat-button" type="button">Toggle Chat</button>
               <button id="toggle-log-button" type="button">Toggle Log</button>
             </div>
           </div>
@@ -77,6 +78,7 @@
       <div id="workspace-shell" class="workspace-shell">
         <aside class="activity-bar" aria-label="Activity bar">
           <button id="explorer-toggle-button" class="activity-button" type="button" aria-label="Toggle explorer" title="Explorer">≡</button>
+          <button id="chat-toggle-activity-button" class="activity-button" type="button" aria-label="Toggle chat" title="Chat">AI</button>
           <button id="settings-button" class="activity-button" type="button" aria-label="Open settings" title="Settings">⋯</button>
           <div class="activity-bar-spacer"></div>
           <div class="activity-status-mark" aria-hidden="true"></div>
@@ -144,6 +146,7 @@
                        data-placeholder="Select or create a .md or .mtree file"></div>
                   <div id="editor-drop-caret" class="editor-drop-caret" aria-hidden="true" hidden></div>
                   <div id="editor-cursors" class="editor-cursors" aria-hidden="true"></div>
+                  <div id="editor-agent-bar" class="editor-agent-bar" hidden aria-live="polite"></div>
                 </div>
                 <div id="editor-autocomplete" class="editor-autocomplete" hidden>
                   <div id="editor-autocomplete-label" class="subtle-label">Suggestions</div>
@@ -183,6 +186,47 @@
             <div id="debug-log-list" class="debug-log-list"></div>
           </section>
         </main>
+
+        <div id="chat-splitter" class="panel-splitter chat-splitter" role="separator" aria-orientation="vertical" aria-label="Resize chat"></div>
+
+        <aside id="chat-panel" class="chat-panel" aria-label="Agent chat panel">
+          <!-- Toolbar -->
+          <header class="chat-toolbar">
+            <span class="chat-toolbar-title">Stilo Marker</span>
+            <div id="chat-status-text" class="chat-model-badge">Checking…</div>
+            <div class="chat-toolbar-actions">
+              <button id="chat-new-thread-button" class="chat-toolbar-icon-btn" type="button" aria-label="New chat" title="New chat">&#43;</button>
+              <button id="chat-history-toggle-button" class="chat-toolbar-icon-btn" type="button" aria-label="Chat history" title="Chat history" aria-pressed="false">&#9776;</button>
+              <button id="chat-collapse-button" class="chat-toolbar-icon-btn" type="button" aria-label="Collapse chat" title="Collapse chat" aria-expanded="true">&#8250;</button>
+            </div>
+          </header>
+
+          <!-- History drawer (toggled by the history button) -->
+          <div id="chat-history-pane" class="chat-history-pane" hidden>
+            <div id="chat-thread-list" class="chat-thread-list"></div>
+          </div>
+
+          <!-- Conversation -->
+          <div id="chat-message-list" class="chat-message-list" role="log" aria-label="Chat conversation" aria-live="polite"></div>
+
+          <!-- Compose area -->
+          <div class="chat-compose-shell">
+            <div id="chat-context-list" class="chat-context-list"></div>
+            <form id="chat-compose-form" class="chat-compose-form">
+              <div class="chat-compose-context-controls">
+                <button id="chat-add-active-file-button" class="chat-compose-chip-btn" type="button"
+                  title="Add the currently open file to context">&#64; Active</button>
+                <span class="chat-compose-drop-hint">or drag files here</span>
+              </div>
+              <div class="chat-compose-input-row">
+                <textarea id="chat-input" class="chat-input" rows="2" spellcheck="true"
+                  placeholder="Ask the agent…"></textarea>
+                <button id="chat-send-button" class="chat-send-button" type="submit"
+                  title="Send (Enter)" aria-label="Send">&#8593;</button>
+              </div>
+            </form>
+          </div>
+        </aside>
       </div>
 
       <footer class="status-bar" aria-label="Status bar">
@@ -258,6 +302,14 @@
               <select id="indent-style-select">
                 <option value="tab">Tab</option>
                 <option value="spaces">4 Spaces</option>
+              </select>
+            </label>
+
+            <label>
+              Bmap Generate Context
+              <select id="bmap-generate-scope-select">
+                <option value="connected">Connected nodes only</option>
+                <option value="all">All linked files</option>
               </select>
             </label>
           </section>
