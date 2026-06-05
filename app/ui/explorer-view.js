@@ -229,7 +229,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
     row.addEventListener("mouseleave", hidePreviewTooltip);
   }
 
-  function render(project) {
+  function render(project, pendingPaths = new Set()) {
     currentProject = project;
     container.replaceChildren();
     const filterMode = getFilterMode?.() ?? "all";
@@ -247,7 +247,8 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       const row = document.createElement("div");
       const selectedTarget = getSelectedTarget?.() ?? { nodeId: ROOT_ID, entryId: null };
       const isSelectedNode = selectedTarget.nodeId === node.id && !selectedTarget.entryId;
-      row.className = `tree-row${isSelectedNode ? " is-active" : ""}`;
+      const hasPendingEdit = pendingPaths.has(path);
+      row.className = `tree-row${isSelectedNode ? " is-active" : ""}${hasPendingEdit ? " is-agent-pending" : ""}`;
       row.setAttribute("role", "treeitem");
       row.dataset.nodeId = node.id;
       row.title = path;

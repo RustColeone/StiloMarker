@@ -421,9 +421,11 @@ function createBmapView({ container, ...defaultOptions } = {}) {
   let activeOptions = {
     onCommit: null,
     onOpenLinkedFile: null,
+    onQuickGenerate: null,
     resolveFileContent: null,
     listProjectFiles: () => [],
     resolveRelativeFilePath: () => null,
+    generateScope: "connected",
     logDebug: null,
     ...defaultOptions,
   };
@@ -953,6 +955,106 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     return toolbar;
   }
 
+  const IMAGE_EXT_RE = /\.(png|jpe?g|gif|svg|webp|bmp)$/i;
+
+  function getConnectedNodeIds(nodeId) {
+    const ids = new Set();
+    for (const connector of ast.connectors) {
+      const from = parseEndpoint(connector.from);
+      const to = parseEndpoint(connector.to);
+      if (from.nodeId === nodeId && to.nodeId && to.nodeId !== nodeId) {
+        ids.add(to.nodeId);
+      } else if (to.nodeId === nodeId && from.nodeId && from.nodeId !== nodeId) {
+        ids.add(from.nodeId);
+      }
+    }
+    return ids;
+  }
+
+  function buildBmapOverview() {
+    const lines = ["Nodes:"];
+    for (const node of ast.nodes) {
+      const parts = [`- [${node.id}]`];
+      if (node.name) {
+        parts.push(node.name);
+      }
+      if (node.file) {
+        parts.push(`(file: ${node.file})`);
+      }
+      lines.push(parts.join(" "));
+      if (node.text) {
+        lines.push(`    ${node.text.replace(/\n/g, " ")}`);
+      }
+    }
+    if (ast.connectors.length > 0) {
+      lines.push("", "Connections:");
+      for (const connector of ast.connectors) {
+        const from = parseEndpoint(connector.from);
+        const to = parseEndpoint(connector.to);
+        lines.push(`- ${from.nodeId} -> ${to.nodeId}`);
+      }
+    }
+    return lines.join("\n");
+  }
+
+  function collectGenerationContextFiles(node) {
+    const scope = String(activeOptions.generateScope ?? "connected").trim().toLowerCase() === "all"
+      ? "all"
+      : "connected";
+    const connectedIds = scope === "connected" ? getConnectedNodeIds(node.id) : null;
+    const sourceNodes = scope === "all"
+      ? ast.nodes
+      : ast.nodes.filter((candidate) => connectedIds.has(candidate.id));
+
+    const seen = new Set();
+    const files = [];
+    for (const candidate of sourceNodes) {
+      const filePath = candidate.file;
+      if (!filePath || seen.has(filePath)) {
+        continue;
+      }
+      seen.add(filePath);
+      const isImage = IMAGE_EXT_RE.test(filePath);
+      const content = isImage ? "" : (activeOptions.resolveFileContent?.(filePath) ?? null);
+      if (!isImage && content == null) {
+        continue;
+      }
+      files.push({ path: filePath, kind: isImage ? "image" : "text", content: content ?? "" });
+    }
+    return files;
+  }
+
+  function requestQuickGenerate(node, btn) {
+    if (typeof activeOptions.onQuickGenerate !== "function") {
+      return;
+    }
+    const subjectParts = [];
+    if (node.name) {
+      subjectParts.push(node.name);
+    }
+    if (node.text) {
+      subjectParts.push(node.text);
+    }
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Generating\u2026";
+    }
+    const promise = activeOptions.onQuickGenerate({
+      nodeId: node.id,
+      nodeName: node.name,
+      nodeText: node.text,
+      subject: subjectParts.join("\n\n").trim(),
+      bmapOverview: buildBmapOverview(),
+      contextFiles: collectGenerationContextFiles(node),
+    });
+    if (btn && promise instanceof Promise) {
+      promise.finally(() => {
+        btn.disabled = false;
+        btn.textContent = "Quick Generate File";
+      });
+    }
+  }
+
   function buildNodeInspector(node) {
     const availableFiles = activeOptions.listProjectFiles?.() ?? [];
     const { width, height } = getBmapNodeDimensions(node);
@@ -1066,6 +1168,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
           </select>
         </label>
         <div class="bmap-inspector-actions">
+          <button type="button" data-action="quick-generate" class="bmap-generate-btn">Quick Generate File</button>
           <button type="button" data-action="delete" class="bmap-danger-btn">Delete Node</button>
         </div>
         </fieldset>
@@ -1210,6 +1313,10 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       if (isEditingEnabled()) {
         deleteSelected();
       }
+    });
+
+    inspector.querySelector('[data-action="quick-generate"]').addEventListener("click", (event) => {
+      requestQuickGenerate(getNodeById(node.id) ?? node, event.currentTarget);
     });
 
     return inspector;

@@ -39,6 +39,27 @@ Keep the product as a static HTML, CSS, and ES module workbench that can run on 
 - Clarify the backend roadmap for session durability, LAN deployment ergonomics, and collaboration resilience.
 - Keep the backend contract aligned with the frontend's current file model, including `.urldb` and image assets.
 
+### Phase E: Frontend Assistant and Context Scoping
+- Add an in-browser assistant experience that stays entirely in the frontend and lets the user choose the provider and supply their own API key.
+- Keep provider integration behind a service adapter so the UI can support multiple vendors without coupling core app state to any single API.
+- Scope assistant context explicitly: selected files only by default, or a bmap plus all files referenced by that bmap when the user asks from a diagram-led workflow.
+- Present the assistant in a VS Code-like chat panel with visible context chips, provider/model selection, and clear send/stop controls.
+- Preserve project state boundaries so the assistant can suggest or summarize without automatically expanding to the entire workspace.
+
+#### MVP Scope
+- Provider picker and BYOK storage in browser local state.
+- Manual file selection for context attachment.
+- bmap-aware expansion to include the map and referenced files.
+- Chat transcript panel with streaming responses when the selected provider supports them.
+- Context summary before sending so the user can verify exactly what is included.
+
+#### Suggested Sequence
+1. Define the assistant service contract and provider adapter interface.
+2. Add context collection helpers for selected files and bmap expansion.
+3. Add a docked chat-style assistant panel to the existing shell layout.
+4. Wire provider requests and streaming response handling.
+5. Add guardrails, error states, and tests for context boundaries.
+
 ## Architecture Rules
 
 - Keep domain logic free of DOM and browser APIs.
@@ -51,6 +72,7 @@ Keep the product as a static HTML, CSS, and ES module workbench that can run on 
 - Collaboration correctness under concurrent editing
 - Final decision on `.urldb` entry representation
 - Continued explorer UX tightening without introducing unnecessary framework complexity
+- Frontend assistant scope and context-bound request model
 - Maintaining self-test coverage as the frontend and backend continue to evolve
 
 ## Open Technical Problem: Wrapped-Line Indentation Visual

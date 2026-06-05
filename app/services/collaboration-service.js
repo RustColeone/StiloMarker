@@ -4,7 +4,7 @@ function fingerprintProject(project) {
   return JSON.stringify(sanitizeProjectForSync(project));
 }
 
-function createCollaborationRuntime({ getProject, replaceProject, applyOperation, onStatusChange, onRemoteCursor, onPatchConfirmed }) {
+function createCollaborationRuntime({ getProject, replaceProject, applyOperation, onStatusChange, onRemoteCursor, onPatchConfirmed, onChatWorkspaceUpdate }) {
   let connection = null;
   let isApplyingRemote = false;
   let pendingTextPatches = new Map();
@@ -350,6 +350,12 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
             onRemoteCursor(event);
           }
         }
+
+        if (event.type === "chat-workspace-update") {
+          if (event.clientId !== connection.clientId && typeof onChatWorkspaceUpdate === "function") {
+            onChatWorkspaceUpdate(event.workspace);
+          }
+        }
       },
       () => {
         disconnect("Connection to server lost.");
@@ -371,8 +377,18 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     hasPendingPatch(fileId) {
       return pendingTextPatches.has(fileId);
     },
+    getConnectionInfo() {
+      if (!connection) return null;
+      return { serverUrl: connection.serverUrl, token: connection.token };
+    },
     getRole() {
       return connection?.role ?? null;
+    },
+    getClientId() {
+      return connection?.clientId ?? null;
+    },
+    getRevision() {
+      return localRevision;
     },
     isConnected() {
       return Boolean(connection);
