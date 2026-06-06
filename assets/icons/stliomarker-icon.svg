@@ -1,0 +1,36 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">StlioMarker app icon</title>
+  <desc id="desc">Rounded square tile with a folded note page, highlighted marker line, and sparkle accent.</desc>
+
+  <defs>
+    <linearGradient id="tileGradient" x1="64" y1="64" x2="448" y2="448" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F172A"/>
+      <stop offset="1" stop-color="#1E293B"/>
+    </linearGradient>
+    <linearGradient id="markerGradient" x1="170" y1="286" x2="350" y2="286" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F59E0B"/>
+      <stop offset="1" stop-color="#FBBF24"/>
+    </linearGradient>
+    <filter id="tileShadow" x="40" y="48" width="432" height="432" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#020617" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#tileShadow)">
+    <rect x="64" y="64" width="384" height="384" rx="94" fill="url(#tileGradient)"/>
+  </g>
+
+  <!-- Note sheet -->
+  <path d="M164 132H306L364 190V380C364 395.464 351.464 408 336 408H164C148.536 408 136 395.464 136 380V160C136 144.536 148.536 132 164 132Z" fill="#F8FAFC"/>
+  <path d="M306 132V178C306 184.627 311.373 190 318 190H364" fill="#E2E8F0"/>
+
+  <!-- Text lines -->
+  <rect x="174" y="208" width="152" height="14" rx="7" fill="#CBD5E1"/>
+  <rect x="174" y="246" width="126" height="14" rx="7" fill="#CBD5E1"/>
+
+  <!-- Marker stroke -->
+  <rect x="168" y="280" width="184" height="22" rx="11" fill="url(#markerGradient)"/>
+
+  <!-- Spark accent -->
+  <path d="M350 220L357 238L375 245L357 252L350 270L343 252L325 245L343 238L350 220Z" fill="#F59E0B"/>
+</svg>

@@ -415,7 +415,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
   let gesture = null;
   let connectPreview = null;
   let currentDocumentKey = null;
-  let interactionMode = "edit";
+  let interactionMode = "readonly";
   let inspectorCollapsed = false;
   let snapStep = MIN_SNAP_STEP;
   let activeOptions = {
@@ -1535,7 +1535,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
 
     const controls = document.createElement("div");
     controls.className = "bmap-controls";
-    const penBtn = makeControlButton("✏", isEditingEnabled() ? "Switch to read-only mode" : "Switch to editing mode", () => {
+    const penBtn = makeControlButton("🖊️", isEditingEnabled() ? "Switch to read-only mode" : "Switch to editing mode", () => {
       setInteractionMode(isEditingEnabled() ? "readonly" : "edit");
     });
     if (isEditingEnabled()) {
@@ -1869,6 +1869,9 @@ function createBmapView({ container, ...defaultOptions } = {}) {
         pan = { x: 40, y: 40 };
         zoom = 1;
         setPopupHidden();
+        // A freshly opened diagram defaults to read-only (view) mode so the
+        // preview pane is not in edit mode until the user opts in via the pen.
+        interactionMode = "readonly";
       }
       sourceText = String(sourceOrOptions.source ?? "");
     }

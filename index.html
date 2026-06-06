@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Stilo Marker</title>
+    <link rel="icon" type="image/svg+xml" href="./assets/icons/stliomarker-icon.svg">
     <link rel="stylesheet" href="./app/styles.css">
   </head>
   <body>
@@ -64,6 +65,8 @@
             <div id="settings-menu" class="menu-popover" hidden>
               <button id="open-settings-menu-button" type="button">Open Settings</button>
               <button id="toggle-debug-menu-button" type="button">Toggle Log Panel</button>
+              <button id="reset-workspace-menu-button" type="button">Reset to Default Workspace</button>
+              <button id="empty-workspace-menu-button" class="menu-danger-button" type="button">Empty Everything</button>
               <button id="clear-cache-menu-button" class="menu-danger-button" type="button">Clear All Cache</button>
             </div>
           </div>
@@ -319,7 +322,7 @@
 
             <label>
               Server URL
-              <input id="server-url-input" type="url" placeholder="http://localhost:8000">
+              <input id="server-url-input" type="url" placeholder="(same origin — leave blank when behind a proxy)">
             </label>
 
             <label>

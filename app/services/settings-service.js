@@ -3,7 +3,7 @@ const SETTINGS_KEY = "mdnotes.settings.v1";
 function createDefaultSettings() {
   return {
     theme: "system",
-    serverUrl: "http://localhost:8000",
+    serverUrl: "",
     serverPin: "",
     displayName: "",
     explorer: "expanded",

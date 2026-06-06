@@ -1,9 +1,18 @@
 function normalizeServerUrl(serverUrl) {
-  const value = serverUrl.trim();
+  const value = (serverUrl ?? "").trim();
+  // Empty string means "same origin + current app base path" so the app
+  // works when mounted under a subpath (for example "/stilomarker/")
+  // behind a reverse proxy without manual URL configuration.
   if (!value) {
-    throw new Error("Server URL is required.");
+    if (typeof window === "undefined") {
+      return "";
+    }
+    const pathname = window.location.pathname || "/";
+    const basePath = pathname.endsWith("/")
+      ? pathname.slice(0, -1)
+      : pathname.replace(/\/[^/]*$/, "");
+    return `${window.location.origin}${basePath}`;
   }
-
   return value.replace(/\/+$/, "");
 }
 

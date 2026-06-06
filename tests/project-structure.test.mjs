@@ -108,7 +108,7 @@ test("main.js wires core feature symbols", async () => {
 test("bmap-view.js wires interaction controls", async () => {
   const bmapViewSource = await readFile(resolveFromRoot("app/ui/bmap-view.js"), "utf8");
   assert.match(bmapViewSource, /const MIN_SNAP_STEP = 10/);
-  assert.match(bmapViewSource, /let interactionMode = "edit"/);
+  assert.match(bmapViewSource, /let interactionMode = "readonly"/);
   assert.match(bmapViewSource, /function toggleInspectorCollapsed\(\)/);
   assert.match(bmapViewSource, /Snap \$\{snapStep\}/);
   assert.match(bmapViewSource, /setInteractionMode\(/);
