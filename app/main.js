@@ -1,4 +1,4 @@
-import { ROOT_ID, findChildByName, getNode, getNodeIdByPath, getPath, isAllowedFileName, isBmapFileName, isImageFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
+import { ROOT_ID, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isAllowedFileName, isBmapFileName, isImageFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
 import { createProjectController, seedDefaultProject } from "./domain/project-service.js";
 import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
 import { createCollaborationRuntime } from "./services/collaboration-service.js";
@@ -106,6 +106,8 @@ const elements = {
   openSettingsMenuButton: query("#open-settings-menu-button"),
   toggleDebugMenuButton: query("#toggle-debug-menu-button"),
   clearCacheMenuButton: query("#clear-cache-menu-button"),
+  resetWorkspaceMenuButton: query("#reset-workspace-menu-button"),
+  emptyWorkspaceMenuButton: query("#empty-workspace-menu-button"),
   toggleLogButton: query("#toggle-log-button"),
   themeSelect: query("#theme-select"),
   explorerSelect: query("#explorer-select"),
@@ -600,6 +602,8 @@ function ensureChatWorkspaceLoaded(project) {
   chatState.threads = workspace.threads;
   chatState.activeThreadId = workspace.activeThreadId;
   sortChatThreads();
+  // First load for this project: land on the latest message, not the top.
+  chatState.shouldScrollToBottom = true;
 }
 
 function persistChatWorkspaceState(project = controller.getProject()) {
@@ -5958,10 +5962,13 @@ async function quickGenerateBmapFile(bmapFileId, request) {
     return;
   }
 
+  // Empty serverUrl resolves to the page origin (same-origin proxy), so it is
+  // valid — only block if the resolved URL would be empty (no window.location).
   const serverUrl = settings.serverUrl?.trim();
-  if (!serverUrl) {
-    notify("Set a Server URL in Settings to use Quick Generate.");
-    logDebug("action", "Quick Generate skipped", "no server URL configured");
+  const resolvedUrl = serverUrl || (typeof window !== "undefined" ? window.location.origin : "");
+  if (!resolvedUrl) {
+    notify("Could not determine server URL. Set one in Settings to use Quick Generate.");
+    logDebug("action", "Quick Generate skipped", "no server URL");
     return;
   }
 
@@ -5980,7 +5987,7 @@ async function quickGenerateBmapFile(bmapFileId, request) {
   logDebug("action", "Quick Generate started", `node="${request?.nodeName}" file="${fileName}" context=${contextCount} scope=${settings.bmapGenerateScope}`);
   logDebug("request", "POST /api/generate", `subject=${subject.slice(0, 80)}${subject.length > 80 ? "…" : ""}`);
   try {
-    const result = await sendGenerationRequest(serverUrl, {
+    const result = await sendGenerationRequest(resolvedUrl, {
       subject,
       contextFiles: Array.isArray(request?.contextFiles) ? request.contextFiles : [],
       bmapOverview: String(request?.bmapOverview ?? ""),
@@ -6723,6 +6730,7 @@ function toggleChat() {
   persistSettings();
   if (settings.chatPanel === "shown") {
     void refreshChatStatus({ silent: true });
+    chatState.shouldScrollToBottom = true;
     renderChatPanel(controller.getProject());
   }
   logDebug("action", "Chat toggled", settings.chatPanel);
@@ -6739,6 +6747,59 @@ function toggleLogPanel() {
   settings.debugPanel = !settings.debugPanel;
   persistSettings();
   logDebug("action", settings.debugPanel ? "Log panel enabled" : "Log panel disabled");
+}
+
+/** Remove every persisted localStorage key this app owns (project, settings,
+ *  chat, and any future "mdnotes.*" keys). Returns the count removed. */
+function clearAllAppStorage() {
+  const store = globalThis.localStorage;
+  if (!store) return 0;
+  const keys = [];
+  for (let i = 0; i < store.length; i += 1) {
+    const key = store.key(i);
+    if (key && key.startsWith("mdnotes.")) keys.push(key);
+  }
+  keys.forEach((key) => store.removeItem(key));
+  return keys.length;
+}
+
+/** Wipe all saved data and reload into the default welcome workspace
+ *  (loaded fresh from the Template on next boot). */
+async function resetToDefaultWorkspace() {
+  const confirmed = await showConfirmDialog({
+    title: "Reset to Default Workspace",
+    message: "This deletes your current workspace, chat history, and settings, then reloads the default welcome workspace. This cannot be undone.",
+    acceptLabel: "Reset"
+  });
+  if (!confirmed) {
+    logDebug("response", "Workspace reset cancelled");
+    return;
+  }
+  elements.settingsMenu.hidden = true;
+  const removed = clearAllAppStorage();
+  logDebug("action", "Workspace reset to default", `keysRemoved=${removed}`);
+  window.location.reload();
+}
+
+/** Wipe all saved data AND seed an empty project so even the default welcome
+ *  workspace is gone on reload — a blank slate for quick tests. */
+async function emptyEverything() {
+  const confirmed = await showConfirmDialog({
+    title: "Empty Everything",
+    message: "This deletes your workspace, chat history, and settings, then reloads into a completely empty workspace (no welcome files). This cannot be undone.",
+    acceptLabel: "Empty Everything"
+  });
+  if (!confirmed) {
+    logDebug("response", "Empty everything cancelled");
+    return;
+  }
+  elements.settingsMenu.hidden = true;
+  clearAllAppStorage();
+  // Persist an empty project so the boot path doesn't fall back to loading the
+  // default Template welcome workspace.
+  saveProject(createProject("Workspace"));
+  logDebug("action", "Workspace emptied");
+  window.location.reload();
 }
 
 async function clearAllCache() {
@@ -6840,6 +6901,12 @@ elements.openSettingsMenuButton.addEventListener("click", () => {
 });
 
 elements.toggleDebugMenuButton.addEventListener("click", toggleLogPanel);
+elements.resetWorkspaceMenuButton.addEventListener("click", () => {
+  void resetToDefaultWorkspace();
+});
+elements.emptyWorkspaceMenuButton.addEventListener("click", () => {
+  void emptyEverything();
+});
 elements.clearCacheMenuButton.addEventListener("click", () => {
   void clearAllCache();
 });

@@ -1307,6 +1307,7 @@ p {
 
 #editor-content {
   display: block;
+  position: relative;
   height: 100%;
   outline: none;
   border: 0;
@@ -1336,9 +1337,14 @@ p {
   text-indent: calc(var(--wrapped-indent-columns, 0) * -1ch);
 }
 
-/* Placeholder shown when no file is open */
+/* Placeholder shown when no file is open. Absolutely positioned so it overlays
+   the first line instead of consuming a line box (which would push the caret
+   onto the second visual line). */
 #editor-content[data-empty="true"]::before {
   content: attr(data-placeholder);
+  position: absolute;
+  top: 16px;
+  left: 16px;
   color: var(--text-muted);
   pointer-events: none;
 }
@@ -2109,6 +2115,10 @@ menu {
 }
 
 ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-corner {
   background: transparent;
 }
 
@@ -3249,8 +3259,8 @@ menu {
 .chat-panel {
   min-width: 0;
   min-height: 0;
-  display: grid;
-  grid-template-rows: auto auto 1fr;
+  display: flex;
+  flex-direction: column;
   border-left: 1px solid var(--border);
   background: var(--sidebar);
   overflow: hidden;
@@ -3271,6 +3281,7 @@ menu {
   height: 35px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  flex-grow: 0;
 }
 
 .chat-toolbar-title {
@@ -3396,12 +3407,14 @@ menu {
 /* ─ Message list ─────────────────────────────────────────────────────── */
 
 .chat-message-list {
+  flex: 1 1 0;
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 0;
-  padding: 6px 0 150px;
+  padding: 6px 0;
 }
 
 .chat-message {
@@ -3409,6 +3422,7 @@ menu {
   gap: 4px;
   padding: 8px 14px;
   border-left: 2px solid transparent;
+  min-width: 0;
 }
 
 .chat-message + .chat-message {
@@ -3467,10 +3481,13 @@ menu {
 }
 
 .chat-message-content {
+  min-width: 0;
+  max-width: 100%;
   font-size: 13px;
   line-height: 1.55;
   color: var(--text);
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .chat-message[data-role="user"] .chat-message-content,
@@ -3488,6 +3505,7 @@ menu {
 }
 
 .chat-message[data-role="assistant"] .chat-message-content pre {
+  max-width: 100%;
   overflow-x: auto;
   border-radius: 3px;
   padding: 8px;
@@ -3855,15 +3873,12 @@ pre.proposal-diff-block {
 /* ─ Compose area (absolute overlay at the bottom) ───────────────────── */
 
 .chat-compose-shell {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  flex-shrink: 0;
   max-height: 40%;
+  overflow-x: hidden;
   overflow-y: auto;
-  border-top: 1px solid var(--border);
+  border-top: 2px solid var(--border-strong, var(--border));
   background: var(--sidebar);
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.2);
   display: grid;
   gap: 0;
 }
