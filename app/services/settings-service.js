@@ -18,7 +18,13 @@ function createDefaultSettings() {
     chatWidth: 420,
     previewWidthCustomized: false,
     debugPanelHeight: 180,
-    bmapGenerateScope: "connected"
+    bmapGenerateScope: "connected",
+    autoReconnect: true,
+    chatModel: "",
+    // Runtime memory: true while the user has an active/intended session, so the
+    // app can auto-reconnect on next load or after a dropped connection.
+    wasConnected: false,
+    showFormatToolbar: false
   };
 }
 

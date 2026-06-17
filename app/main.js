@@ -16,8 +16,8 @@ import { appendUrlDbEntry, formatUrlDbEntryBody, moveUrlDbEntry, moveUrlDbEntryB
 import { createZip, downloadBlob } from "./services/zip-service.js";
 import { query } from "./ui/dom.js";
 import { createExplorerView } from "./ui/explorer-view.js";
-import { createBmapView } from "./ui/bmap-view.js";
-import { createDefaultBmap } from "./services/bmap-service.js";
+import { createBmapView, renderBmapToSvg } from "./ui/bmap-view.js";
+import { createDefaultBmap, normalizeBmapAst, parseBmap } from "./services/bmap-service.js";
 
 const elements = {
   app: query("#app"),
@@ -45,6 +45,8 @@ const elements = {
   editorAgentBar: query("#editor-agent-bar"),
   editorCursors: query("#editor-cursors"),
   editorAutocomplete: query("#editor-autocomplete"),
+  editorFormatToolbar: query("#editor-format-toolbar"),
+  formatToolbarInput: query("#format-toolbar-input"),
   editorAutocompleteLabel: query("#editor-autocomplete-label"),
   editorAutocompleteList: query("#editor-autocomplete-list"),
   preview: query("#preview-output"),
@@ -116,6 +118,7 @@ const elements = {
   indentStyleSelect: query("#indent-style-select"),
   bmapGenerateScopeSelect: query("#bmap-generate-scope-select"),
   serverUrlInput: query("#server-url-input"),
+  autoReconnectInput: query("#auto-reconnect-input"),
   serverPinInput: query("#server-pin-input"),
   displayNameInput: query("#display-name-input"),
   pingServerButton: query("#ping-server-button"),
@@ -165,6 +168,10 @@ const elements = {
   serverIndicator: query("#server-indicator"),
   serverStatusBarText: query("#server-status-bar-text"),
   presenceSummaryText: query("#presence-summary-text"),
+  statusSourceItem: query("#status-source-item"),
+  statusBrowserItem: query("#status-browser-item"),
+  statusServerItem: query("#status-server-item"),
+  statusPresenceItem: query("#status-presence-item"),
   previewToggleActivityButton: query("#preview-toggle-activity-button"),
   chatToggleActivityButton: query("#chat-toggle-activity-button"),
   debugPanel: query("#debug-panel"),
@@ -177,6 +184,7 @@ const elements = {
   logCollapseButton: query("#log-collapse-button"),
   debugLogList: query("#debug-log-list"),
   chatStatusText: query("#chat-status-text"),
+  chatModelSelect: query("#chat-model-select"),
   chatNewThreadButton: query("#chat-new-thread-button"),
   chatCollapseButton: query("#chat-collapse-button"),
   chatThreadList: query("#chat-thread-list"),
@@ -243,10 +251,13 @@ const chatState = {
   localOnly: true,
   provider: null,
   model: null,
+  models: [],
+  selectedModel: null,
   status: "idle",
   detail: "Checking chat backend...",
   sending: false,
   activity: [],
+  activityExpanded: false,
   streamingText: "",
   shouldScrollToBottom: false
 };
@@ -716,10 +727,20 @@ function renderAgentActivity() {
   if (!chatState.activity.length) {
     return `<div class="chat-activity-line">Working…</div>`;
   }
-  return chatState.activity
-    .slice(-6)
+  const total = chatState.activity.length;
+  const COLLAPSED = 6;
+  const expanded = chatState.activityExpanded || total <= COLLAPSED;
+  const visible = expanded ? chatState.activity : chatState.activity.slice(-COLLAPSED);
+  const lines = visible
     .map((line) => `<div class="chat-activity-line">${escapeHtmlAttribute(line)}</div>`)
     .join("");
+  if (total <= COLLAPSED) {
+    return lines;
+  }
+  const toggle = expanded
+    ? `<button type="button" class="chat-activity-toggle" data-chat-activity-toggle>Show less</button>`
+    : `<button type="button" class="chat-activity-toggle" data-chat-activity-toggle>Show all ${total} steps</button>`;
+  return lines + toggle;
 }
 
 function renderChatPanel(project) {
@@ -727,10 +748,29 @@ function renderChatPanel(project) {
 
   const activeThread = getActiveChatThread();
   const statusPrefix = chatState.sending ? "Sending…" : chatState.detail;
-  const statusSuffix = chatState.configured && chatState.provider && chatState.model
+  const statusSuffix = chatState.configured && chatState.provider && chatState.model && chatState.models.length <= 1
     ? ` · ${chatState.provider} ${chatState.model}`
-    : "";
+    : (chatState.configured && chatState.provider ? ` · ${chatState.provider}` : "");
   elements.chatStatusText.textContent = `${statusPrefix}${statusSuffix}`.trim();
+  const badgeError = chatState.status === "offline" || chatState.status === "restricted" || chatState.status === "unconfigured";
+  elements.chatStatusText.classList.toggle("is-error", badgeError);
+
+  // Model picker — only meaningful when the server offers more than one model.
+  if (elements.chatModelSelect) {
+    const showPicker = chatState.configured && chatState.models.length > 1;
+    elements.chatModelSelect.hidden = !showPicker;
+    if (showPicker) {
+      const desired = chatState.selectedModel ?? chatState.models[0];
+      const optionsHtml = chatState.models
+        .map((name) => `<option value="${escapeHtmlAttribute(name)}"${name === desired ? " selected" : ""}>${escapeHtmlAttribute(name)}</option>`)
+        .join("");
+      if (elements.chatModelSelect.innerHTML !== optionsHtml) {
+        elements.chatModelSelect.innerHTML = optionsHtml;
+      }
+      elements.chatModelSelect.value = desired;
+      elements.chatModelSelect.disabled = chatState.sending;
+    }
+  }
 
   elements.chatThreadList.innerHTML = chatState.threads.length
     ? chatState.threads.map((thread) => {
@@ -793,6 +833,10 @@ function renderChatPanel(project) {
       const proposalCardHtml = message.role === "assistant" && message.proposedOperations?.length
         ? renderProposalCard(message, isOriginator)
         : "";
+      // Offer a retry on a failed turn so the user can re-send without retyping.
+      const retryHtml = message.error && !chatState.sending
+        ? `<button type="button" class="chat-message-retry" data-chat-retry>↻ Retry</button>`
+        : "";
       return `
         <article class="chat-message${message.error ? " is-error" : ""}" data-role="${escapeHtmlAttribute(message.role)}" data-msg-id="${escapeHtmlAttribute(message.id)}">
           <div class="chat-message-meta">
@@ -802,6 +846,7 @@ function renderChatPanel(project) {
           <div class="chat-message-content">${contentHtml}</div>
           ${contextBadgesHtml}
           ${proposalCardHtml}
+          ${retryHtml}
         </article>
       `;
     }).join("") + thinkingHtml
@@ -888,12 +933,21 @@ async function refreshChatStatus({ silent = false } = {}) {
     chatState.localOnly = status.localOnly !== false;
     chatState.provider = status.provider ?? null;
     chatState.model = status.model ?? null;
+    chatState.models = Array.isArray(status.models) && status.models.length
+      ? status.models
+      : (status.model ? [status.model] : []);
+    // Keep the user's saved choice if the server still offers it, else default.
+    chatState.selectedModel = chatState.models.includes(settings.chatModel)
+      ? settings.chatModel
+      : (status.model ?? chatState.models[0] ?? null);
     chatState.status = chatState.configured ? "ready" : "unconfigured";
     chatState.detail = status.message ?? (chatState.configured ? "Chat is ready." : "Chat is not configured.");
   } catch (error) {
     chatState.configured = false;
     chatState.provider = null;
     chatState.model = null;
+    chatState.models = [];
+    chatState.selectedModel = null;
     chatState.status = error?.status === 403 ? "restricted" : "offline";
     chatState.detail = error instanceof Error ? error.message : String(error);
   }
@@ -923,7 +977,6 @@ async function handleChatSubmit() {
   }
   const project = controller.getProject();
   const thread = ensureActiveChatThread();
-  const contextFiles = resolveChatContextFiles(project, thread);
   const contextPaths = (thread.contextPaths ?? []).slice();
   thread.contextPaths = [];
   thread.messages.push(createChatMessage("user", prompt, { contextPaths }));
@@ -931,11 +984,32 @@ async function handleChatSubmit() {
   thread.updatedAt = Date.now();
   sortChatThreads();
   chatState.activeThreadId = thread.id;
+  elements.chatInput.value = "";
+  await runAgentTurn(thread, project);
+}
+
+/** Re-send the most recent failed turn (clears the trailing error first). */
+async function retryLastChatTurn() {
+  if (chatState.sending) return;
+  const thread = getActiveChatThread();
+  if (!thread) return;
+  while (thread.messages.length && thread.messages[thread.messages.length - 1].role === "system") {
+    thread.messages.pop();
+  }
+  if (!thread.messages.some((message) => message.role === "user")) return;
+  thread.updatedAt = Date.now();
+  await runAgentTurn(thread, controller.getProject());
+}
+
+/** Send the thread's current messages to the agent and fold the reply (or
+ *  error) back in. Shared by the compose box and the retry affordance. */
+async function runAgentTurn(thread, project) {
+  const contextFiles = resolveChatContextFiles(project, thread);
   chatState.sending = true;
   chatState.activity = [];
+  chatState.activityExpanded = false;
   chatState.streamingText = "";
   chatState.shouldScrollToBottom = true;
-  elements.chatInput.value = "";
   persistChatWorkspaceState(project);
   renderChatPanel(project);
 
@@ -949,6 +1023,7 @@ async function handleChatSubmit() {
 
     const response = await sendChatRequest(settings.serverUrl, {
       projectName: project.name,
+      model: chatState.selectedModel ?? undefined,
       messages: thread.messages
         .filter((message) => message.role === "user" || message.role === "assistant")
         .map((message) => ({ role: message.role, content: message.content })),
@@ -1481,6 +1556,31 @@ function buildProjectFileSuggestions(project, activeFileId, kind = "path") {
     .sort((left, right) => left.detail.localeCompare(right.detail));
 }
 
+/** General word completion: suggest words already present in the document that
+ *  share the typed prefix, ranked by frequency. Makes the popup useful beyond
+ *  link/path contexts, like an editor's basic word-based IntelliSense. */
+function buildWordSuggestions(text, token) {
+  const prefix = token.toLowerCase();
+  const counts = new Map();
+  const wordPattern = /[A-Za-z][A-Za-z0-9_-]{2,}/g;
+  let match;
+  while ((match = wordPattern.exec(text)) !== null) {
+    const word = match[0];
+    const lower = word.toLowerCase();
+    if (lower === prefix || !lower.startsWith(prefix)) continue;
+    counts.set(word, (counts.get(word) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 10)
+    .map(([word, count]) => ({
+      insertText: word,
+      label: word,
+      detail: count > 1 ? `${count}×` : "word",
+      kind: "word"
+    }));
+}
+
 // ── .bmap autocomplete helpers ──────────────────────────────────────────────
 
 /** Determine block depth and type at a given cursor position in a .bmap source. */
@@ -1755,12 +1855,25 @@ function findAutocompleteContext(force = false) {
     };
   }
 
+  // General word completion: trigger automatically once a plain word reaches a
+  // few characters, so the popup is useful for prose, not just links/paths.
+  const wordMatch = linePrefix.match(/([A-Za-z][A-Za-z0-9_-]*)$/);
+  if (wordMatch && (force || wordMatch[1].length >= 3)) {
+    const token = wordMatch[1];
+    return {
+      kind: "word",
+      token,
+      start: cursor - token.length,
+      end: cursor
+    };
+  }
+
   if (!force) {
     return null;
   }
 
   return {
-    kind: activeFile.name.endsWith(".md") ? "path" : "path",
+    kind: "path",
     token: "",
     start: cursor,
     end: cursor
@@ -1792,6 +1905,58 @@ function renderEditorAutocomplete() {
   });
 
   elements.editorAutocomplete.hidden = autocompleteState.items.length === 0;
+  if (!elements.editorAutocomplete.hidden) {
+    positionEditorAutocompleteAtCaret();
+    // Keep the active row scrolled into view during keyboard navigation.
+    elements.editorAutocompleteList
+      .querySelector(".editor-autocomplete-item.is-active")
+      ?.scrollIntoView({ block: "nearest" });
+  }
+}
+
+/** Anchor the completion popup directly under the text caret (VSCode-style),
+ *  flipping above the caret when it would overflow the editor surface. */
+function positionEditorAutocompleteAtCaret() {
+  const surface = elements.editorContent.closest(".editor-surface");
+  if (!surface) return;
+
+  const selection = globalThis.getSelection?.();
+  let caretRect = null;
+  if (selection && selection.rangeCount > 0) {
+    const range = selection.getRangeAt(0).cloneRange();
+    range.collapse(true);
+    const rects = range.getClientRects();
+    if (rects.length > 0) {
+      caretRect = rects[0];
+    } else {
+      const bounding = range.getBoundingClientRect();
+      if (bounding && (bounding.width || bounding.height || bounding.top)) {
+        caretRect = bounding;
+      }
+    }
+    if (!caretRect) {
+      // Collapsed caret on an empty line yields no rect — fall back to the line.
+      const anchor = selection.anchorNode;
+      const anchorEl = anchor?.nodeType === Node.ELEMENT_NODE ? anchor : anchor?.parentElement;
+      const lineEl = anchorEl?.closest?.(".editor-line");
+      if (lineEl) caretRect = lineEl.getBoundingClientRect();
+    }
+  }
+  if (!caretRect) return;
+
+  const base = surface.getBoundingClientRect();
+  const popup = elements.editorAutocomplete;
+  const left = Math.max(0, Math.min(caretRect.left - base.left, base.width - popup.offsetWidth - 4));
+  popup.style.bottom = "auto";
+  popup.style.left = `${left}px`;
+  popup.style.top = `${caretRect.bottom - base.top + 2}px`;
+
+  // Flip above the caret if the popup would spill below the editor surface.
+  const popupHeight = popup.offsetHeight;
+  const caretTop = caretRect.top - base.top;
+  if (caretRect.bottom - base.top + 2 + popupHeight > base.height && caretTop > popupHeight) {
+    popup.style.top = `${caretTop - popupHeight - 2}px`;
+  }
 }
 
 function showEditorAutocomplete(force = false) {
@@ -1808,6 +1973,8 @@ function showEditorAutocomplete(force = false) {
   let items;
   if (context.kind.startsWith("bmap-")) {
     items = getBmapAutocompleteItems(context, project, activeFile);
+  } else if (context.kind === "word") {
+    items = buildWordSuggestions(getEditorText(), context.token);
   } else {
     items = buildProjectFileSuggestions(project, activeFile?.id ?? null, context.kind)
       .filter((item) => !tokenLower || item.insertText.toLowerCase().includes(tokenLower) || item.detail.toLowerCase().includes(tokenLower));
@@ -2258,6 +2425,75 @@ function insertReferenceAtCursor(referenceText) {
   replaceEditorRange(start, end, referenceText);
 }
 
+// ── Markdown formatting toolbar ──────────────────────────────────────────────
+
+/** Wrap the current selection (or a placeholder) with inline markers and leave
+ *  the wrapped text selected so the user can keep typing or replace it. */
+function wrapEditorSelection(before, after, placeholder) {
+  const { start, end } = getEditorSelection();
+  const text = getEditorText();
+  const selected = text.slice(start, end) || placeholder;
+  const inserted = `${before}${selected}${after}`;
+  const innerStart = start + before.length;
+  replaceEditorRange(start, end, inserted, innerStart, innerStart + selected.length);
+}
+
+/** Prefix every line touched by the selection (line-oriented markdown like
+ *  headings, lists, quotes). `numbered` increments the prefix per line. */
+function prefixEditorLines(prefix, numbered = false) {
+  const { start, end } = getEditorSelection();
+  const text = getEditorText();
+  const blockStart = text.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+  let blockEnd = text.indexOf("\n", end);
+  if (blockEnd === -1) blockEnd = text.length;
+  const lines = text.slice(blockStart, blockEnd).split("\n");
+  const newBlock = lines
+    .map((line, index) => `${numbered ? `${index + 1}. ` : prefix}${line}`)
+    .join("\n");
+  replaceEditorRange(blockStart, blockEnd, newBlock, blockStart, blockStart + newBlock.length);
+}
+
+/** Insert a multi-line block snippet on its own line(s). `caretOffset` (if set)
+ *  places the caret at that offset within the inserted snippet. */
+function insertEditorBlock(snippet, caretOffset = null) {
+  const { start, end } = getEditorSelection();
+  const text = getEditorText();
+  const atLineStart = start === 0 || text[start - 1] === "\n";
+  const lead = atLineStart ? "" : "\n";
+  const inserted = `${lead}${snippet}`;
+  const caret = caretOffset === null
+    ? start + inserted.length
+    : start + lead.length + caretOffset;
+  replaceEditorRange(start, end, inserted, caret, caret);
+}
+
+const MARKDOWN_TABLE_SNIPPET =
+  "| Column A | Column B |\n| --- | --- |\n| Cell 1 | Cell 2 |\n| Cell 3 | Cell 4 |\n";
+
+function applyMarkdownToolbarAction(action) {
+  const activeFile = controller.getActiveFile();
+  if (!activeFile || !isTextFileName(activeFile.name)) return;
+  elements.editorContent.focus({ preventScroll: true });
+  switch (action) {
+    case "bold": wrapEditorSelection("**", "**", "bold text"); break;
+    case "italic": wrapEditorSelection("*", "*", "italic text"); break;
+    case "strike": wrapEditorSelection("~~", "~~", "strikethrough"); break;
+    case "code": wrapEditorSelection("`", "`", "code"); break;
+    case "heading": prefixEditorLines("## "); break;
+    case "ul": prefixEditorLines("- "); break;
+    case "ol": prefixEditorLines("", true); break;
+    case "quote": prefixEditorLines("> "); break;
+    case "task": prefixEditorLines("- [ ] "); break;
+    case "link": wrapEditorSelection("[", "](url)", "link text"); break;
+    case "image": wrapEditorSelection("![", "](url)", "alt text"); break;
+    case "table": insertEditorBlock(MARKDOWN_TABLE_SNIPPET); break;
+    case "codeblock": insertEditorBlock("```\n\n```\n", 4); break;
+    case "hr": insertEditorBlock("---\n"); break;
+    default: return;
+  }
+  logDebug("action", "Markdown toolbar insert", action);
+}
+
 function suggestUniqueFileName(project, parentId, name) {
   const dotIndex = name.lastIndexOf(".");
   const baseName = dotIndex >= 0 ? name.slice(0, dotIndex) : name;
@@ -2313,6 +2549,8 @@ elements.previewSelect.value = settings.preview;
 elements.wordWrapSelect.value = settings.wordWrap ? "on" : "off";
 elements.indentStyleSelect.value = settings.indentStyle;
 elements.bmapGenerateScopeSelect.value = settings.bmapGenerateScope === "all" ? "all" : "connected";
+if (elements.autoReconnectInput) elements.autoReconnectInput.checked = settings.autoReconnect !== false;
+if (elements.formatToolbarInput) elements.formatToolbarInput.checked = Boolean(settings.showFormatToolbar);
 
 // Per-turn agent checkpoints (Phase 6 / subtask 6.1).
 // batchId → { project: deepClone, baseRevision: number, soleAuthored: boolean }
@@ -2420,6 +2658,11 @@ const collaboration = createCollaborationRuntime({
         render(controller.getProject());
         return;
       }
+    }
+    if (nextState.status === "offline") {
+      // Dropped while we had an intended session — try to re-establish it.
+      // (Guarded against firing during a deliberate reconnect handshake.)
+      scheduleReconnect?.();
     }
     if (nextState.status === "offline" && workspaceMode === "synced") {
       // Lost connection: restore the user's private workspace.
@@ -3727,6 +3970,20 @@ function handleEditorKeydown(event) {
     return;
   }
 
+  if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey) {
+    const key = event.key.toLowerCase();
+    if (key === "b") {
+      event.preventDefault();
+      applyMarkdownToolbarAction("bold");
+      return;
+    }
+    if (key === "i") {
+      event.preventDefault();
+      applyMarkdownToolbarAction("italic");
+      return;
+    }
+  }
+
   if (!elements.editorAutocomplete.hidden) {
     // Space dismisses autocomplete so the user can keep typing freely.
     if (event.key === " ") {
@@ -4838,6 +5095,7 @@ function applyWorkspaceSettings() {
   elements.previewCollapseButton.setAttribute("aria-expanded", settings.preview === "shown" ? "true" : "false");
   elements.chatCollapseButton.setAttribute("aria-expanded", settings.chatPanel === "shown" ? "true" : "false");
   elements.debugPanel.hidden = !settings.debugPanel;
+  if (elements.editorFormatToolbar) elements.editorFormatToolbar.hidden = !settings.showFormatToolbar;
   elements.chatPanel.hidden = settings.chatPanel === "hidden";
   elements.chatToggleActivityButton.classList.toggle("is-active", settings.chatPanel === "shown");
   elements.toggleDebugMenuButton.textContent = settings.debugPanel ? "Hide Log Panel" : "Show Log Panel";
@@ -5082,6 +5340,19 @@ function acceptAgentOperations(ops, message) {
 }
 
 document.addEventListener("click", (event) => {
+  // Retry a failed agent turn.
+  if (event.target.closest("[data-chat-retry]")) {
+    void retryLastChatTurn();
+    return;
+  }
+
+  // Expand / collapse the agent activity log.
+  if (event.target.closest("[data-chat-activity-toggle]")) {
+    chatState.activityExpanded = !chatState.activityExpanded;
+    renderChatPanel(controller.getProject());
+    return;
+  }
+
   // Jump to first changed line in editor (Phase 5 / subtask 5.3)
   const jumpBtn = event.target.closest("[data-batch-jump]");
   if (jumpBtn) {
@@ -6155,6 +6426,78 @@ function exportNode(nodeId) {
   downloadBlob(createZip(collectFileEntries(project, node.id)), `${node.name || project.name}.zip`);
 }
 
+/** Rasterize an SVG string to a PNG/JPG Blob. `background` (e.g. white) is
+ *  painted first for opaque formats; omit it to keep PNG transparency. */
+function rasterizeSvgToBlob(svgString, { type, background = null, scale = 2 }) {
+  return new Promise((resolve, reject) => {
+    const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(svgBlob);
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const width = image.naturalWidth || image.width;
+        const height = image.naturalHeight || image.height;
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+        const ctx = canvas.getContext("2d");
+        if (background) {
+          ctx.fillStyle = background;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(
+          (blob) => (blob ? resolve(blob) : reject(new Error("Canvas export produced no data."))),
+          type,
+          0.92
+        );
+      } catch (error) {
+        reject(error);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Failed to render the diagram for export."));
+    };
+    image.src = url;
+  });
+}
+
+/** Export a .bmap file as PNG (transparent), JPG (white background), or SVG. */
+async function exportBmapAs(nodeId, format) {
+  const project = controller.getProject();
+  const node = project.nodes[nodeId];
+  if (!node || node.kind !== "file" || !isBmapFileName(node.name)) {
+    notify("Export As is only available for .bmap diagrams.");
+    return;
+  }
+  try {
+    const ast = normalizeBmapAst(parseBmap(node.content ?? ""));
+    if (!ast.nodes.length) {
+      notify("This diagram has no nodes to export.");
+      return;
+    }
+    const svgString = renderBmapToSvg(ast);
+    const baseName = node.name.replace(/\.bmap$/i, "");
+
+    if (format === "svg") {
+      downloadBlob(new Blob([svgString], { type: "image/svg+xml" }), `${baseName}.svg`);
+    } else if (format === "png") {
+      const blob = await rasterizeSvgToBlob(svgString, { type: "image/png" });
+      downloadBlob(blob, `${baseName}.png`);
+    } else if (format === "jpg") {
+      const blob = await rasterizeSvgToBlob(svgString, { type: "image/jpeg", background: "#ffffff" });
+      downloadBlob(blob, `${baseName}.jpg`);
+    }
+    logDebug("action", "Bmap exported", `${node.name} → ${format}`);
+  } catch (error) {
+    notify(error instanceof Error ? error.message : String(error));
+    logDebug("error", "Bmap export failed", error instanceof Error ? error.message : String(error));
+  }
+}
+
 async function handleExplorerAction(action, target, options = {}) {
   if (options.dryRun) {
     return false;
@@ -6243,6 +6586,18 @@ async function handleExplorerAction(action, target, options = {}) {
   }
   if (action === "export") {
     exportNode(nodeId);
+    return;
+  }
+  if (action === "export-bmap-png") {
+    await exportBmapAs(nodeId, "png");
+    return;
+  }
+  if (action === "export-bmap-jpg") {
+    await exportBmapAs(nodeId, "jpg");
+    return;
+  }
+  if (action === "export-bmap-svg") {
+    await exportBmapAs(nodeId, "svg");
   }
 }
 
@@ -6841,6 +7196,22 @@ elements.chatCollapseButton.addEventListener("click", toggleChat);
 elements.logCollapseButton.addEventListener("click", toggleLogPanel);
 elements.chatNewThreadButton.addEventListener("click", createNewChatConversation);
 elements.chatHistoryToggleButton?.addEventListener("click", toggleChatHistoryPane);
+
+elements.chatModelSelect?.addEventListener("change", (event) => {
+  chatState.selectedModel = event.target.value;
+  settings.chatModel = event.target.value;
+  saveSettings(settings);
+  logDebug("action", "Agent model changed", settings.chatModel);
+});
+
+// The status badge doubles as a shortcut: open settings when the agent isn't
+// usable, otherwise just re-check the backend.
+elements.chatStatusText.addEventListener("click", () => {
+  if (chatState.status !== "ready") {
+    if (!elements.settingsDialog.open) elements.settingsDialog.showModal();
+  }
+  void refreshChatStatus({ silent: true });
+});
 elements.chatAddActiveFileButton.addEventListener("click", addActiveFileToChatContext);
 elements.chatComposeForm.addEventListener("dragover", (event) => {
   if (!event.dataTransfer?.types.includes("text/mdnotes-file-id")) return;
@@ -6898,6 +7269,38 @@ elements.settingsButton.addEventListener("click", () => {
 elements.openSettingsMenuButton.addEventListener("click", () => {
   logDebug("action", "Settings dialog opened from menu");
   elements.settingsDialog.showModal();
+});
+
+// Status-bar footer items double as shortcuts to their related menus/panels.
+elements.statusSourceItem.addEventListener("click", () => {
+  logDebug("action", "Status bar: open directory");
+  elements.openDirectoryButton.click();
+});
+elements.statusBrowserItem.addEventListener("click", () => {
+  const supported = supportsDirectoryAccess();
+  showNoticeDialog(
+    supported
+      ? "This browser supports the File System Access API, so you can open and edit a local directory directly."
+      : "This browser falls back to import/export mode. Use a Chromium-based browser (Chrome, Edge) to edit a local directory in place.",
+    "Browser Support"
+  );
+});
+elements.statusServerItem.addEventListener("click", () => {
+  logDebug("action", "Status bar: open collaboration settings");
+  if (!elements.settingsDialog.open) {
+    elements.settingsDialog.showModal();
+  }
+  elements.serverUrlInput?.focus();
+});
+elements.statusPresenceItem.addEventListener("click", () => {
+  // The session/presence panel lives in the explorer sidebar — reveal it.
+  if (settings.explorer !== "expanded") {
+    settings.explorer = "expanded";
+    if (elements.explorerSelect) elements.explorerSelect.value = settings.explorer;
+    persistSettings();
+  }
+  document.querySelector(".collaboration-sidebar-panel")?.scrollIntoView({ block: "nearest" });
+  logDebug("action", "Status bar: reveal session panel");
 });
 
 elements.toggleDebugMenuButton.addEventListener("click", toggleLogPanel);
@@ -6965,6 +7368,20 @@ elements.bmapGenerateScopeSelect.addEventListener("change", (event) => {
   logDebug("action", "Bmap generate scope changed", settings.bmapGenerateScope);
 });
 
+elements.formatToolbarInput?.addEventListener("change", (event) => {
+  settings.showFormatToolbar = event.target.checked;
+  persistSettings();
+  logDebug("action", "Format toolbar setting changed", settings.showFormatToolbar ? "on" : "off");
+});
+
+// mousedown + preventDefault keeps the editor selection intact while clicking.
+elements.editorFormatToolbar?.addEventListener("mousedown", (event) => {
+  const button = event.target.closest("[data-md-action]");
+  if (!button) return;
+  event.preventDefault();
+  applyMarkdownToolbarAction(button.dataset.mdAction);
+});
+
 window.addEventListener("resize", () => {
   renderEditorContent(getEditorText());
   syncEditorScroll();
@@ -6984,6 +7401,17 @@ elements.serverPinInput.addEventListener("change", (event) => {
 elements.displayNameInput.addEventListener("change", (event) => {
   settings.displayName = event.target.value.trim();
   saveSettings(settings);
+});
+
+elements.autoReconnectInput?.addEventListener("change", (event) => {
+  settings.autoReconnect = event.target.checked;
+  if (!settings.autoReconnect) {
+    // Disabling auto-reconnect cancels any pending retry and forgets the session.
+    clearReconnectTimer();
+    settings.wasConnected = false;
+  }
+  saveSettings(settings);
+  logDebug("action", "Auto-reconnect setting changed", settings.autoReconnect ? "on" : "off");
 });
 
 elements.pingServerButton.addEventListener("click", async () => {
@@ -7008,20 +7436,80 @@ elements.pingServerButton.addEventListener("click", async () => {
   }
 });
 
-elements.connectServerButton.addEventListener("click", async () => {
-  // Ask the user to confirm before making any network call or touching the workspace.
-  const confirmed = await showAcceptConnectionDialog();
-  if (!confirmed) return;
+// ── Auto-reconnect ──────────────────────────────────────────────────────────
+// Remember the last intended session (settings.wasConnected) and transparently
+// re-establish it on startup and after a dropped connection, with backoff.
+const reconnectState = { timer: null, attempts: 0, connecting: false };
+const RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 20000, 30000];
+const MAX_RECONNECT_ATTEMPTS = 10;
+
+function clearReconnectTimer() {
+  if (reconnectState.timer) {
+    window.clearTimeout(reconnectState.timer);
+    reconnectState.timer = null;
+  }
+}
+
+/** Connect using the saved credentials. `auto` skips the confirm dialog (the
+ *  user already consented to this session when they first connected). */
+async function establishConnection({ auto = false } = {}) {
+  if (reconnectState.connecting) return false;
+  if (!settings.serverPin) {
+    if (auto) return false;
+    throw new Error("PIN is required.");
+  }
+  reconnectState.connecting = true;
   try {
-    logDebug("action", "Server connect requested", elements.serverUrlInput.value.trim());
-    await collaboration.connect(elements.serverUrlInput.value, elements.serverPinInput.value, elements.displayNameInput.value);
-    settings.serverUrl = elements.serverUrlInput.value.trim();
-    settings.serverPin = elements.serverPinInput.value;
-    settings.displayName = elements.displayNameInput.value.trim();
+    await collaboration.connect(settings.serverUrl, settings.serverPin, settings.displayName);
+    settings.wasConnected = true;
     saveSettings(settings);
+    reconnectState.attempts = 0;
+    clearReconnectTimer();
     flashStatusPanel("success");
     logDebug("response", "Server connected", settings.displayName || "anonymous");
     await refreshChatStatus({ silent: true });
+    return true;
+  } finally {
+    reconnectState.connecting = false;
+  }
+}
+
+function scheduleReconnect() {
+  if (!settings.autoReconnect || !settings.wasConnected || !settings.serverPin) return;
+  if (reconnectState.connecting || reconnectState.timer) return;
+  if (reconnectState.attempts >= MAX_RECONNECT_ATTEMPTS) {
+    syncState.detail = "Reconnect failed. Open collaboration settings to retry.";
+    render(controller.getProject());
+    logDebug("response", "Auto-reconnect gave up", `after ${reconnectState.attempts} attempts`);
+    return;
+  }
+  const delay = RECONNECT_DELAYS[Math.min(reconnectState.attempts, RECONNECT_DELAYS.length - 1)];
+  reconnectState.attempts += 1;
+  syncState.detail = `Reconnecting in ${Math.round(delay / 1000)}s… (attempt ${reconnectState.attempts})`;
+  render(controller.getProject());
+  reconnectState.timer = window.setTimeout(() => {
+    reconnectState.timer = null;
+    establishConnection({ auto: true }).catch((error) => {
+      logDebug("response", "Auto-reconnect attempt failed", error.message);
+      scheduleReconnect();
+    });
+  }, delay);
+}
+
+elements.connectServerButton.addEventListener("click", async () => {
+  // Persist the latest field values before connecting so reconnect uses them.
+  settings.serverUrl = elements.serverUrlInput.value.trim();
+  settings.serverPin = elements.serverPinInput.value;
+  settings.displayName = elements.displayNameInput.value.trim();
+  saveSettings(settings);
+  // Ask the user to confirm before making any network call or touching the workspace.
+  const confirmed = await showAcceptConnectionDialog();
+  if (!confirmed) return;
+  reconnectState.attempts = 0;
+  clearReconnectTimer();
+  try {
+    logDebug("action", "Server connect requested", settings.serverUrl);
+    await establishConnection({ auto: false });
   } catch (error) {
     syncState.status = "offline";
     syncState.detail = error.message;
@@ -7042,3 +7530,13 @@ window.addEventListener("beforeunload", (event) => {
 
 registerOfflineShell();
 void refreshChatStatus({ silent: true });
+
+// Restore the previous session: if the user was connected last time and saved a
+// PIN, reconnect automatically (silently, since they already consented before).
+if (settings.autoReconnect && settings.wasConnected && settings.serverPin) {
+  logDebug("action", "Auto-reconnect on startup", settings.serverUrl || "(same origin)");
+  establishConnection({ auto: true }).catch((error) => {
+    logDebug("response", "Startup auto-reconnect failed", error.message);
+    scheduleReconnect();
+  });
+}

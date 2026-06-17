@@ -25,6 +25,11 @@ const MAX_ZOOM = 3;
 const ZOOM_STEP = 0.15;
 const SNAP_STEP_OPTIONS = [10, 20, 25, 50, 100];
 
+// Default ink for node name/body text. Node boxes are always light, so this is a
+// fixed neutral near-black (not a theme variable) shared by the live preview,
+// the SVG export, and the inspector's color-picker defaults so they all agree.
+const BMAP_DEFAULT_INK = "#1a1a1a";
+
 const SNAP_DIR = [
   { x: 0, y: -1 },
   { x: 1, y: 0 },
@@ -206,14 +211,316 @@ function buildConnectorPath(connector, nodeMap, previewPointer = null) {
     : buildBezierPath(fromPoint, fromEndpoint.sideIndex, toPoint, toEndpoint.sideIndex);
 }
 
+/** Parse a CSS border shorthand ("1px dashed #e8b339") into width/style/color. */
+function parseBmapBorder(border, fallbackColor = "#cccccc") {
+  const value = String(border ?? "");
+  const widthMatch = value.match(/(\d+(?:\.\d+)?)px/);
+  const colorMatch = value.match(/#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)/);
+  const styleMatch = value.match(/\b(solid|dashed|dotted|double|none)\b/i);
+  const style = styleMatch ? styleMatch[1].toLowerCase() : "solid";
+  const explicitlyNone = style === "none" || /\bnone\b/i.test(value);
+  return {
+    width: explicitlyNone ? 0 : (widthMatch ? Number(widthMatch[1]) : 1),
+    color: colorMatch ? colorMatch[0] : fallbackColor,
+    style,
+  };
+}
+
+/** Compose a border shorthand from structured parts (or "none" when disabled). */
+function composeBmapBorder({ enabled = true, width = 1, style = "solid", color = "#cccccc" }) {
+  if (!enabled || style === "none") {
+    return "none";
+  }
+  return `${Math.max(1, Number(width) || 1)}px ${style} ${color}`;
+}
+
+/**
+ * Tokenize a single line of text into inline-markdown segments. Supports
+ * **bold**, *italic* / _italic_, and `code`. Returns [{ text, bold, italic,
+ * code }]. Shared by the SVG exporter; the live preview reuses renderMarkdown.
+ */
+function parseInlineSegments(text) {
+  const segments = [];
+  const pattern = /(\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*|_([^_]+)_|`([^`]+)`)/g;
+  let lastIndex = 0;
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({ text: text.slice(lastIndex, match.index), bold: false, italic: false, code: false });
+    }
+    if (match[2] !== undefined || match[3] !== undefined) {
+      segments.push({ text: match[2] ?? match[3], bold: true, italic: false, code: false });
+    } else if (match[4] !== undefined || match[5] !== undefined) {
+      segments.push({ text: match[4] ?? match[5], bold: false, italic: true, code: false });
+    } else if (match[6] !== undefined) {
+      segments.push({ text: match[6], bold: false, italic: false, code: true });
+    }
+    lastIndex = pattern.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    segments.push({ text: text.slice(lastIndex), bold: false, italic: false, code: false });
+  }
+  return segments;
+}
+
+/** Word-wrap inline-markdown text into lines of styled word-tokens for SVG. */
+function wrapStyledText(text, maxChars) {
+  const lines = [];
+  for (const paragraph of String(text ?? "").split("\n")) {
+    const words = [];
+    for (const seg of parseInlineSegments(paragraph)) {
+      for (const piece of seg.text.split(/(\s+)/)) {
+        if (piece === "") continue;
+        words.push({ text: piece, bold: seg.bold, italic: seg.italic, code: seg.code, space: /^\s+$/.test(piece) });
+      }
+    }
+    let line = [];
+    let len = 0;
+    for (const word of words) {
+      if (word.space && len === 0) continue; // drop leading space
+      if (!word.space && len + word.text.length > maxChars && len > 0) {
+        while (line.length && line[line.length - 1].space) len -= line.pop().text.length;
+        lines.push(line);
+        line = [];
+        len = 0;
+      }
+      line.push(word);
+      len += word.text.length;
+    }
+    while (line.length && line[line.length - 1].space) line.pop();
+    if (line.length) lines.push(line);
+  }
+  return lines;
+}
+
+/** Serialize one wrapped line (array of styled word-tokens) to SVG <tspan>s. */
+function styledLineToTspans(line) {
+  return line
+    .map((word) => {
+      const attrs = [];
+      if (word.bold) attrs.push('font-weight="700"');
+      if (word.italic) attrs.push('font-style="italic"');
+      if (word.code) attrs.push('font-family="ui-monospace, SFMono-Regular, monospace"', 'fill="#b91c1c"');
+      const prefix = attrs.length ? " " + attrs.join(" ") : "";
+      return `<tspan${prefix}>${escapeHtml(word.text)}</tspan>`;
+    })
+    .join("");
+}
+
+/** Naive word-wrap for SVG <text> (no native wrapping). Honors explicit
+ *  newlines, then greedily wraps each paragraph to maxChars per line. */
+function wrapSvgText(text, maxChars) {
+  const lines = [];
+  for (const paragraph of String(text ?? "").split("\n")) {
+    const words = paragraph.split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      continue;
+    }
+    let line = "";
+    for (const word of words) {
+      if (!line) {
+        line = word;
+      } else if ((line + " " + word).length <= maxChars) {
+        line += " " + word;
+      } else {
+        lines.push(line);
+        line = word;
+      }
+    }
+    if (line) {
+      lines.push(line);
+    }
+  }
+  return lines;
+}
+
+/**
+ * Render a .bmap AST to a standalone, self-contained SVG string.
+ *
+ * The live editor draws nodes as HTML divs over an SVG connector overlay, so the
+ * on-screen DOM can't be serialized directly. This re-renders the same geometry
+ * (shared helpers: getNodeRect / buildConnectorPath) as pure SVG so it can be
+ * saved as .svg or rasterized to PNG/JPG. No background is drawn — callers add
+ * one when a non-transparent format (JPG) needs it.
+ */
+function renderBmapToSvg(ast, { padding = 60 } = {}) {
+  const nodes = ast?.nodes ?? [];
+  const connectors = ast?.connectors ?? [];
+  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const node of nodes) {
+    const rect = getNodeRect(node);
+    minX = Math.min(minX, rect.x);
+    minY = Math.min(minY, rect.y);
+    maxX = Math.max(maxX, rect.x + rect.width);
+    maxY = Math.max(maxY, rect.y + rect.height);
+  }
+  if (!Number.isFinite(minX)) {
+    minX = 0;
+    minY = 0;
+    maxX = 200;
+    maxY = 120;
+  }
+  const offsetX = padding - minX;
+  const offsetY = padding - minY;
+  const width = Math.ceil(maxX - minX + padding * 2);
+  const height = Math.ceil(maxY - minY + padding * 2);
+
+  const out = [];
+  out.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`);
+
+  // One arrow marker per distinct connector color.
+  const markers = new Map();
+  for (const connector of connectors) {
+    const color = String(connector.styles?.color ?? "#1677ff");
+    markers.set(`arrow-${color.replace(/[^a-zA-Z0-9]/g, "")}`, color);
+  }
+  out.push("<defs>");
+  for (const [id, color] of markers) {
+    out.push(`<marker id="${id}" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="8" markerHeight="8" markerUnits="strokeWidth" orient="auto-start-reverse"><path d="M 0 0 L 12 6 L 0 12 z" fill="${color}"/></marker>`);
+  }
+  out.push("</defs>");
+
+  out.push(`<g transform="translate(${offsetX} ${offsetY})">`);
+
+  for (const connector of connectors) {
+    const pathData = buildConnectorPath(connector, nodeMap);
+    if (!pathData) {
+      continue;
+    }
+    const color = String(connector.styles?.color ?? "#1677ff");
+    const thickness = Math.max(1, Number.parseInt(String(connector.styles?.thickness ?? 2), 10) || 2);
+    const markerId = `arrow-${color.replace(/[^a-zA-Z0-9]/g, "")}`;
+    const arrow = String(connector.styles?.arrow ?? "end");
+    const dash = connector.styles?.dashed ? ` stroke-dasharray="${thickness * 3} ${thickness * 2}"` : "";
+    const markerEnd = arrow === "end" || arrow === "both" ? ` marker-end="url(#${markerId})"` : "";
+    const markerStart = arrow === "start" || arrow === "both" ? ` marker-start="url(#${markerId})"` : "";
+    out.push(`<path d="${pathData}" fill="none" stroke="${color}" stroke-width="${thickness}" stroke-linecap="round"${dash}${markerEnd}${markerStart}/>`);
+  }
+
+  const FONT_FAMILY = "system-ui, -apple-system, sans-serif";
+  for (const node of nodes) {
+    const rect = getNodeRect(node);
+    const styles = node.styles ?? {};
+    const isCircle = node.shape === "circle";
+    const background = String(styles.background ?? styles["background-color"] ?? (isCircle ? "#f0fff4" : "#fffbe6"));
+    const border = parseBmapBorder(styles.border, isCircle ? "#3dba72" : "#e8b339");
+    const textColor = String(styles.color ?? BMAP_DEFAULT_INK);
+    const nameColor = String(styles["name-color"] ?? BMAP_DEFAULT_INK);
+    const opacity = styles.opacity ? ` opacity="${escapeHtml(String(styles.opacity))}"` : "";
+
+    // Border: honor width/style (dashed/dotted) — the on-screen node uses a CSS
+    // border, so the export must mirror it or it "won't match the bmap file".
+    let strokeAttrs = `stroke="none"`;
+    if (border.width > 0 && border.style !== "none") {
+      strokeAttrs = `stroke="${border.color}" stroke-width="${border.width}"`;
+      if (border.style === "dashed") strokeAttrs += ` stroke-dasharray="${border.width * 3} ${border.width * 2}"`;
+      else if (border.style === "dotted") strokeAttrs += ` stroke-dasharray="${border.width} ${border.width * 2}" stroke-linecap="round"`;
+    }
+
+    out.push(`<g transform="translate(${rect.x} ${rect.y})"${opacity}>`);
+    if (isCircle) {
+      out.push(`<ellipse cx="${rect.width / 2}" cy="${rect.height / 2}" rx="${rect.width / 2}" ry="${rect.height / 2}" fill="${background}" ${strokeAttrs}/>`);
+    } else {
+      const radius = Number.parseInt(String(styles["border-radius"] ?? "8"), 10) || 0;
+      out.push(`<rect width="${rect.width}" height="${rect.height}" rx="${radius}" ry="${radius}" fill="${background}" ${strokeAttrs}/>`);
+    }
+
+    const padX = 12;
+    let cursorY = 22;
+    const nameSize = 13;
+    const bodySize = Number.parseInt(String(styles["font-size"] ?? "12"), 10) || 12;
+    // Mirror the node's chosen text alignment (defaults by shape).
+    const align = getBmapTextAlign(node);
+    let textX = padX;
+    let anchorAttr = "";
+    if (align === "center") {
+      textX = rect.width / 2;
+      anchorAttr = ` text-anchor="middle"`;
+    } else if (align === "right") {
+      textX = rect.width - padX;
+      anchorAttr = ` text-anchor="end"`;
+    }
+    const nameChars = Math.max(6, Math.floor((rect.width - padX * 2) / (nameSize * 0.55)));
+    for (const line of wrapSvgText(node.name || node.id, nameChars)) {
+      out.push(`<text x="${textX}" y="${cursorY}"${anchorAttr} font-family="${FONT_FAMILY}" font-size="${nameSize}" font-weight="600" fill="${nameColor}">${escapeHtml(line)}</text>`);
+      cursorY += nameSize + 4;
+    }
+    if (node.file) {
+      out.push(`<text x="${textX}" y="${cursorY}"${anchorAttr} font-family="${FONT_FAMILY}" font-size="10" fill="#6b7280">${escapeHtml(node.file)}</text>`);
+      cursorY += 14;
+    }
+    if (node.text) {
+      cursorY += 4;
+      const bodyChars = Math.max(6, Math.floor((rect.width - padX * 2) / (bodySize * 0.55)));
+      for (const line of wrapStyledText(node.text, bodyChars)) {
+        if (cursorY > rect.height - 6) {
+          break;
+        }
+        out.push(`<text x="${textX}" y="${cursorY}"${anchorAttr} xml:space="preserve" font-family="${FONT_FAMILY}" font-size="${bodySize}" fill="${textColor}">${styledLineToTspans(line)}</text>`);
+        cursorY += bodySize + 3;
+      }
+    }
+    out.push("</g>");
+  }
+
+  out.push("</g></svg>");
+  return out.join("");
+}
+
 function getNodeStyleValue(node, key, fallback = "") {
   return String(node?.styles?.[key] ?? fallback ?? "");
+}
+
+/**
+ * Effective text alignment for a node's name/body. Honors an explicit
+ * `text-align` style; otherwise defaults by shape (circles center, rectangles
+ * left) so existing diagrams keep looking the same until the user overrides it.
+ */
+function getBmapTextAlign(node) {
+  const value = String(node?.styles?.["text-align"] ?? "").toLowerCase();
+  if (value === "left" || value === "center" || value === "right") {
+    return value;
+  }
+  return node?.shape === "circle" ? "center" : "left";
 }
 
 function getPixelStyleValue(node, key, fallback) {
   const rawValue = getNodeStyleValue(node, key, "");
   const parsed = Number.parseInt(rawValue, 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/** Coerce any color string to a 6-digit hex for an <input type="color">. */
+function toHexColor(value, fallback = "#000000") {
+  const v = String(value ?? "").trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(v)) return v.toLowerCase();
+  if (/^#[0-9a-fA-F]{3}$/.test(v)) return ("#" + v.slice(1).split("").map((c) => c + c).join("")).toLowerCase();
+  return fallback;
+}
+
+/**
+ * Reusable color field: a native picker that doubles as a live swatch preview,
+ * paired with a hex text input (the form value). Used for every color-related
+ * field across the node and connector inspectors so they stay coherent.
+ */
+function colorFieldHtml({ label, name, value, fallback = "#000000" }) {
+  const hex = toHexColor(value, fallback);
+  // A <div> (not <label>) so only the picker itself opens the color dialog —
+  // clicking the caption text must not trigger it. The picker carries the form
+  // name and doubles as the live swatch preview; its change event bubbles to the
+  // form, which re-submits.
+  return `
+    <div class="bmap-field bmap-color-field">
+      <span>${escapeHtml(label)}</span>
+      <span class="bmap-color-control">
+        <input type="color" name="${name}" class="bmap-color-swatch" value="${hex}" aria-label="${escapeHtml(label)}">
+      </span>
+    </div>`;
 }
 
 function setPopupHidden() {
@@ -1073,6 +1380,10 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     inspector.className = "bmap-inspector";
     const snappedWidth = snapSizeValue(width, snapStep);
     const snappedHeight = snapSizeValue(height, snapStep);
+    const rawBorder = getNodeStyleValue(node, "border", "");
+    const borderParts = parseBmapBorder(rawBorder, node.shape === "circle" ? "#3dba72" : "#e8b339");
+    const borderEnabled = rawBorder ? (borderParts.width > 0 && borderParts.style !== "none") : true;
+    const textAlign = getBmapTextAlign(node);
     inspector.innerHTML = `
       <div class="bmap-inspector-header">
         <h3>Node</h3>
@@ -1130,24 +1441,38 @@ function createBmapView({ container, ...defaultOptions } = {}) {
           </label>
         </div>
         <div class="bmap-field-row">
-          <label class="bmap-field">
-            <span>Background</span>
-            <input name="background" type="text" value="${escapeHtml(getNodeStyleValue(node, "background", ""))}">
-          </label>
-          <label class="bmap-field">
-            <span>Border</span>
-            <input name="border" type="text" value="${escapeHtml(getNodeStyleValue(node, "border", ""))}">
-          </label>
+          ${colorFieldHtml({ label: "Background", name: "background", value: getNodeStyleValue(node, "background", ""), fallback: node.shape === "circle" ? "#f0fff4" : "#fffbe6" })}
+          ${colorFieldHtml({ label: "Text color", name: "color", value: getNodeStyleValue(node, "color", ""), fallback: BMAP_DEFAULT_INK })}
         </div>
         <div class="bmap-field-row">
-          <label class="bmap-field">
-            <span>Text color</span>
-            <input name="color" type="text" value="${escapeHtml(getNodeStyleValue(node, "color", ""))}">
-          </label>
+          ${colorFieldHtml({ label: "Name color", name: "nameColor", value: getNodeStyleValue(node, "name-color", ""), fallback: BMAP_DEFAULT_INK })}
           <label class="bmap-field">
             <span>Opacity</span>
-            <input name="opacity" type="text" value="${escapeHtml(getNodeStyleValue(node, "opacity", ""))}">
+            <input name="opacity" type="number" min="0" max="1" step="0.1" value="${escapeHtml(getNodeStyleValue(node, "opacity", ""))}" placeholder="1">
           </label>
+        </div>
+        <div class="bmap-style-group">
+          <label class="bmap-field bmap-checkbox-field">
+            <input name="borderEnabled" type="checkbox"${borderEnabled ? " checked" : ""}>
+            <span>Border</span>
+          </label>
+          <div class="bmap-border-options"${borderEnabled ? "" : " hidden"}>
+            ${colorFieldHtml({ label: "Color", name: "borderColor", value: borderParts.color, fallback: node.shape === "circle" ? "#3dba72" : "#e8b339" })}
+            <div class="bmap-field-row">
+              <label class="bmap-field">
+                <span>Thickness</span>
+                <input name="borderWidth" type="number" min="1" step="1" value="${Math.max(1, borderParts.width || 1)}">
+              </label>
+              <label class="bmap-field">
+                <span>Style</span>
+                <select name="borderStyle">
+                  <option value="solid"${borderParts.style === "solid" ? " selected" : ""}>Solid</option>
+                  <option value="dashed"${borderParts.style === "dashed" ? " selected" : ""}>Dashed</option>
+                  <option value="dotted"${borderParts.style === "dotted" ? " selected" : ""}>Dotted</option>
+                </select>
+              </label>
+            </div>
+          </div>
         </div>
         <div class="bmap-field-row">
           <label class="bmap-field">
@@ -1159,14 +1484,24 @@ function createBmapView({ container, ...defaultOptions } = {}) {
             <input name="fontSize" type="number" step="1" min="8" value="${getPixelStyleValue(node, "font-size", 12)}">
           </label>
         </div>
-        <label class="bmap-field">
-          <span>Font weight</span>
-          <select name="fontWeight">
-            <option value="normal"${getNodeStyleValue(node, "font-weight", "normal") === "normal" ? " selected" : ""}>Normal</option>
-            <option value="600"${getNodeStyleValue(node, "font-weight", "normal") === "600" ? " selected" : ""}>600</option>
-            <option value="bold"${getNodeStyleValue(node, "font-weight", "normal") === "bold" ? " selected" : ""}>Bold</option>
-          </select>
-        </label>
+        <div class="bmap-field-row">
+          <label class="bmap-field">
+            <span>Font weight</span>
+            <select name="fontWeight">
+              <option value="normal"${getNodeStyleValue(node, "font-weight", "normal") === "normal" ? " selected" : ""}>Normal</option>
+              <option value="600"${getNodeStyleValue(node, "font-weight", "normal") === "600" ? " selected" : ""}>600</option>
+              <option value="bold"${getNodeStyleValue(node, "font-weight", "normal") === "bold" ? " selected" : ""}>Bold</option>
+            </select>
+          </label>
+          <label class="bmap-field">
+            <span>Text align</span>
+            <select name="textAlign">
+              <option value="left"${textAlign === "left" ? " selected" : ""}>Left</option>
+              <option value="center"${textAlign === "center" ? " selected" : ""}>Center</option>
+              <option value="right"${textAlign === "right" ? " selected" : ""}>Right</option>
+            </select>
+          </label>
+        </div>
         <div class="bmap-inspector-actions">
           <button type="button" data-action="quick-generate" class="bmap-generate-btn">Quick Generate File</button>
           <button type="button" data-action="delete" class="bmap-danger-btn">Delete Node</button>
@@ -1204,12 +1539,19 @@ function createBmapView({ container, ...defaultOptions } = {}) {
           width: String(nextWidth),
           height: String(nextHeight),
           background: formData.get("background") ?? "",
-          border: formData.get("border") ?? "",
+          border: composeBmapBorder({
+            enabled: formData.get("borderEnabled") === "on",
+            width: formData.get("borderWidth") ?? 1,
+            style: formData.get("borderStyle") ?? "solid",
+            color: formData.get("borderColor") ?? "#cccccc",
+          }),
           color: formData.get("color") ?? "",
+          "name-color": formData.get("nameColor") ?? "",
           opacity: formData.get("opacity") ?? "",
           "border-radius": `${Math.max(0, Number.parseInt(String(formData.get("borderRadius") ?? 0), 10) || 0)}px`,
           "font-size": `${Math.max(8, Number.parseInt(String(formData.get("fontSize") ?? 12), 10) || 12)}px`,
           "font-weight": formData.get("fontWeight") ?? "normal",
+          "text-align": formData.get("textAlign") ?? "left",
         }
       });
       const index = ast.nodes.findIndex((item) => item.id === node.id);
@@ -1225,6 +1567,13 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       if (isEditingEnabled()) {
         form.requestSubmit();
       }
+    });
+
+    // Border sub-options only show when the border is enabled.
+    const borderToggle = inspector.querySelector('[name="borderEnabled"]');
+    const borderOptions = inspector.querySelector(".bmap-border-options");
+    borderToggle?.addEventListener("change", () => {
+      if (borderOptions) borderOptions.hidden = !borderToggle.checked;
     });
 
     if (!isReadOnly) {
@@ -1357,10 +1706,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
             <span>Thickness</span>
             <input name="thickness" type="number" min="1" step="1" value="${Number.parseInt(String(connector.styles?.thickness ?? 2), 10) || 2}">
           </label>
-          <label class="bmap-field">
-            <span>Color</span>
-            <input name="color" type="text" value="${escapeHtml(String(connector.styles?.color ?? "#1677ff"))}">
-          </label>
+          ${colorFieldHtml({ label: "Color", name: "color", value: String(connector.styles?.color ?? "#1677ff"), fallback: "#1677ff" })}
         </div>
         <label class="bmap-field bmap-checkbox-field">
           <input name="dashed" type="checkbox"${connector.styles?.dashed ? " checked" : ""}>
@@ -1496,6 +1842,10 @@ function createBmapView({ container, ...defaultOptions } = {}) {
 
   function renderScene() {
     ensureSelectionStillExists();
+    // Applying an inspector edit re-renders the whole scene, which rebuilds the
+    // inspector and would otherwise reset its scroll to the top mid-edit. Capture
+    // and restore the scroll position so the user keeps their place.
+    const prevInspectorScroll = container.querySelector(".bmap-inspector-body")?.scrollTop ?? 0;
     container.replaceChildren();
 
     const root = document.createElement("div");
@@ -1755,11 +2105,17 @@ function createBmapView({ container, ...defaultOptions } = {}) {
         });
       }
 
+      const textAlign = getBmapTextAlign(node);
+
       const header = document.createElement("div");
       header.className = "bmap-node-header";
       const nameEl = document.createElement("span");
       nameEl.className = "bmap-node-name";
       nameEl.textContent = node.name || node.id;
+      nameEl.style.textAlign = textAlign;
+      if (node.styles?.["name-color"]) {
+        nameEl.style.color = String(node.styles["name-color"]);
+      }
       header.append(nameEl);
 
       if (node.file) {
@@ -1804,7 +2160,12 @@ function createBmapView({ container, ...defaultOptions } = {}) {
 
       const textEl = document.createElement("div");
       textEl.className = "bmap-node-text";
-      textEl.textContent = node.text;
+      textEl.style.textAlign = textAlign;
+      // Render simple markdown (bold/italic/code/lists) so node bodies are
+      // formatted in the preview, mirroring the rest of the app.
+      if (node.text) {
+        textEl.innerHTML = renderMarkdown(node.text);
+      }
       contentEl.append(textEl);
 
       nodeEl.append(contentEl);
@@ -1816,6 +2177,13 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     workspace.append(stage, buildInspector());
     root.append(toolbar, workspace);
     container.append(root);
+
+    if (prevInspectorScroll) {
+      const newBody = container.querySelector(".bmap-inspector-body");
+      if (newBody) {
+        newBody.scrollTop = prevInspectorScroll;
+      }
+    }
 
     canvas.addEventListener("click", (event) => {
       if (event.target === canvas || event.target === inner || event.target === svg || event.target === nodesLayer) {
@@ -1883,4 +2251,4 @@ function createBmapView({ container, ...defaultOptions } = {}) {
   return { render };
 }
 
-export { createBmapView };
+export { createBmapView, renderBmapToSvg };
