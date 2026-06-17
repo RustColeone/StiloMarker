@@ -139,6 +139,24 @@
                   <div id="source-tab-strip" class="tab-strip pane-tab-strip" aria-label="Open source tabs"></div>
                   <button id="preview-toggle-activity-button" class="pane-action source-preview-toggle" type="button" aria-label="Show preview" title="Show preview">◫</button>
                 </div>
+              <div id="editor-format-toolbar" class="editor-format-toolbar" role="toolbar" aria-label="Markdown formatting" hidden>
+                <button class="format-toolbar-btn" type="button" data-md-action="bold" title="Bold (Ctrl+B)"><strong>B</strong></button>
+                <button class="format-toolbar-btn" type="button" data-md-action="italic" title="Italic (Ctrl+I)"><em>I</em></button>
+                <button class="format-toolbar-btn" type="button" data-md-action="strike" title="Strikethrough"><s>S</s></button>
+                <button class="format-toolbar-btn" type="button" data-md-action="code" title="Inline code">&lt;&gt;</button>
+                <span class="format-toolbar-sep" aria-hidden="true"></span>
+                <button class="format-toolbar-btn" type="button" data-md-action="heading" title="Heading">H</button>
+                <button class="format-toolbar-btn" type="button" data-md-action="ul" title="Bullet list">&bull;&nbsp;</button>
+                <button class="format-toolbar-btn" type="button" data-md-action="ol" title="Numbered list">1.</button>
+                <button class="format-toolbar-btn" type="button" data-md-action="quote" title="Blockquote">&ldquo;</button>
+                <button class="format-toolbar-btn" type="button" data-md-action="task" title="Task list">&#9745;</button>
+                <span class="format-toolbar-sep" aria-hidden="true"></span>
+                <button class="format-toolbar-btn" type="button" data-md-action="link" title="Link">&#128279;</button>
+                <button class="format-toolbar-btn" type="button" data-md-action="image" title="Image">&#128247;</button>
+                <button class="format-toolbar-btn" type="button" data-md-action="table" title="Insert table">Table</button>
+                <button class="format-toolbar-btn" type="button" data-md-action="codeblock" title="Code block">Code</button>
+                <button class="format-toolbar-btn" type="button" data-md-action="hr" title="Horizontal rule">&horbar;</button>
+              </div>
               <div class="editor-surface">
                 <div id="editor-gutter" class="editor-gutter" aria-hidden="true"></div>
                 <div id="editor-scroll" class="editor-scroll">
@@ -196,7 +214,9 @@
           <!-- Toolbar -->
           <header class="chat-toolbar">
             <span class="chat-toolbar-title">Stilo Marker</span>
-            <div id="chat-status-text" class="chat-model-badge">Checking…</div>
+            <button id="chat-status-text" class="chat-model-badge" type="button"
+              title="Agent status — click to open settings / retry">Checking…</button>
+            <select id="chat-model-select" class="chat-model-select" aria-label="Agent model" hidden></select>
             <div class="chat-toolbar-actions">
               <button id="chat-new-thread-button" class="chat-toolbar-icon-btn" type="button" aria-label="New chat" title="New chat">&#43;</button>
               <button id="chat-history-toggle-button" class="chat-toolbar-icon-btn" type="button" aria-label="Chat history" title="Chat history" aria-pressed="false">&#9776;</button>
@@ -233,21 +253,25 @@
       </div>
 
       <footer class="status-bar" aria-label="Status bar">
-        <div class="status-item">
+        <button id="status-source-item" class="status-item status-item-action" type="button"
+          title="Open a local directory">
           <span id="source-indicator" class="status-dot"></span>
           <span id="source-status-text">In Browser</span>
-        </div>
-        <div class="status-item">
+        </button>
+        <button id="status-browser-item" class="status-item status-item-action" type="button"
+          title="Browser capability details">
           <span id="browser-indicator" class="status-dot"></span>
           <span id="browser-status-text">Checking browser support</span>
-        </div>
-        <div class="status-item">
+        </button>
+        <button id="status-server-item" class="status-item status-item-action" type="button"
+          title="Open collaboration settings">
           <span id="server-indicator" class="status-dot"></span>
           <span id="server-status-bar-text">Server offline</span>
-        </div>
-        <div class="status-item status-item-grow">
+        </button>
+        <button id="status-presence-item" class="status-item status-item-action status-item-grow" type="button"
+          title="Show the session panel">
           <span id="presence-summary-text">0 collaborators</span>
-        </div>
+        </button>
       </footer>
     </div>
 
@@ -308,6 +332,11 @@
               </select>
             </label>
 
+            <label class="checkbox-row">
+              <input id="format-toolbar-input" type="checkbox">
+              <span>Show markdown formatting toolbar</span>
+            </label>
+
             <label>
               Bmap Generate Context
               <select id="bmap-generate-scope-select">
@@ -333,6 +362,11 @@
             <label>
               Display Name
               <input id="display-name-input" type="text" maxlength="40" placeholder="Name shown to collaborators">
+            </label>
+
+            <label class="checkbox-row">
+              <input id="auto-reconnect-input" type="checkbox" checked>
+              <span>Remember session &amp; reconnect automatically</span>
             </label>
 
             <div class="settings-actions-row">

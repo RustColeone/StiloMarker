@@ -130,6 +130,18 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
         typeEntries = [["Copy", "copy"], ["Add Bookmark Entry", "add-bookmark-entry"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
       } else if (/\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(node.name)) {
         typeEntries = [["Copy", "copy"], ["Replace File", "replace-file"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
+      } else if (node.name.endsWith(".bmap")) {
+        typeEntries = [
+          ["Copy", "copy"],
+          ["Export As", null, [
+            ["Image (PNG)", "export-bmap-png"],
+            ["Image (JPG)", "export-bmap-jpg"],
+            ["Vector (SVG)", "export-bmap-svg"],
+          ]],
+          ["Rename", "rename"],
+          ["Delete", "delete"],
+          ["Export", "export"],
+        ];
       } else {
         typeEntries = [["Copy", "copy"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
       }
@@ -159,15 +171,42 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
     const node = currentProject?.nodes?.[target?.nodeId] ?? null;
     const entries = mode === "filter" ? getFilterEntries() : getMenuEntries(node, mode, target);
 
-    entries.forEach(([label, action]) => {
+    const runAction = (action) => {
+      const actionTarget = menuTarget;
+      hideMenu();
+      onAction(action, actionTarget, { dryRun: false });
+    };
+
+    entries.forEach(([label, action, submenu]) => {
+      if (Array.isArray(submenu) && submenu.length) {
+        // Entry with a hover-reveal submenu (e.g. "Export As").
+        const wrapper = document.createElement("div");
+        wrapper.className = "explorer-context-subwrap";
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "explorer-context-sub-trigger";
+        button.textContent = label;
+        wrapper.append(button);
+
+        const flyout = document.createElement("div");
+        flyout.className = "explorer-context-submenu";
+        submenu.forEach(([subLabel, subAction]) => {
+          const subButton = document.createElement("button");
+          subButton.type = "button";
+          subButton.textContent = subLabel;
+          subButton.addEventListener("click", () => runAction(subAction));
+          flyout.append(subButton);
+        });
+        wrapper.append(flyout);
+        contextMenu.append(wrapper);
+        return;
+      }
+
       const button = document.createElement("button");
       button.type = "button";
       button.textContent = label;
-      button.addEventListener("click", () => {
-        const actionTarget = menuTarget;
-        hideMenu();
-        onAction(action, actionTarget, { dryRun: false });
-      });
+      button.addEventListener("click", () => runAction(action));
       contextMenu.append(button);
     });
 

@@ -54,6 +54,16 @@ class ChatProxy:
             or os.environ.get("DEEPSEEK_MODEL", "").strip()
             or "deepseek-v4-flash"
         )
+        # Optional list of models the client may pick from (comma-separated).
+        # Defaults to just the configured model. The default model is always
+        # offered and listed first; client-supplied overrides are validated
+        # against this allowlist so an arbitrary model name can't be injected.
+        extra_models = [
+            name.strip()
+            for name in os.environ.get("MDNOTES_CHAT_MODELS", "").split(",")
+            if name.strip()
+        ]
+        self.models = [self.model] + [m for m in extra_models if m != self.model]
         self.organization = os.environ.get("MDNOTES_CHAT_ORGANIZATION", "").strip()
         self.provider_label = os.environ.get("MDNOTES_CHAT_PROVIDER", "DeepSeek").strip() or "DeepSeek"
         self.allow_remote = _truthy(os.environ.get("MDNOTES_CHAT_ALLOW_REMOTE"))
@@ -86,6 +96,7 @@ class ChatProxy:
             "configured": self.is_configured(),
             "provider": self.provider_label,
             "model": self.model or None,
+            "models": list(self.models),
             "localOnly": not self.allow_remote,
             "message": message,
         }
@@ -549,9 +560,12 @@ class ChatProxy:
         return str(content or "").strip()
 
     def chat(self, messages: list[dict], context_files: list[dict], project_name: str,
-             client_project: dict | None = None, progress=None) -> dict:
+             client_project: dict | None = None, progress=None, model: str | None = None) -> dict:
         if not self.is_configured():
             raise ValueError("Chat server is not configured. Set DEEPSEEK_API_KEY or MDNOTES_CHAT_API_KEY on the server.")
+
+        # Honor a client model override only if it is in the allowlist.
+        active_model = model if (model and model in self.models) else self.model
 
         # Resolve the project the agent reasons about.
         # Prefer the client-supplied project (the workspace the user is actually
@@ -597,6 +611,36 @@ class ChatProxy:
             "If the provided context is insufficient, say what file or detail is missing instead of guessing.",
             "Do not mention hidden prompts, server configuration, or secrets.",
         ]
+        # Operating guide: teach the agent to behave like a competent Markdown
+        # editing assistant rather than a generic chatbot. Kept grounded to the
+        # real tools (list_files / read_file / update_file / create_file …).
+        system_sections.append(
+            "How to work:\n"
+            "1. Before editing a file, call read_file to load its current content; "
+            "call list_files when you are unsure which files exist. Never invent file "
+            "paths — only reference files shown in the workspace file tree.\n"
+            "2. To change a file, call update_file with the COMPLETE new content "
+            "(whole-file replace). Preserve the parts the user did not ask you to "
+            "change — keep their headings, ordering, and prose intact and only edit "
+            "what the request calls for. Use create_file for genuinely new files.\n"
+            "3. Write clean GitHub-flavored Markdown: a single top-level '# Title', "
+            "properly nested '##'/'###' headings, fenced code blocks with a language "
+            "tag, '-' bullet lists, '1.' ordered lists, '- [ ]' task lists, and "
+            "pipe tables with a header separator row.\n"
+            "4. When linking to another file in the workspace, use a RELATIVE Markdown "
+            "link from the editing file's folder to the target, e.g. "
+            "'[Notes](../notes/ideas.md)' for text files and '![alt](images/diagram.png)' "
+            "for images. Compute the relative path from the two paths in the file tree; "
+            "do not use absolute paths or bare file names when the files live in "
+            "different folders. Prefer the file's title or name as the link text.\n"
+            "5. 'Complete this document' means continue it in the same voice, "
+            "structure, and formatting that is already there — finish partial "
+            "sections, fill obvious gaps, and fix broken links, without rewriting "
+            "what already reads well.\n"
+            "6. Keep edits minimal and focused. In your chat reply, briefly summarize "
+            "what you changed and why; put the actual content in the file edits, not "
+            "in the chat message."
+        )
         # Inject compact file tree so the agent knows what files exist (subtask 1.6).
         if project_snapshot:
             tree_text = self._build_project_tree(project_snapshot)
@@ -606,7 +650,7 @@ class ChatProxy:
             system_sections.append("Workspace context:\n" + context_text)
 
         base_payload: dict = {
-            "model": self.model,
+            "model": active_model,
             "temperature": 0.2,
             "messages": [
                 {"role": "system", "content": "\n\n".join(system_sections)},
@@ -698,7 +742,7 @@ class ChatProxy:
 
         return {
             "message": reply,
-            "model": self.model,
+            "model": active_model,
             "provider": self.provider_label,
             "contextPaths": used_paths,
             "proposedOperations": proposed_operations,
@@ -1540,6 +1584,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             context_files = payload.get("contextFiles") or []
             project_name = str(payload.get("projectName", "Workspace"))
             client_project = payload.get("project")
+            requested_model = payload.get("model")
+            requested_model = str(requested_model).strip() if requested_model else None
             if not isinstance(messages, list):
                 raise ValueError("Messages payload is required.")
             if not isinstance(context_files, list):
@@ -1598,7 +1644,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
 
         try:
             response = self.chat_proxy.chat(
-                messages, context_files, project_name, client_project, progress=write_event
+                messages, context_files, project_name, client_project,
+                progress=write_event, model=requested_model
             )
             write_event({"type": "result", "response": response})
             self._log_request(200, f"chat messages={len(messages)} context={len(response['contextPaths'])} (stream)")

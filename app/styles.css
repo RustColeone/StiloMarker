@@ -285,6 +285,48 @@ p {
   background: var(--accent-soft);
 }
 
+/* Hover-reveal submenu (e.g. "Export As" on .bmap files). */
+.explorer-context-subwrap {
+  position: relative;
+}
+.explorer-context-sub-trigger::after {
+  content: "\25B8";
+  float: right;
+  margin-left: 8px;
+  opacity: 0.6;
+}
+.explorer-context-submenu {
+  position: absolute;
+  top: -5px;
+  left: 100%;
+  /* Sit flush against the trigger — any horizontal gap becomes a dead zone that
+     drops :hover before the pointer reaches the flyout, slamming it shut. */
+  margin-left: 0;
+  min-width: 160px;
+  display: none;
+  gap: 1px;
+  padding: 4px;
+  padding-left: 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--menu);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.26);
+  z-index: 41;
+}
+/* Invisible bridge across the visual gap so the hover region is continuous. */
+.explorer-context-submenu::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -6px;
+  width: 6px;
+  height: 100%;
+}
+.explorer-context-subwrap:hover > .explorer-context-submenu,
+.explorer-context-submenu:hover {
+  display: grid;
+}
+
 .menu-popover button.menu-danger-button {
   color: var(--danger);
   font-weight: 600;
@@ -1048,50 +1090,126 @@ p {
   position: relative;
 }
 
+/* The source pane has three stacked regions when the toolbar is on: header,
+   toolbar, editor surface. The base .editor-pane grid only defines two rows, so
+   use a flex column here — the toolbar takes its natural height and the editor
+   surface fills the rest (and collapses to nothing when the toolbar is hidden). */
+#source-pane {
+  display: flex;
+  flex-direction: column;
+}
+#source-pane > .editor-surface {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Optional Overleaf-style markdown insert toolbar above the editor surface. */
+.editor-format-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-0);
+}
+.format-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.format-toolbar-btn:hover,
+.format-toolbar-btn:focus-visible {
+  border-color: var(--border-strong);
+  background: var(--accent-soft);
+  color: var(--text);
+  outline: none;
+}
+.format-toolbar-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+/* Caret-anchored, VSCode-style completion popup. left/top are set inline by
+   positionEditorAutocompleteAtCaret(); keep the defaults as a safe fallback. */
 .editor-autocomplete {
   position: absolute;
   left: 16px;
-  bottom: 16px;
-  width: min(420px, calc(100% - 32px));
-  display: grid;
-  gap: 6px;
-  padding: 8px;
+  top: 16px;
+  width: max-content;
+  min-width: 180px;
+  max-width: 360px;
+  display: block;
+  padding: 2px;
   border: 1px solid var(--border-strong);
+  border-radius: 5px;
   background: var(--menu);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24);
-  z-index: 20;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.30);
+  z-index: 30;
+}
+
+/* The category label adds height VSCode-style popups don't have — hide it. */
+.editor-autocomplete-label {
+  display: none;
 }
 
 .editor-autocomplete-list {
-  display: grid;
-  gap: 4px;
-  max-height: 240px;
-  overflow: auto;
+  display: block;
+  max-height: 200px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .editor-autocomplete-item {
-  display: grid;
-  gap: 2px;
-  padding: 8px;
-  border: 1px solid transparent;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 2px 8px;
+  border: none;
+  border-radius: 3px;
   background: transparent;
   text-align: left;
+  white-space: nowrap;
 }
 
 .editor-autocomplete-item.is-active,
 .editor-autocomplete-item:hover {
-  border-color: var(--accent);
+  border: none;
   background: var(--accent-soft);
 }
 
 .editor-autocomplete-item-title {
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: 12px;
+  line-height: 1.5;
   color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .editor-autocomplete-item-detail {
+  flex: 0 0 auto;
+  margin-left: auto;
   font-size: 11px;
+  line-height: 1.5;
   color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .app-shell[data-preview="hidden"] .editor-grid {
@@ -1608,6 +1726,23 @@ p {
 .status-item-grow {
   justify-content: flex-end;
   margin-left: auto;
+}
+
+/* Status-bar items that act as shortcuts to related menus/panels. */
+.status-item-action {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.status-item-action:hover,
+.status-item-action:focus-visible {
+  background: rgba(255, 255, 255, 0.16);
+  outline: none;
 }
 
 .status-dot {
@@ -2458,7 +2593,9 @@ menu {
   flex: 1;
   font-size: 12px;
   font-weight: 600;
-  color: var(--text);
+  /* Node boxes are always light, so default the name to a fixed dark ink that
+     matches the SVG export and the inspector picker, not the theme text color. */
+  color: #1a1a1a;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2508,7 +2645,9 @@ menu {
 .bmap-node-text {
   padding: 4px 8px 6px;
   font-size: 11px;
-  color: var(--text-dim);
+  /* Fixed dark ink (matches the export + inspector default), since the node box
+     is always light regardless of theme. */
+  color: #1a1a1a;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -2832,6 +2971,61 @@ menu {
 .bmap-checkbox-field input {
   width: auto;
   margin: 0;
+}
+
+/* Unified color field: native picker doubles as a live swatch preview. */
+.bmap-color-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* Higher specificity than `.bmap-field input` so width/height/padding win. */
+.bmap-color-control .bmap-color-swatch {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+.bmap-color-swatch::-webkit-color-swatch-wrapper { padding: 2px; }
+.bmap-color-swatch::-webkit-color-swatch { border: none; border-radius: 2px; }
+
+/* Grouped style section with dynamically revealed sub-options (e.g. Border). */
+.bmap-style-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.bmap-border-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bmap-border-options[hidden] {
+  display: none;
+}
+
+/* Markdown-rendered node body: keep it compact inside the node box. */
+.bmap-node-text {
+  white-space: normal;
+}
+.bmap-node-text > :first-child { margin-top: 0; }
+.bmap-node-text > :last-child { margin-bottom: 0; }
+.bmap-node-text p { margin: 0 0 4px; }
+.bmap-node-text ul,
+.bmap-node-text ol { margin: 0 0 4px; padding-left: 18px; }
+.bmap-node-text code {
+  font-size: 0.92em;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--surface-2);
 }
 
 .bmap-inspector-actions {
@@ -3309,6 +3503,58 @@ menu {
   text-overflow: ellipsis;
   max-width: 140px;
   flex-shrink: 1;
+  font-family: inherit;
+  cursor: pointer;
+}
+.chat-model-badge:hover,
+.chat-model-badge:focus-visible {
+  border-color: var(--border-strong);
+  color: var(--text);
+  outline: none;
+}
+.chat-model-badge.is-error {
+  border-color: var(--danger, #c0392b);
+  color: var(--danger, #c0392b);
+}
+
+.chat-model-select {
+  font-size: 10px;
+  color: var(--text-dim);
+  padding: 2px 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  max-width: 130px;
+  flex-shrink: 1;
+}
+
+/* Expandable agent activity log. */
+.chat-activity-toggle {
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+}
+.chat-activity-toggle:hover {
+  text-decoration: underline;
+}
+
+/* Retry affordance on a failed turn. */
+.chat-message-retry {
+  margin-top: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.chat-message-retry:hover {
+  background: var(--accent-soft);
 }
 
 .chat-toolbar-actions {
