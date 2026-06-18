@@ -12,6 +12,30 @@ test("markdown: headings, lists, and bold", () => {
   assert.match(html, /<strong>bold<\/strong>/);
 });
 
+test("markdown: GFM pipe table renders thead/tbody with inline formatting", () => {
+  const html = markdownService.renderMarkdown(
+    "| Name | Note |\n| --- | --- |\n| **Bo** | a |\n| Cy | b |"
+  );
+  assert.match(html, /<table><thead><tr><th>Name<\/th><th>Note<\/th><\/tr><\/thead>/);
+  assert.match(html, /<tbody>.*<td><strong>Bo<\/strong><\/td>.*<\/tbody>/s);
+  assert.equal((html.match(/<tr>/g) ?? []).length, 3); // 1 header + 2 body
+});
+
+test("markdown: table delimiter alignment maps to text-align", () => {
+  const html = markdownService.renderMarkdown(
+    "| L | C | R |\n| :-- | :-: | --: |\n| 1 | 2 | 3 |"
+  );
+  assert.match(html, /<th style="text-align:left">L<\/th>/);
+  assert.match(html, /<th style="text-align:center">C<\/th>/);
+  assert.match(html, /<th style="text-align:right">R<\/th>/);
+});
+
+test("markdown: pipes without a delimiter row stay a paragraph", () => {
+  const html = markdownService.renderMarkdown("a | b | c");
+  assert.match(html, /<p>a \| b \| c<\/p>/);
+  assert.doesNotMatch(html, /<table>/);
+});
+
 test("markdown: image url resolution", () => {
   const htmlWithImage = markdownService.renderMarkdown("![Sketch](./diagram.png)", {
     resolveUrl(url) {

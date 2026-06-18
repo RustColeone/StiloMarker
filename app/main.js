@@ -17,6 +17,8 @@ import { createZip, downloadBlob } from "./services/zip-service.js";
 import { query } from "./ui/dom.js";
 import { createExplorerView } from "./ui/explorer-view.js";
 import { createBmapView, renderBmapToSvg } from "./ui/bmap-view.js";
+import { buildTableSnippet, getEditorToolbarFormat, renderEditorFormatToolbar } from "./ui/editor-format-toolbar.js";
+import { createTableGridPicker } from "./ui/table-grid-picker.js";
 import { createDefaultBmap, normalizeBmapAst, parseBmap } from "./services/bmap-service.js";
 
 const elements = {
@@ -288,6 +290,11 @@ let pendingExternalEditorSelection = null;
 // updateStatus callback triggered by notifyEditorChanged does not mistake a
 // transient focus state during innerHTML replacement for "editor lost focus".
 let _editorUpdating = false;
+// Set to true while a preview-originated edit (e.g. a bmap inspector change) is
+// being committed. The preview view has already updated itself in place, so the
+// synchronous updateStatus callback must skip re-rendering the preview pane —
+// re-rendering would rebuild the diagram and reset its scroll/selection.
+let _previewUpdating = false;
 
 const debugState = {
   entries: [],
@@ -2467,31 +2474,79 @@ function insertEditorBlock(snippet, caretOffset = null) {
   replaceEditorRange(start, end, inserted, caret, caret);
 }
 
-const MARKDOWN_TABLE_SNIPPET =
-  "| Column A | Column B |\n| --- | --- |\n| Cell 1 | Cell 2 |\n| Cell 3 | Cell 4 |\n";
+/** Indent level of an mtree line: one tab or four spaces per level (matches the
+ *  mtree parser's indentation rules). */
+function getMtreeIndentLevel(line) {
+  let level = 0;
+  let spaceRun = 0;
+  for (const char of line) {
+    if (char === "\t") {
+      level += 1;
+      spaceRun = 0;
+    } else if (char === " ") {
+      spaceRun += 1;
+      if (spaceRun === 4) {
+        level += 1;
+        spaceRun = 0;
+      }
+    } else {
+      break;
+    }
+  }
+  return level;
+}
 
-function applyMarkdownToolbarAction(action) {
+/** Insert an mtree child node one level deeper than the line at the caret,
+ *  placed on the next line so it nests under the current node. */
+function insertMtreeChild(text) {
+  const { start } = getEditorSelection();
+  const value = getEditorText();
+  const lineStart = value.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+  let lineEnd = value.indexOf("\n", start);
+  if (lineEnd === -1) lineEnd = value.length;
+  const currentLine = value.slice(lineStart, lineEnd);
+  const childIndent = "\t".repeat(getMtreeIndentLevel(currentLine) + 1);
+  const inserted = `\n${childIndent}${text}`;
+  const caret = lineEnd + inserted.length;
+  replaceEditorRange(lineEnd, lineEnd, inserted, caret, caret);
+}
+
+// Lazily-created floating grid-picker for the Markdown "Insert table" action.
+let tableGridPicker = null;
+
+function ensureTableGridPicker() {
+  if (!tableGridPicker) {
+    tableGridPicker = createTableGridPicker({
+      onPick({ rows, cols, kind }) {
+        elements.editorContent.focus({ preventScroll: true });
+        insertEditorBlock(buildTableSnippet({ rows, cols, kind }));
+        logDebug("action", "Toolbar table insert", `${cols}x${rows} ${kind}`);
+      }
+    });
+    document.body.append(tableGridPicker.element);
+  }
+  return tableGridPicker;
+}
+
+/** Generic interpreter for a declarative toolbar action (see editor-format-toolbar.js). */
+function applyToolbarAction(action, buttonEl) {
   const activeFile = controller.getActiveFile();
-  if (!activeFile || !isTextFileName(activeFile.name)) return;
+  if (!action || !activeFile || !isTextFileName(activeFile.name)) return;
+
+  if (action.kind === "table") {
+    ensureTableGridPicker().open(buttonEl);
+    return;
+  }
+
   elements.editorContent.focus({ preventScroll: true });
-  switch (action) {
-    case "bold": wrapEditorSelection("**", "**", "bold text"); break;
-    case "italic": wrapEditorSelection("*", "*", "italic text"); break;
-    case "strike": wrapEditorSelection("~~", "~~", "strikethrough"); break;
-    case "code": wrapEditorSelection("`", "`", "code"); break;
-    case "heading": prefixEditorLines("## "); break;
-    case "ul": prefixEditorLines("- "); break;
-    case "ol": prefixEditorLines("", true); break;
-    case "quote": prefixEditorLines("> "); break;
-    case "task": prefixEditorLines("- [ ] "); break;
-    case "link": wrapEditorSelection("[", "](url)", "link text"); break;
-    case "image": wrapEditorSelection("![", "](url)", "alt text"); break;
-    case "table": insertEditorBlock(MARKDOWN_TABLE_SNIPPET); break;
-    case "codeblock": insertEditorBlock("```\n\n```\n", 4); break;
-    case "hr": insertEditorBlock("---\n"); break;
+  switch (action.kind) {
+    case "wrap": wrapEditorSelection(action.before, action.after, action.placeholder); break;
+    case "prefix": prefixEditorLines(action.prefix ?? "", action.numbered === true); break;
+    case "block": insertEditorBlock(action.snippet, action.caret ?? null); break;
+    case "mtree-child": insertMtreeChild(action.text); break;
     default: return;
   }
-  logDebug("action", "Markdown toolbar insert", action);
+  logDebug("action", "Toolbar insert", action.kind);
 }
 
 function suggestUniqueFileName(project, parentId, name) {
@@ -3108,6 +3163,30 @@ function renderWhitespaceOnlyEditorLine(rawLine) {
   return `<div class="editor-line">${escapeEditorHtml(rawLine)}</div>`;
 }
 
+/** Highlight an mtree chain ("Parent -> Child", indentation, or a single name).
+ *  Splits on the literal "->" arrows and tokenises each segment separately so we
+ *  never run name-matching regexes over already-inserted span markup. */
+function highlightMtreeChain(chainPart) {
+  const segments = chainPart.split("->");
+  return segments
+    .map((segment, index) => {
+      const leading = segment.match(/^\s*/)[0];
+      const trailing = segment.match(/\s*$/)[0];
+      const core = segment.slice(leading.length, segment.length - trailing.length);
+      let coreHtml = "";
+      if (core === "...") {
+        coreHtml = '<span class="token-mtree-continuation">...</span>';
+      } else if (core) {
+        coreHtml = `<span class="token-mtree-name">${escapeEditorHtml(core)}</span>`;
+      }
+      const arrow = index < segments.length - 1
+        ? '<span class="token-mtree-chain-arrow">-&gt;</span>'
+        : "";
+      return `${escapeEditorHtml(leading)}${coreHtml}${escapeEditorHtml(trailing)}${arrow}`;
+    })
+    .join("");
+}
+
 function highlightMtreeSource(value) {
   const lines = value.replace(/\r\n/g, "\n").split("\n");
 
@@ -3137,13 +3216,7 @@ function highlightMtreeSource(value) {
     const semicolonIndex = rawLine.indexOf(";");
     const chainPart = semicolonIndex >= 0 ? rawLine.slice(0, semicolonIndex) : rawLine;
     const descriptionPart = semicolonIndex >= 0 ? rawLine.slice(semicolonIndex + 1) : "";
-    const highlightedChain = escapeEditorHtml(chainPart)
-      .replace(/\.\.\./g, '<span class="token-mtree-continuation">...</span>')
-      .replace(/-&gt;/g, '<span class="token-mtree-chain-arrow">-&gt;</span>');
-
-    const chainHtml = highlightedChain.replace(/(^|\s)([^\s<][^<&]*?)(?=(?:\s*&gt;|\s*$|<span class="token-mtree-chain-arrow">))/g, (match, prefix, name) => {
-      return `${prefix}<span class="token-mtree-name">${name}</span>`;
-    });
+    const chainHtml = highlightMtreeChain(chainPart);
 
     const descriptionHtml = semicolonIndex >= 0
       ? `<span class="token-mtree-section-mark">;</span><span class="token-mtree-description">${escapeEditorHtml(descriptionPart)}</span>`
@@ -3413,9 +3486,32 @@ function syncEditorViewportMetrics() {
   // No-op retained for call-site compatibility; layout is now native.
 }
 
+// Cached toolbar format so we only rebuild the buttons when it actually changes
+// (renderEditorContent runs on every keystroke). null = toolbar hidden.
+let currentToolbarFormat = undefined;
+
+/** Show/hide and (re)build the formatting toolbar for the active file. */
+function refreshFormatToolbar() {
+  const toolbar = elements.editorFormatToolbar;
+  if (!toolbar) return;
+  const activeFile = controller.getActiveFile();
+  const format = settings.showFormatToolbar ? getEditorToolbarFormat(activeFile?.name ?? "") : null;
+
+  toolbar.hidden = format === null;
+  if (format === currentToolbarFormat) return;
+  currentToolbarFormat = format;
+
+  if (format === null) {
+    toolbar.replaceChildren();
+    return;
+  }
+  renderEditorFormatToolbar(toolbar, format, { onAction: applyToolbarAction });
+}
+
 /** Re-render syntax-highlighted DOM from plain text and rebuild the gutter.
  *  Does NOT modify the selection — callers are responsible for restoring it. */
 function renderEditorContent(text) {
+  refreshFormatToolbar();
   const normalized = text.replace(/\r\n/g, "\n");
   const lines = normalized.split("\n");
   const activeFile = controller.getActiveFile();
@@ -3972,14 +4068,16 @@ function handleEditorKeydown(event) {
 
   if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey) {
     const key = event.key.toLowerCase();
-    if (key === "b") {
+    // Bold/italic markers are Markdown-only.
+    const isMarkdown = getEditorToolbarFormat(controller.getActiveFile()?.name ?? "") === "markdown";
+    if (key === "b" && isMarkdown) {
       event.preventDefault();
-      applyMarkdownToolbarAction("bold");
+      applyToolbarAction({ kind: "wrap", before: "**", after: "**", placeholder: "bold text" });
       return;
     }
-    if (key === "i") {
+    if (key === "i" && isMarkdown) {
       event.preventDefault();
-      applyMarkdownToolbarAction("italic");
+      applyToolbarAction({ kind: "wrap", before: "*", after: "*", placeholder: "italic text" });
       return;
     }
   }
@@ -5095,7 +5193,7 @@ function applyWorkspaceSettings() {
   elements.previewCollapseButton.setAttribute("aria-expanded", settings.preview === "shown" ? "true" : "false");
   elements.chatCollapseButton.setAttribute("aria-expanded", settings.chatPanel === "shown" ? "true" : "false");
   elements.debugPanel.hidden = !settings.debugPanel;
-  if (elements.editorFormatToolbar) elements.editorFormatToolbar.hidden = !settings.showFormatToolbar;
+  refreshFormatToolbar();
   elements.chatPanel.hidden = settings.chatPanel === "hidden";
   elements.chatToggleActivityButton.classList.toggle("is-active", settings.chatPanel === "shown");
   elements.toggleDebugMenuButton.textContent = settings.debugPanel ? "Hide Log Panel" : "Show Log Panel";
@@ -6144,9 +6242,13 @@ function updateStatus(project) {
     }
     syncEditorScroll();
   }
-  const previewState = renderPreviewContent(elements.preview, project, previewFile);
-  if (previewState.shouldTypeset) {
-    void typesetPreview(previewState.content);
+  // Skip the redundant preview rebuild when the change came from the preview
+  // itself — re-rendering would reset the diagram's scroll position/selection.
+  if (!_previewUpdating) {
+    const previewState = renderPreviewContent(elements.preview, project, previewFile);
+    if (previewState.shouldTypeset) {
+      void typesetPreview(previewState.content);
+    }
   }
   renderLinksPanel(project, activeFile);
   renderChatPanel(project);
@@ -6200,7 +6302,14 @@ function updateFileContentFromPreview(fileId, nextContent, reason = "preview edi
     return;
   }
 
-  controller.updateContent(fileId, nextContent);
+  // The preview view already re-rendered itself for this edit; suppress the
+  // redundant preview re-render in the synchronous updateStatus that follows.
+  _previewUpdating = true;
+  try {
+    controller.updateContent(fileId, nextContent);
+  } finally {
+    _previewUpdating = false;
+  }
   publishOperation({
     type: "update-file",
     path: getPath(project, fileId),
@@ -7371,15 +7480,8 @@ elements.bmapGenerateScopeSelect.addEventListener("change", (event) => {
 elements.formatToolbarInput?.addEventListener("change", (event) => {
   settings.showFormatToolbar = event.target.checked;
   persistSettings();
+  refreshFormatToolbar();
   logDebug("action", "Format toolbar setting changed", settings.showFormatToolbar ? "on" : "off");
-});
-
-// mousedown + preventDefault keeps the editor selection intact while clicking.
-elements.editorFormatToolbar?.addEventListener("mousedown", (event) => {
-  const button = event.target.closest("[data-md-action]");
-  if (!button) return;
-  event.preventDefault();
-  applyMarkdownToolbarAction(button.dataset.mdAction);
 });
 
 window.addEventListener("resize", () => {
