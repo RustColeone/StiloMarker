@@ -403,6 +403,73 @@ function extractMarkdownLinks(markdown) {
   return links;
 }
 
+// ── GFM pipe tables ──────────────────────────────────────────────────────────
+
+/** Split a table row into trimmed cells, honouring escaped pipes and dropping
+ *  the optional leading/trailing pipe. */
+function splitTableCells(row) {
+  const trimmed = row.trim().replace(/^\|/, "").replace(/\|$/, "");
+  const cells = [];
+  let current = "";
+  for (let index = 0; index < trimmed.length; index += 1) {
+    const char = trimmed[index];
+    if (char === "\\" && trimmed[index + 1] === "|") {
+      current += "|";
+      index += 1;
+      continue;
+    }
+    if (char === "|") {
+      cells.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+/** A delimiter row is `---`/`:--`/`:-:`/`--:` cells separated by pipes. */
+function isTableDelimiterRow(row) {
+  const cells = splitTableCells(row);
+  return cells.length > 0 && cells.every((cell) => /^:?-+:?$/.test(cell));
+}
+
+function parseTableAlignment(cell) {
+  const left = cell.startsWith(":");
+  const right = cell.endsWith(":");
+  if (left && right) return "center";
+  if (right) return "right";
+  if (left) return "left";
+  return null;
+}
+
+function renderTableBlock(headerLine, delimiterLine, bodyLines, renderOptions) {
+  const headers = splitTableCells(headerLine);
+  const alignments = splitTableCells(delimiterLine).map(parseTableAlignment);
+  const cellAttr = (columnIndex) => {
+    const alignment = alignments[columnIndex];
+    return alignment ? ` style="text-align:${alignment}"` : "";
+  };
+
+  const headHtml = `<thead><tr>${headers
+    .map((header, columnIndex) => `<th${cellAttr(columnIndex)}>${renderInline(header, renderOptions)}</th>`)
+    .join("")}</tr></thead>`;
+
+  const rowsHtml = bodyLines
+    .map((line) => {
+      const cells = splitTableCells(line);
+      const cellsHtml = headers
+        .map((_, columnIndex) => `<td${cellAttr(columnIndex)}>${renderInline(cells[columnIndex] ?? "", renderOptions)}</td>`)
+        .join("");
+      return `<tr>${cellsHtml}</tr>`;
+    })
+    .join("");
+
+  const bodyHtml = rowsHtml ? `<tbody>${rowsHtml}</tbody>` : "";
+  return `<table>${headHtml}${bodyHtml}</table>`;
+}
+
 function renderMarkdown(markdown, options = {}) {
   const { contentLines, references } = collectReferenceDefinitions(String(markdown ?? "").replace(/\r\n/g, "\n").split("\n"));
   const lines = contentLines;
@@ -427,7 +494,8 @@ function renderMarkdown(markdown, options = {}) {
     return `<div class="md-code-block"><button class="md-code-copy-button" type="button" data-copy-code="true" aria-label="Copy code block">Copy</button><pre><code>${code}</code></pre></div>`;
   }
 
-  for (const rawLine of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const rawLine = lines[index];
     const line = rawLine.trimEnd();
 
     if (line.startsWith("```")) {
@@ -449,6 +517,29 @@ function renderMarkdown(markdown, options = {}) {
 
     if (!line) {
       flushList();
+      continue;
+    }
+
+    // GFM pipe table: a header row with pipes followed by a delimiter row.
+    if (
+      line.includes("|") &&
+      !isBlockHtmlLine(line) &&
+      index + 1 < lines.length &&
+      isTableDelimiterRow(lines[index + 1].trimEnd())
+    ) {
+      flushList();
+      const bodyLines = [];
+      let bodyIndex = index + 2;
+      while (bodyIndex < lines.length) {
+        const bodyLine = lines[bodyIndex].trimEnd();
+        if (!bodyLine || !bodyLine.includes("|") || bodyLine.startsWith("```")) {
+          break;
+        }
+        bodyLines.push(bodyLine);
+        bodyIndex += 1;
+      }
+      output.push(renderTableBlock(line, lines[index + 1].trimEnd(), bodyLines, renderOptions));
+      index = bodyIndex - 1;
       continue;
     }
 

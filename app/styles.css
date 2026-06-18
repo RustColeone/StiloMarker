@@ -1143,6 +1143,67 @@ p {
   background: var(--border);
 }
 
+/* Floating drag-to-size table picker (Markdown "Insert table"). Positioned via
+   fixed coords set inline by table-grid-picker.js open(). */
+.table-grid-picker {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--menu);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.30);
+}
+.table-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--grid-cols, 10), 16px);
+  gap: 2px;
+}
+.table-grid-cell {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--surface-0);
+  cursor: pointer;
+}
+.table-grid-cell.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.table-grid-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.table-grid-size {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.table-grid-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.table-grid-toggle-btn {
+  padding: 2px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+.table-grid-toggle-btn.is-active {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
 /* Caret-anchored, VSCode-style completion popup. left/top are set inline by
    positionEditorAutocompleteAtCaret(); keep the defaults as a safe fallback. */
 .editor-autocomplete {
@@ -2648,7 +2709,9 @@ menu {
   /* Fixed dark ink (matches the export + inspector default), since the node box
      is always light regardless of theme. */
   color: #1a1a1a;
-  white-space: pre-wrap;
+  /* Body is rendered Markdown HTML (block <p>/<ul>), so use `normal`: `pre-wrap`
+     would render the newlines between block tags as extra blank lines. */
+  white-space: normal;
   word-break: break-word;
 }
 
@@ -3013,9 +3076,6 @@ menu {
 }
 
 /* Markdown-rendered node body: keep it compact inside the node box. */
-.bmap-node-text {
-  white-space: normal;
-}
 .bmap-node-text > :first-child { margin-top: 0; }
 .bmap-node-text > :last-child { margin-bottom: 0; }
 .bmap-node-text p { margin: 0 0 4px; }
