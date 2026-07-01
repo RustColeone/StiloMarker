@@ -270,8 +270,12 @@
           <p class="subtle-label">Theme, layout, and collaboration preferences.</p>
         </header>
 
-        <div class="settings-grid">
-          <section class="settings-section">
+        <div id="settings-tab-strip" class="settings-tab-strip" role="tablist" aria-label="Settings sections">
+          <button id="settings-tab-appearance" class="settings-tab is-active" type="button" role="tab" aria-selected="true" data-tab="appearance">Appearance</button>
+          <button id="settings-tab-collaboration" class="settings-tab" type="button" role="tab" aria-selected="false" data-tab="collaboration">Collaboration</button>
+        </div>
+        <div class="settings-tab-panels">
+          <section id="settings-panel-appearance" class="settings-section settings-tab-panel is-active" data-tab-panel="appearance">
             <h3>Appearance</h3>
 
             <label>
@@ -329,89 +333,103 @@
             </label>
           </section>
 
-          <section class="settings-section">
-            <h3>Collaboration</h3>
-
-            <label>
-              Server URL
-              <input id="server-url-input" type="url" placeholder="(same origin — leave blank when behind a proxy)">
-            </label>
-
-            <label>
-              PIN
-              <input id="server-pin-input" type="password" inputmode="numeric" placeholder="Server PIN">
-            </label>
-
-            <label>
-              Display Name
-              <input id="display-name-input" type="text" maxlength="40" placeholder="Name shown to collaborators">
-            </label>
-
-            <label class="checkbox-row">
-              <input id="auto-reconnect-input" type="checkbox" checked>
-              <span>Remember session &amp; reconnect automatically</span>
-            </label>
-
-            <div class="settings-actions-row">
-              <button id="ping-server-button" type="button">Ping Server</button>
-              <button id="connect-server-button" type="button">Connect</button>
-            </div>
-
-            <div class="settings-status-panel">
-              <p id="server-status-text" class="subtle-label">No server checked yet.</p>
-            </div>
-
-            <!-- Account login — only shown when the pinged server reports it
-                 supports accounts (state 3). Uses the Server URL above. -->
-            <div id="account-login-row" class="account-login" hidden>
-              <h4>Account login</h4>
-              <label>
-                Username
-                <input id="account-username-input" type="text" autocomplete="username" placeholder="Account username">
-              </label>
-              <label>
-                Password
-                <input id="account-password-input" type="password" autocomplete="current-password" placeholder="Account password">
-              </label>
-              <div class="settings-actions-row">
-                <button id="account-login-button" type="button">Log In</button>
-                <button id="account-logout-button" type="button" hidden>Log Out</button>
-              </div>
-              <p id="account-status-text" class="subtle-label"></p>
-
-              <!-- Cloud workspaces (state 3) — shown once logged in. Only lists
-                   workspaces the account is a member of. -->
-              <div id="workspace-switcher" hidden>
-                <h4>Cloud workspaces</h4>
-                <ul id="workspace-list" class="workspace-list"></ul>
-                <div class="workspace-create-row">
-                  <select id="workspace-team-select" aria-label="Team"></select>
-                  <input id="workspace-name-input" type="text" maxlength="64" placeholder="New workspace name">
-                  <label class="checkbox-row">
-                    <input id="workspace-share-team" type="checkbox">
-                    <span>Share to whole team</span>
+          <div id="settings-panel-collaboration" class="settings-tab-panel" data-tab-panel="collaboration" hidden>
+            <div class="settings-grid collab-grid">
+              <!-- LEFT column: connect to a server, then join / host a shared session. -->
+              <div class="collab-column">
+                <section class="settings-section">
+                  <h3>Server</h3>
+                  <label>
+                    Server URL
+                    <input id="server-url-input" type="url" placeholder="(same origin — leave blank when behind a proxy)">
                   </label>
-                  <button id="workspace-create-button" type="button">Create</button>
-                </div>
+                  <label class="checkbox-row">
+                    <input id="auto-reconnect-input" type="checkbox" checked>
+                    <span>Remember &amp; reconnect automatically</span>
+                  </label>
+                  <div class="settings-actions-row">
+                    <button id="ping-server-button" type="button">Ping Server</button>
+                  </div>
+                  <div class="settings-status-panel">
+                    <p id="server-status-text" class="subtle-label">No server checked yet.</p>
+                  </div>
+                </section>
+
+                <section class="settings-section">
+                  <h3>Shared session</h3>
+                  <p class="subtle-label">Join someone's shared session with their PIN, or share your current workspace so others can join with the PIN you get.</p>
+
+                  <label>
+                    Display Name
+                    <input id="display-name-input" type="text" maxlength="40" placeholder="Name shown to collaborators">
+                  </label>
+                  <label>
+                    PIN
+                    <input id="server-pin-input" type="password" inputmode="numeric" placeholder="Session PIN">
+                  </label>
+                  <div class="settings-actions-row">
+                    <button id="connect-server-button" type="button">Join</button>
+                  </div>
+
+                  <!-- Share the CURRENT local project with others. "No team" hosts an
+                       ephemeral guest session (a shareable PIN, discarded when you
+                       leave); a team target publishes it as a persistent workspace. -->
+                  <div id="collab-hosting" class="collab-hosting" hidden>
+                    <h4>Share this workspace</h4>
+                    <div class="settings-actions-row">
+                      <select id="host-team-select" aria-label="Share target">
+                        <option value="">No team (temporary)</option>
+                      </select>
+                      <button id="host-button" type="button">Share</button>
+                    </div>
+                    <p id="host-pin-text" class="subtle-label"></p>
+                  </div>
+
+                  <div id="presence-list" class="presence-list"></div>
+                </section>
+              </div>
+
+              <!-- RIGHT column: account login + personal cloud workspaces. -->
+              <div class="collab-column">
+                <section class="settings-section">
+                  <h3>Account</h3>
+                  <p id="account-locked-note" class="subtle-label">Ping a server that supports accounts to log in.</p>
+
+                  <!-- Only shown when the pinged server reports accounts (state 3). -->
+                  <div id="account-login-row" class="account-login" hidden>
+                    <label>
+                      Username
+                      <input id="account-username-input" type="text" autocomplete="username" placeholder="Account username">
+                    </label>
+                    <label>
+                      Password
+                      <input id="account-password-input" type="password" autocomplete="current-password" placeholder="Account password">
+                    </label>
+                    <div class="settings-actions-row">
+                      <button id="account-login-button" type="button">Log In</button>
+                      <button id="account-logout-button" type="button" hidden>Log Out</button>
+                    </div>
+                    <p id="account-status-text" class="subtle-label"></p>
+
+                    <!-- Cloud workspaces — shown once logged in. Only the account's own. -->
+                    <div id="workspace-switcher" hidden>
+                      <h4>Cloud workspaces</h4>
+                      <ul id="workspace-list" class="workspace-list"></ul>
+                      <div class="workspace-create-row">
+                        <select id="workspace-team-select" aria-label="Team"></select>
+                        <input id="workspace-name-input" type="text" maxlength="64" placeholder="New workspace name">
+                        <label class="checkbox-row">
+                          <input id="workspace-share-team" type="checkbox">
+                          <span>Share to whole team</span>
+                        </label>
+                        <button id="workspace-create-button" type="button">Create</button>
+                      </div>
+                    </div>
+                  </div>
+                </section>
               </div>
             </div>
-
-            <!-- Share the CURRENT local project with others. "No team" hosts an
-                 ephemeral guest session (a shareable PIN, discarded when you
-                 leave); a team target publishes it as a persistent workspace. -->
-            <div id="collab-hosting" class="collab-hosting" hidden>
-              <h4>Share this workspace</h4>
-              <div class="settings-actions-row">
-                <select id="host-team-select" aria-label="Share target">
-                  <option value="">No team (temporary)</option>
-                </select>
-                <button id="host-button" type="button">Share</button>
-              </div>
-              <p id="host-pin-text" class="subtle-label"></p>
-            </div>
-
-            <div id="presence-list" class="presence-list"></div>
-          </section>
+          </div>
         </div>
 
         <menu class="dialog-actions">

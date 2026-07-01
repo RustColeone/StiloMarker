@@ -24,7 +24,16 @@ function createDefaultSettings() {
     // Runtime memory: true while the user has an active/intended session, so the
     // app can auto-reconnect on next load or after a dropped connection.
     wasConnected: false,
-    showFormatToolbar: false
+    showFormatToolbar: false,
+    // Accounts mode (state 3) auto-restore. Credentials are plaintext (matching
+    // the server whitelist choice). accountSuccess maps a normalized server URL
+    // to the username that last logged in there successfully — auto-login only
+    // fires for a server+username that previously succeeded. lastWorkspace is the
+    // last-opened cloud workspace, reopened on boot.
+    accountUsername: "",
+    accountPassword: "",
+    accountSuccess: {},
+    lastWorkspace: null
   };
 }
 
