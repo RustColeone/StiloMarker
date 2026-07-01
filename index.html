@@ -378,6 +378,22 @@
                 <button id="account-logout-button" type="button" hidden>Log Out</button>
               </div>
               <p id="account-status-text" class="subtle-label"></p>
+
+              <!-- Cloud workspaces (state 3) — shown once logged in. Only lists
+                   workspaces the account is a member of. -->
+              <div id="workspace-switcher" hidden>
+                <h4>Cloud workspaces</h4>
+                <ul id="workspace-list" class="workspace-list"></ul>
+                <div class="workspace-create-row">
+                  <select id="workspace-team-select" aria-label="Team"></select>
+                  <input id="workspace-name-input" type="text" maxlength="64" placeholder="New workspace name">
+                  <label class="checkbox-row">
+                    <input id="workspace-share-team" type="checkbox">
+                    <span>Share to whole team</span>
+                  </label>
+                  <button id="workspace-create-button" type="button">Create</button>
+                </div>
+              </div>
             </div>
 
             <div id="presence-list" class="presence-list"></div>

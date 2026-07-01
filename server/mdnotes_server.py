@@ -5,6 +5,7 @@ import mimetypes
 import os
 import posixpath
 import queue
+import re
 import secrets
 import threading
 import time
@@ -1194,15 +1195,9 @@ class CollaborationBroker:
                     "Drop is only allowed when you are the sole author of all edits since the target."
                 )
 
-    def connect(self, pin: str, display_name: str = ""):
-        if pin == self.master_pin:
-            role = "master"
-        elif pin == self.pin:
-            role = "client"
-        else:
-            _log("AUTH", "Rejected connect — wrong PIN")
-            raise PermissionError("Invalid PIN")
-
+    def _admit(self, display_name: str, role: str):
+        """Mint a session token + presence for an already-authorized joiner.
+        Shared by PIN connect() and account/workspace opens (which have no PIN)."""
         token = secrets.token_urlsafe(24)
         client_id = f"client-{uuid.uuid4().hex[:12]}"
         cleaned_name = display_name.strip()[:40]
@@ -1215,6 +1210,16 @@ class CollaborationBroker:
         _log("CONNECT", f"{display_name} joined as {role}", clientId=client_id, revision=self.revision)
         self._broadcast_presence(f"{display_name} joined the session.")
         return {"token": token, "clientId": client_id, "displayName": display_name, "revision": self.revision, "sessionId": "default", "role": role}
+
+    def connect(self, pin: str, display_name: str = ""):
+        if pin == self.master_pin:
+            role = "master"
+        elif pin == self.pin:
+            role = "client"
+        else:
+            _log("AUTH", "Rejected connect — wrong PIN")
+            raise PermissionError("Invalid PIN")
+        return self._admit(display_name, role)
 
     def authorize(self, token: str):
         with self.lock:
@@ -1514,6 +1519,9 @@ class AccountStore:
     def teams_for(self, username: str) -> list[str]:
         return list(self.users.get(username, {}).get("teams", []))
 
+    def team_members(self, team: str) -> list[str]:
+        return [name for name, user in self.users.items() if team in user.get("teams", [])]
+
 
 class WorkspaceRegistry:
     """Owns one CollaborationBroker per workspace and maps session tokens to the
@@ -1526,11 +1534,12 @@ class WorkspaceRegistry:
     """
 
     def __init__(self, pin: str, legacy_state_file: Path, master_pin: str | None = None,
-                 accounts: "AccountStore | None" = None):
+                 accounts: "AccountStore | None" = None, data_dir: Path | None = None):
         self.lock = threading.RLock()
         self.pin = pin
         self.master_pin = master_pin or pin
         self.accounts = accounts or AccountStore(None)
+        self.data_dir = data_dir
         self.brokers: dict[str, CollaborationBroker] = {}
         self.token_workspace: dict[str, str] = {}
         self.account_tokens: dict[str, str] = {}  # account token -> username
@@ -1538,6 +1547,125 @@ class WorkspaceRegistry:
         self.brokers[DEFAULT_WORKSPACE_ID] = CollaborationBroker(
             pin, legacy_state_file, master_pin=self.master_pin
         )
+
+    # ---- Team workspace storage (accounts mode) --------------------------------
+    @staticmethod
+    def safe_component(name: str) -> str:
+        """Sanitize a single team/workspace path component. Rejects traversal and
+        anything outside a conservative allowlist so a request can never escape
+        the data directory."""
+        cleaned = str(name or "").strip()
+        if not cleaned or cleaned in {".", ".."} or "/" in cleaned or "\\" in cleaned:
+            raise ValueError("Invalid name")
+        if not re.fullmatch(r"[A-Za-z0-9 _.-]{1,64}", cleaned):
+            raise ValueError("Name may only contain letters, numbers, spaces, _.-")
+        return cleaned
+
+    def _team_dir(self, team: str) -> Path:
+        if self.data_dir is None:
+            raise PermissionError("Cloud storage is not enabled on this server")
+        return self.data_dir / f"team_{self.safe_component(team)}" / "workspaces"
+
+    def _index_path(self, team: str) -> Path:
+        return self._team_dir(team).parent / "index.json"
+
+    def _read_index(self, team: str) -> dict:
+        path = self._index_path(team)
+        if not path.exists():
+            return {"workspaces": {}}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {"workspaces": {}}
+        if not isinstance(data.get("workspaces"), dict):
+            data["workspaces"] = {}
+        return data
+
+    def _write_index(self, team: str, index: dict) -> None:
+        path = self._index_path(team)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(index, indent=2), encoding="utf-8")
+
+    def _state_file(self, team: str, name: str) -> Path:
+        return self._team_dir(team) / f"{self.safe_component(name)}.json"
+
+    def _require_account(self, token: str) -> dict:
+        identity = self.account_for_token(token)
+        if identity is None:
+            raise PermissionError("Not logged in")
+        return identity
+
+    def _require_team(self, identity: dict, team: str) -> str:
+        team = self.safe_component(team)
+        if team not in identity["teams"]:
+            raise PermissionError("You are not a member of that team")
+        return team
+
+    def list_workspaces(self, token: str) -> list[dict]:
+        """Only workspaces the caller is a member of, across their teams."""
+        identity = self._require_account(token)
+        out = []
+        for team in identity["teams"]:
+            try:
+                index = self._read_index(team)
+            except (ValueError, PermissionError):
+                continue
+            for name, meta in index["workspaces"].items():
+                members = meta.get("members", [])
+                if identity["username"] in members:
+                    out.append({
+                        "team": team,
+                        "name": name,
+                        "id": f"{team}/{name}",
+                        "members": members,
+                        "createdBy": meta.get("createdBy"),
+                    })
+        return out
+
+    def create_workspace(self, token: str, team: str, name: str, share_team: bool = False) -> dict:
+        identity = self._require_account(token)
+        team = self._require_team(identity, team)
+        name = self.safe_component(name)
+        with self.lock:
+            index = self._read_index(team)
+            if name in index["workspaces"]:
+                raise ValueError("A workspace with that name already exists")
+            members = list(self.accounts.team_members(team)) if share_team else [identity["username"]]
+            if identity["username"] not in members:
+                members.append(identity["username"])
+            index["workspaces"][name] = {
+                "members": members,
+                "createdBy": identity["username"],
+                "createdAt": time.time(),
+            }
+            self._write_index(team, index)
+        _log("WORKSPACE", f"{identity['username']} created {team}/{name}", members=members)
+        return {"team": team, "name": name, "id": f"{team}/{name}", "members": members, "createdBy": identity["username"]}
+
+    def open_workspace(self, token: str, team: str, name: str) -> dict:
+        """Admit a logged-in account into a team workspace (role master), loading
+        or creating its persisted broker. Returns a session bound to it."""
+        identity = self._require_account(token)
+        team = self._require_team(identity, team)
+        name = self.safe_component(name)
+        index = self._read_index(team)
+        meta = index["workspaces"].get(name)
+        if meta is None:
+            raise PermissionError("Unknown workspace")
+        if identity["username"] not in meta.get("members", []):
+            raise PermissionError("You do not have access to that workspace")
+        workspace_id = f"{team}/{name}"
+        with self.lock:
+            broker = self.brokers.get(workspace_id)
+            if broker is None:
+                broker = CollaborationBroker(self.pin, self._state_file(team, name), master_pin=self.master_pin)
+                self.brokers[workspace_id] = broker
+        session = broker._admit(identity["username"], "master")
+        with self.lock:
+            self.token_workspace[session["token"]] = workspace_id
+        session["sessionId"] = workspace_id
+        session["workspace"] = workspace_id
+        return session
 
     def login(self, username: str, password: str) -> dict:
         """Authenticate an account and mint an *account* token (distinct from a
@@ -1641,6 +1769,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_get_state(parsed)
         if parsed.path == "/api/session/presence":
             return self._handle_get_presence(parsed)
+        if parsed.path == "/api/workspaces":
+            return self._handle_list_workspaces(parsed)
         if parsed.path == "/api/events/stream":
             return self._handle_event_stream(parsed)
         return self._serve_static(parsed.path)
@@ -1655,6 +1785,10 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_post_chat_workspace(parsed)
         if parsed.path == "/api/auth/login":
             return self._handle_login()
+        if parsed.path == "/api/workspaces":
+            return self._handle_create_workspace(parsed)
+        if parsed.path == "/api/workspaces/open":
+            return self._handle_open_workspace(parsed)
         if parsed.path == "/api/session/connect":
             return self._handle_connect()
         if parsed.path == "/api/session/state":
@@ -1700,6 +1834,46 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             result = self.registry.login(str(payload.get("username", "")), str(payload.get("password", "")))
             self._write_json(HTTPStatus.OK, result)
             self._log_request(200, f"login user={result['username']!r} teams={result['teams']}")
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+            self._log_request(403, str(error))
+        except ValueError as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            self._log_request(400, str(error))
+
+    def _handle_list_workspaces(self, parsed):
+        try:
+            token = self._extract_token(parsed)
+            self._write_json(HTTPStatus.OK, {"workspaces": self.registry.list_workspaces(token)})
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+
+    def _handle_create_workspace(self, parsed):
+        try:
+            token = self._extract_token(parsed)
+            payload = self._read_json()
+            result = self.registry.create_workspace(
+                token,
+                str(payload.get("team", "")),
+                str(payload.get("name", "")),
+                share_team=bool(payload.get("shareTeam", False)),
+            )
+            self._write_json(HTTPStatus.OK, result)
+            self._log_request(200, f"created {result['id']}")
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+            self._log_request(403, str(error))
+        except ValueError as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            self._log_request(400, str(error))
+
+    def _handle_open_workspace(self, parsed):
+        try:
+            token = self._extract_token(parsed)
+            payload = self._read_json()
+            session = self.registry.open_workspace(token, str(payload.get("team", "")), str(payload.get("name", "")))
+            self._write_json(HTTPStatus.OK, session)
+            self._log_request(200, f"opened {session['workspace']} as {session['displayName']!r}")
         except PermissionError as error:
             self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
             self._log_request(403, str(error))
@@ -2030,9 +2204,9 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
 
-def build_server(host: str, port: int, pin: str, static_root: Path, state_file: Path, master_pin: str | None = None, chat_proxy: ChatProxy | None = None, whitelist_file: Path | None = None):
+def build_server(host: str, port: int, pin: str, static_root: Path, state_file: Path, master_pin: str | None = None, chat_proxy: ChatProxy | None = None, whitelist_file: Path | None = None, data_dir: Path | None = None):
     accounts = AccountStore(whitelist_file)
-    registry = WorkspaceRegistry(pin, state_file, master_pin=master_pin, accounts=accounts)
+    registry = WorkspaceRegistry(pin, state_file, master_pin=master_pin, accounts=accounts, data_dir=data_dir)
     chat_proxy = chat_proxy or ChatProxy()
     # Chat context falls back to the default workspace's project when the client
     # doesn't supply one — same behaviour as the pre-registry single broker.
@@ -2175,6 +2349,8 @@ def main():
     parser.add_argument("--state-file", default=str(Path(__file__).resolve().parent / "session-state.json"))
     parser.add_argument("--whitelist", default=os.environ.get("MDNOTES_WHITELIST", str(Path(__file__).resolve().parent / "whitelist.json")),
                         help="Account whitelist JSON (accounts mode). Kept out of the web-served set. Absent ⇒ accounts disabled.")
+    parser.add_argument("--data-dir", default=os.environ.get("MDNOTES_DATA_DIR", str(Path(__file__).resolve().parent / "data")),
+                        help="Directory for persistent per-team cloud workspaces. Kept out of the web-served set.")
     parser.add_argument("--selftest", action="store_true")
     args = parser.parse_args()
 
@@ -2185,8 +2361,9 @@ def main():
     static_root = Path(args.static_dir).resolve()
     state_file = Path(args.state_file).resolve()
     whitelist_file = Path(args.whitelist).resolve() if args.whitelist else None
+    data_dir = Path(args.data_dir).resolve() if args.data_dir else None
     chat_proxy = ChatProxy()
-    server = build_server(args.host, args.port, args.pin, static_root, state_file, master_pin=args.master_pin, chat_proxy=chat_proxy, whitelist_file=whitelist_file)
+    server = build_server(args.host, args.port, args.pin, static_root, state_file, master_pin=args.master_pin, chat_proxy=chat_proxy, whitelist_file=whitelist_file, data_dir=data_dir)
     accounts_enabled = whitelist_file is not None and whitelist_file.exists()
     print(f"MDNotes collaboration server running at http://{args.host}:{args.port}")
     print(f"Serving static files from {static_root}")

@@ -10,7 +10,7 @@ import { buildModuleMapSection, replaceOrAppendModuleMap } from "./services/mtre
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
 import { applyTheme, loadSettings, saveSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
-import { loginToServer, pingServer } from "./services/sync-service.js";
+import { createWorkspace, listWorkspaces, loginToServer, pingServer } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { appendUrlDbEntry, formatUrlDbEntryBody, moveUrlDbEntry, moveUrlDbEntryBetweenFiles, parseUrlDb, parseUrlDbEntryBody, removeUrlDbEntry, serializeUrlDb, updateUrlDbEntry } from "./services/urldb-service.js";
 import { createZip, downloadBlob } from "./services/zip-service.js";
@@ -132,6 +132,12 @@ const elements = {
   accountLoginButton: query("#account-login-button"),
   accountLogoutButton: query("#account-logout-button"),
   accountStatusText: query("#account-status-text"),
+  workspaceSwitcher: query("#workspace-switcher"),
+  workspaceList: query("#workspace-list"),
+  workspaceTeamSelect: query("#workspace-team-select"),
+  workspaceNameInput: query("#workspace-name-input"),
+  workspaceShareTeam: query("#workspace-share-team"),
+  workspaceCreateButton: query("#workspace-create-button"),
   serverStatusText: query("#server-status-text"),
   serverStatusPanel: query("#server-status-text")?.closest(".settings-status-panel"),
   acceptConnectionDialog: query("#accept-connection-dialog"),
@@ -7595,6 +7601,97 @@ function renderAccountControls() {
       ? "This server supports accounts. Log in to access cloud workspaces."
       : "";
   }
+  if (elements.workspaceSwitcher) {
+    elements.workspaceSwitcher.hidden = !loggedIn;
+    if (loggedIn) {
+      const teams = syncState.account.teams ?? [];
+      elements.workspaceTeamSelect.replaceChildren(...teams.map((team) => {
+        const option = document.createElement("option");
+        option.value = team;
+        option.textContent = team;
+        return option;
+      }));
+    }
+  }
+}
+
+async function refreshWorkspaceList() {
+  if (!syncState.account || !elements.workspaceList) return;
+  try {
+    const workspaces = await listWorkspaces(settings.serverUrl, syncState.account.token);
+    elements.workspaceList.replaceChildren();
+    if (workspaces.length === 0) {
+      const empty = document.createElement("li");
+      empty.className = "workspace-empty subtle-label";
+      empty.textContent = "No workspaces yet. Create one below.";
+      elements.workspaceList.append(empty);
+      return;
+    }
+    for (const ws of workspaces) {
+      const item = document.createElement("li");
+      item.className = "workspace-item";
+      const label = document.createElement("span");
+      label.className = "workspace-item-label";
+      label.textContent = `${ws.team} / ${ws.name}`;
+      label.title = `Members: ${(ws.members ?? []).join(", ")}`;
+      const openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.textContent = syncState.sessionId === ws.id && syncState.status === "connected" ? "Open ✓" : "Open";
+      openBtn.addEventListener("click", () => { void handleOpenWorkspace(ws.team, ws.name); });
+      item.append(label, openBtn);
+      elements.workspaceList.append(item);
+    }
+  } catch (error) {
+    logDebug("response", "Workspace list failed", error.message);
+  }
+}
+
+async function handleOpenWorkspace(team, name) {
+  if (!syncState.account) return;
+  try {
+    // Preserve the user's local project once, so leaving the cloud workspace
+    // restores it. Setting synced mode up-front stops onStatusChange's master
+    // auto-switch from snapshotting the (just-pulled) cloud project by mistake.
+    if (workspaceMode === "private") {
+      privateProjectSnapshot = controller.getProject();
+    }
+    workspaceMode = "synced";
+    await collaboration.openWorkspace(settings.serverUrl, syncState.account.token, team, name);
+    settings.wasConnected = false; // cloud opens are account-driven, not PIN auto-reconnect
+    logDebug("action", "Opened cloud workspace", `${team}/${name}`);
+    await refreshWorkspaceList();
+    render(controller.getProject());
+  } catch (error) {
+    workspaceMode = "private";
+    if (privateProjectSnapshot) {
+      controller.replaceProject(privateProjectSnapshot);
+      privateProjectSnapshot = null;
+    }
+    notify(error.message || "Could not open workspace.");
+    logDebug("response", "Open workspace failed", error.message);
+    render(controller.getProject());
+  }
+}
+
+async function handleCreateWorkspace() {
+  if (!syncState.account) return;
+  const team = elements.workspaceTeamSelect.value;
+  const name = elements.workspaceNameInput.value.trim();
+  const shareTeam = elements.workspaceShareTeam.checked;
+  if (!name) {
+    notify("Enter a workspace name.");
+    return;
+  }
+  try {
+    await createWorkspace(settings.serverUrl, syncState.account.token, team, name, shareTeam);
+    elements.workspaceNameInput.value = "";
+    elements.workspaceShareTeam.checked = false;
+    logDebug("action", "Created cloud workspace", `${team}/${name}`);
+    await refreshWorkspaceList();
+  } catch (error) {
+    notify(error.message || "Could not create workspace.");
+    logDebug("response", "Create workspace failed", error.message);
+  }
 }
 
 async function handleAccountLogin() {
@@ -7612,6 +7709,7 @@ async function handleAccountLogin() {
     logDebug("response", "Account login succeeded", `${result.username} teams=${(result.teams ?? []).join(",")}`);
     flashStatusPanel("success");
     renderAccountControls();
+    await refreshWorkspaceList();
     render(controller.getProject());
   } catch (error) {
     syncState.account = null;
@@ -7624,7 +7722,13 @@ async function handleAccountLogin() {
 }
 
 function handleAccountLogout() {
+  // Leaving the account also leaves any cloud workspace it opened.
+  if (collaboration.isConnected() && workspaceMode === "synced") {
+    collaboration.disconnect("Logged out.");
+    switchWorkspaceMode?.("private");
+  }
   syncState.account = null;
+  elements.workspaceList?.replaceChildren();
   logDebug("action", "Account logged out");
   renderAccountControls();
   render(controller.getProject());
@@ -7632,6 +7736,7 @@ function handleAccountLogout() {
 
 elements.accountLoginButton?.addEventListener("click", () => { void handleAccountLogin(); });
 elements.accountLogoutButton?.addEventListener("click", handleAccountLogout);
+elements.workspaceCreateButton?.addEventListener("click", () => { void handleCreateWorkspace(); });
 elements.accountPasswordInput?.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
