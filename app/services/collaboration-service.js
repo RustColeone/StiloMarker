@@ -1,4 +1,4 @@
-import { connectToServer, fetchSessionState, openEventStream, openWorkspaceSession, pushOperation, pushSessionState, sanitizeProjectForSync } from "./sync-service.js";
+import { connectToServer, fetchSessionState, hostSession, openEventStream, openWorkspaceSession, pushOperation, pushSessionState, sanitizeProjectForSync } from "./sync-service.js";
 
 function fingerprintProject(project) {
   return JSON.stringify(sanitizeProjectForSync(project));
@@ -406,9 +406,38 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     return session;
   }
 
+  // Host the CURRENT local project as an ephemeral guest session. Returns the
+  // generated guest PIN to share. The host is master and pushes the local
+  // project as the session's canonical state.
+  async function hostForGuests(serverUrl, displayName = "") {
+    disconnect();
+    emitStatus("reachable", "Starting host session…");
+
+    const session = await hostSession(serverUrl, displayName);
+    connection = {
+      serverUrl,
+      token: session.token,
+      clientId: session.clientId,
+      displayName: session.displayName || session.clientId,
+      sessionId: session.sessionId ?? session.workspace,
+      revision: session.revision ?? 0,
+      role: "master",
+      eventSource: null
+    };
+    localRevision = connection.revision;
+
+    // Push our local project into the fresh ephemeral session.
+    await publishSnapshot(getProject());
+    emitStatus("connected", `Hosting for guests — PIN ${session.guestPin}.`);
+
+    attachEventStream(serverUrl);
+    return { guestPin: session.guestPin, workspace: session.workspace };
+  }
+
   return {
     connect,
     openWorkspace,
+    hostForGuests,
     disconnect,
     publishOperation,
     publishSnapshot,

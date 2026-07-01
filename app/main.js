@@ -138,6 +138,9 @@ const elements = {
   workspaceNameInput: query("#workspace-name-input"),
   workspaceShareTeam: query("#workspace-share-team"),
   workspaceCreateButton: query("#workspace-create-button"),
+  hostTeamSelect: query("#host-team-select"),
+  hostButton: query("#host-button"),
+  hostPinText: query("#host-pin-text"),
   serverStatusText: query("#server-status-text"),
   serverStatusPanel: query("#server-status-text")?.closest(".settings-status-panel"),
   acceptConnectionDialog: query("#accept-connection-dialog"),
@@ -7613,6 +7616,72 @@ function renderAccountControls() {
       }));
     }
   }
+  renderHostTargets();
+}
+
+// The share dropdown always offers ephemeral hosting ("No team (temporary)");
+// logged-in accounts additionally get their teams as persistent publish targets.
+function renderHostTargets() {
+  if (!elements.hostTeamSelect) return;
+  const previous = elements.hostTeamSelect.value;
+  const options = [["", "No team (temporary)"]];
+  for (const team of (syncState.account?.teams ?? [])) {
+    options.push([team, `Team: ${team}`]);
+  }
+  elements.hostTeamSelect.replaceChildren(...options.map(([value, label]) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    return option;
+  }));
+  elements.hostTeamSelect.value = options.some(([v]) => v === previous) ? previous : "";
+}
+
+async function handleHost() {
+  const team = elements.hostTeamSelect?.value ?? "";
+  const displayName = settings.displayName || syncState.account?.username || "";
+  try {
+    if (workspaceMode === "private") {
+      privateProjectSnapshot = controller.getProject();
+    }
+    if (team === "") {
+      // Ephemeral guest session hosting the current local project.
+      workspaceMode = "synced";
+      const { guestPin } = await collaboration.hostForGuests(settings.serverUrl, displayName);
+      settings.wasConnected = false;
+      elements.hostPinText.textContent = `Sharing! Guests join with PIN ${guestPin} (enter it under PIN above). Ends when you disconnect.`;
+      logDebug("action", "Hosting ephemeral session", `pin=${guestPin}`);
+    } else {
+      // Publish the current local project into a new persistent team workspace.
+      if (!syncState.account) {
+        notify("Log in to publish to a team.");
+        return;
+      }
+      const name = await promptForName("Name this cloud workspace", "");
+      if (!name) return;
+      const localProject = controller.getProject();
+      await createWorkspace(settings.serverUrl, syncState.account.token, team, name, false);
+      workspaceMode = "synced";
+      await collaboration.openWorkspace(settings.serverUrl, syncState.account.token, team, name);
+      // The freshly-opened workspace is empty; push our local project into it.
+      controller.replaceProject(localProject);
+      await collaboration.publishSnapshot(localProject);
+      settings.wasConnected = false;
+      elements.hostPinText.textContent = `Published to ${team}/${name}.`;
+      await refreshWorkspaceList();
+      logDebug("action", "Published local project to team workspace", `${team}/${name}`);
+    }
+    render(controller.getProject());
+  } catch (error) {
+    workspaceMode = "private";
+    if (privateProjectSnapshot) {
+      controller.replaceProject(privateProjectSnapshot);
+      privateProjectSnapshot = null;
+    }
+    notify(error.message || "Could not share workspace.");
+    logDebug("response", "Host/share failed", error.message);
+    render(controller.getProject());
+  }
 }
 
 async function refreshWorkspaceList() {
@@ -7737,6 +7806,8 @@ function handleAccountLogout() {
 elements.accountLoginButton?.addEventListener("click", () => { void handleAccountLogin(); });
 elements.accountLogoutButton?.addEventListener("click", handleAccountLogout);
 elements.workspaceCreateButton?.addEventListener("click", () => { void handleCreateWorkspace(); });
+elements.hostButton?.addEventListener("click", () => { void handleHost(); });
+renderHostTargets();
 elements.accountPasswordInput?.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
