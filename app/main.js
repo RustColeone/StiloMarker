@@ -1257,10 +1257,28 @@ function resolveProjectAssetUrl(project, sourceFileId, url) {
 
   const node = project.nodes[nodeId];
   if (node?.kind === "file" && isImageFileName(node.name)) {
-    return node.content;
+    return imageSrcFor(project, node);
   }
 
   return trimmed;
+}
+
+/** Resolve an image node to a usable <img> src. Local/PIN workspaces inline the
+ *  bytes as a data: URL in content; directory-backed cloud workspaces keep the
+ *  bytes on the server and serve them by the file's workspace path. */
+function imageSrcFor(project, node) {
+  if (!node) return "";
+  const content = typeof node.content === "string" ? node.content : "";
+  if (content.startsWith("data:")) {
+    return content;
+  }
+  const conn = collaboration.getConnectionInfo?.();
+  if (conn && workspaceMode === "synced") {
+    const base = normalizeServerUrl(conn.serverUrl);
+    const path = getPath(project, node.id);
+    return `${base}/api/workspaces/asset?token=${encodeURIComponent(conn.token)}&path=${encodeURIComponent(path)}`;
+  }
+  return content;
 }
 
 function logDebug(kind, message, detail = "") {
@@ -2890,8 +2908,9 @@ const explorer = createExplorerView({
     return settings.explorerFilter;
   },
   getAssetPreviewSrc(fileId) {
-    const file = controller.getProject().nodes[fileId];
-    return file?.kind === "file" && isImageFileName(file.name) ? file.content : "";
+    const project = controller.getProject();
+    const file = project.nodes[fileId];
+    return file?.kind === "file" && isImageFileName(file.name) ? imageSrcFor(project, file) : "";
   },
   getUrlDbEntries(fileId) {
     const file = controller.getProject().nodes[fileId];
@@ -3724,7 +3743,7 @@ function showLinkTooltipContent(linkEl) {
       resolveUrl(url) { return resolveProjectAssetUrl(project, nodeId, url); }
     });
   } else if (isImageFileName(node.name)) {
-    editorLinkTooltip.previewEl.innerHTML = `<img src="${escapeHtmlAttribute(node.content)}" alt="${escapeHtmlAttribute(node.name)}" style="max-width:100%;height:auto">`;
+    editorLinkTooltip.previewEl.innerHTML = `<img src="${escapeHtmlAttribute(imageSrcFor(project, node))}" alt="${escapeHtmlAttribute(node.name)}" style="max-width:100%;height:auto">`;
   } else {
     editorLinkTooltip.previewEl.innerHTML = `<pre><code>${escapeEditorHtml(node.content ?? "")}</code></pre>`;
   }
@@ -5001,7 +5020,7 @@ function renderPreviewContent(target, project, file) {
     const frame = document.createElement("div");
     frame.className = "asset-preview";
     const image = document.createElement("img");
-    image.src = file.content;
+    image.src = imageSrcFor(project, file);
     image.alt = file.name;
     frame.append(image);
     target.append(frame);
