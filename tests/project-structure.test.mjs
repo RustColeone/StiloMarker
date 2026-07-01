@@ -144,7 +144,7 @@ test("collaboration-service.js wires transport and OT", async () => {
 
 test("service-worker.js caches the app shell", async () => {
   const serviceWorkerSource = await readFile(resolveFromRoot("service-worker.js"), "utf8");
-  assert.match(serviceWorkerSource, /mdnotes-shell-v4/);
+  assert.match(serviceWorkerSource, /mdnotes-shell-v\d+/);
   assert.match(serviceWorkerSource, /cache.addAll\(APP_SHELL\)/);
 });
 

@@ -105,8 +105,22 @@ function normalizeSideIndex(sideIndex) {
   return ((parsed % 4) + 4) % 4;
 }
 
+/**
+ * Parse a connector endpoint string. Three forms:
+ *   "nodeId.side.N"  → anchored to a node side
+ *   "@x,y"           → a dangling endpoint pinned at a free coordinate
+ *   "nodeId"         → anchored to side 0 (legacy/loose)
+ * A dangling endpoint is only ever produced by copy/paste; it lets a connector
+ * survive with one (or both) ends detached so the user can re-attach it.
+ */
 function parseEndpoint(rawValue) {
   const value = String(rawValue ?? "").trim();
+  if (value.startsWith("@")) {
+    const [rawX, rawY] = value.slice(1).split(",");
+    const x = Number.parseFloat(rawX);
+    const y = Number.parseFloat(rawY);
+    return { dangling: true, point: { x: Number.isFinite(x) ? x : 0, y: Number.isFinite(y) ? y : 0 } };
+  }
   const separator = value.lastIndexOf(".side.");
   if (separator < 0) {
     return { nodeId: value, sideIndex: 0 };
@@ -119,6 +133,38 @@ function parseEndpoint(rawValue) {
 
 function formatEndpoint(nodeId, sideIndex) {
   return `${nodeId}.side.${normalizeSideIndex(sideIndex)}`;
+}
+
+function formatPointEndpoint(point) {
+  return `@${Math.round(point?.x ?? 0)},${Math.round(point?.y ?? 0)}`;
+}
+
+/** Resolve an endpoint to a world point (and its side, when node-anchored). */
+function resolveEndpointPoint(endpoint, nodeMap) {
+  if (endpoint.dangling) {
+    return { point: endpoint.point, side: null };
+  }
+  const node = nodeMap.get(endpoint.nodeId);
+  if (!node) {
+    return null;
+  }
+  return { point: getSnapPoint(node, endpoint.sideIndex), side: endpoint.sideIndex };
+}
+
+/** Closest node side (0..3) to a world point — used when dropping a dragged
+ *  connector endpoint anywhere on a node rather than exactly on a snap dot. */
+function nearestSide(node, point) {
+  let best = 0;
+  let bestDistance = Infinity;
+  for (let sideIndex = 0; sideIndex < 4; sideIndex += 1) {
+    const snap = getSnapPoint(node, sideIndex);
+    const distance = Math.hypot(snap.x - point.x, snap.y - point.y);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = sideIndex;
+    }
+  }
+  return best;
 }
 
 function escapeHtml(value) {
@@ -184,31 +230,35 @@ function inferTargetSide(fromPoint, toPoint) {
 
 function buildConnectorPath(connector, nodeMap, previewPointer = null) {
   const fromEndpoint = parseEndpoint(connector.from);
-  const fromNode = nodeMap.get(fromEndpoint.nodeId);
-  if (!fromNode) {
+  const fromResolved = resolveEndpointPoint(fromEndpoint, nodeMap);
+  if (!fromResolved) {
     return null;
   }
-
-  const fromPoint = getSnapPoint(fromNode, fromEndpoint.sideIndex);
+  const fromPoint = fromResolved.point;
   const styleMode = String(connector.styles?.mode ?? "bezier").trim();
 
   if (previewPointer) {
+    const fromSide = fromResolved.side ?? inferTargetSide(previewPointer, fromPoint);
     const toSide = inferTargetSide(fromPoint, previewPointer);
     return styleMode === "straight"
       ? buildStraightPath(fromPoint, previewPointer)
-      : buildBezierPath(fromPoint, fromEndpoint.sideIndex, previewPointer, toSide);
+      : buildBezierPath(fromPoint, fromSide, previewPointer, toSide);
   }
 
   const toEndpoint = parseEndpoint(connector.to);
-  const toNode = nodeMap.get(toEndpoint.nodeId);
-  if (!toNode) {
+  const toResolved = resolveEndpointPoint(toEndpoint, nodeMap);
+  if (!toResolved) {
     return null;
   }
+  const toPoint = toResolved.point;
 
-  const toPoint = getSnapPoint(toNode, toEndpoint.sideIndex);
+  // Dangling ends have no side, so infer one from the opposite point to keep the
+  // bezier curving sensibly.
+  const fromSide = fromResolved.side ?? inferTargetSide(toPoint, fromPoint);
+  const toSide = toResolved.side ?? inferTargetSide(fromPoint, toPoint);
   return styleMode === "straight"
     ? buildStraightPath(fromPoint, toPoint)
-    : buildBezierPath(fromPoint, fromEndpoint.sideIndex, toPoint, toEndpoint.sideIndex);
+    : buildBezierPath(fromPoint, fromSide, toPoint, toSide);
 }
 
 /** Parse a CSS border shorthand ("1px dashed #e8b339") into width/style/color. */
@@ -508,19 +558,57 @@ function toHexColor(value, fallback = "#000000") {
  * paired with a hex text input (the form value). Used for every color-related
  * field across the node and connector inspectors so they stay coherent.
  */
-function colorFieldHtml({ label, name, value, fallback = "#000000" }) {
+function colorFieldHtml({ label, name, value, fallback = "#000000", mixed = false }) {
   const hex = toHexColor(value, fallback);
   // A <div> (not <label>) so only the picker itself opens the color dialog —
   // clicking the caption text must not trigger it. The picker carries the form
   // name and doubles as the live swatch preview; its change event bubbles to the
-  // form, which re-submits.
+  // form, which re-submits. When `mixed` is set (a multi-selection where the
+  // chosen nodes disagree), a small badge flags it; picking still applies to all.
   return `
     <div class="bmap-field bmap-color-field">
-      <span>${escapeHtml(label)}</span>
+      <span>${escapeHtml(label)}${mixed ? ' <span class="bmap-mixed-badge">mixed</span>' : ""}</span>
       <span class="bmap-color-control">
         <input type="color" name="${name}" class="bmap-color-swatch" value="${hex}" aria-label="${escapeHtml(label)}">
       </span>
     </div>`;
+}
+
+/** Common value of `getter` across items, or null when they disagree. */
+function commonFieldValue(items, getter) {
+  if (!items.length) {
+    return null;
+  }
+  const first = getter(items[0]);
+  return items.every((item) => getter(item) === first) ? first : null;
+}
+
+/** A text/number field for the multi-edit inspector. A null value (the items
+ *  disagree) renders as an empty input with a "—" placeholder; leaving it empty
+ *  on change means "no change". */
+function multiTextFieldHtml(label, name, value, { type = "text", min, step } = {}) {
+  const attrs = [`name="${name}"`, `type="${type}"`];
+  if (min != null) attrs.push(`min="${min}"`);
+  if (step != null) attrs.push(`step="${step}"`);
+  if (value == null) {
+    attrs.push('value=""', 'placeholder="—"');
+  } else {
+    attrs.push(`value="${escapeHtml(String(value))}"`);
+  }
+  return `<label class="bmap-field"><span>${escapeHtml(label)}</span><input ${attrs.join(" ")}></label>`;
+}
+
+/** A select for the multi-edit inspector. A null value prepends a selected "—"
+ *  sentinel option whose empty value means "no change". */
+function multiSelectFieldHtml(label, name, options, value) {
+  const opts = [];
+  if (value == null) {
+    opts.push('<option value="" selected>—</option>');
+  }
+  for (const [optionValue, optionLabel] of options) {
+    opts.push(`<option value="${escapeHtml(optionValue)}"${value === optionValue ? " selected" : ""}>${escapeHtml(optionLabel)}</option>`);
+  }
+  return `<label class="bmap-field"><span>${escapeHtml(label)}</span><select name="${name}">${opts.join("")}</select></label>`;
 }
 
 function setPopupHidden() {
@@ -715,8 +803,15 @@ function showBmapFilePopup(anchorElement, filePath, fileContent) {
 function createBmapView({ container, ...defaultOptions } = {}) {
   let sourceText = "";
   let ast = normalizeBmapAst({ nodes: [], connectors: [], parseErrors: [] });
-  let selected = null;
-  let nodeClipboard = null;
+  // Multi-selection: an array of { type:"node", id } | { type:"connector", index }.
+  // The last item is treated as the "primary" for single-element edit panels.
+  let selection = [];
+  let nodeClipboard = null; // { nodes: [...snapshots], connectors: [...endpoint-snapshots] }
+  let pastePreview = null; // { nodes, connectors, anchor: {x,y}, pointerWorld: {x,y} } while a paste is pending placement
+  let pastePreviewListeners = null; // { pointermove, pointerdown, contextmenu, keydown } while pending
+  let clickSuppressed = false; // swallow the click that trails a drag-move
+  let history = [];
+  let historyIndex = -1;
   let pan = { x: 40, y: 40 };
   let zoom = 1;
   let gesture = null;
@@ -739,6 +834,13 @@ function createBmapView({ container, ...defaultOptions } = {}) {
 
   let canvasEl = null;
   let innerEl = null;
+  let rootEl = null; // the .bmap-editor wrapper for the current render
+  let viewActive = false; // the bmap was the last thing the user pointer-interacted with
+  let lastPointerClient = null; // last pointer position over the canvas, for paste seeding
+  let rightDragPanned = false; // a right-drag became a pan, so suppress its context menu
+  let keyboardBound = false; // document-level keydown handler attached once
+  let contextMenuEl = null; // the floating right-click menu, portaled to <body>
+  let toastTimer = null;
 
   function setActiveOptions(nextOptions = {}) {
     activeOptions = {
@@ -769,6 +871,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     interactionMode = normalizedMode;
     if (!isEditingEnabled()) {
       stopGesture(false);
+      cancelPastePreview();
     }
     renderScene();
   }
@@ -787,22 +890,72 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     renderScene();
   }
 
+  function isNodeSelected(id) {
+    return selection.some((item) => item.type === "node" && item.id === id);
+  }
+
+  function isConnectorSelected(index) {
+    return selection.some((item) => item.type === "connector" && item.index === index);
+  }
+
+  function selectionNodes() {
+    return selection
+      .filter((item) => item.type === "node")
+      .map((item) => getNodeById(item.id))
+      .filter(Boolean);
+  }
+
+  function selectionConnectors() {
+    return selection
+      .filter((item) => item.type === "connector")
+      .map((item) => ({ index: item.index, connector: ast.connectors[item.index] }))
+      .filter((entry) => entry.connector);
+  }
+
+  // Single-element accessors: only resolve when the selection is exactly one of
+  // that kind, so the rich single-element inspectors stay for solo selections.
   function getSelectedNode() {
-    return selected?.type === "node" ? getNodeById(selected.id) : null;
+    return selection.length === 1 && selection[0].type === "node"
+      ? getNodeById(selection[0].id)
+      : null;
   }
 
   function getSelectedConnector() {
-    return selected?.type === "connector" ? ast.connectors[selected.index] ?? null : null;
+    return selection.length === 1 && selection[0].type === "connector"
+      ? ast.connectors[selection[0].index] ?? null
+      : null;
   }
 
   function ensureSelectionStillExists() {
-    if (selected?.type === "node" && !getNodeById(selected.id)) {
-      selected = null;
+    selection = selection.filter((item) =>
+      item.type === "node" ? Boolean(getNodeById(item.id)) : Boolean(ast.connectors[item.index]));
+  }
+
+  function pushHistory(src) {
+    if (history[historyIndex] === src) {
       return;
     }
-    if (selected?.type === "connector" && !ast.connectors[selected.index]) {
-      selected = null;
+    history = history.slice(0, historyIndex + 1);
+    history.push(src);
+    historyIndex = history.length - 1;
+    if (history.length > 200) {
+      history.shift();
+      historyIndex -= 1;
     }
+  }
+
+  function applyHistory(delta) {
+    const nextIndex = historyIndex + delta;
+    if (nextIndex < 0 || nextIndex >= history.length) {
+      return;
+    }
+    historyIndex = nextIndex;
+    const src = history[historyIndex];
+    sourceText = src;
+    ast = normalizeBmapAst(parseBmap(src));
+    selection = [];
+    renderScene();
+    activeOptions.onCommit?.(src, { reason: delta < 0 ? "bmap:undo" : "bmap:redo", selection: null });
   }
 
   function commitAst(reason) {
@@ -811,12 +964,487 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       return;
     }
     sourceText = nextSource;
-    activeOptions.onCommit?.(nextSource, { reason, selection: selected });
+    pushHistory(nextSource);
+    activeOptions.onCommit?.(nextSource, { reason, selection: selection[selection.length - 1] ?? null });
   }
 
   function setSelection(nextSelection) {
-    selected = nextSelection;
+    selection = nextSelection ? [nextSelection] : [];
     renderScene();
+  }
+
+  function toggleSelectionItem(item) {
+    const present = item.type === "node" ? isNodeSelected(item.id) : isConnectorSelected(item.index);
+    if (present) {
+      selection = selection.filter((entry) =>
+        item.type === "node"
+          ? !(entry.type === "node" && entry.id === item.id)
+          : !(entry.type === "connector" && entry.index === item.index));
+    } else {
+      selection = [...selection, item];
+    }
+    renderScene();
+  }
+
+  function updateSelectedNodes(mutate, reason) {
+    const nodes = selectionNodes();
+    if (!nodes.length) {
+      return;
+    }
+    for (const node of nodes) {
+      const index = ast.nodes.findIndex((candidate) => candidate.id === node.id);
+      if (index >= 0) {
+        ast.nodes[index] = mutate(node);
+      }
+    }
+    renderScene();
+    commitAst(reason ?? "bmap:multi-edit-node");
+  }
+
+  function updateSelectedConnectors(mutate, reason) {
+    const entries = selectionConnectors();
+    if (!entries.length) {
+      return;
+    }
+    for (const { index, connector } of entries) {
+      ast.connectors[index] = mutate(connector);
+    }
+    renderScene();
+    commitAst(reason ?? "bmap:multi-edit-connector");
+  }
+
+  // Snapshot one endpoint for the clipboard. Endpoints anchored to a copied node
+  // are recorded as a node reference (so the pair stays connected on paste);
+  // every other endpoint is frozen to its current coordinate and becomes a
+  // dangling end on paste.
+  function snapshotEndpoint(rawEndpoint, copiedNodeIds, nodeMap) {
+    const endpoint = parseEndpoint(rawEndpoint);
+    if (endpoint.dangling) {
+      return { kind: "point", point: { ...endpoint.point } };
+    }
+    if (copiedNodeIds.has(endpoint.nodeId)) {
+      return { kind: "node", id: endpoint.nodeId, side: endpoint.sideIndex };
+    }
+    const node = nodeMap.get(endpoint.nodeId);
+    if (node) {
+      return { kind: "point", point: getSnapPoint(node, endpoint.sideIndex) };
+    }
+    return { kind: "point", point: { x: 0, y: 0 } };
+  }
+
+  function materializeEndpoint(snapshot, idMap, delta) {
+    if (snapshot.kind === "node" && idMap.has(snapshot.id)) {
+      return formatEndpoint(idMap.get(snapshot.id), snapshot.side);
+    }
+    const point = snapshot.point ?? { x: 0, y: 0 };
+    return formatPointEndpoint({ x: point.x + delta.x, y: point.y + delta.y });
+  }
+
+  function copySelectionToClipboard() {
+    const nodes = selectionNodes();
+    const connectorEntries = selectionConnectors();
+    if (nodes.length === 0 && connectorEntries.length === 0) {
+      return;
+    }
+    const copiedNodeIds = new Set(nodes.map((node) => node.id));
+    const nodeMap = new Map(ast.nodes.map((node) => [node.id, node]));
+    nodeClipboard = {
+      nodes: nodes.map((node) => JSON.parse(JSON.stringify(node))),
+      connectors: connectorEntries.map(({ connector }) => ({
+        styles: { ...connector.styles },
+        from: snapshotEndpoint(connector.from, copiedNodeIds, nodeMap),
+        to: snapshotEndpoint(connector.to, copiedNodeIds, nodeMap),
+      })),
+    };
+  }
+
+  function cutSelectionToClipboard() {
+    if (!isEditingEnabled() || selection.length === 0) {
+      return;
+    }
+    copySelectionToClipboard();
+    deleteSelected();
+  }
+
+  // Ctrl+V doesn't drop the clipboard immediately: it shows a translucent
+  // "ghost" of the copied nodes/connectors that follows the pointer until the
+  // user left-clicks to place it (or right-clicks / Escapes to cancel), so
+  // they always see exactly what they're about to paste before it lands.
+  function clipboardAnchorPoint() {
+    const clipNodes = nodeClipboard?.nodes ?? [];
+    if (clipNodes.length > 0) {
+      return {
+        x: Math.min(...clipNodes.map((node) => node.pos?.x ?? 0)),
+        y: Math.min(...clipNodes.map((node) => node.pos?.y ?? 0)),
+      };
+    }
+    const points = (nodeClipboard?.connectors ?? [])
+      .flatMap((clip) => [clip.from, clip.to])
+      .filter((endpoint) => endpoint.kind === "point")
+      .map((endpoint) => endpoint.point);
+    if (points.length === 0) {
+      return { x: 0, y: 0 };
+    }
+    return {
+      x: Math.min(...points.map((point) => point.x)),
+      y: Math.min(...points.map((point) => point.y)),
+    };
+  }
+
+  function beginPastePreview() {
+    const clipNodes = nodeClipboard?.nodes ?? [];
+    const clipConnectors = nodeClipboard?.connectors ?? [];
+    if (!isEditingEnabled() || (clipNodes.length === 0 && clipConnectors.length === 0)) {
+      return;
+    }
+    cancelPastePreview();
+    // Pasting clears the current selection: the highlighted originals are no
+    // longer the focus once the ghost is in the user's hands. Without this a
+    // Ctrl+C immediately followed by Ctrl+V looks like nothing happened, since
+    // the still-highlighted source masks the freshly spawned ghost.
+    if (selection.length) {
+      selection = [];
+      renderScene();
+    }
+    // Start the ghost under the pointer (where the user is looking) when we know
+    // where that is; otherwise fall back to the middle of the viewport.
+    const startWorld = lastPointerClient
+      ? clientToWorld(lastPointerClient.x, lastPointerClient.y)
+      : getViewportCenterWorld();
+    pastePreview = {
+      nodes: clipNodes,
+      connectors: clipConnectors,
+      anchor: clipboardAnchorPoint(),
+      pointerWorld: startWorld,
+    };
+    canvasEl?.classList.add("is-pasting");
+    attachPastePreviewListeners();
+    renderPasteGhost();
+  }
+
+  function pastePreviewDelta() {
+    return {
+      x: pastePreview.pointerWorld.x - pastePreview.anchor.x,
+      y: pastePreview.pointerWorld.y - pastePreview.anchor.y,
+    };
+  }
+
+  // The final, grid-snapped position a pasted node will land at for a given drag
+  // delta. Shared by the ghost preview and the real commit so what the user sees
+  // following the cursor is exactly what gets placed.
+  function pasteNodePosition(snapshot, delta) {
+    return {
+      x: snapValue((snapshot.pos?.x ?? 0) + delta.x, snapStep),
+      y: snapValue((snapshot.pos?.y ?? 0) + delta.y, snapStep),
+    };
+  }
+
+  function attachPastePreviewListeners() {
+    const handlePointerMove = (event) => {
+      pastePreview.pointerWorld = clientToWorld(event.clientX, event.clientY);
+      renderPasteGhost();
+    };
+    const handlePointerDown = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.button === 2) {
+        // Right-click cancels the paste. Swallow the contextmenu event that
+        // trails it so we don't also pop the right-click menu.
+        rightDragPanned = true;
+        cancelPastePreview();
+        canvasEl?.focus({ preventScroll: true });
+        viewActive = true;
+        return;
+      }
+      if (event.button === 0) {
+        pastePreview.pointerWorld = clientToWorld(event.clientX, event.clientY);
+        commitPastePreview();
+      }
+    };
+    const handleContextMenu = (event) => {
+      event.preventDefault();
+    };
+    const handleKeydown = (event) => {
+      // While the ghost is in the user's hands the paste is modal: Escape, Delete
+      // and Backspace all dismiss it (the floating "new" thing disappears), and
+      // we swallow the keys so they can't fall through to deleteSelected() and
+      // touch the real diagram. A second Ctrl+V just restarts the paste.
+      if (event.key === "Escape" || event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        event.stopPropagation();
+        cancelPastePreview();
+        canvasEl?.focus({ preventScroll: true });
+        viewActive = true;
+        return;
+      }
+      const mod = event.ctrlKey || event.metaKey;
+      if (mod && event.key.toLowerCase() === "v") {
+        event.preventDefault();
+        event.stopPropagation();
+        beginPastePreview();
+      }
+    };
+    pastePreviewListeners = {
+      pointermove: handlePointerMove,
+      pointerdown: handlePointerDown,
+      contextmenu: handleContextMenu,
+      keydown: handleKeydown,
+    };
+    document.addEventListener("pointermove", handlePointerMove);
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("contextmenu", handleContextMenu, true);
+    document.addEventListener("keydown", handleKeydown, true);
+  }
+
+  function detachPastePreviewListeners() {
+    if (!pastePreviewListeners) {
+      return;
+    }
+    document.removeEventListener("pointermove", pastePreviewListeners.pointermove);
+    document.removeEventListener("pointerdown", pastePreviewListeners.pointerdown, true);
+    document.removeEventListener("contextmenu", pastePreviewListeners.contextmenu, true);
+    document.removeEventListener("keydown", pastePreviewListeners.keydown, true);
+    pastePreviewListeners = null;
+  }
+
+  function clearPasteGhost() {
+    canvasEl?.querySelectorAll(".bmap-paste-ghost").forEach((el) => el.remove());
+  }
+
+  function renderPasteGhost() {
+    clearPasteGhost();
+    if (!pastePreview || !canvasEl) {
+      return;
+    }
+    const nodesLayer = canvasEl.querySelector(".bmap-nodes-layer");
+    if (!nodesLayer) {
+      return;
+    }
+    const delta = pastePreviewDelta();
+    const ghostNodes = pastePreview.nodes.map((snapshot) => ({
+      ...snapshot,
+      pos: pasteNodePosition(snapshot, delta),
+    }));
+    const ghostNodeMap = new Map(ghostNodes.map((node) => [node.id, node]));
+    const ghostIdentityMap = new Map(ghostNodes.map((node) => [node.id, node.id]));
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.classList.add("bmap-paste-ghost", "bmap-paste-ghost-svg");
+    svg.setAttribute("overflow", "visible");
+    svg.setAttribute("width", "1");
+    svg.setAttribute("height", "1");
+    for (const clip of pastePreview.connectors) {
+      const connector = createBmapConnector({
+        from: materializeEndpoint(clip.from, ghostIdentityMap, delta),
+        to: materializeEndpoint(clip.to, ghostIdentityMap, delta),
+        styles: { ...clip.styles },
+      });
+      const pathData = buildConnectorPath(connector, ghostNodeMap);
+      if (!pathData) {
+        continue;
+      }
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", pathData);
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", connector.styles?.color || "var(--accent)");
+      path.setAttribute("stroke-width", String(connector.styles?.thickness ?? 2));
+      path.classList.add("bmap-paste-ghost-path");
+      svg.append(path);
+    }
+    nodesLayer.append(svg);
+
+    for (const node of ghostNodes) {
+      const { width, height } = getBmapNodeDimensions(node);
+      const el = document.createElement("div");
+      el.className = `bmap-paste-ghost bmap-node bmap-node-${node.shape === "circle" ? "circle" : "rect"} bmap-paste-ghost-node`;
+      el.style.left = `${node.pos.x}px`;
+      el.style.top = `${node.pos.y}px`;
+      el.style.width = `${width}px`;
+      el.style.height = `${height}px`;
+      for (const [key, value] of Object.entries(node.styles ?? {})) {
+        if (key === "width" || key === "height") {
+          continue;
+        }
+        if (SAFE_STYLE_PROPS.has(key)) {
+          el.style.setProperty(key, String(value));
+        }
+      }
+      if (node.shape === "circle") {
+        el.style.borderRadius = "50%";
+      }
+      const nameEl = document.createElement("div");
+      nameEl.className = "bmap-node-name";
+      nameEl.textContent = node.name || node.id;
+      el.append(nameEl);
+      nodesLayer.append(el);
+    }
+  }
+
+  function commitPastePreview() {
+    if (!pastePreview) {
+      return;
+    }
+    const { nodes: clipNodes, connectors: clipConnectors } = pastePreview;
+    const delta = pastePreviewDelta();
+    const existingIds = new Set(ast.nodes.map((node) => node.id));
+    const idMap = new Map();
+    const nextSelection = [];
+
+    for (const snapshot of clipNodes) {
+      let newId = `${snapshot.id}-copy`;
+      let counter = 1;
+      while (existingIds.has(newId)) {
+        newId = `${snapshot.id}-copy-${counter++}`;
+      }
+      existingIds.add(newId);
+      idMap.set(snapshot.id, newId);
+      const newNode = createBmapNode({
+        ...snapshot,
+        id: newId,
+        pos: pasteNodePosition(snapshot, delta),
+      });
+      ast.nodes.push(newNode);
+      nextSelection.push({ type: "node", id: newId });
+    }
+
+    for (const clip of clipConnectors) {
+      const connector = createBmapConnector({
+        from: materializeEndpoint(clip.from, idMap, delta),
+        to: materializeEndpoint(clip.to, idMap, delta),
+        styles: { ...clip.styles },
+      });
+      ast.connectors.push(connector);
+      nextSelection.push({ type: "connector", index: ast.connectors.length - 1 });
+    }
+
+    detachPastePreviewListeners();
+    clearPasteGhost();
+    pastePreview = null;
+    selection = nextSelection;
+    // The commit fires from a capture-phase pointerdown whose preventDefault
+    // stops the canvas from taking focus, and the browser still fires a trailing
+    // click that would otherwise re-select whatever is under the cursor (often
+    // the original node) — leaving the wrong thing "selected" and, because focus
+    // never landed back on the canvas, the keyboard dead until the context menu
+    // re-focuses it. Swallow that click and re-assert focus/active ourselves.
+    suppressTrailingClick();
+    renderScene();
+    canvasEl?.focus({ preventScroll: true });
+    viewActive = true;
+    commitAst("bmap:paste-selection");
+  }
+
+  // Neutralize the single click that trails a pointerdown-driven action (paste
+  // commit). Mirrors the drag-then-click suppression used for node moves.
+  function suppressTrailingClick() {
+    const cleanup = () => {
+      document.removeEventListener("click", handler, true);
+      window.clearTimeout(timer);
+    };
+    const handler = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      cleanup();
+    };
+    const timer = window.setTimeout(cleanup, 350);
+    document.addEventListener("click", handler, true);
+  }
+
+  function cancelPastePreview() {
+    detachPastePreviewListeners();
+    clearPasteGhost();
+    pastePreview = null;
+    canvasEl?.classList.remove("is-pasting");
+  }
+
+  // Small transient toast (e.g. "Copied") anchored to the top of the canvas. It
+  // lives on <body> so a re-render of the canvas mid-fade can't tear it out.
+  function showBmapToast(message) {
+    document.querySelectorAll(".bmap-toast").forEach((el) => el.remove());
+    if (!canvasEl) {
+      return;
+    }
+    const rect = canvasEl.getBoundingClientRect();
+    const toast = document.createElement("div");
+    toast.className = "bmap-toast";
+    toast.textContent = message;
+    toast.style.left = `${rect.left + (rect.width / 2)}px`;
+    toast.style.top = `${rect.top + 14}px`;
+    document.body.append(toast);
+    requestAnimationFrame(() => toast.classList.add("is-visible"));
+    window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => {
+      toast.classList.remove("is-visible");
+      window.setTimeout(() => toast.remove(), 200);
+    }, 1100);
+  }
+
+  function hideContextMenu() {
+    contextMenuEl?.remove();
+    contextMenuEl = null;
+  }
+
+  // Right-click menu. Built fresh each open so item enabled-state reflects the
+  // current selection / clipboard / history. Lands on <body> (position: fixed)
+  // so it survives the canvas re-renders its actions trigger.
+  function showContextMenu(clientX, clientY) {
+    hideContextMenu();
+    const editing = isEditingEnabled();
+    const hasSelection = selection.length > 0;
+    const hasClipboard = (nodeClipboard?.nodes?.length ?? 0) > 0
+      || (nodeClipboard?.connectors?.length ?? 0) > 0;
+    const hasContent = ast.nodes.length > 0 || ast.connectors.length > 0;
+    const canUndo = historyIndex > 0;
+    const canRedo = historyIndex < history.length - 1;
+
+    const items = [
+      { label: "Copy", disabled: !hasSelection, run: () => { copySelectionToClipboard(); showBmapToast("Copied"); } },
+      { label: "Cut", disabled: !editing || !hasSelection, run: () => { cutSelectionToClipboard(); showBmapToast("Cut"); } },
+      { label: "Paste", disabled: !editing || !hasClipboard, run: () => beginPastePreview() },
+      { separator: true },
+      { label: "Delete", disabled: !editing || !hasSelection, danger: true, run: () => deleteSelected() },
+      { separator: true },
+      { label: "Select All", disabled: !hasContent, run: () => selectAll() },
+      { separator: true },
+      { label: "Undo", disabled: !editing || !canUndo, run: () => applyHistory(-1) },
+      { label: "Redo", disabled: !editing || !canRedo, run: () => applyHistory(1) },
+    ];
+
+    const menu = document.createElement("div");
+    menu.className = "bmap-context-menu";
+    for (const item of items) {
+      if (item.separator) {
+        const hr = document.createElement("div");
+        hr.className = "bmap-context-sep";
+        menu.append(hr);
+        continue;
+      }
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = item.label;
+      button.disabled = Boolean(item.disabled);
+      if (item.danger) {
+        button.classList.add("bmap-context-danger");
+      }
+      button.addEventListener("click", () => {
+        hideContextMenu();
+        item.run();
+      });
+      menu.append(button);
+    }
+
+    // Off-screen measure, then clamp so the menu stays inside the viewport.
+    menu.style.left = "0px";
+    menu.style.top = "0px";
+    menu.style.visibility = "hidden";
+    document.body.append(menu);
+    const menuRect = menu.getBoundingClientRect();
+    const x = Math.min(clientX, window.innerWidth - menuRect.width - 4);
+    const y = Math.min(clientY, window.innerHeight - menuRect.height - 4);
+    menu.style.left = `${Math.max(4, x)}px`;
+    menu.style.top = `${Math.max(4, y)}px`;
+    menu.style.visibility = "";
+    contextMenuEl = menu;
   }
 
   function getViewportCenterWorld() {
@@ -904,73 +1532,128 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       }
     });
     ast.nodes.push(node);
-    selected = { type: "node", id: node.id };
+    selection = [{ type: "node", id: node.id }];
     renderScene();
     commitAst("bmap:add-node");
   }
 
   function deleteSelected() {
-    if (!isEditingEnabled()) {
+    if (!isEditingEnabled() || selection.length === 0) {
       return;
     }
-    if (selected?.type === "node") {
-      const nodeId = selected.id;
-      ast.nodes = ast.nodes.filter((node) => node.id !== nodeId);
-      ast.connectors = ast.connectors.filter((connector) => {
-        const from = parseEndpoint(connector.from);
-        const to = parseEndpoint(connector.to);
-        return from.nodeId !== nodeId && to.nodeId !== nodeId;
-      });
-      selected = null;
-      renderScene();
-      commitAst("bmap:delete-node");
+    const nodeIds = new Set(selection.filter((item) => item.type === "node").map((item) => item.id));
+    const connectorIndices = new Set(selection.filter((item) => item.type === "connector").map((item) => item.index));
+    if (nodeIds.size === 0 && connectorIndices.size === 0) {
       return;
     }
-    if (selected?.type === "connector") {
-      ast.connectors.splice(selected.index, 1);
-      selected = null;
-      renderScene();
-      commitAst("bmap:delete-connector");
-    }
+    // Drop directly-selected connectors plus any connector touching a deleted node.
+    ast.connectors = ast.connectors.filter((connector, index) => {
+      if (connectorIndices.has(index)) {
+        return false;
+      }
+      const from = parseEndpoint(connector.from);
+      const to = parseEndpoint(connector.to);
+      return !nodeIds.has(from.nodeId) && !nodeIds.has(to.nodeId);
+    });
+    ast.nodes = ast.nodes.filter((node) => !nodeIds.has(node.id));
+    selection = [];
+    renderScene();
+    commitAst("bmap:delete-selection");
+  }
+
+  function selectAll() {
+    // Allowed in read-only mode too: it only highlights, it does not edit.
+    selection = [
+      ...ast.nodes.map((node) => ({ type: "node", id: node.id })),
+      ...ast.connectors.map((_, index) => ({ type: "connector", index })),
+    ];
+    renderScene();
   }
 
   function handleCanvasKeydown(event) {
-    if (event.key === "Delete" || event.key === "Backspace") {
-      if (selected) {
-        deleteSelected();
-      }
-      return;
-    }
-    if ((event.ctrlKey || event.metaKey) && event.key === "c") {
-      const node = getSelectedNode();
-      if (node) {
-        nodeClipboard = JSON.parse(JSON.stringify(node));
-      }
-      return;
-    }
-    if ((event.ctrlKey || event.metaKey) && event.key === "v") {
-      if (!isEditingEnabled() || !nodeClipboard) {
+    const mod = event.ctrlKey || event.metaKey;
+    const key = event.key.toLowerCase();
+    const consume = () => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    if (mod && key === "z") {
+      if (!isEditingEnabled()) {
         return;
       }
-      const existingIds = new Set(ast.nodes.map((n) => n.id));
-      let newId = `${nodeClipboard.id}-copy`;
-      let counter = 1;
-      while (existingIds.has(newId)) {
-        newId = `${nodeClipboard.id}-copy-${counter++}`;
-      }
-      const newNode = createBmapNode({
-        ...nodeClipboard,
-        id: newId,
-        pos: {
-          x: snapValue(nodeClipboard.pos.x + snapStep * 2, snapStep),
-          y: snapValue(nodeClipboard.pos.y + snapStep * 2, snapStep),
-        },
-      });
-      ast.nodes.push(newNode);
-      selected = { type: "node", id: newNode.id };
-      renderScene();
-      commitAst("bmap:paste-node");
+      consume();
+      applyHistory(event.shiftKey ? 1 : -1);
+      return;
     }
+    if (mod && key === "y") {
+      if (!isEditingEnabled()) {
+        return;
+      }
+      consume();
+      applyHistory(1);
+      return;
+    }
+    if (mod && key === "a") {
+      consume();
+      selectAll();
+      return;
+    }
+    if (mod && key === "c") {
+      consume();
+      if (selection.length) {
+        copySelectionToClipboard();
+        showBmapToast("Copied");
+      }
+      return;
+    }
+    if (mod && key === "x") {
+      consume();
+      if (isEditingEnabled() && selection.length) {
+        cutSelectionToClipboard();
+        showBmapToast("Cut");
+      }
+      return;
+    }
+    if (mod && key === "v") {
+      consume();
+      beginPastePreview();
+      return;
+    }
+    if (event.key === "Delete" || event.key === "Backspace") {
+      if (selection.length) {
+        consume();
+        deleteSelected();
+      }
+    }
+  }
+
+  // A single document-level keydown listener (attached once) so the bmap's
+  // shortcuts fire whenever this view holds focus — regardless of which inner
+  // element (canvas, a control/toolbar button, the inspector chrome) the focus
+  // landed on. Scoping to "focus is somewhere inside our root" keeps it from
+  // clashing with the editor pane's own Ctrl+A / Ctrl+Z on the other side.
+  function handleDocumentKeydown(event) {
+    if (!rootEl || !rootEl.isConnected) {
+      return;
+    }
+    const active = document.activeElement;
+    const focusInView = rootEl.contains(active);
+    // Selecting a node in edit mode starts a drag that re-renders the canvas; the
+    // browser then fires its trailing click on a replaced ancestor and focus can
+    // fall back to <body>. In that case (focus is "loose" and the bmap was the
+    // last thing the user touched) we still own the keyboard. We do NOT claim it
+    // when focus sits on a real element elsewhere (e.g. the editor pane), so the
+    // other side's own Ctrl+A / Ctrl+Z keep working.
+    const focusIsLoose = active == null || active === document.body;
+    if (!focusInView && !(viewActive && focusIsLoose)) {
+      return;
+    }
+    // Never hijack typing inside the inspector's inputs/textareas.
+    if (typeof event.target?.closest === "function" && event.target.closest("form")) {
+      return;
+    }
+    handleCanvasKeydown(event);
   }
 
   function startGesture(nextGesture) {
@@ -985,6 +1668,10 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     document.removeEventListener("pointermove", handlePointerMove);
     document.removeEventListener("pointerup", handlePointerUp);
     document.removeEventListener("pointercancel", handlePointerCancel);
+    if (gesture?.rectEl) {
+      gesture.rectEl.remove();
+    }
+    canvasEl?.classList.remove("is-panning");
     gesture = null;
     connectPreview = null;
     if (shouldRender) {
@@ -1040,24 +1727,44 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     }
 
     if (gesture.kind === "pan") {
+      const dx = event.clientX - gesture.startClient.x;
+      const dy = event.clientY - gesture.startClient.y;
+      // A right-drag that actually moves is a pan; remember that so the trailing
+      // contextmenu event opens nothing (vs. a stationary right-click → menu).
+      if (gesture.fromButton === 2 && (Math.abs(dx) + Math.abs(dy)) > 4) {
+        rightDragPanned = true;
+      }
       pan = {
-        x: gesture.startPan.x + (event.clientX - gesture.startClient.x),
-        y: gesture.startPan.y + (event.clientY - gesture.startClient.y),
+        x: gesture.startPan.x + dx,
+        y: gesture.startPan.y + dy,
       };
       applyViewportTransform();
       return;
     }
 
     if (gesture.kind === "move-node") {
-      const node = getNodeById(gesture.nodeId);
-      if (!node) {
-        return;
-      }
       const deltaX = (event.clientX - gesture.startClient.x) / zoom;
       const deltaY = (event.clientY - gesture.startClient.y) / zoom;
-      node.pos.x = snapValue(gesture.startPos.x + deltaX, snapStep);
-      node.pos.y = snapValue(gesture.startPos.y + deltaY, snapStep);
+      for (const [id, startPos] of gesture.startPositions) {
+        const node = getNodeById(id);
+        if (!node) {
+          continue;
+        }
+        node.pos.x = snapValue(startPos.x + deltaX, snapStep);
+        node.pos.y = snapValue(startPos.y + deltaY, snapStep);
+      }
       renderScene();
+      return;
+    }
+
+    if (gesture.kind === "marquee") {
+      const canvasRect = canvasEl.getBoundingClientRect();
+      const curX = event.clientX - canvasRect.left;
+      const curY = event.clientY - canvasRect.top;
+      gesture.rectEl.style.left = `${Math.min(curX, gesture.startScreen.x)}px`;
+      gesture.rectEl.style.top = `${Math.min(curY, gesture.startScreen.y)}px`;
+      gesture.rectEl.style.width = `${Math.abs(curX - gesture.startScreen.x)}px`;
+      gesture.rectEl.style.height = `${Math.abs(curY - gesture.startScreen.y)}px`;
       return;
     }
 
@@ -1093,6 +1800,17 @@ function createBmapView({ container, ...defaultOptions } = {}) {
         pointer: clientToWorld(event.clientX, event.clientY)
       };
       renderScene();
+      return;
+    }
+
+    if (gesture.kind === "drag-endpoint") {
+      const connector = ast.connectors[gesture.connectorIndex];
+      if (!connector) {
+        return;
+      }
+      // Follow the cursor as a free coordinate; it snaps to a node side on drop.
+      connector[gesture.end] = formatPointEndpoint(clientToWorld(event.clientX, event.clientY));
+      renderScene();
     }
   }
 
@@ -1104,8 +1822,79 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     stopGesture(false);
 
     if (finishedGesture.kind === "move-node") {
+      const movedDistance = Math.abs(finishedGesture.startClient.x - event.clientX)
+        + Math.abs(finishedGesture.startClient.y - event.clientY);
+      if (movedDistance > 3) {
+        // Swallow the click that the browser fires after this drag so it does
+        // not collapse a multi-selection back down to the single dragged node.
+        clickSuppressed = true;
+        window.setTimeout(() => { clickSuppressed = false; }, 0);
+      }
       renderScene();
       commitAst("bmap:move-node");
+      return;
+    }
+
+    if (finishedGesture.kind === "marquee") {
+      const endWorld = clientToWorld(event.clientX, event.clientY);
+      const minX = Math.min(finishedGesture.startWorld.x, endWorld.x);
+      const maxX = Math.max(finishedGesture.startWorld.x, endWorld.x);
+      const minY = Math.min(finishedGesture.startWorld.y, endWorld.y);
+      const maxY = Math.max(finishedGesture.startWorld.y, endWorld.y);
+      const movedDistance = Math.abs(finishedGesture.startClient.x - event.clientX)
+        + Math.abs(finishedGesture.startClient.y - event.clientY);
+
+      // A negligible drag is just a click on empty space: clear the selection
+      // (unless the user was Ctrl-adding, in which case leave it untouched).
+      if (movedDistance < 4) {
+        if (!finishedGesture.additive) {
+          selection = [];
+          renderScene();
+        }
+        return;
+      }
+
+      const hitNodeIds = new Set();
+      for (const node of ast.nodes) {
+        const rect = getNodeRect(node);
+        const intersects = rect.x < maxX && rect.x + rect.width > minX
+          && rect.y < maxY && rect.y + rect.height > minY;
+        if (intersects) {
+          hitNodeIds.add(node.id);
+        }
+      }
+
+      const nextSelection = [...finishedGesture.baseSelection];
+      const pushUnique = (item) => {
+        const duplicate = nextSelection.some((entry) =>
+          item.type === "node"
+            ? (entry.type === "node" && entry.id === item.id)
+            : (entry.type === "connector" && entry.index === item.index));
+        if (!duplicate) {
+          nextSelection.push(item);
+        }
+      };
+      for (const id of hitNodeIds) {
+        pushUnique({ type: "node", id });
+      }
+      // A connector is captured when both of its endpoints are inside the box.
+      // A dangling endpoint counts when its free coordinate falls inside.
+      const endpointInside = (rawEndpoint) => {
+        const endpoint = parseEndpoint(rawEndpoint);
+        if (endpoint.dangling) {
+          return endpoint.point.x >= minX && endpoint.point.x <= maxX
+            && endpoint.point.y >= minY && endpoint.point.y <= maxY;
+        }
+        return hitNodeIds.has(endpoint.nodeId);
+      };
+      ast.connectors.forEach((connector, index) => {
+        if (endpointInside(connector.from) && endpointInside(connector.to)) {
+          pushUnique({ type: "connector", index });
+        }
+      });
+
+      selection = nextSelection;
+      renderScene();
       return;
     }
 
@@ -1126,13 +1915,39 @@ function createBmapView({ container, ...defaultOptions } = {}) {
         });
         if (nextConnector.from !== nextConnector.to) {
           ast.connectors.push(nextConnector);
-          selected = { type: "connector", index: ast.connectors.length - 1 };
+          selection = [{ type: "connector", index: ast.connectors.length - 1 }];
           renderScene();
           commitAst("bmap:add-connector");
           return;
         }
       }
       renderScene();
+      return;
+    }
+
+    if (finishedGesture.kind === "drag-endpoint") {
+      const connector = ast.connectors[finishedGesture.connectorIndex];
+      if (connector) {
+        // Dropping on a node side (exact snap dot, or anywhere on the node →
+        // nearest side) re-attaches the end; dropping elsewhere leaves it
+        // dangling at the new coordinate.
+        const snapEl = event.target.closest?.(".bmap-snap[data-node-id][data-side-index]");
+        const nodeElTarget = event.target.closest?.(".bmap-node[data-node-id]");
+        if (snapEl) {
+          connector[finishedGesture.end] = formatEndpoint(snapEl.dataset.nodeId, normalizeSideIndex(snapEl.dataset.sideIndex));
+        } else if (nodeElTarget) {
+          const node = getNodeById(nodeElTarget.dataset.nodeId);
+          if (node) {
+            connector[finishedGesture.end] = formatEndpoint(node.id, nearestSide(node, clientToWorld(event.clientX, event.clientY)));
+          } else {
+            connector[finishedGesture.end] = formatPointEndpoint(clientToWorld(event.clientX, event.clientY));
+          }
+        } else {
+          connector[finishedGesture.end] = formatPointEndpoint(clientToWorld(event.clientX, event.clientY));
+        }
+        renderScene();
+        commitAst("bmap:reconnect-endpoint");
+      }
     }
   }
 
@@ -1143,12 +1958,16 @@ function createBmapView({ container, ...defaultOptions } = {}) {
   function startPan(event) {
     startGesture({
       kind: "pan",
+      fromButton: event.button,
       startClient: { x: event.clientX, y: event.clientY },
       startPan: { ...pan }
     });
+    // Show the grabbing hand for the duration of the pan. :active is unreliable
+    // for right/middle buttons, so the class is toggled explicitly here.
+    canvasEl?.classList.add("is-panning");
   }
 
-  function startNodeMove(nodeId, event) {
+  function startNodeDrag(nodeId, event) {
     if (!isEditingEnabled()) {
       return;
     }
@@ -1156,14 +1975,36 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     if (!node) {
       return;
     }
-    selected = { type: "node", id: nodeId };
+    // Dragging a node that isn't part of the current selection makes it the sole
+    // selection; dragging one that is part of a multi-selection moves them all.
+    if (!isNodeSelected(nodeId)) {
+      selection = [{ type: "node", id: nodeId }];
+    }
+    const movingNodes = selectionNodes();
+    const startPositions = new Map(movingNodes.map((item) => [item.id, { ...item.pos }]));
     startGesture({
       kind: "move-node",
-      nodeId,
       startClient: { x: event.clientX, y: event.clientY },
-      startPos: { ...node.pos }
+      startPositions
     });
     renderScene();
+  }
+
+  function startMarquee(event) {
+    const additive = event.ctrlKey || event.metaKey;
+    const canvasRect = canvasEl.getBoundingClientRect();
+    const rectEl = document.createElement("div");
+    rectEl.className = "bmap-marquee";
+    canvasEl.append(rectEl);
+    startGesture({
+      kind: "marquee",
+      startClient: { x: event.clientX, y: event.clientY },
+      startWorld: clientToWorld(event.clientX, event.clientY),
+      startScreen: { x: event.clientX - canvasRect.left, y: event.clientY - canvasRect.top },
+      additive,
+      baseSelection: additive ? [...selection] : [],
+      rectEl,
+    });
   }
 
   function startNodeResize(nodeId, edge, event) {
@@ -1174,7 +2015,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     if (!node) {
       return;
     }
-    selected = { type: "node", id: nodeId };
+    selection = [{ type: "node", id: nodeId }];
     startGesture({
       kind: "resize-node",
       nodeId,
@@ -1189,7 +2030,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     if (!isEditingEnabled()) {
       return;
     }
-    selected = { type: "node", id: nodeId };
+    selection = [{ type: "node", id: nodeId }];
     connectPreview = {
       fromId: nodeId,
       fromSide: sideIndex,
@@ -1199,6 +2040,21 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       kind: "connect",
       fromId: nodeId,
       fromSide: sideIndex
+    });
+    renderScene();
+  }
+
+  // Drag a dangling connector end (a free coordinate) to re-attach it to a node.
+  function startEndpointDrag(connectorIndex, end, event) {
+    if (!isEditingEnabled()) {
+      return;
+    }
+    selection = [{ type: "connector", index: connectorIndex }];
+    startGesture({
+      kind: "drag-endpoint",
+      connectorIndex,
+      end,
+      startClient: { x: event.clientX, y: event.clientY }
     });
     renderScene();
   }
@@ -1229,7 +2085,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     left.append(
       makeToolbarButton("Add Rect", "Add a rectangular node", () => addNode("rect"), !isEditingEnabled()),
       makeToolbarButton("Add Oval", "Add an oval node", () => addNode("circle"), !isEditingEnabled()),
-      makeToolbarButton("Delete", "Delete selected node or connector", deleteSelected, !selected || !isEditingEnabled()),
+      makeToolbarButton("Delete", "Delete selected node or connector", deleteSelected, selection.length === 0 || !isEditingEnabled()),
     );
 
     const snapField = document.createElement("label");
@@ -1252,11 +2108,20 @@ function createBmapView({ container, ...defaultOptions } = {}) {
 
     const status = document.createElement("div");
     status.className = "bmap-toolbar-status";
-    status.textContent = selected?.type === "node"
-      ? `Selected node: ${selected.id}`
-      : selected?.type === "connector"
-        ? `Selected connector ${selected.index + 1}`
-        : `Snap ${snapStep}\u00D7${snapStep}`;
+    const nodeCount = selection.filter((item) => item.type === "node").length;
+    const connectorCount = selection.filter((item) => item.type === "connector").length;
+    if (selection.length === 0) {
+      status.textContent = `Snap ${snapStep}\u00D7${snapStep}`;
+    } else if (selection.length === 1 && nodeCount === 1) {
+      status.textContent = `Selected node: ${selection[0].id}`;
+    } else if (selection.length === 1 && connectorCount === 1) {
+      status.textContent = `Selected connector ${selection[0].index + 1}`;
+    } else {
+      const parts = [];
+      if (nodeCount) parts.push(`${nodeCount} node${nodeCount === 1 ? "" : "s"}`);
+      if (connectorCount) parts.push(`${connectorCount} connector${connectorCount === 1 ? "" : "s"}`);
+      status.textContent = `Selected ${parts.join(" + ")}`;
+    }
 
     toolbar.append(left, snapField, status);
     return toolbar;
@@ -1298,7 +2163,9 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       for (const connector of ast.connectors) {
         const from = parseEndpoint(connector.from);
         const to = parseEndpoint(connector.to);
-        lines.push(`- ${from.nodeId} -> ${to.nodeId}`);
+        const fromLabel = from.dangling ? "(unattached)" : from.nodeId;
+        const toLabel = to.dangling ? "(unattached)" : to.nodeId;
+        lines.push(`- ${fromLabel} -> ${toLabel}`);
       }
     }
     return lines.join("\n");
@@ -1558,7 +2425,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       if (index >= 0) {
         ast.nodes[index] = nextNode;
       }
-      selected = { type: "node", id: nextNode.id };
+      selection = [{ type: "node", id: nextNode.id }];
       renderScene();
       commitAst("bmap:update-node-from-inspector");
     });
@@ -1737,7 +2604,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
           dashed: formData.get("dashed") === "on",
         }
       });
-      selected = { type: "connector", index };
+      selection = [{ type: "connector", index }];
       renderScene();
       commitAst("bmap:update-connector-from-inspector");
     });
@@ -1785,18 +2652,266 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     return inspector;
   }
 
+  function buildMultiNodeInspector(nodes) {
+    const inspector = document.createElement("aside");
+    inspector.className = "bmap-inspector";
+    const common = (getter) => commonFieldValue(nodes, getter);
+    const name = common((node) => node.name);
+    const text = common((node) => node.text);
+    const shape = common((node) => node.shape);
+    const background = common((node) => getNodeStyleValue(node, "background", ""));
+    const color = common((node) => getNodeStyleValue(node, "color", ""));
+    const nameColor = common((node) => getNodeStyleValue(node, "name-color", ""));
+    const opacity = common((node) => getNodeStyleValue(node, "opacity", ""));
+    const borderColor = common((node) => parseBmapBorder(getNodeStyleValue(node, "border", ""), "").color);
+    const borderWidth = common((node) => parseBmapBorder(getNodeStyleValue(node, "border", ""), "").width);
+    const borderStyle = common((node) => parseBmapBorder(getNodeStyleValue(node, "border", ""), "").style);
+    const radius = common((node) => getPixelStyleValue(node, "border-radius", 8));
+    const fontSize = common((node) => getPixelStyleValue(node, "font-size", 12));
+    const fontWeight = common((node) => getNodeStyleValue(node, "font-weight", "normal"));
+    const textAlign = common((node) => getBmapTextAlign(node));
+    const width = common((node) => getBmapNodeDimensions(node).width);
+    const height = common((node) => getBmapNodeDimensions(node).height);
+
+    inspector.innerHTML = `
+      <div class="bmap-inspector-header">
+        <h3>${nodes.length} Nodes</h3>
+        <div class="subtle-label">Multi-edit</div>
+      </div>
+      <div class="bmap-inspector-note">Changing a field updates every selected node. Fields that differ show “—”.</div>
+      <form class="bmap-inspector-form" novalidate>
+        <fieldset class="bmap-inspector-fieldset">
+          ${multiTextFieldHtml("Name", "name", name)}
+          <label class="bmap-field"><span>Text</span><textarea name="text" rows="3" placeholder="${text == null ? "—" : ""}">${text == null ? "" : escapeHtml(text)}</textarea></label>
+          <div class="bmap-field-row">
+            ${multiSelectFieldHtml("Shape", "shape", [["rect", "Rectangle"], ["circle", "Oval"]], shape)}
+            ${multiSelectFieldHtml("Text align", "textAlign", [["left", "Left"], ["center", "Center"], ["right", "Right"]], textAlign)}
+          </div>
+          <div class="bmap-field-row">
+            ${colorFieldHtml({ label: "Background", name: "background", value: background, fallback: "#fffbe6", mixed: background == null })}
+            ${colorFieldHtml({ label: "Text color", name: "color", value: color, fallback: BMAP_DEFAULT_INK, mixed: color == null })}
+          </div>
+          <div class="bmap-field-row">
+            ${colorFieldHtml({ label: "Name color", name: "nameColor", value: nameColor, fallback: BMAP_DEFAULT_INK, mixed: nameColor == null })}
+            ${multiTextFieldHtml("Opacity", "opacity", opacity, { type: "number", min: 0, step: 0.1 })}
+          </div>
+          <div class="bmap-field-row">
+            ${colorFieldHtml({ label: "Border color", name: "borderColor", value: borderColor, fallback: "#cccccc", mixed: borderColor == null })}
+            ${multiSelectFieldHtml("Border style", "borderStyle", [["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"], ["none", "None"]], borderStyle)}
+          </div>
+          <div class="bmap-field-row">
+            ${multiTextFieldHtml("Border width", "borderWidth", borderWidth, { type: "number", min: 1, step: 1 })}
+            ${multiTextFieldHtml("Radius", "borderRadius", radius, { type: "number", min: 0, step: 1 })}
+          </div>
+          <div class="bmap-field-row">
+            ${multiTextFieldHtml("Font size", "fontSize", fontSize, { type: "number", min: 8, step: 1 })}
+            ${multiSelectFieldHtml("Font weight", "fontWeight", [["normal", "Normal"], ["600", "600"], ["bold", "Bold"]], fontWeight)}
+          </div>
+          <div class="bmap-field-row">
+            ${multiTextFieldHtml("Width", "width", width, { type: "number", min: snapStep, step: snapStep })}
+            ${multiTextFieldHtml("Height", "height", height, { type: "number", min: snapStep, step: snapStep })}
+          </div>
+          <div class="bmap-inspector-actions">
+            <button type="button" data-action="delete" class="bmap-danger-btn">Delete ${nodes.length} Nodes</button>
+          </div>
+        </fieldset>
+      </form>
+    `;
+
+    const form = inspector.querySelector("form");
+    form.addEventListener("submit", (event) => event.preventDefault());
+    form.addEventListener("change", (event) => {
+      const field = event.target?.name;
+      if (!field || !isEditingEnabled()) {
+        return;
+      }
+      applyMultiNodeField(field, new FormData(form).get(field));
+    });
+    inspector.querySelector('[data-action="delete"]').addEventListener("click", () => {
+      if (isEditingEnabled()) {
+        deleteSelected();
+      }
+    });
+    return inspector;
+  }
+
+  // Apply a single changed field to every selected node. An empty value means
+  // the user left a "differs" field untouched, so it is a no-op.
+  function applyMultiNodeField(field, rawValue) {
+    const value = rawValue == null ? "" : String(rawValue);
+    const recomposeBorder = (node, part) => {
+      const current = parseBmapBorder(getNodeStyleValue(node, "border", ""), "#cccccc");
+      const next = { ...current, ...part };
+      return composeBmapBorder({
+        enabled: next.style !== "none" && next.width > 0,
+        width: next.width || 1,
+        style: next.style === "none" ? "none" : next.style,
+        color: next.color,
+      });
+    };
+    const withStyle = (node, key, styleValue) =>
+      createBmapNode({ ...node, styles: { ...node.styles, [key]: styleValue } });
+
+    switch (field) {
+      case "name":
+        updateSelectedNodes((node) => createBmapNode({ ...node, name: value }));
+        break;
+      case "text":
+        updateSelectedNodes((node) => createBmapNode({ ...node, text: value }));
+        break;
+      case "shape":
+        if (value) updateSelectedNodes((node) => createBmapNode({ ...node, shape: value }));
+        break;
+      case "background":
+        updateSelectedNodes((node) => withStyle(node, "background", value));
+        break;
+      case "color":
+        updateSelectedNodes((node) => withStyle(node, "color", value));
+        break;
+      case "nameColor":
+        updateSelectedNodes((node) => withStyle(node, "name-color", value));
+        break;
+      case "opacity":
+        if (value !== "") updateSelectedNodes((node) => withStyle(node, "opacity", value));
+        break;
+      case "borderColor":
+        updateSelectedNodes((node) => withStyle(node, "border", recomposeBorder(node, { color: value })));
+        break;
+      case "borderStyle":
+        if (value) updateSelectedNodes((node) => withStyle(node, "border", recomposeBorder(node, { style: value })));
+        break;
+      case "borderWidth":
+        if (value !== "") updateSelectedNodes((node) => withStyle(node, "border", recomposeBorder(node, { width: Math.max(1, Number.parseInt(value, 10) || 1) })));
+        break;
+      case "borderRadius":
+        if (value !== "") updateSelectedNodes((node) => withStyle(node, "border-radius", `${Math.max(0, Number.parseInt(value, 10) || 0)}px`));
+        break;
+      case "fontSize":
+        if (value !== "") updateSelectedNodes((node) => withStyle(node, "font-size", `${Math.max(8, Number.parseInt(value, 10) || 12)}px`));
+        break;
+      case "fontWeight":
+        if (value) updateSelectedNodes((node) => withStyle(node, "font-weight", value));
+        break;
+      case "textAlign":
+        if (value) updateSelectedNodes((node) => withStyle(node, "text-align", value));
+        break;
+      case "width":
+        if (value !== "") updateSelectedNodes((node) => withStyle(node, "width", String(snapSizeValue(value, snapStep))));
+        break;
+      case "height":
+        if (value !== "") updateSelectedNodes((node) => withStyle(node, "height", String(snapSizeValue(value, snapStep))));
+        break;
+      default:
+        break;
+    }
+  }
+
+  function buildMultiConnectorInspector(entries) {
+    const inspector = document.createElement("aside");
+    inspector.className = "bmap-inspector";
+    const connectors = entries.map((entry) => entry.connector);
+    const common = (getter) => commonFieldValue(connectors, getter);
+    const mode = common((connector) => connector.styles?.mode ?? "bezier");
+    const arrow = common((connector) => connector.styles?.arrow ?? "end");
+    const thickness = common((connector) => Number.parseInt(String(connector.styles?.thickness ?? 2), 10) || 2);
+    const colorValue = common((connector) => String(connector.styles?.color ?? "#1677ff"));
+    const dashedCommon = common((connector) => Boolean(connector.styles?.dashed));
+
+    inspector.innerHTML = `
+      <div class="bmap-inspector-header">
+        <h3>${entries.length} Connectors</h3>
+        <div class="subtle-label">Multi-edit</div>
+      </div>
+      <div class="bmap-inspector-note">Changing a field updates every selected connector. Fields that differ show “—”.</div>
+      <form class="bmap-inspector-form" novalidate>
+        <fieldset class="bmap-inspector-fieldset">
+          <div class="bmap-field-row">
+            ${multiSelectFieldHtml("Mode", "mode", [["bezier", "Bezier"], ["straight", "Straight"]], mode)}
+            ${multiSelectFieldHtml("Arrow", "arrow", [["end", "End"], ["start", "Start"], ["both", "Both"], ["none", "None"]], arrow)}
+          </div>
+          <div class="bmap-field-row">
+            ${multiTextFieldHtml("Thickness", "thickness", thickness, { type: "number", min: 1, step: 1 })}
+            ${colorFieldHtml({ label: "Color", name: "color", value: colorValue, fallback: "#1677ff", mixed: colorValue == null })}
+          </div>
+          <label class="bmap-field bmap-checkbox-field">
+            <input name="dashed" type="checkbox"${dashedCommon ? " checked" : ""}>
+            <span>Dashed${dashedCommon == null ? ' <span class="bmap-mixed-badge">mixed</span>' : ""}</span>
+          </label>
+          <div class="bmap-inspector-actions">
+            <button type="button" data-action="delete" class="bmap-danger-btn">Delete ${entries.length} Connectors</button>
+          </div>
+        </fieldset>
+      </form>
+    `;
+
+    const form = inspector.querySelector("form");
+    form.addEventListener("submit", (event) => event.preventDefault());
+    form.addEventListener("change", (event) => {
+      const field = event.target?.name;
+      if (!field || !isEditingEnabled()) {
+        return;
+      }
+      const formData = new FormData(form);
+      const raw = formData.get(field);
+      const value = raw == null ? "" : String(raw);
+      if (field === "dashed") {
+        const checked = event.target.checked;
+        updateSelectedConnectors((connector) => createBmapConnector({ ...connector, styles: { ...connector.styles, dashed: checked } }));
+        return;
+      }
+      if (value === "") {
+        return;
+      }
+      const styleKey = field;
+      updateSelectedConnectors((connector) => createBmapConnector({ ...connector, styles: { ...connector.styles, [styleKey]: value } }));
+    });
+    inspector.querySelector('[data-action="delete"]').addEventListener("click", () => {
+      if (isEditingEnabled()) {
+        deleteSelected();
+      }
+    });
+    return inspector;
+  }
+
+  function buildMultiMixedInspector(nodes, entries) {
+    const inspector = document.createElement("aside");
+    inspector.className = "bmap-inspector";
+    inspector.innerHTML = `
+      <div class="bmap-inspector-header">
+        <h3>${nodes.length + entries.length} Items</h3>
+        <div class="subtle-label">${nodes.length} nodes · ${entries.length} connectors</div>
+      </div>
+      <div class="bmap-inspector-empty">
+        <p>A mix of nodes and connectors is selected. Select only nodes or only connectors to edit their shared properties.</p>
+      </div>
+      <div class="bmap-inspector-actions">
+        <button type="button" data-action="delete" class="bmap-danger-btn">Delete Selection</button>
+      </div>
+    `;
+    inspector.querySelector('[data-action="delete"]').addEventListener("click", () => {
+      if (isEditingEnabled()) {
+        deleteSelected();
+      }
+    });
+    return inspector;
+  }
+
   function buildInspector() {
     let inspector;
-    const selectedNode = getSelectedNode();
-    if (selectedNode) {
-      inspector = buildNodeInspector(selectedNode);
+    const nodes = selectionNodes();
+    const connectors = selectionConnectors();
+    if (selection.length === 0) {
+      inspector = buildEmptyInspector();
+    } else if (selection.length === 1 && nodes.length === 1) {
+      inspector = buildNodeInspector(nodes[0]);
+    } else if (selection.length === 1 && connectors.length === 1) {
+      inspector = buildConnectorInspector(connectors[0].connector, connectors[0].index);
+    } else if (connectors.length === 0) {
+      inspector = buildMultiNodeInspector(nodes);
+    } else if (nodes.length === 0) {
+      inspector = buildMultiConnectorInspector(connectors);
     } else {
-      const selectedConnector = getSelectedConnector();
-      if (selectedConnector) {
-        inspector = buildConnectorInspector(selectedConnector, selected.index);
-      } else {
-        inspector = buildEmptyInspector();
-      }
+      inspector = buildMultiMixedInspector(nodes, connectors);
     }
 
     const collapseBtn = document.createElement("button");
@@ -1846,10 +2961,16 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     // inspector and would otherwise reset its scroll to the top mid-edit. Capture
     // and restore the scroll position so the user keeps their place.
     const prevInspectorScroll = container.querySelector(".bmap-inspector-body")?.scrollTop ?? 0;
+    // The canvas is replaced on every render; if focus was anywhere inside this
+    // view (the canvas, a control/toolbar button, etc.), pull it back onto the
+    // rebuilt canvas afterwards so keyboard shortcuts keep firing consistently
+    // (e.g. toggling edit mode via the pen, then immediately Ctrl+A / Delete).
+    const hadFocusInView = rootEl != null && rootEl.contains(document.activeElement);
     container.replaceChildren();
 
     const root = document.createElement("div");
     root.className = "bmap-editor";
+    rootEl = root;
     root.classList.toggle("is-readonly", !isEditingEnabled());
 
     const toolbar = buildToolbar();
@@ -1942,7 +3063,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       if (arrow === "start" || arrow === "both") {
         visiblePath.setAttribute("marker-start", `url(#${markerId})`);
       }
-      if (selected?.type === "connector" && selected.index === index) {
+      if (isConnectorSelected(index)) {
         visiblePath.classList.add("is-selected");
       }
 
@@ -1952,12 +3073,53 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       hitPath.setAttribute("stroke", "transparent");
       hitPath.setAttribute("stroke-width", String(Math.max(thickness + 10, 14)));
       hitPath.classList.add("bmap-connector-hit");
+      hitPath.dataset.connectorIndex = String(index);
       hitPath.addEventListener("click", (event) => {
         event.stopPropagation();
-        setSelection({ type: "connector", index });
+        canvasEl?.focus({ preventScroll: true });
+        if (event.ctrlKey || event.metaKey) {
+          toggleSelectionItem({ type: "connector", index });
+        } else {
+          setSelection({ type: "connector", index });
+        }
       });
 
       svg.append(visiblePath, hitPath);
+
+      // A dangling endpoint (from copy/paste) gets a draggable handle so it can
+      // be re-attached to a node side. The handle lives in world space.
+      const addDanglingHandle = (point, end) => {
+        const handle = document.createElement("div");
+        handle.className = "bmap-dangling-handle";
+        handle.style.left = `${point.x}px`;
+        handle.style.top = `${point.y}px`;
+        handle.title = "Drag onto a node to connect";
+        // Non-interactive while a gesture is in flight so it can't shadow the
+        // node/snap being dropped onto (it sits above nodes in the z-order).
+        const interactive = isEditingEnabled() && !gesture;
+        if (interactive) {
+          handle.addEventListener("pointerdown", (downEvent) => {
+            if (downEvent.button !== 0) {
+              return;
+            }
+            downEvent.preventDefault();
+            downEvent.stopPropagation();
+            canvasEl?.focus({ preventScroll: true });
+            startEndpointDrag(index, end, downEvent);
+          });
+        } else {
+          handle.classList.add("is-static");
+        }
+        nodesLayer.append(handle);
+      };
+      const fromEndpoint = parseEndpoint(connector.from);
+      const toEndpoint = parseEndpoint(connector.to);
+      if (fromEndpoint.dangling) {
+        addDanglingHandle(fromEndpoint.point, "from");
+      }
+      if (toEndpoint.dangling) {
+        addDanglingHandle(toEndpoint.point, "to");
+      }
     });
 
     if (connectPreview) {
@@ -1982,7 +3144,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       const { width, height } = getBmapNodeDimensions(node);
       const nodeEl = document.createElement("div");
       nodeEl.className = `bmap-node bmap-node-${node.shape === "circle" ? "circle" : "rect"}`;
-      if (selected?.type === "node" && selected.id === node.id) {
+      if (isNodeSelected(node.id)) {
         nodeEl.classList.add("is-selected");
       }
       nodeEl.dataset.nodeId = node.id;
@@ -2005,7 +3167,18 @@ function createBmapView({ container, ...defaultOptions } = {}) {
 
       nodeEl.addEventListener("click", (event) => {
         event.stopPropagation();
-        setSelection({ type: "node", id: node.id });
+        // Focus the canvas (in any mode) so keyboard shortcuts target the editor.
+        canvasEl?.focus({ preventScroll: true });
+        // Ignore the click the browser fires right after a drag-move.
+        if (clickSuppressed) {
+          clickSuppressed = false;
+          return;
+        }
+        if (event.ctrlKey || event.metaKey) {
+          toggleSelectionItem({ type: "node", id: node.id });
+        } else {
+          setSelection({ type: "node", id: node.id });
+        }
       });
 
       nodeEl.addEventListener("pointerdown", (event) => {
@@ -2018,8 +3191,13 @@ function createBmapView({ container, ...defaultOptions } = {}) {
         if (event.target.closest(".bmap-node-action, .bmap-resize-handle, .bmap-snap")) {
           return;
         }
+        // Ctrl/Cmd-click toggles selection (handled on click); don't start a drag.
+        if (event.ctrlKey || event.metaKey) {
+          return;
+        }
         event.stopPropagation();
-        startNodeMove(node.id, event);
+        canvasEl?.focus({ preventScroll: true });
+        startNodeDrag(node.id, event);
       });
 
       nodeEl.addEventListener("dragover", (event) => {
@@ -2063,7 +3241,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
           ...node,
           file: relativePath,
         });
-        selected = { type: "node", id: node.id };
+        selection = [{ type: "node", id: node.id }];
         renderScene();
         commitAst("bmap:link-file-drop");
       });
@@ -2185,30 +3363,94 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       }
     }
 
-    canvas.addEventListener("click", (event) => {
-      if (event.target === canvas || event.target === inner || event.target === svg || event.target === nodesLayer) {
-        setSelection(null);
-      }
+    if (hadFocusInView) {
+      canvas.focus({ preventScroll: true });
+    }
+
+    // Bind the keyboard handler once, at the document level, so shortcuts work no
+    // matter which inner element holds focus (and survive canvas re-renders).
+    if (!keyboardBound) {
+      keyboardBound = true;
+      document.addEventListener("keydown", handleDocumentKeydown);
+      // Track which widget the user last pointer-touched (so keyboard shortcuts
+      // keep targeting the bmap even when its re-render dropped focus to <body>),
+      // and dismiss the right-click menu on any outside click.
+      document.addEventListener("pointerdown", (event) => {
+        const inMenu = contextMenuEl != null && contextMenuEl.contains(event.target);
+        if (contextMenuEl && !inMenu) {
+          hideContextMenu();
+        }
+        // A click on our own context menu shouldn't flip the bmap to "inactive".
+        if (!inMenu) {
+          viewActive = rootEl != null && rootEl.contains(event.target);
+        }
+      }, true);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && contextMenuEl) {
+          hideContextMenu();
+        }
+      }, true);
+    }
+
+    const isEmptyCanvasTarget = (target) =>
+      target === canvas || target === inner || target === svg || target === nodesLayer;
+
+    // Track the pointer over the canvas so a paste can spawn its ghost right
+    // under the cursor, and so the context menu / pan know where we are.
+    canvas.addEventListener("pointermove", (event) => {
+      lastPointerClient = { x: event.clientX, y: event.clientY };
     });
 
     canvas.addEventListener("pointerdown", (event) => {
+      lastPointerClient = { x: event.clientX, y: event.clientY };
+      hideContextMenu();
+      if (!isEmptyCanvasTarget(event.target)) {
+        return;
+      }
+      // Controls are identical in both modes: right/middle-drag pans, left-drag
+      // draws a marquee selection rectangle. Read-only mode still selects (for
+      // highlighting); it just can't edit what's selected.
+      if (event.button === 1 || event.button === 2) {
+        event.preventDefault();
+        rightDragPanned = false;
+        startPan(event);
+        return;
+      }
       if (event.button !== 0) {
         return;
       }
-      if (event.target !== canvas && event.target !== inner && event.target !== svg && event.target !== nodesLayer) {
-        return;
-      }
-      startPan(event);
+      canvas.focus({ preventScroll: true });
+      startMarquee(event);
     });
 
-    workspace.addEventListener("keydown", (event) => {
-      if (event.target.closest("form")) {
+    canvas.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      // A right-button drag means the user was panning, not asking for a menu.
+      if (rightDragPanned) {
+        rightDragPanned = false;
         return;
       }
-      handleCanvasKeydown(event);
+      canvas.focus({ preventScroll: true });
+      // Right-clicking an element selects it (unless it is already part of the
+      // selection), so the menu's actions target what is under the cursor.
+      const nodeElTarget = event.target.closest?.(".bmap-node[data-node-id]");
+      const connectorHit = event.target.closest?.(".bmap-connector-hit[data-connector-index]");
+      if (nodeElTarget) {
+        const id = nodeElTarget.dataset.nodeId;
+        if (!isNodeSelected(id)) {
+          setSelection({ type: "node", id });
+        }
+      } else if (connectorHit) {
+        const index = Number.parseInt(connectorHit.dataset.connectorIndex, 10);
+        if (Number.isInteger(index) && !isConnectorSelected(index)) {
+          setSelection({ type: "connector", index });
+        }
+      }
+      showContextMenu(event.clientX, event.clientY);
     });
 
     canvas.addEventListener("wheel", (event) => {
+      hideContextMenu();
       const previousZoom = zoom;
       zoom = clamp(zoom + (event.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP), MIN_ZOOM, MAX_ZOOM);
       const rect = canvas.getBoundingClientRect();
@@ -2223,6 +3465,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
   }
 
   function render(sourceOrOptions = "") {
+    let documentChanged = false;
     if (typeof sourceOrOptions === "string") {
       setActiveOptions(defaultOptions);
       sourceText = sourceOrOptions;
@@ -2231,9 +3474,11 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       const nextDocumentKey = sourceOrOptions.documentKey ?? null;
       if (nextDocumentKey !== currentDocumentKey) {
         currentDocumentKey = nextDocumentKey;
-        selected = null;
+        documentChanged = true;
+        selection = [];
         connectPreview = null;
         stopGesture(false);
+        cancelPastePreview();
         pan = { x: 40, y: 40 };
         zoom = 1;
         setPopupHidden();
@@ -2242,6 +3487,14 @@ function createBmapView({ container, ...defaultOptions } = {}) {
         interactionMode = "readonly";
       }
       sourceText = String(sourceOrOptions.source ?? "");
+    }
+    // Seed the undo history on document open; record external source edits too so
+    // Ctrl+Z still works after the raw text was changed elsewhere.
+    if (documentChanged || historyIndex < 0) {
+      history = [sourceText];
+      historyIndex = 0;
+    } else {
+      pushHistory(sourceText);
     }
     ast = normalizeBmapAst(parseBmap(sourceText));
     ensureSelectionStillExists();

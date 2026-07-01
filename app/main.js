@@ -96,6 +96,7 @@ const elements = {
   inputDialogLabel: query("#input-dialog-label"),
   inputDialogInput: query("#input-dialog-input"),
   inputDialogSubmitButton: query("#input-dialog-submit-button"),
+  inputDialogCancelButton: query("#input-dialog-cancel-button"),
   bookmarkEntryDialog: query("#bookmark-entry-dialog"),
   bookmarkEntryDialogTitle: query("#bookmark-entry-dialog-title"),
   bookmarkEntryDialogMessage: query("#bookmark-entry-dialog-message"),
@@ -1382,8 +1383,13 @@ function showInputDialog({ title = "Rename Item", message = "Enter a value.", la
     elements.inputDialogInput.value = value;
     elements.inputDialogSubmitButton.textContent = submitLabel;
 
+    const handleCancel = () => {
+      elements.inputDialog.close("cancel");
+    };
+
     const handleClose = () => {
       elements.inputDialog.removeEventListener("close", handleClose);
+      elements.inputDialogCancelButton.removeEventListener("click", handleCancel);
       const result = elements.inputDialog.returnValue === "accept"
         ? elements.inputDialogInput.value.trim() || null
         : null;
@@ -1391,6 +1397,7 @@ function showInputDialog({ title = "Rename Item", message = "Enter a value.", la
     };
 
     elements.inputDialog.addEventListener("close", handleClose, { once: true });
+    elements.inputDialogCancelButton.addEventListener("click", handleCancel);
     elements.inputDialog.showModal();
     elements.inputDialogInput.focus();
     elements.inputDialogInput.select();
@@ -2108,6 +2115,14 @@ function getEditorSelection() {
 /** Move the browser selection to cover [start, end] in the editor plain text. */
 function setEditorSelection(start, end) {
   if (!elements.editorContent.isConnected) return;
+  // Only ever move the caret when the editor is the focused element. Adding a
+  // Range inside a contenteditable otherwise *steals* focus into it (and lands
+  // the caret at offset 0). That bites preview-driven updates: e.g. committing a
+  // paste in the .bmap preview re-renders the source here, and without this guard
+  // focus would jump to the editor with the caret on the leading "." of the first
+  // ".node{}" — so the next Delete would eat that "." and break the file grammar.
+  // Every legitimate caller (typing, IME, toolbar, drag) focuses the editor first.
+  if (document.activeElement !== elements.editorContent) return;
   try {
     const startPos = textOffsetToDomPosition(start);
     const endPos = start === end ? startPos : textOffsetToDomPosition(end);

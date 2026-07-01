@@ -2493,13 +2493,29 @@ menu {
   height: 100%;
   overflow: hidden;
   background-color: var(--surface-0);
-  cursor: grab;
+  /* In both modes left-drag is a marquee select, so the idle cursor is a normal
+     arrow. The grabbing hand is only shown while actively panning (right/middle
+     drag), driven by the .is-panning class from the pan gesture. */
+  cursor: default;
   touch-action: none;
   user-select: none;
 }
 
-.bmap-canvas:active {
+/* The canvas is focusable (tabIndex) so it can receive keyboard shortcuts; it
+   must not paint a browser focus ring around the whole preview pane. */
+.bmap-canvas:focus,
+.bmap-canvas:focus-visible {
+  outline: none;
+}
+
+.bmap-canvas.is-panning {
   cursor: grabbing;
+}
+
+/* While a clipboard paste is pending placement (the ghost is following the
+   pointer), show a stamp-style cursor as a hint that the next click drops it. */
+.bmap-canvas.is-pasting {
+  cursor: copy;
 }
 
 .bmap-editor.is-readonly .bmap-toolbar {
@@ -2512,11 +2528,6 @@ menu {
 
 .bmap-editor.is-readonly .bmap-inspector {
   display: none;
-}
-
-.bmap-editor.is-readonly .bmap-canvas,
-.bmap-editor.is-readonly .bmap-canvas:active {
-  cursor: default;
 }
 
 .bmap-inner {
@@ -2828,6 +2839,148 @@ menu {
 
 .bmap-connector-preview {
   pointer-events: none;
+}
+
+/* Rubber-band rectangle for marquee selection (screen-space, not transformed) */
+.bmap-marquee {
+  position: absolute;
+  z-index: 6;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 60%, transparent);
+  pointer-events: none;
+}
+
+/* Draggable handle on a dangling connector end (from copy/paste). Lives in
+   world space, so it is counter-scaled to stay a constant on-screen size. */
+.bmap-dangling-handle {
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--surface-0);
+  border: 2px solid var(--danger);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent);
+  transform: translate(-50%, -50%) scale(var(--bmap-inv-zoom, 1));
+  cursor: grab;
+  z-index: 5;
+}
+
+.bmap-dangling-handle:hover {
+  background: color-mix(in srgb, var(--danger) 22%, var(--surface-0));
+}
+
+.bmap-dangling-handle.is-static {
+  cursor: default;
+  pointer-events: none;
+}
+
+/* Translucent "ghost" preview shown while a clipboard paste is pending
+   placement: it follows the pointer until the user left-clicks to drop it
+   (or right-clicks / Escape to cancel), so nothing commits to the diagram
+   sight-unseen. */
+.bmap-paste-ghost {
+  pointer-events: none;
+}
+
+.bmap-paste-ghost-node {
+  opacity: 0.55;
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+}
+
+.bmap-paste-ghost-svg {
+  opacity: 0.55;
+}
+
+.bmap-paste-ghost-path {
+  stroke-dasharray: 6 4;
+}
+
+/* Transient toast (e.g. "Copied") anchored to the top-center of the canvas. */
+.bmap-toast {
+  position: fixed;
+  transform: translate(-50%, -6px);
+  padding: 5px 12px;
+  border-radius: 6px;
+  background: var(--surface-3, rgba(30, 30, 30, 0.92));
+  color: var(--text-on-accent, #fff);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  z-index: 60;
+}
+
+.bmap-toast.is-visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* Right-click context menu for the bmap canvas. Mirrors the explorer menu. */
+.bmap-context-menu {
+  position: fixed;
+  min-width: 180px;
+  display: grid;
+  gap: 1px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--menu);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.26);
+  z-index: 50;
+}
+
+.bmap-context-menu button {
+  width: 100%;
+  min-height: 28px;
+  padding: 0 10px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  font-size: 12px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.bmap-context-menu button:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.bmap-context-menu button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.bmap-context-menu button.bmap-context-danger:not(:disabled) {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.bmap-context-menu button.bmap-context-danger:hover:not(:disabled) {
+  background: rgba(199, 78, 57, 0.14);
+}
+
+.bmap-context-sep {
+  height: 1px;
+  margin: 3px 6px;
+  background: var(--border-strong);
+}
+
+/* "mixed" badge shown beside multi-edit fields whose values disagree */
+.bmap-mixed-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--surface-3);
+  color: var(--text-dim);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
 }
 
 .bmap-inspector {
