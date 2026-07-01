@@ -7846,10 +7846,12 @@ async function handleAccountLogin() {
     elements.accountPasswordInput.value = "";
   } catch (error) {
     syncState.account = null;
-    elements.accountStatusText.textContent = error.message || "Login failed.";
     logDebug("response", "Account login failed", error.message);
     flashStatusPanel("error");
+    // Render first (it resets the status line), then surface the failure so the
+    // "Invalid username or password" message isn't clobbered by the reset.
     renderAccountControls();
+    elements.accountStatusText.textContent = error.message || "Login failed.";
     render(controller.getProject());
   }
 }
