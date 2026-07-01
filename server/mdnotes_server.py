@@ -1,4 +1,5 @@
 import argparse
+import base64
 import copy
 import json
 import mimetypes
@@ -7,6 +8,7 @@ import posixpath
 import queue
 import re
 import secrets
+import shutil
 import threading
 import time
 import uuid
@@ -843,13 +845,25 @@ class ChatProxy:
         }
 
 
+IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"})
+
+
+def is_image_name(name: str) -> bool:
+    return Path(str(name or "")).suffix.lower() in IMAGE_EXTENSIONS
+
+
 class CollaborationBroker:
-    def __init__(self, pin: str, state_file: Path | None, master_pin: str | None = None):
+    def __init__(self, pin: str, state_file: Path | None, master_pin: str | None = None,
+                 workspace_dir: Path | None = None):
         self.pin = pin
         # master_pin grants project-replace authority; defaults to same as pin so
         # single-pin deployments are backward-compatible.
         self.master_pin = master_pin or pin
         self.state_file = state_file
+        # When set, the workspace persists as a real directory of files + a
+        # manifest.json (structure only), and image bytes live on disk and are
+        # served by URL rather than inlined as data: URLs. state_file is ignored.
+        self.workspace_dir = workspace_dir
         self.lock = threading.RLock()
         self.project = None
         self.revision = 0
@@ -894,7 +908,87 @@ class CollaborationBroker:
             },
         }
 
+    # ---- directory-backed storage helpers (workspace_dir mode) -----------------
+    def _abs_path(self, node_id: str) -> Path:
+        """On-disk path of a node, mirroring its position in the workspace tree."""
+        return self.workspace_dir / self._get_path(node_id)
+
+    @staticmethod
+    def _decode_data_url(url: str) -> bytes | None:
+        """Decode a base64 data: URL to raw bytes; None if it isn't one."""
+        value = str(url or "")
+        if not value.startswith("data:") or ";base64," not in value:
+            return None
+        try:
+            return base64.b64decode(value.split(";base64,", 1)[1])
+        except (ValueError, base64.binascii.Error):
+            return None
+
+    def _write_node_file(self, node_id: str) -> None:
+        """Write a single file node to disk. Images externalize their data URL to
+        raw bytes (and the in-memory content is stripped); text writes its string."""
+        node = self.project["nodes"].get(node_id)
+        if not node or node.get("kind") != "file":
+            return
+        path = self._abs_path(node_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if is_image_name(node.get("name", "")):
+            data = self._decode_data_url(node.get("content", ""))
+            if data is not None:
+                path.write_bytes(data)
+                node["content"] = ""  # bytes now live on disk; served by URL
+            elif not path.exists():
+                path.write_bytes(b"")
+        else:
+            path.write_text(str(node.get("content", "")), encoding="utf-8")
+
+    def _remove_path(self, path: Path) -> None:
+        try:
+            if path.is_dir():
+                shutil.rmtree(path)
+            elif path.exists():
+                path.unlink()
+        except OSError:
+            pass
+
+    def _externalize_images(self, project: dict) -> None:
+        """Strip every image node's data URL out to a real file on disk (used when
+        adopting a whole project, e.g. a publish/replace-project)."""
+        nodes = project.get("nodes", {})
+        for node_id, node in nodes.items():
+            if node.get("kind") == "file" and is_image_name(node.get("name", "")):
+                data = self._decode_data_url(node.get("content", ""))
+                if data is not None:
+                    # Compute path within this project (not yet self.project).
+                    rel = self._path_in(project, node_id)
+                    dest = self.workspace_dir / rel
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_bytes(data)
+                    node["content"] = ""
+
+    def _path_in(self, project: dict, node_id: str) -> str:
+        segments = []
+        current = project["nodes"].get(node_id)
+        while current and current.get("parentId"):
+            segments.insert(0, current["name"])
+            current = project["nodes"].get(current["parentId"])
+        return "/".join(segments)
+
+    def resolve_asset(self, rel_path: str) -> Path | None:
+        """Map a workspace-relative file path to an on-disk file, refusing any
+        path that escapes the workspace directory. Assets are addressed by path
+        (not node id) so all peers agree on the URL despite differing local ids."""
+        if self.workspace_dir is None or not rel_path:
+            return None
+        base = self.workspace_dir.resolve()
+        candidate = (self.workspace_dir / rel_path).resolve()
+        if not str(candidate).startswith(str(base)) or not candidate.is_file():
+            return None
+        return candidate
+
     def _load_state(self):
+        if self.workspace_dir is not None:
+            return self._load_state_dir()
         # state_file None => ephemeral, in-memory only (guest-hosted local session).
         if self.state_file is None or not self.state_file.exists():
             self.project = self._default_project()
@@ -904,12 +998,46 @@ class CollaborationBroker:
         self.project = data.get("project") or self._default_project()
         self.revision = int(data.get("revision", 0))
 
+    def _load_state_dir(self):
+        manifest = self.workspace_dir / "manifest.json"
+        if not manifest.exists():
+            self.project = self._default_project()
+            self.revision = 0
+            return
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        self.project = data.get("project") or self._default_project()
+        self.revision = int(data.get("revision", 0))
+        # Re-hydrate text content from real files; leave images empty (served by URL).
+        for node_id, node in self.project.get("nodes", {}).items():
+            if node.get("kind") != "file" or is_image_name(node.get("name", "")):
+                continue
+            path = self._abs_path(node_id)
+            node["content"] = path.read_text(encoding="utf-8") if path.exists() else ""
+
     def _persist_state(self):
+        if self.workspace_dir is not None:
+            return self._persist_state_dir()
         if self.state_file is None:
             return  # ephemeral session — never touch disk
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         payload = {"project": self.project, "revision": self.revision}
         self.state_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def _persist_state_dir(self):
+        self.workspace_dir.mkdir(parents=True, exist_ok=True)
+        # Write every text file's current content; images are written at edit time.
+        for node_id, node in self.project.get("nodes", {}).items():
+            if node.get("kind") == "file" and not is_image_name(node.get("name", "")):
+                path = self._abs_path(node_id)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(str(node.get("content", "")), encoding="utf-8")
+        # Manifest = structure only (all file content stripped to "").
+        manifest_project = copy.deepcopy(self.project)
+        for node in manifest_project.get("nodes", {}).values():
+            if node.get("kind") == "file":
+                node["content"] = ""
+        payload = {"project": manifest_project, "revision": self.revision}
+        (self.workspace_dir / "manifest.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     def _broadcast(self, event, exclude_token: str | None = None):
         subscribers = {}
@@ -1055,9 +1183,22 @@ class CollaborationBroker:
                 self._remove_node_recursive(child_id)
         del self.project["nodes"][node_id]
 
+    def _wipe_workspace_dir(self):
+        """Remove all files/dirs inside the workspace dir (keep the dir itself)."""
+        if self.workspace_dir is None or not self.workspace_dir.exists():
+            return
+        for child in self.workspace_dir.iterdir():
+            self._remove_path(child)
+
     def _apply_operation(self, operation):
         operation_type = operation.get("type")
+        dir_mode = self.workspace_dir is not None
         if operation_type == "replace-project":
+            if dir_mode:
+                # Adopting a whole new tree (e.g. publish): reset the file tree,
+                # then externalize its images to real files (content stripped).
+                self._wipe_workspace_dir()
+                self._externalize_images(operation["project"])
             self.project = operation["project"]
             return
 
@@ -1075,6 +1216,8 @@ class CollaborationBroker:
                 "expanded": True,
             }
             self._append_node(parent_id, node)
+            if dir_mode:
+                self._abs_path(node["id"]).mkdir(parents=True, exist_ok=True)
             return
 
         if operation_type == "create-file":
@@ -1092,23 +1235,37 @@ class CollaborationBroker:
                 "sourceVersion": 0,
             }
             self._append_node(parent_id, node)
+            if dir_mode:
+                self._write_node_file(node["id"])  # externalizes images, writes text
+                if is_image_name(node["name"]):
+                    operation["content"] = ""  # peers fetch the image by URL, not a data URL
             return
 
         if operation_type == "rename-node":
             node_id = self._get_node_id_by_path(operation["path"])
             if not node_id:
                 raise ValueError(f"Node path not found: {operation['path']}")
+            old_abs = self._abs_path(node_id) if dir_mode else None
             self.project["nodes"][node_id]["name"] = operation["name"]
+            if dir_mode:
+                new_abs = self._abs_path(node_id)
+                if old_abs != new_abs and old_abs is not None and old_abs.exists():
+                    new_abs.parent.mkdir(parents=True, exist_ok=True)
+                    self._remove_path(new_abs)
+                    old_abs.rename(new_abs)
             return
 
         if operation_type == "delete-node":
             node_id = self._get_node_id_by_path(operation["path"])
             if not node_id:
                 return
+            abs_path = self._abs_path(node_id) if dir_mode else None
             node = self.project["nodes"][node_id]
             parent = self.project["nodes"][node["parentId"]]
             parent["children"] = [child_id for child_id in parent.get("children", []) if child_id != node_id]
             self._remove_node_recursive(node_id)
+            if dir_mode and abs_path is not None:
+                self._remove_path(abs_path)
             return
 
         if operation_type == "update-file":
@@ -1119,6 +1276,10 @@ class CollaborationBroker:
             node["content"] = operation.get("content", "")
             node["dirty"] = False
             node["sourceVersion"] = int(node.get("sourceVersion", 0)) + 1
+            if dir_mode:
+                self._write_node_file(node_id)  # externalizes images, writes text
+                if is_image_name(node["name"]):
+                    operation["content"] = ""  # peers fetch the image by URL, not a data URL
             return
 
         if operation_type == "patch-file":
@@ -1247,6 +1408,12 @@ class CollaborationBroker:
                 raise PermissionError("Only the session master can replace the project state")
         event = None
         with self.lock:
+            if self.workspace_dir is not None:
+                # Replacing the whole tree (publish): reset the file tree and
+                # externalize inline images to real files (content stripped, so the
+                # broadcast + manifest carry no data URLs — peers fetch by URL).
+                self._wipe_workspace_dir()
+                self._externalize_images(project)
             self.project = project
             self.revision += 1
             self._persist_state()
@@ -1595,6 +1762,29 @@ class WorkspaceRegistry:
     def _state_file(self, team: str, name: str) -> Path:
         return self._team_dir(team) / f"{self.safe_component(name)}.json"
 
+    def _workspace_dir(self, team: str, name: str) -> Path:
+        return self._team_dir(team) / self.safe_component(name)
+
+    def _make_workspace_broker(self, team: str, name: str) -> CollaborationBroker:
+        """Directory-backed broker for a team workspace, migrating a legacy
+        single-file <name>.json into the new directory layout on first open."""
+        workspace_dir = self._workspace_dir(team, name)
+        legacy = self._state_file(team, name)
+        broker = CollaborationBroker(self.pin, None, master_pin=self.master_pin, workspace_dir=workspace_dir)
+        if legacy.exists() and not (workspace_dir / "manifest.json").exists():
+            try:
+                data = json.loads(legacy.read_text(encoding="utf-8"))
+                broker.project = data.get("project") or broker._default_project()
+                broker.revision = int(data.get("revision", 0))
+                # Externalize inline images, write the real file tree + manifest.
+                broker._externalize_images(broker.project)
+                broker._persist_state()
+                legacy.rename(legacy.with_suffix(".json.bak"))
+                _log("WORKSPACE", f"Migrated {team}/{name} to directory storage")
+            except (OSError, ValueError, json.JSONDecodeError) as error:
+                _log("WORKSPACE", f"Migration failed for {team}/{name}: {error}")
+        return broker
+
     def _require_account(self, token: str) -> dict:
         identity = self.account_for_token(token)
         if identity is None:
@@ -1664,7 +1854,7 @@ class WorkspaceRegistry:
         with self.lock:
             broker = self.brokers.get(workspace_id)
             if broker is None:
-                broker = CollaborationBroker(self.pin, self._state_file(team, name), master_pin=self.master_pin)
+                broker = self._make_workspace_broker(team, name)
                 self.brokers[workspace_id] = broker
         session = broker._admit(identity["username"], "master")
         with self.lock:
@@ -1829,6 +2019,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_get_presence(parsed)
         if parsed.path == "/api/workspaces":
             return self._handle_list_workspaces(parsed)
+        if parsed.path == "/api/workspaces/asset":
+            return self._handle_asset(parsed)
         if parsed.path == "/api/events/stream":
             return self._handle_event_stream(parsed)
         return self._serve_static(parsed.path)
@@ -1907,6 +2099,29 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             self._write_json(HTTPStatus.OK, {"workspaces": self.registry.list_workspaces(token)})
         except PermissionError as error:
             self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+
+    def _handle_asset(self, parsed):
+        """Serve a directory-backed workspace's binary asset (image) by its
+        workspace-relative path, to a member of that workspace's session."""
+        try:
+            token = self._extract_token(parsed)
+            broker = self.registry.broker_for_token(token)
+            broker.authorize(token)
+            rel_path = parse_qs(parsed.query).get("path", [""])[0]
+            path = broker.resolve_asset(rel_path)
+        except PermissionError as error:
+            return self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+        if path is None:
+            return self._write_json(HTTPStatus.NOT_FOUND, {"message": "Asset not found"})
+        data = path.read_bytes()
+        content_type, _ = mimetypes.guess_type(str(path))
+        self.send_response(HTTPStatus.OK)
+        self._send_cors_headers()
+        self.send_header("Content-Type", content_type or "application/octet-stream")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(data)
 
     def _handle_create_workspace(self, parsed):
         try:
@@ -2402,6 +2617,30 @@ def run_selftest():
         assert " A" in final_content and " B" in final_content, f"OT convergence failed: {final_content!r}"
         persisted = json.loads(state_file.read_text(encoding="utf-8"))
         assert persisted["revision"] == 4
+
+        # --- directory-backed workspace: real files + externalized image asset ---
+        import base64 as _b64, tempfile as _tf, shutil as _sh
+        _dir = Path(_tf.mkdtemp()) / "WorkNotes"
+        _b = CollaborationBroker("2468", None, workspace_dir=_dir)
+        _png = "data:image/png;base64," + _b64.b64encode(bytes.fromhex(
+            "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+            "0000000d4944415478da6360000002000154a24f5f0000000049454e44ae426082")).decode()
+        _b._apply_operation({"type": "create-file", "parentPath": "", "name": "welcome.md", "content": "# Hi"})
+        _img_op = {"type": "create-file", "parentPath": "", "name": "logo.png", "content": _png}
+        _b._apply_operation(_img_op)
+        _b._persist_state()
+        assert (_dir / "welcome.md").read_text(encoding="utf-8") == "# Hi", "text not written as a real file"
+        assert (_dir / "logo.png").read_bytes()[:4] == b"\x89PNG", "image not written as real bytes"
+        assert _img_op["content"] == "", "image data URL not stripped from the broadcast op"
+        assert "data:image" not in (_dir / "manifest.json").read_text(encoding="utf-8"), "manifest still inlines images"
+        assert _b.resolve_asset("logo.png") == (_dir / "logo.png").resolve(), "asset path not resolvable"
+        assert _b.resolve_asset("../../etc/passwd") is None, "asset path traversal not blocked"
+        _b2 = CollaborationBroker("2468", None, workspace_dir=_dir)  # reload
+        _reload = {n["name"]: n for n in _b2.project["nodes"].values() if n.get("kind") == "file"}
+        assert _reload["welcome.md"]["content"] == "# Hi", "text not re-hydrated on load"
+        assert _reload["logo.png"]["content"] == "", "image should stay externalized on load"
+        _sh.rmtree(_dir.parent, ignore_errors=True)
+
         print("Backend self-test passed.")
     finally:
         server.shutdown()
