@@ -1,0 +1,15 @@
+{
+  "_comment": "Copy this file to server/whitelist.json (or set MDNOTES_WHITELIST) to ENABLE accounts mode. Passwords are plaintext by design; keep this file chmod 600. It is never served over HTTP (see the _serve_static denylist). Absent file => accounts mode disabled.",
+  "users": [
+    {
+      "username": "alice",
+      "password": "change-me",
+      "teams": ["red"]
+    },
+    {
+      "username": "bob",
+      "password": "change-me-too",
+      "teams": ["red", "blue"]
+    }
+  ]
+}

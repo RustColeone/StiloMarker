@@ -10,7 +10,7 @@ import { buildModuleMapSection, replaceOrAppendModuleMap } from "./services/mtre
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
 import { applyTheme, loadSettings, saveSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
-import { pingServer } from "./services/sync-service.js";
+import { loginToServer, pingServer } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { appendUrlDbEntry, formatUrlDbEntryBody, moveUrlDbEntry, moveUrlDbEntryBetweenFiles, parseUrlDb, parseUrlDbEntryBody, removeUrlDbEntry, serializeUrlDb, updateUrlDbEntry } from "./services/urldb-service.js";
 import { createZip, downloadBlob } from "./services/zip-service.js";
@@ -126,6 +126,12 @@ const elements = {
   displayNameInput: query("#display-name-input"),
   pingServerButton: query("#ping-server-button"),
   connectServerButton: query("#connect-server-button"),
+  accountLoginRow: query("#account-login-row"),
+  accountUsernameInput: query("#account-username-input"),
+  accountPasswordInput: query("#account-password-input"),
+  accountLoginButton: query("#account-login-button"),
+  accountLogoutButton: query("#account-logout-button"),
+  accountStatusText: query("#account-status-text"),
   serverStatusText: query("#server-status-text"),
   serverStatusPanel: query("#server-status-text")?.closest(".settings-status-panel"),
   acceptConnectionDialog: query("#accept-connection-dialog"),
@@ -221,7 +227,11 @@ const syncState = {
   revision: 0,
   displayName: null,
   clientId: null,
-  role: null
+  role: null,
+  // Accounts mode (state 3): whether the last-pinged server supports accounts,
+  // and the currently logged-in account (null when signed out).
+  accountsAvailable: false,
+  account: null // { token, username, teams: [...] }
 };
 
 // "private" = user's local workspace; "synced" = connected server workspace.
@@ -6164,11 +6174,15 @@ function updateStatus(project) {
   elements.projectNameLabel.textContent = project.name;
   elements.sourceStatusText.textContent = liveDirectory ? "Live directory" : "In-browser workspace";
   elements.browserStatusText.textContent = browserSupported ? "Chromium directory access available" : "Fallback import/export mode";
-  elements.serverStatusBarText.textContent = syncState.status === "connected"
-    ? `Connected r${syncState.revision}`
-    : syncState.status === "reachable"
-      ? "Server reachable"
-      : "Server offline";
+  elements.serverStatusBarText.textContent = syncState.account
+    ? (syncState.status === "connected"
+        ? `${syncState.account.username} · r${syncState.revision}`
+        : `Logged in as ${syncState.account.username}`)
+    : syncState.status === "connected"
+      ? `Connected r${syncState.revision}`
+      : syncState.status === "reachable"
+        ? "Server reachable"
+        : "Server offline";
   elements.serverStatusText.textContent = syncState.detail;
   elements.sessionDetailText.textContent = syncState.sessionId
     ? `Session ${syncState.sessionId} at revision ${syncState.revision}${syncState.displayName ? ` as ${syncState.displayName}` : ""}${syncState.role ? ` (${syncState.role})` : ""}.`
@@ -7539,17 +7553,89 @@ elements.pingServerButton.addEventListener("click", async () => {
     saveSettings(settings);
     syncState.status = "reachable";
     syncState.detail = typeof result === "string" ? result : (result.message || "Server responded to ping.");
+    // Capability discovery: reveal the account Login controls only when this
+    // server advertises accounts mode (state 3).
+    syncState.accountsAvailable = Boolean(result && typeof result === "object" && result.accounts);
     logDebug("response", "Server ping succeeded", syncState.detail);
     flashStatusPanel("success");
+    renderAccountControls();
     await refreshChatStatus({ silent: true });
     render(controller.getProject());
   } catch (error) {
     syncState.status = "offline";
     syncState.detail = error.message;
+    syncState.accountsAvailable = false;
     logDebug("response", "Server ping failed", error.message);
     flashStatusPanel("error");
+    renderAccountControls();
     await refreshChatStatus({ silent: true });
     render(controller.getProject());
+  }
+});
+
+// ── Account login (accounts mode / state 3) ─────────────────────────────────
+function renderAccountControls() {
+  const row = elements.accountLoginRow;
+  if (!row) return;
+  const loggedIn = Boolean(syncState.account);
+  // The block is only relevant once a pinged server advertises accounts, or
+  // while a session is already active.
+  row.hidden = !(syncState.accountsAvailable || loggedIn);
+  elements.accountLoginButton.hidden = loggedIn;
+  elements.accountLogoutButton.hidden = !loggedIn;
+  elements.accountUsernameInput.disabled = loggedIn;
+  elements.accountPasswordInput.disabled = loggedIn;
+  if (loggedIn) {
+    const teams = syncState.account.teams ?? [];
+    elements.accountStatusText.textContent = teams.length
+      ? `Logged in as ${syncState.account.username} · teams: ${teams.join(", ")}`
+      : `Logged in as ${syncState.account.username}`;
+  } else {
+    elements.accountStatusText.textContent = syncState.accountsAvailable
+      ? "This server supports accounts. Log in to access cloud workspaces."
+      : "";
+  }
+}
+
+async function handleAccountLogin() {
+  const username = elements.accountUsernameInput.value.trim();
+  const password = elements.accountPasswordInput.value;
+  if (!username) {
+    elements.accountStatusText.textContent = "Username is required.";
+    return;
+  }
+  try {
+    logDebug("action", "Account login requested", username);
+    const result = await loginToServer(settings.serverUrl, username, password);
+    syncState.account = { token: result.token, username: result.username, teams: result.teams ?? [] };
+    elements.accountPasswordInput.value = "";
+    logDebug("response", "Account login succeeded", `${result.username} teams=${(result.teams ?? []).join(",")}`);
+    flashStatusPanel("success");
+    renderAccountControls();
+    render(controller.getProject());
+  } catch (error) {
+    syncState.account = null;
+    elements.accountStatusText.textContent = error.message || "Login failed.";
+    logDebug("response", "Account login failed", error.message);
+    flashStatusPanel("error");
+    renderAccountControls();
+    render(controller.getProject());
+  }
+}
+
+function handleAccountLogout() {
+  syncState.account = null;
+  logDebug("action", "Account logged out");
+  renderAccountControls();
+  render(controller.getProject());
+}
+
+elements.accountLoginButton?.addEventListener("click", () => { void handleAccountLogin(); });
+elements.accountLogoutButton?.addEventListener("click", handleAccountLogout);
+elements.accountPasswordInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    void handleAccountLogin();
   }
 });
 

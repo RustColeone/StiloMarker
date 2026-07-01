@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# Accounts mode: the real whitelist holds plaintext credentials — never commit it.
+# (whitelist.example.json is the safe, committed template.)
+server/whitelist.json
+
+# Per-team cloud workspace storage (runtime data)
+data/

@@ -1461,11 +1461,148 @@ class CollaborationBroker:
             self._broadcast_presence(f"{display_name} left the session.")
 
 
+# Special team that holds today's single PIN session and any ephemeral
+# guest-hosted local projects. Its workspaces are never account-owned.
+DEFAULT_TEAM = "temp"
+DEFAULT_WORKSPACE_ID = f"{DEFAULT_TEAM}/default"
+
+
+class AccountStore:
+    """Whitelist of accounts loaded from a JSON file.
+
+    Passwords are PLAINTEXT by deployment choice (single trusted admin, behind
+    TLS, and the file is kept out of the web-served set — see the _serve_static
+    denylist). The file is hand-editable:
+
+        { "users": [ { "username": "alice", "password": "pw", "teams": ["red"] } ] }
+
+    When the file is absent, the accounts feature is simply disabled and the app
+    keeps working in PIN-only / local modes.
+    """
+
+    def __init__(self, path: Path | None):
+        self.path = path
+        self.users: dict[str, dict] = {}  # username -> {"password", "teams": [...]}
+        self._load()
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.users)
+
+    def _load(self) -> None:
+        if not self.path or not self.path.exists():
+            return
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as error:
+            _log("AUTH", f"Failed to read whitelist {self.path}: {error}")
+            return
+        for entry in data.get("users", []):
+            username = str(entry.get("username", "")).strip()
+            if not username:
+                continue
+            teams = [str(t).strip() for t in entry.get("teams", []) if str(t).strip()]
+            self.users[username] = {"password": str(entry.get("password", "")), "teams": teams}
+        _log("AUTH", f"Loaded {len(self.users)} account(s) from {self.path}")
+
+    def authenticate(self, username: str, password: str) -> dict | None:
+        user = self.users.get(username)
+        if user is None or not password or user["password"] != password:
+            return None
+        return {"username": username, "teams": list(user["teams"])}
+
+    def teams_for(self, username: str) -> list[str]:
+        return list(self.users.get(username, {}).get("teams", []))
+
+
+class WorkspaceRegistry:
+    """Owns one CollaborationBroker per workspace and maps session tokens to the
+    workspace that minted them, so every request can resolve the right broker.
+
+    Phase 0 keeps a single backward-compatible ``temp/default`` workspace that
+    loads the legacy state file and honours the legacy PIN, so existing sync
+    clients and the selftest behave exactly as before. Later phases add account
+    logins and additional (team) workspaces on top of the same structure.
+    """
+
+    def __init__(self, pin: str, legacy_state_file: Path, master_pin: str | None = None,
+                 accounts: "AccountStore | None" = None):
+        self.lock = threading.RLock()
+        self.pin = pin
+        self.master_pin = master_pin or pin
+        self.accounts = accounts or AccountStore(None)
+        self.brokers: dict[str, CollaborationBroker] = {}
+        self.token_workspace: dict[str, str] = {}
+        self.account_tokens: dict[str, str] = {}  # account token -> username
+        # Backward-compatible default workspace.
+        self.brokers[DEFAULT_WORKSPACE_ID] = CollaborationBroker(
+            pin, legacy_state_file, master_pin=self.master_pin
+        )
+
+    def login(self, username: str, password: str) -> dict:
+        """Authenticate an account and mint an *account* token (distinct from a
+        workspace session token). Used to list/open team workspaces later."""
+        identity = self.accounts.authenticate(username.strip(), password)
+        if identity is None:
+            _log("AUTH", f"Rejected login for {username!r}")
+            raise PermissionError("Invalid username or password")
+        token = secrets.token_urlsafe(24)
+        with self.lock:
+            self.account_tokens[token] = identity["username"]
+        _log("AUTH", f"{identity['username']} logged in", teams=identity["teams"])
+        return {"token": token, "username": identity["username"], "teams": identity["teams"]}
+
+    def account_for_token(self, token: str) -> dict | None:
+        with self.lock:
+            username = self.account_tokens.get(token)
+        if username is None:
+            return None
+        return {"username": username, "teams": self.accounts.teams_for(username)}
+
+    def logout(self, token: str) -> None:
+        with self.lock:
+            self.account_tokens.pop(token, None)
+
+    @property
+    def default_broker(self) -> CollaborationBroker:
+        return self.brokers[DEFAULT_WORKSPACE_ID]
+
+    def get_broker(self, workspace_id: str) -> CollaborationBroker | None:
+        with self.lock:
+            return self.brokers.get(workspace_id)
+
+    def connect(self, workspace_id: str | None, pin: str, display_name: str = ""):
+        """Guest-PIN connect, scoped to a workspace (defaults to temp/default)."""
+        workspace_id = workspace_id or DEFAULT_WORKSPACE_ID
+        broker = self.get_broker(workspace_id)
+        if broker is None:
+            raise PermissionError("Unknown workspace")
+        session = broker.connect(pin, display_name)
+        with self.lock:
+            self.token_workspace[session["token"]] = workspace_id
+        session["sessionId"] = workspace_id
+        session["workspace"] = workspace_id
+        return session
+
+    def broker_for_token(self, token: str) -> CollaborationBroker:
+        with self.lock:
+            workspace_id = self.token_workspace.get(token)
+        # Unknown token → route to the default broker, whose authorize() will
+        # raise the standard "invalid/expired token" error. (Every token minted
+        # through connect() is recorded, so this only hits genuinely bad tokens.)
+        broker = self.get_broker(workspace_id) if workspace_id else None
+        return broker or self.default_broker
+
+    def forget_token(self, token: str) -> None:
+        with self.lock:
+            self.token_workspace.pop(token, None)
+
+
 class MDNotesRequestHandler(BaseHTTPRequestHandler):
     server_version = "MDNotesServer/0.1"
 
-    def __init__(self, *args, broker: CollaborationBroker, static_root: Path, chat_proxy: ChatProxy, **kwargs):
-        self.broker = broker
+    def __init__(self, *args, registry: WorkspaceRegistry, static_root: Path, chat_proxy: ChatProxy, **kwargs):
+        self.registry = registry
         self.static_root = static_root
         self.chat_proxy = chat_proxy
         super().__init__(*args, **kwargs)
@@ -1490,7 +1627,12 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/api/ping":
-            return self._write_json(HTTPStatus.OK, {"message": "pong", "server": "mdnotes", "transport": "sse-text-ops"})
+            return self._write_json(HTTPStatus.OK, {
+                "message": "pong",
+                "server": "mdnotes",
+                "transport": "sse-text-ops",
+                "accounts": self.registry.accounts.enabled,  # capability flag for the Login UI
+            })
         if parsed.path == "/api/chat/status":
             return self._handle_chat_status()
         if parsed.path == "/api/chat/workspace":
@@ -1511,6 +1653,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_generate()
         if parsed.path == "/api/chat/workspace":
             return self._handle_post_chat_workspace(parsed)
+        if parsed.path == "/api/auth/login":
+            return self._handle_login()
         if parsed.path == "/api/session/connect":
             return self._handle_connect()
         if parsed.path == "/api/session/state":
@@ -1550,12 +1694,30 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             raise PermissionError("Missing session token")
         return token
 
+    def _handle_login(self):
+        try:
+            payload = self._read_json()
+            result = self.registry.login(str(payload.get("username", "")), str(payload.get("password", "")))
+            self._write_json(HTTPStatus.OK, result)
+            self._log_request(200, f"login user={result['username']!r} teams={result['teams']}")
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+            self._log_request(403, str(error))
+        except ValueError as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            self._log_request(400, str(error))
+
     def _handle_connect(self):
         try:
             payload = self._read_json()
-            session = self.broker.connect(str(payload.get("pin", "")), str(payload.get("displayName", "")))
+            workspace = payload.get("workspace") or None
+            session = self.registry.connect(
+                workspace,
+                str(payload.get("pin", "")),
+                str(payload.get("displayName", "")),
+            )
             self._write_json(HTTPStatus.OK, session)
-            self._log_request(200, f"role={session['role']}  name={session['displayName']!r}")
+            self._log_request(200, f"role={session['role']}  name={session['displayName']!r}  ws={session['workspace']}")
         except PermissionError as error:
             self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
             self._log_request(403, str(error))
@@ -1693,7 +1855,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
     def _handle_get_chat_workspace(self, parsed):
         try:
             token = self._extract_token(parsed)
-            workspace = self.broker.get_chat_workspace(token)
+            workspace = self.registry.broker_for_token(token).get_chat_workspace(token)
             self._write_json(HTTPStatus.OK, workspace)
             self._log_request(200, "chat workspace read")
         except PermissionError as error:
@@ -1704,7 +1866,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         try:
             token = self._extract_token(parsed)
             payload = self._read_json()
-            self.broker.set_chat_workspace(token, payload)
+            self.registry.broker_for_token(token).set_chat_workspace(token, payload)
             self._write_json(HTTPStatus.OK, {"message": "chat workspace saved"})
             self._log_request(200, "chat workspace updated")
         except PermissionError as error:
@@ -1717,15 +1879,16 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
     def _handle_get_state(self, parsed):
         try:
             token = self._extract_token(parsed)
-            self._write_json(HTTPStatus.OK, self.broker.get_state(token))
+            self._write_json(HTTPStatus.OK, self.registry.broker_for_token(token).get_state(token))
         except PermissionError as error:
             self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
 
     def _handle_get_presence(self, parsed):
         try:
             token = self._extract_token(parsed)
-            self.broker.authorize(token)
-            self._write_json(HTTPStatus.OK, {"presence": self.broker.get_presence(), "revision": self.broker.revision})
+            broker = self.registry.broker_for_token(token)
+            broker.authorize(token)
+            self._write_json(HTTPStatus.OK, {"presence": broker.get_presence(), "revision": broker.revision})
         except PermissionError as error:
             self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
 
@@ -1736,7 +1899,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             project = payload.get("project")
             if not isinstance(project, dict):
                 raise ValueError("Project payload is required")
-            event = self.broker.set_state(token, project)
+            event = self.registry.broker_for_token(token).set_state(token, project)
             self._write_json(HTTPStatus.OK, {"message": "state stored", "revision": event["revision"]})
             self._log_request(200, f"revision={event['revision']}")
         except PermissionError as error:
@@ -1754,7 +1917,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             file_id = str(payload.get("fileId", ""))
             sel_start = int(payload.get("selStart", 0))
             sel_end = int(payload.get("selEnd", 0))
-            self.broker.broadcast_cursor(token, file_id, sel_start, sel_end)
+            self.registry.broker_for_token(token).broadcast_cursor(token, file_id, sel_start, sel_end)
             self._write_json(HTTPStatus.OK, {"message": "cursor broadcast"})
         except PermissionError as error:
             self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
@@ -1768,7 +1931,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             operation = payload.get("operation")
             if not isinstance(operation, dict):
                 raise ValueError("Operation payload is required")
-            event = self.broker.apply_operation(token, operation)
+            event = self.registry.broker_for_token(token).apply_operation(token, operation)
             self._write_json(HTTPStatus.OK, {"message": "operation stored", "revision": event["revision"]})
         except PermissionError as error:
             self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
@@ -1780,14 +1943,15 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
     def _handle_event_stream(self, parsed):
         try:
             token = self._extract_token(parsed)
-            events = self.broker.subscribe(token)
+            broker = self.registry.broker_for_token(token)
+            events = broker.subscribe(token)
         except PermissionError as error:
             self._log_request(403, str(error))
             return self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
 
-        with self.broker.lock:
-            display_name = self.broker.presence.get(token, {}).get("displayName", "?")
-            sub_count = len(self.broker.subscribers)
+        with broker.lock:
+            display_name = broker.presence.get(token, {}).get("displayName", "?")
+            sub_count = len(broker.subscribers)
 
         self.send_response(HTTPStatus.OK)
         self._send_cors_headers()
@@ -1824,7 +1988,24 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
             _log("SSE", f"Stream closed  {self.client_address[0]}", client=display_name)
         finally:
-            self.broker.unsubscribe(token)
+            broker.unsubscribe(token)
+
+    # Server-side files that live under the repo (== static root) but must never
+    # be handed out over HTTP: collaboration state, account whitelist, secrets,
+    # the Python source, the virtualenv and any dotfiles. Matched on the first
+    # path segment or the basename so both dirs and specific files are covered.
+    _STATIC_DENY_SEGMENTS = frozenset({"server", "data", "venv", ".git", "__pycache__"})
+    _STATIC_DENY_SUFFIXES = (".env", ".py", ".pyc")
+    _STATIC_DENY_NAMES = frozenset({"whitelist.json", "session-state.json", "test-session-state.json"})
+
+    def _is_denied_static(self, safe_path: str) -> bool:
+        if not safe_path:
+            return False
+        segments = safe_path.split("/")
+        if segments[0] in self._STATIC_DENY_SEGMENTS or any(seg.startswith(".") for seg in segments):
+            return True
+        base = segments[-1]
+        return base in self._STATIC_DENY_NAMES or base.endswith(self._STATIC_DENY_SUFFIXES)
 
     def _serve_static(self, request_path: str):
         relative = request_path or "/"
@@ -1832,6 +2013,10 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             relative = "/index.html"
 
         safe_path = posixpath.normpath(relative).lstrip("/")
+        # Block sensitive server-side files before touching the filesystem. Fall
+        # back to index.html (SPA behaviour) rather than confirming existence.
+        if self._is_denied_static(safe_path):
+            safe_path = "index.html"
         candidate = (self.static_root / safe_path).resolve()
         if not str(candidate).startswith(str(self.static_root.resolve())) or not candidate.exists() or candidate.is_dir():
             candidate = self.static_root / "index.html"
@@ -1845,11 +2030,14 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
 
-def build_server(host: str, port: int, pin: str, static_root: Path, state_file: Path, master_pin: str | None = None, chat_proxy: ChatProxy | None = None):
-    broker = CollaborationBroker(pin, state_file, master_pin=master_pin)
+def build_server(host: str, port: int, pin: str, static_root: Path, state_file: Path, master_pin: str | None = None, chat_proxy: ChatProxy | None = None, whitelist_file: Path | None = None):
+    accounts = AccountStore(whitelist_file)
+    registry = WorkspaceRegistry(pin, state_file, master_pin=master_pin, accounts=accounts)
     chat_proxy = chat_proxy or ChatProxy()
-    chat_proxy.broker = broker  # wire broker so chat() can read/snapshot project (subtask 1.2)
-    handler = partial(MDNotesRequestHandler, broker=broker, static_root=static_root, chat_proxy=chat_proxy)
+    # Chat context falls back to the default workspace's project when the client
+    # doesn't supply one — same behaviour as the pre-registry single broker.
+    chat_proxy.broker = registry.default_broker
+    handler = partial(MDNotesRequestHandler, registry=registry, static_root=static_root, chat_proxy=chat_proxy)
 
     class QuietThreadingHTTPServer(ThreadingHTTPServer):
         """Suppress noisy client-disconnect tracebacks on Windows."""
@@ -1985,6 +2173,8 @@ def main():
                         help="Secret PIN for the session master (project owner). Defaults to --pin.")
     parser.add_argument("--static-dir", default=str(Path(__file__).resolve().parents[1]))
     parser.add_argument("--state-file", default=str(Path(__file__).resolve().parent / "session-state.json"))
+    parser.add_argument("--whitelist", default=os.environ.get("MDNOTES_WHITELIST", str(Path(__file__).resolve().parent / "whitelist.json")),
+                        help="Account whitelist JSON (accounts mode). Kept out of the web-served set. Absent ⇒ accounts disabled.")
     parser.add_argument("--selftest", action="store_true")
     args = parser.parse_args()
 
@@ -1994,12 +2184,15 @@ def main():
 
     static_root = Path(args.static_dir).resolve()
     state_file = Path(args.state_file).resolve()
+    whitelist_file = Path(args.whitelist).resolve() if args.whitelist else None
     chat_proxy = ChatProxy()
-    server = build_server(args.host, args.port, args.pin, static_root, state_file, master_pin=args.master_pin, chat_proxy=chat_proxy)
+    server = build_server(args.host, args.port, args.pin, static_root, state_file, master_pin=args.master_pin, chat_proxy=chat_proxy, whitelist_file=whitelist_file)
+    accounts_enabled = whitelist_file is not None and whitelist_file.exists()
     print(f"MDNotes collaboration server running at http://{args.host}:{args.port}")
     print(f"Serving static files from {static_root}")
     print(f"Persisting collaborative state to {state_file}")
     print("Configured transport: HTTP + SSE file-operation sync")
+    print(f"Accounts mode: {'enabled — ' + str(whitelist_file) if accounts_enabled else 'disabled (no whitelist file)'}")
     print(f"Master PIN configured: {'yes (separate)' if args.master_pin and args.master_pin != args.pin else 'same as session PIN'}")
     print(f"Chat proxy configured: {'yes' if chat_proxy.is_configured() else 'no'}")
     if chat_proxy.is_configured():
