@@ -360,6 +360,26 @@
             <div class="settings-status-panel">
               <p id="server-status-text" class="subtle-label">No server checked yet.</p>
             </div>
+
+            <!-- Account login — only shown when the pinged server reports it
+                 supports accounts (state 3). Uses the Server URL above. -->
+            <div id="account-login-row" class="account-login" hidden>
+              <h4>Account login</h4>
+              <label>
+                Username
+                <input id="account-username-input" type="text" autocomplete="username" placeholder="Account username">
+              </label>
+              <label>
+                Password
+                <input id="account-password-input" type="password" autocomplete="current-password" placeholder="Account password">
+              </label>
+              <div class="settings-actions-row">
+                <button id="account-login-button" type="button">Log In</button>
+                <button id="account-logout-button" type="button" hidden>Log Out</button>
+              </div>
+              <p id="account-status-text" class="subtle-label"></p>
+            </div>
+
             <div id="presence-list" class="presence-list"></div>
           </section>
         </div>

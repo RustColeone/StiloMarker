@@ -1902,6 +1902,28 @@ p {
   animation: flash-border-error 1.4s ease-out forwards;
 }
 
+/* Account login block (accounts mode / state 3) — visually set off from the
+   PIN connect controls above it. */
+.account-login {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.account-login[hidden] {
+  display: none;
+}
+
+.account-login h4 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, var(--subtle, #888));
+}
+
 .presence-list {
   min-height: 40px;
   padding: 8px;

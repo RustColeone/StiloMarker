@@ -72,6 +72,28 @@ async function connectToServer(serverUrl, pin, displayName = "") {
   return parseResponse(response);
 }
 
+async function loginToServer(serverUrl, username, password) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const trimmedName = String(username ?? "").trim();
+  if (!trimmedName) {
+    throw new Error("Username is required.");
+  }
+  const response = await fetch(`${baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json, text/plain;q=0.9"
+    },
+    body: JSON.stringify({ username: trimmedName, password: String(password ?? "") })
+  });
+
+  if (!response.ok) {
+    await throwForResponse("Login failed.", response);
+  }
+
+  return parseResponse(response);
+}
+
 function sanitizeProjectForSync(project) {
   const syncProject = structuredClone(project);
   delete syncProject.handles;
@@ -156,6 +178,7 @@ function openEventStream(serverUrl, token, onEvent, onError) {
 export {
   connectToServer,
   fetchSessionState,
+  loginToServer,
   normalizeServerUrl,
   openEventStream,
   pingServer,
