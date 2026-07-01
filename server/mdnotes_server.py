@@ -844,7 +844,7 @@ class ChatProxy:
 
 
 class CollaborationBroker:
-    def __init__(self, pin: str, state_file: Path, master_pin: str | None = None):
+    def __init__(self, pin: str, state_file: Path | None, master_pin: str | None = None):
         self.pin = pin
         # master_pin grants project-replace authority; defaults to same as pin so
         # single-pin deployments are backward-compatible.
@@ -895,7 +895,8 @@ class CollaborationBroker:
         }
 
     def _load_state(self):
-        if not self.state_file.exists():
+        # state_file None => ephemeral, in-memory only (guest-hosted local session).
+        if self.state_file is None or not self.state_file.exists():
             self.project = self._default_project()
             self.revision = 0
             return
@@ -904,6 +905,8 @@ class CollaborationBroker:
         self.revision = int(data.get("revision", 0))
 
     def _persist_state(self):
+        if self.state_file is None:
+            return  # ephemeral session — never touch disk
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         payload = {"project": self.project, "revision": self.revision}
         self.state_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -1543,6 +1546,9 @@ class WorkspaceRegistry:
         self.brokers: dict[str, CollaborationBroker] = {}
         self.token_workspace: dict[str, str] = {}
         self.account_tokens: dict[str, str] = {}  # account token -> username
+        # Ephemeral guest-hosted sessions: workspace_id -> {ownerToken, guestPin}.
+        # In-memory only; evicted when the hosting master disconnects.
+        self.ephemeral: dict[str, dict] = {}
         # Backward-compatible default workspace.
         self.brokers[DEFAULT_WORKSPACE_ID] = CollaborationBroker(
             pin, legacy_state_file, master_pin=self.master_pin
@@ -1699,18 +1705,69 @@ class WorkspaceRegistry:
         with self.lock:
             return self.brokers.get(workspace_id)
 
-    def connect(self, workspace_id: str | None, pin: str, display_name: str = ""):
-        """Guest-PIN connect, scoped to a workspace (defaults to temp/default)."""
-        workspace_id = workspace_id or DEFAULT_WORKSPACE_ID
-        broker = self.get_broker(workspace_id)
-        if broker is None:
-            raise PermissionError("Unknown workspace")
-        session = broker.connect(pin, display_name)
+    def _bind_session(self, workspace_id: str, session: dict) -> dict:
         with self.lock:
             self.token_workspace[session["token"]] = workspace_id
         session["sessionId"] = workspace_id
         session["workspace"] = workspace_id
         return session
+
+    def connect(self, workspace_id: str | None, pin: str, display_name: str = ""):
+        """Guest-PIN connect. With an explicit workspace, joins it; otherwise the
+        PIN is resolved — first against the default workspace, then against any
+        ephemeral guest-hosted session — so a guest only needs the shared PIN."""
+        if workspace_id:
+            broker = self.get_broker(workspace_id)
+            if broker is None:
+                raise PermissionError("Unknown workspace")
+            return self._bind_session(workspace_id, broker.connect(pin, display_name))
+        # No workspace given: try the legacy default session first.
+        try:
+            return self._bind_session(DEFAULT_WORKSPACE_ID, self.default_broker.connect(pin, display_name))
+        except PermissionError:
+            pass
+        # Then any ephemeral host whose guest PIN matches.
+        with self.lock:
+            match = next((wid for wid, meta in self.ephemeral.items() if meta["guestPin"] == pin), None)
+        if match is None:
+            raise PermissionError("Invalid PIN")
+        broker = self.get_broker(match)
+        return self._bind_session(match, broker.connect(pin, display_name))
+
+    def host_ephemeral(self, display_name: str) -> dict:
+        """Create an in-memory guest-hosted session for a local project. Returns a
+        master session + the generated guest PIN. Evicted when the master leaves."""
+        guest_pin = f"{secrets.randbelow(900000) + 100000}"  # 6-digit shareable PIN
+        workspace_id = f"{DEFAULT_TEAM}/host-{uuid.uuid4().hex[:8]}"
+        broker = CollaborationBroker(guest_pin, None, master_pin=secrets.token_urlsafe(16))
+        with self.lock:
+            self.brokers[workspace_id] = broker
+        session = broker._admit(display_name, "master")
+        with self.lock:
+            self.ephemeral[workspace_id] = {"ownerToken": session["token"], "guestPin": guest_pin}
+        self._bind_session(workspace_id, session)
+        session["guestPin"] = guest_pin
+        _log("HOST", f"{session['displayName']} hosting ephemeral {workspace_id}", guestPin=guest_pin)
+        return session
+
+    def on_disconnect(self, token: str) -> None:
+        """Called when a session's SSE stream closes. If the departing token owns
+        an ephemeral workspace, evict it (in-memory state discarded)."""
+        with self.lock:
+            workspace_id = self.token_workspace.get(token)
+            meta = self.ephemeral.get(workspace_id) if workspace_id else None
+            is_owner = bool(meta and meta.get("ownerToken") == token)
+        if is_owner:
+            self._evict_ephemeral(workspace_id)
+
+    def _evict_ephemeral(self, workspace_id: str) -> None:
+        with self.lock:
+            self.ephemeral.pop(workspace_id, None)
+            self.brokers.pop(workspace_id, None)
+            stale = [tok for tok, wid in self.token_workspace.items() if wid == workspace_id]
+            for tok in stale:
+                self.token_workspace.pop(tok, None)
+        _log("HOST", f"Evicted ephemeral {workspace_id} (master left)")
 
     def broker_for_token(self, token: str) -> CollaborationBroker:
         with self.lock:
@@ -1789,6 +1846,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_create_workspace(parsed)
         if parsed.path == "/api/workspaces/open":
             return self._handle_open_workspace(parsed)
+        if parsed.path == "/api/session/host":
+            return self._handle_host()
         if parsed.path == "/api/session/connect":
             return self._handle_connect()
         if parsed.path == "/api/session/state":
@@ -1877,6 +1936,16 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         except PermissionError as error:
             self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
             self._log_request(403, str(error))
+        except ValueError as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            self._log_request(400, str(error))
+
+    def _handle_host(self):
+        try:
+            payload = self._read_json()
+            session = self.registry.host_ephemeral(str(payload.get("displayName", "")))
+            self._write_json(HTTPStatus.OK, session)
+            self._log_request(200, f"host {session['workspace']} pin={session['guestPin']}")
         except ValueError as error:
             self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
             self._log_request(400, str(error))
@@ -2163,6 +2232,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             _log("SSE", f"Stream closed  {self.client_address[0]}", client=display_name)
         finally:
             broker.unsubscribe(token)
+            # Evict an ephemeral guest-hosted session once its master disconnects.
+            self.registry.on_disconnect(token)
 
     # Server-side files that live under the repo (== static root) but must never
     # be handed out over HTTP: collaboration state, account whitelist, secrets,

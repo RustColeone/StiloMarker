@@ -396,6 +396,20 @@
               </div>
             </div>
 
+            <!-- Share the CURRENT local project with others. "No team" hosts an
+                 ephemeral guest session (a shareable PIN, discarded when you
+                 leave); a team target publishes it as a persistent workspace. -->
+            <div class="collab-hosting">
+              <h4>Share this workspace</h4>
+              <div class="settings-actions-row">
+                <select id="host-team-select" aria-label="Share target">
+                  <option value="">No team (temporary)</option>
+                </select>
+                <button id="host-button" type="button">Share</button>
+              </div>
+              <p id="host-pin-text" class="subtle-label"></p>
+            </div>
+
             <div id="presence-list" class="presence-list"></div>
           </section>
         </div>

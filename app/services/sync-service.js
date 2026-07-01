@@ -120,6 +120,19 @@ async function createWorkspace(serverUrl, accountToken, team, name, shareTeam = 
   return parseResponse(response);
 }
 
+async function hostSession(serverUrl, displayName) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const response = await fetch(`${baseUrl}/api/session/host`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ displayName: String(displayName ?? "").trim() })
+  });
+  if (!response.ok) {
+    await throwForResponse("Could not start hosting.", response);
+  }
+  return parseResponse(response);
+}
+
 async function openWorkspaceSession(serverUrl, accountToken, team, name) {
   const baseUrl = normalizeServerUrl(serverUrl);
   const response = await fetch(`${baseUrl}/api/workspaces/open?token=${encodeURIComponent(accountToken)}`, {
@@ -218,6 +231,7 @@ export {
   connectToServer,
   createWorkspace,
   fetchSessionState,
+  hostSession,
   listWorkspaces,
   loginToServer,
   normalizeServerUrl,
