@@ -138,6 +138,7 @@ const elements = {
   workspaceNameInput: query("#workspace-name-input"),
   workspaceShareTeam: query("#workspace-share-team"),
   workspaceCreateButton: query("#workspace-create-button"),
+  collabHosting: query("#collab-hosting"),
   hostTeamSelect: query("#host-team-select"),
   hostButton: query("#host-button"),
   hostPinText: query("#host-pin-text"),
@@ -240,6 +241,7 @@ const syncState = {
   // Accounts mode (state 3): whether the last-pinged server supports accounts,
   // and the currently logged-in account (null when signed out).
   accountsAvailable: false,
+  hostingAvailable: false,
   account: null // { token, username, teams: [...] }
 };
 
@@ -7565,6 +7567,7 @@ elements.pingServerButton.addEventListener("click", async () => {
     // Capability discovery: reveal the account Login controls only when this
     // server advertises accounts mode (state 3).
     syncState.accountsAvailable = Boolean(result && typeof result === "object" && result.accounts);
+    syncState.hostingAvailable = Boolean(result && typeof result === "object" && result.hosting);
     logDebug("response", "Server ping succeeded", syncState.detail);
     flashStatusPanel("success");
     renderAccountControls();
@@ -7574,6 +7577,7 @@ elements.pingServerButton.addEventListener("click", async () => {
     syncState.status = "offline";
     syncState.detail = error.message;
     syncState.accountsAvailable = false;
+    syncState.hostingAvailable = false;
     logDebug("response", "Server ping failed", error.message);
     flashStatusPanel("error");
     renderAccountControls();
@@ -7623,6 +7627,12 @@ function renderAccountControls() {
 // logged-in accounts additionally get their teams as persistent publish targets.
 function renderHostTargets() {
   if (!elements.hostTeamSelect) return;
+  // Only surface hosting once a server advertising it has been pinged (or while
+  // a host session is live), so the button can never 404 an older backend.
+  if (elements.collabHosting) {
+    const hosting = collaboration.isConnected() && workspaceMode === "synced";
+    elements.collabHosting.hidden = !(syncState.hostingAvailable || hosting);
+  }
   const previous = elements.hostTeamSelect.value;
   const options = [["", "No team (temporary)"]];
   for (const team of (syncState.account?.teams ?? [])) {
