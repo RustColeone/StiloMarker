@@ -10,7 +10,7 @@ import { buildModuleMapSection, replaceOrAppendModuleMap } from "./services/mtre
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
 import { applyTheme, loadSettings, saveSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
-import { createWorkspace, listWorkspaces, loginToServer, pingServer } from "./services/sync-service.js";
+import { createWorkspace, listWorkspaces, loginToServer, normalizeServerUrl, pingServer } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { appendUrlDbEntry, formatUrlDbEntryBody, moveUrlDbEntry, moveUrlDbEntryBetweenFiles, parseUrlDb, parseUrlDbEntryBody, removeUrlDbEntry, serializeUrlDb, updateUrlDbEntry } from "./services/urldb-service.js";
 import { createZip, downloadBlob } from "./services/zip-service.js";
@@ -106,6 +106,8 @@ const elements = {
   bookmarkEntrySubmitButton: query("#bookmark-entry-submit-button"),
   settingsButton: query("#settings-button"),
   settingsDialog: query("#settings-dialog"),
+  settingsTabStrip: query("#settings-tab-strip"),
+  accountLockedNote: query("#account-locked-note"),
   settingsMenuButton: query("#settings-menu-button"),
   settingsMenu: query("#settings-menu"),
   openSettingsMenuButton: query("#open-settings-menu-button"),
@@ -2635,6 +2637,7 @@ elements.themeSelect.value = settings.theme;
 elements.serverUrlInput.value = settings.serverUrl;
 elements.serverPinInput.value = settings.serverPin;
 elements.displayNameInput.value = settings.displayName;
+if (elements.accountUsernameInput) elements.accountUsernameInput.value = settings.accountUsername ?? "";
 elements.explorerSelect.value = settings.explorer;
 elements.previewSelect.value = settings.preview;
 elements.wordWrapSelect.value = settings.wordWrap ? "on" : "off";
@@ -7412,12 +7415,12 @@ elements.chatInput.addEventListener("input", () => {
 
 elements.settingsButton.addEventListener("click", () => {
   logDebug("action", "Settings dialog opened");
-  elements.settingsDialog.showModal();
+  openSettingsDialog("appearance");
 });
 
 elements.openSettingsMenuButton.addEventListener("click", () => {
   logDebug("action", "Settings dialog opened from menu");
-  elements.settingsDialog.showModal();
+  openSettingsDialog("appearance");
 });
 
 // Status-bar footer items double as shortcuts to their related menus/panels.
@@ -7434,12 +7437,36 @@ elements.statusBrowserItem.addEventListener("click", () => {
     "Browser Support"
   );
 });
-elements.statusServerItem.addEventListener("click", () => {
-  logDebug("action", "Status bar: open collaboration settings");
+// ── Settings dialog tabs ────────────────────────────────────────────────────
+function switchSettingsTab(tab) {
+  const strip = elements.settingsTabStrip;
+  if (!strip) return;
+  strip.querySelectorAll(".settings-tab").forEach((button) => {
+    const active = button.dataset.tab === tab;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  elements.settingsDialog.querySelectorAll(".settings-tab-panel").forEach((panel) => {
+    panel.hidden = panel.dataset.tabPanel !== tab;
+  });
+}
+
+function openSettingsDialog(tab = "appearance") {
   if (!elements.settingsDialog.open) {
     elements.settingsDialog.showModal();
   }
-  elements.serverUrlInput?.focus();
+  switchSettingsTab(tab);
+}
+
+elements.settingsTabStrip?.querySelectorAll(".settings-tab").forEach((button) => {
+  button.addEventListener("click", () => switchSettingsTab(button.dataset.tab));
+});
+
+elements.statusServerItem.addEventListener("click", () => {
+  logDebug("action", "Status bar: open collaboration settings");
+  openSettingsDialog("collaboration");
+  // Clicking the server footer immediately checks the configured server.
+  void pingCurrentServer();
 });
 elements.statusPresenceItem.addEventListener("click", () => {
   // The session/presence panel lives in the explorer sidebar — reveal it.
@@ -7556,35 +7583,43 @@ elements.autoReconnectInput?.addEventListener("change", (event) => {
   logDebug("action", "Auto-reconnect setting changed", settings.autoReconnect ? "on" : "off");
 });
 
-elements.pingServerButton.addEventListener("click", async () => {
+async function pingCurrentServer({ silent = false } = {}) {
   try {
     logDebug("action", "Server ping requested", elements.serverUrlInput.value.trim());
     const result = await pingServer(elements.serverUrlInput.value);
     settings.serverUrl = elements.serverUrlInput.value.trim();
     saveSettings(settings);
-    syncState.status = "reachable";
-    syncState.detail = typeof result === "string" ? result : (result.message || "Server responded to ping.");
-    // Capability discovery: reveal the account Login controls only when this
-    // server advertises accounts mode (state 3).
+    syncState.status = syncState.status === "connected" ? "connected" : "reachable";
+    if (!silent) {
+      syncState.detail = typeof result === "string" ? result : (result.message || "Server responded to ping.");
+    }
+    // Capability discovery: reveal the account Login / Share controls only when
+    // this server advertises them (state 3).
     syncState.accountsAvailable = Boolean(result && typeof result === "object" && result.accounts);
     syncState.hostingAvailable = Boolean(result && typeof result === "object" && result.hosting);
     logDebug("response", "Server ping succeeded", syncState.detail);
-    flashStatusPanel("success");
+    if (!silent) flashStatusPanel("success");
     renderAccountControls();
     await refreshChatStatus({ silent: true });
     render(controller.getProject());
+    return result;
   } catch (error) {
-    syncState.status = "offline";
-    syncState.detail = error.message;
+    if (syncState.status !== "connected") {
+      syncState.status = "offline";
+      syncState.detail = error.message;
+    }
     syncState.accountsAvailable = false;
     syncState.hostingAvailable = false;
     logDebug("response", "Server ping failed", error.message);
-    flashStatusPanel("error");
+    if (!silent) flashStatusPanel("error");
     renderAccountControls();
     await refreshChatStatus({ silent: true });
     render(controller.getProject());
+    return null;
   }
-});
+}
+
+elements.pingServerButton.addEventListener("click", () => { void pingCurrentServer(); });
 
 // ── Account login (accounts mode / state 3) ─────────────────────────────────
 function renderAccountControls() {
@@ -7594,6 +7629,9 @@ function renderAccountControls() {
   // The block is only relevant once a pinged server advertises accounts, or
   // while a session is already active.
   row.hidden = !(syncState.accountsAvailable || loggedIn);
+  if (elements.accountLockedNote) {
+    elements.accountLockedNote.hidden = syncState.accountsAvailable || loggedIn;
+  }
   elements.accountLoginButton.hidden = loggedIn;
   elements.accountLogoutButton.hidden = !loggedIn;
   elements.accountUsernameInput.disabled = loggedIn;
@@ -7737,6 +7775,8 @@ async function handleOpenWorkspace(team, name) {
     workspaceMode = "synced";
     await collaboration.openWorkspace(settings.serverUrl, syncState.account.token, team, name);
     settings.wasConnected = false; // cloud opens are account-driven, not PIN auto-reconnect
+    settings.lastWorkspace = { team, name }; // reopened on next boot
+    saveSettings(settings);
     logDebug("action", "Opened cloud workspace", `${team}/${name}`);
     await refreshWorkspaceList();
     render(controller.getProject());
@@ -7773,6 +7813,26 @@ async function handleCreateWorkspace() {
   }
 }
 
+async function performLogin(username, password, { silent = false } = {}) {
+  const result = await loginToServer(settings.serverUrl, username, password);
+  syncState.account = { token: result.token, username: result.username, teams: result.teams ?? [] };
+  // Remember creds + mark this (server, username) as a proven login so boot can
+  // auto-restore it. Also default the collaborator display name to the username.
+  settings.accountUsername = result.username;
+  settings.accountPassword = password;
+  settings.accountSuccess = { ...settings.accountSuccess, [normalizeServerUrl(settings.serverUrl)]: result.username };
+  if (!settings.displayName) {
+    settings.displayName = result.username;
+    if (elements.displayNameInput) elements.displayNameInput.value = result.username;
+  }
+  saveSettings(settings);
+  logDebug("response", "Account login succeeded", `${result.username} teams=${(result.teams ?? []).join(",")}`);
+  if (!silent) flashStatusPanel("success");
+  renderAccountControls();
+  await refreshWorkspaceList();
+  render(controller.getProject());
+}
+
 async function handleAccountLogin() {
   const username = elements.accountUsernameInput.value.trim();
   const password = elements.accountPasswordInput.value;
@@ -7782,14 +7842,8 @@ async function handleAccountLogin() {
   }
   try {
     logDebug("action", "Account login requested", username);
-    const result = await loginToServer(settings.serverUrl, username, password);
-    syncState.account = { token: result.token, username: result.username, teams: result.teams ?? [] };
+    await performLogin(username, password);
     elements.accountPasswordInput.value = "";
-    logDebug("response", "Account login succeeded", `${result.username} teams=${(result.teams ?? []).join(",")}`);
-    flashStatusPanel("success");
-    renderAccountControls();
-    await refreshWorkspaceList();
-    render(controller.getProject());
   } catch (error) {
     syncState.account = null;
     elements.accountStatusText.textContent = error.message || "Login failed.";
@@ -7807,6 +7861,13 @@ function handleAccountLogout() {
     switchWorkspaceMode?.("private");
   }
   syncState.account = null;
+  // Explicit logout clears the proven-login record + stored password for this
+  // server so it won't silently auto-login again (username stays for autofill).
+  const { [normalizeServerUrl(settings.serverUrl)]: _dropped, ...rest } = settings.accountSuccess ?? {};
+  settings.accountSuccess = rest;
+  settings.accountPassword = "";
+  settings.lastWorkspace = null;
+  saveSettings(settings);
   elements.workspaceList?.replaceChildren();
   logDebug("action", "Account logged out");
   renderAccountControls();
@@ -7920,12 +7981,47 @@ window.addEventListener("beforeunload", (event) => {
 registerOfflineShell();
 void refreshChatStatus({ silent: true });
 
-// Restore the previous session: if the user was connected last time and saved a
-// PIN, reconnect automatically (silently, since they already consented before).
-if (settings.autoReconnect && settings.wasConnected && settings.serverPin) {
-  logDebug("action", "Auto-reconnect on startup", settings.serverUrl || "(same origin)");
-  establishConnection({ auto: true }).catch((error) => {
-    logDebug("response", "Startup auto-reconnect failed", error.message);
-    scheduleReconnect();
-  });
+// Restore the previous session on boot so a refresh isn't a fresh start:
+//   1. Ping the stored server (or same-origin) to learn its capabilities.
+//   2. Auto-login the account — but only to a server+username that has
+//      succeeded before — then reopen the last cloud workspace.
+//   3. Auto-reconnect a PIN session if one was active last time.
+async function restoreSessionOnBoot() {
+  const ping = await pingCurrentServer({ silent: true });
+  if (ping) {
+    const serverKey = normalizeServerUrl(settings.serverUrl);
+    const provenUser = settings.accountSuccess?.[serverKey];
+    if (
+      syncState.accountsAvailable &&
+      provenUser &&
+      provenUser === settings.accountUsername &&
+      settings.accountPassword
+    ) {
+      try {
+        await performLogin(settings.accountUsername, settings.accountPassword, { silent: true });
+        const last = settings.lastWorkspace;
+        if (last?.team && last?.name && syncState.account) {
+          await handleOpenWorkspace(last.team, last.name);
+        }
+      } catch (error) {
+        logDebug("response", "Startup auto-login failed", error.message);
+      }
+    }
+  }
+  // A PIN guest session takes over the collaboration connection; only auto-join
+  // one if we aren't already in a cloud workspace from the account restore.
+  if (
+    settings.autoReconnect && settings.wasConnected && settings.serverPin &&
+    !(collaboration.isConnected() && workspaceMode === "synced")
+  ) {
+    logDebug("action", "Auto-reconnect on startup", settings.serverUrl || "(same origin)");
+    try {
+      await establishConnection({ auto: true });
+    } catch (error) {
+      logDebug("response", "Startup auto-reconnect failed", error.message);
+      scheduleReconnect();
+    }
+  }
 }
+
+void restoreSessionOnBoot();
