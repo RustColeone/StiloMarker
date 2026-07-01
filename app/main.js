@@ -146,6 +146,8 @@ const elements = {
   hostPinText: query("#host-pin-text"),
   serverStatusText: query("#server-status-text"),
   serverStatusPanel: query("#server-status-text")?.closest(".settings-status-panel"),
+  accountSection: query("#account-login-row")?.closest(".settings-section"),
+  sharedSessionSection: query("#connect-server-button")?.closest(".settings-section"),
   acceptConnectionDialog: query("#accept-connection-dialog"),
   acceptConnectionMessage: query("#accept-connection-message"),
   acceptConnectionAcceptButton: query("#accept-connection-accept-button"),
@@ -1348,8 +1350,7 @@ function getSelectedTarget() {
 }
 
 /** Flash the server status panel border green (success) or red (error). */
-function flashStatusPanel(type) {
-  const panel = elements.serverStatusPanel;
+function flashStatusPanel(type, panel = elements.serverStatusPanel) {
   if (!panel) return;
   panel.classList.remove("settings-status-panel--flash-success", "settings-status-panel--flash-error");
   void panel.offsetWidth; // force reflow so restarting mid-animation works
@@ -7827,7 +7828,7 @@ async function performLogin(username, password, { silent = false } = {}) {
   }
   saveSettings(settings);
   logDebug("response", "Account login succeeded", `${result.username} teams=${(result.teams ?? []).join(",")}`);
-  if (!silent) flashStatusPanel("success");
+  if (!silent) flashStatusPanel("success", elements.accountSection);
   renderAccountControls();
   await refreshWorkspaceList();
   render(controller.getProject());
@@ -7847,7 +7848,7 @@ async function handleAccountLogin() {
   } catch (error) {
     syncState.account = null;
     logDebug("response", "Account login failed", error.message);
-    flashStatusPanel("error");
+    flashStatusPanel("error", elements.accountSection);
     // Render first (it resets the status line), then surface the failure so the
     // "Invalid username or password" message isn't clobbered by the reset.
     renderAccountControls();
@@ -7917,7 +7918,7 @@ async function establishConnection({ auto = false } = {}) {
     saveSettings(settings);
     reconnectState.attempts = 0;
     clearReconnectTimer();
-    flashStatusPanel("success");
+    flashStatusPanel("success", elements.sharedSessionSection);
     logDebug("response", "Server connected", settings.displayName || "anonymous");
     await refreshChatStatus({ silent: true });
     return true;
@@ -7966,7 +7967,7 @@ elements.connectServerButton.addEventListener("click", async () => {
     syncState.status = "offline";
     syncState.detail = error.message;
     logDebug("response", "Server connect failed", error.message);
-    flashStatusPanel("error");
+    flashStatusPanel("error", elements.sharedSessionSection);
     await refreshChatStatus({ silent: true });
     render(controller.getProject());
   }
