@@ -1817,6 +1817,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
                 "server": "mdnotes",
                 "transport": "sse-text-ops",
                 "accounts": self.registry.accounts.enabled,  # capability flag for the Login UI
+                "hosting": True,  # this backend supports ephemeral guest-PIN hosting
             })
         if parsed.path == "/api/chat/status":
             return self._handle_chat_status()
