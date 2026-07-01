@@ -1,4 +1,4 @@
-import { connectToServer, fetchSessionState, openEventStream, pushOperation, pushSessionState, sanitizeProjectForSync } from "./sync-service.js";
+import { connectToServer, fetchSessionState, openEventStream, openWorkspaceSession, pushOperation, pushSessionState, sanitizeProjectForSync } from "./sync-service.js";
 
 function fingerprintProject(project) {
   return JSON.stringify(sanitizeProjectForSync(project));
@@ -263,6 +263,14 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       emitStatus("connected", "Connected as client. Server has no project yet.");
     }
 
+    attachEventStream(serverUrl);
+
+    return session;
+  }
+
+  // Shared post-session wiring: open the SSE stream and route events. Used by
+  // both PIN connect() and account openWorkspace().
+  function attachEventStream(serverUrl) {
     connection.eventSource = openEventStream(
       serverUrl,
       connection.token,
@@ -361,12 +369,46 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
         disconnect("Connection to server lost.");
       }
     );
+  }
 
+  // Open a persistent team workspace as a logged-in account. Unlike connect()'s
+  // master branch (which pushes the local project), a cloud workspace already
+  // holds the canonical project, so we always PULL it.
+  async function openWorkspace(serverUrl, accountToken, team, name) {
+    disconnect();
+    emitStatus("reachable", "Opening workspace…");
+
+    const session = await openWorkspaceSession(serverUrl, accountToken, team, name);
+    connection = {
+      serverUrl,
+      token: session.token,
+      clientId: session.clientId,
+      displayName: session.displayName || session.clientId,
+      sessionId: session.sessionId ?? session.workspace,
+      revision: session.revision ?? 0,
+      role: session.role ?? "master",
+      eventSource: null
+    };
+    localRevision = connection.revision;
+
+    const snapshot = await fetchSessionState(serverUrl, connection.token);
+    presence = snapshot.presence ?? [];
+    if (snapshot.project) {
+      isApplyingRemote = true;
+      replaceProject(snapshot.project);
+      isApplyingRemote = false;
+      lastFingerprint = fingerprintProject(snapshot.project);
+      connection.revision = snapshot.revision ?? connection.revision;
+    }
+    emitStatus("connected", `Opened ${session.workspace} at revision ${connection.revision}.`);
+
+    attachEventStream(serverUrl);
     return session;
   }
 
   return {
     connect,
+    openWorkspace,
     disconnect,
     publishOperation,
     publishSnapshot,

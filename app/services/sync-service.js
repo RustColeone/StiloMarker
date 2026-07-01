@@ -94,6 +94,45 @@ async function loginToServer(serverUrl, username, password) {
   return parseResponse(response);
 }
 
+async function listWorkspaces(serverUrl, accountToken) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const response = await fetch(`${baseUrl}/api/workspaces?token=${encodeURIComponent(accountToken)}`, {
+    method: "GET",
+    headers: { accept: "application/json" }
+  });
+  if (!response.ok) {
+    await throwForResponse("Could not list workspaces.", response);
+  }
+  const data = await parseResponse(response);
+  return data.workspaces ?? [];
+}
+
+async function createWorkspace(serverUrl, accountToken, team, name, shareTeam = false) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const response = await fetch(`${baseUrl}/api/workspaces?token=${encodeURIComponent(accountToken)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ team, name, shareTeam: Boolean(shareTeam) })
+  });
+  if (!response.ok) {
+    await throwForResponse("Could not create workspace.", response);
+  }
+  return parseResponse(response);
+}
+
+async function openWorkspaceSession(serverUrl, accountToken, team, name) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const response = await fetch(`${baseUrl}/api/workspaces/open?token=${encodeURIComponent(accountToken)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ team, name })
+  });
+  if (!response.ok) {
+    await throwForResponse("Could not open workspace.", response);
+  }
+  return parseResponse(response);
+}
+
 function sanitizeProjectForSync(project) {
   const syncProject = structuredClone(project);
   delete syncProject.handles;
@@ -177,10 +216,13 @@ function openEventStream(serverUrl, token, onEvent, onError) {
 
 export {
   connectToServer,
+  createWorkspace,
   fetchSessionState,
+  listWorkspaces,
   loginToServer,
   normalizeServerUrl,
   openEventStream,
+  openWorkspaceSession,
   pingServer,
   pushOperation,
   pushSessionState,
