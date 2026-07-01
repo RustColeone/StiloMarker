@@ -341,7 +341,7 @@
                   <h3>Server</h3>
                   <label>
                     Server URL
-                    <input id="server-url-input" type="url" placeholder="(same origin — leave blank when behind a proxy)">
+                    <input id="server-url-input" type="url" autocomplete="off" placeholder="(same origin — leave blank when behind a proxy)">
                   </label>
                   <label class="checkbox-row">
                     <input id="auto-reconnect-input" type="checkbox" checked>
@@ -361,11 +361,13 @@
 
                   <label>
                     Display Name
-                    <input id="display-name-input" type="text" maxlength="40" placeholder="Name shown to collaborators">
+                    <input id="display-name-input" type="text" maxlength="40" autocomplete="nickname" placeholder="Name shown to collaborators">
                   </label>
                   <label>
                     PIN
-                    <input id="server-pin-input" type="password" inputmode="numeric" placeholder="Session PIN">
+                    <!-- one-time-code + off keeps password managers from treating this
+                         session PIN as an account password to save/fill. -->
+                    <input id="server-pin-input" type="password" inputmode="numeric" autocomplete="one-time-code" name="session-pin" placeholder="Session PIN">
                   </label>
                   <div class="settings-actions-row">
                     <button id="connect-server-button" type="button">Join</button>

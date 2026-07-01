@@ -587,7 +587,7 @@ function commonFieldValue(items, getter) {
  *  disagree) renders as an empty input with a "—" placeholder; leaving it empty
  *  on change means "no change". */
 function multiTextFieldHtml(label, name, value, { type = "text", min, step } = {}) {
-  const attrs = [`name="${name}"`, `type="${type}"`];
+  const attrs = [`name="${name}"`, `type="${type}"`, 'autocomplete="off"'];
   if (min != null) attrs.push(`min="${min}"`);
   if (step != null) attrs.push(`step="${step}"`);
   if (value == null) {
@@ -2257,15 +2257,15 @@ function createBmapView({ container, ...defaultOptions } = {}) {
         <div class="subtle-label">${escapeHtml(node.id)}</div>
       </div>
       ${isReadOnly ? '<div class="bmap-inspector-note">Read-only mode is on. Switch back to editing to modify this node.</div>' : ""}
-      <form class="bmap-inspector-form" novalidate>
+      <form class="bmap-inspector-form" novalidate autocomplete="off">
         <fieldset class="bmap-inspector-fieldset"${isReadOnly ? " disabled" : ""}>
         <label class="bmap-field">
           <span>Name</span>
-          <input name="name" type="text" value="${escapeHtml(node.name)}">
+          <input name="name" type="text" autocomplete="off" value="${escapeHtml(node.name)}">
         </label>
         <label class="bmap-field">
           <span>Text</span>
-          <textarea name="text" rows="4">${escapeHtml(node.text)}</textarea>
+          <textarea name="text" rows="4" autocomplete="off">${escapeHtml(node.text)}</textarea>
         </label>
         <div class="bmap-field-row">
           <label class="bmap-field">
@@ -2548,7 +2548,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
         <div class="subtle-label">${escapeHtml(connector.from)} → ${escapeHtml(connector.to)}</div>
       </div>
       ${isReadOnly ? '<div class="bmap-inspector-note">Read-only mode is on. Switch back to editing to modify this connector.</div>' : ""}
-      <form class="bmap-inspector-form" novalidate>
+      <form class="bmap-inspector-form" novalidate autocomplete="off">
         <fieldset class="bmap-inspector-fieldset"${isReadOnly ? " disabled" : ""}>
         <div class="bmap-field-row">
           <label class="bmap-field">
@@ -2679,10 +2679,10 @@ function createBmapView({ container, ...defaultOptions } = {}) {
         <div class="subtle-label">Multi-edit</div>
       </div>
       <div class="bmap-inspector-note">Changing a field updates every selected node. Fields that differ show “—”.</div>
-      <form class="bmap-inspector-form" novalidate>
+      <form class="bmap-inspector-form" novalidate autocomplete="off">
         <fieldset class="bmap-inspector-fieldset">
           ${multiTextFieldHtml("Name", "name", name)}
-          <label class="bmap-field"><span>Text</span><textarea name="text" rows="3" placeholder="${text == null ? "—" : ""}">${text == null ? "" : escapeHtml(text)}</textarea></label>
+          <label class="bmap-field"><span>Text</span><textarea name="text" rows="3" autocomplete="off" placeholder="${text == null ? "—" : ""}">${text == null ? "" : escapeHtml(text)}</textarea></label>
           <div class="bmap-field-row">
             ${multiSelectFieldHtml("Shape", "shape", [["rect", "Rectangle"], ["circle", "Oval"]], shape)}
             ${multiSelectFieldHtml("Text align", "textAlign", [["left", "Left"], ["center", "Center"], ["right", "Right"]], textAlign)}
@@ -2823,7 +2823,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
         <div class="subtle-label">Multi-edit</div>
       </div>
       <div class="bmap-inspector-note">Changing a field updates every selected connector. Fields that differ show “—”.</div>
-      <form class="bmap-inspector-form" novalidate>
+      <form class="bmap-inspector-form" novalidate autocomplete="off">
         <fieldset class="bmap-inspector-fieldset">
           <div class="bmap-field-row">
             ${multiSelectFieldHtml("Mode", "mode", [["bezier", "Bezier"], ["straight", "Straight"]], mode)}
