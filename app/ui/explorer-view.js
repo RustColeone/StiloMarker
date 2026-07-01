@@ -133,6 +133,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       } else if (node.name.endsWith(".bmap")) {
         typeEntries = [
           ["Copy", "copy"],
+          ["Export", "export"],
           ["Export As", null, [
             ["Image (PNG)", "export-bmap-png"],
             ["Image (JPG)", "export-bmap-jpg"],
@@ -140,7 +141,6 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
           ]],
           ["Rename", "rename"],
           ["Delete", "delete"],
-          ["Export", "export"],
         ];
       } else {
         typeEntries = [["Copy", "copy"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
