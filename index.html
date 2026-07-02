@@ -23,7 +23,8 @@
             <button id="file-menu-button" class="menu-trigger" type="button">File</button>
             <div id="file-menu" class="menu-popover" hidden>
               <button id="new-project-button" type="button">New Project</button>
-              <button id="open-directory-button" type="button">Open Directory</button>
+              <button id="open-directory-button" type="button">Open Local Directory</button>
+              <button id="open-server-directory-button" type="button">Open Server Directory</button>
               <button id="import-file-button" type="button">Import File or Zip</button>
               <button id="save-button" type="button">Save</button>
               <button id="save-pdf-button" type="button">Save as PDF</button>
@@ -94,7 +95,7 @@
               <div id="project-name-label" class="sidebar-title">Workspace</div>
             </div>
             <div class="sidebar-actions">
-              <button id="explorer-filter-button" class="sidebar-icon-button sidebar-funnel-button" type="button" aria-label="Filter items" title="Filter items"></button>
+              <button id="explorer-filter-button" class="sidebar-icon-button sidebar-funnel-button" type="button" aria-label="Filter items" title="Filter items"><svg class="sidebar-icon-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg></button>
               <button id="explorer-add-button" class="sidebar-add-button" type="button" aria-label="Add items" title="Add items">+</button>
             </div>
           </header>
@@ -354,7 +355,10 @@
                     <p id="server-status-text" class="subtle-label">No server checked yet.</p>
                   </div>
                 </section>
+              </div>
 
+              <!-- RIGHT column: join or host a shared session. -->
+              <div class="collab-column">
                 <section class="settings-section">
                   <h3>Shared session</h3>
                   <p class="subtle-label">Join someone's shared session with their PIN, or share your current workspace so others can join with the PIN you get.</p>
@@ -390,49 +394,63 @@
                   <div id="presence-list" class="presence-list"></div>
                 </section>
               </div>
-
-              <!-- RIGHT column: account login + personal cloud workspaces. -->
-              <div class="collab-column">
-                <section class="settings-section">
-                  <h3>Account</h3>
-                  <p id="account-locked-note" class="subtle-label">Ping a server that supports accounts to log in.</p>
-
-                  <!-- Only shown when the pinged server reports accounts (state 3). -->
-                  <div id="account-login-row" class="account-login" hidden>
-                    <label>
-                      Username
-                      <input id="account-username-input" type="text" autocomplete="username" placeholder="Account username">
-                    </label>
-                    <label>
-                      Password
-                      <input id="account-password-input" type="password" autocomplete="current-password" placeholder="Account password">
-                    </label>
-                    <div class="settings-actions-row">
-                      <button id="account-login-button" type="button">Log In</button>
-                      <button id="account-logout-button" type="button" hidden>Log Out</button>
-                    </div>
-                    <p id="account-status-text" class="subtle-label"></p>
-
-                    <!-- Cloud workspaces — shown once logged in. Only the account's own. -->
-                    <div id="workspace-switcher" hidden>
-                      <h4>Cloud workspaces</h4>
-                      <ul id="workspace-list" class="workspace-list"></ul>
-                      <div class="workspace-create-row">
-                        <select id="workspace-team-select" aria-label="Team"></select>
-                        <input id="workspace-name-input" type="text" maxlength="64" placeholder="New workspace name">
-                        <label class="checkbox-row">
-                          <input id="workspace-share-team" type="checkbox">
-                          <span>Share to whole team</span>
-                        </label>
-                        <button id="workspace-create-button" type="button">Create</button>
-                      </div>
-                    </div>
-                  </div>
-                </section>
-              </div>
             </div>
           </div>
         </div>
+
+        <menu class="dialog-actions">
+          <button value="cancel" type="submit">Close</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <!-- Open Server Directory: log into an account server and pick a cloud
+         workspace to open. Uses the Server URL configured in Settings. -->
+    <dialog id="open-server-dialog">
+      <form method="dialog" class="settings-form open-server-form">
+        <header class="dialog-header">
+          <div>
+            <div class="eyebrow">Workspace</div>
+            <h2>Open Server Directory</h2>
+          </div>
+          <p class="subtle-label">Log in to your account server and open one of your cloud workspaces.</p>
+        </header>
+
+        <section class="settings-section">
+          <p id="account-locked-note" class="subtle-label">Set a Server URL that supports accounts in Settings → Collaboration, then reopen this.</p>
+
+          <!-- Only shown when the pinged server reports accounts (state 3). -->
+          <div id="account-login-row" class="account-login" hidden>
+            <label>
+              Username
+              <input id="account-username-input" type="text" autocomplete="username" placeholder="Account username">
+            </label>
+            <label>
+              Password
+              <input id="account-password-input" type="password" autocomplete="current-password" placeholder="Account password">
+            </label>
+            <div class="settings-actions-row">
+              <button id="account-login-button" type="button">Log In</button>
+              <button id="account-logout-button" type="button" hidden>Log Out</button>
+            </div>
+            <p id="account-status-text" class="subtle-label"></p>
+
+            <!-- Cloud workspaces — shown once logged in. Only the account's own. -->
+            <div id="workspace-switcher" hidden>
+              <h4>Cloud workspaces</h4>
+              <ul id="workspace-list" class="workspace-list"></ul>
+              <div class="workspace-create-row">
+                <select id="workspace-team-select" aria-label="Team"></select>
+                <input id="workspace-name-input" type="text" maxlength="64" placeholder="New workspace name">
+                <label class="checkbox-row">
+                  <input id="workspace-share-team" type="checkbox">
+                  <span>Share to whole team</span>
+                </label>
+                <button id="workspace-create-button" type="button">Create</button>
+              </div>
+            </div>
+          </div>
+        </section>
 
         <menu class="dialog-actions">
           <button value="cancel" type="submit">Close</button>
