@@ -71,6 +71,7 @@ function parseLinkTarget(rawTarget) {
 
   let href = "";
   let rest = "";
+  const isAngle = target.startsWith("<");
 
   if (target.startsWith("<")) {
     const endIndex = target.indexOf(">");
@@ -114,6 +115,13 @@ function parseLinkTarget(rawTarget) {
     const titleMatch = rest.match(/^(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|\((.*)\))$/);
     if (titleMatch) {
       title = titleMatch[1] ?? titleMatch[2] ?? titleMatch[3] ?? null;
+    } else if (!isAngle) {
+      // The text after the first space isn't a valid title, so this is a plain
+      // destination that just contains spaces — e.g. an image named
+      // "new diagram 1.png". Keep the whole thing as the href (lenient vs. strict
+      // CommonMark, which would require <...> or %20). The editor hover-preview
+      // already resolves such paths, so the rendered preview should match.
+      href = target.trim();
     }
   }
 

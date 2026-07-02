@@ -129,11 +129,13 @@ const elements = {
   pingServerButton: query("#ping-server-button"),
   connectServerButton: query("#connect-server-button"),
   accountLoginRow: query("#account-login-row"),
+  accountLoginFields: query("#account-login-fields"),
   accountUsernameInput: query("#account-username-input"),
   accountPasswordInput: query("#account-password-input"),
   accountLoginButton: query("#account-login-button"),
   accountLogoutButton: query("#account-logout-button"),
   accountStatusText: query("#account-status-text"),
+  openServerLoginNote: query("#open-server-login-note"),
   workspaceSwitcher: query("#workspace-switcher"),
   workspaceList: query("#workspace-list"),
   workspaceTeamSelect: query("#workspace-team-select"),
@@ -7064,13 +7066,16 @@ elements.openDirectoryButton.addEventListener("click", async () => {
 
 elements.openServerDirectoryButton?.addEventListener("click", () => {
   closeMenus();
-  elements.openServerDialog.showModal();
   logDebug("action", "Open server directory");
-  // Ping the configured server (Settings → Collaboration → Server URL) to learn
-  // whether it supports accounts, then show login / the workspace picker.
-  void pingCurrentServer({ silent: true }).then(() => {
-    if (syncState.account) void refreshWorkspaceList();
-  });
+  if (!syncState.account) {
+    // Account login lives in Settings → Collaboration → Account; send them there
+    // to sign in first, pinging the configured server on the way.
+    openSettingsDialog("collaboration");
+    void pingCurrentServer({ silent: true });
+    return;
+  }
+  elements.openServerDialog.showModal();
+  void refreshWorkspaceList();
 });
 
 elements.importFileButton.addEventListener("click", () => elements.importFileInput.click());
@@ -7665,19 +7670,22 @@ function renderAccountControls() {
   if (elements.accountLockedNote) {
     elements.accountLockedNote.hidden = syncState.accountsAvailable || loggedIn;
   }
-  elements.accountLoginButton.hidden = loggedIn;
+  // Logged in → collapse to just the name + Log Out (credential fields hidden).
+  if (elements.accountLoginFields) {
+    elements.accountLoginFields.hidden = loggedIn;
+  }
   elements.accountLogoutButton.hidden = !loggedIn;
-  elements.accountUsernameInput.disabled = loggedIn;
-  elements.accountPasswordInput.disabled = loggedIn;
   if (loggedIn) {
     const teams = syncState.account.teams ?? [];
     elements.accountStatusText.textContent = teams.length
       ? `Logged in as ${syncState.account.username} · teams: ${teams.join(", ")}`
       : `Logged in as ${syncState.account.username}`;
   } else {
-    elements.accountStatusText.textContent = syncState.accountsAvailable
-      ? "This server supports accounts. Log in to access cloud workspaces."
-      : "";
+    elements.accountStatusText.textContent = "";
+  }
+  // Workspace picker (lives in the File → Open Server Directory dialog).
+  if (elements.openServerLoginNote) {
+    elements.openServerLoginNote.hidden = loggedIn;
   }
   if (elements.workspaceSwitcher) {
     elements.workspaceSwitcher.hidden = !loggedIn;
