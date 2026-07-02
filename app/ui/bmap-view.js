@@ -409,6 +409,27 @@ function renderBmapToSvg(ast, { padding = 60 } = {}) {
     maxX = Math.max(maxX, rect.x + rect.width);
     maxY = Math.max(maxY, rect.y + rect.height);
   }
+  // Connector bezier paths can bulge past the node rects (e.g. two right-sides of
+  // vertically stacked nodes). Include every path coordinate in the bounds so the
+  // export never crops a drifting connector. A bezier stays within the convex hull
+  // of its control points, so the raw path coords are a safe over-approximation.
+  const connectorPaths = [];
+  for (const connector of connectors) {
+    const pathData = buildConnectorPath(connector, nodeMap);
+    connectorPaths.push({ connector, pathData });
+    if (!pathData) {
+      continue;
+    }
+    const nums = pathData.match(/-?\d+(?:\.\d+)?/g) ?? [];
+    for (let i = 0; i + 1 < nums.length; i += 2) {
+      const x = Number(nums[i]);
+      const y = Number(nums[i + 1]);
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    }
+  }
   if (!Number.isFinite(minX)) {
     minX = 0;
     minY = 0;
@@ -437,8 +458,7 @@ function renderBmapToSvg(ast, { padding = 60 } = {}) {
 
   out.push(`<g transform="translate(${offsetX} ${offsetY})">`);
 
-  for (const connector of connectors) {
-    const pathData = buildConnectorPath(connector, nodeMap);
+  for (const { connector, pathData } of connectorPaths) {
     if (!pathData) {
       continue;
     }
@@ -1291,10 +1311,13 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     const nextSelection = [];
 
     for (const snapshot of clipNodes) {
-      let newId = `${snapshot.id}-copy`;
-      let counter = 1;
+      // Strip any existing "-copy"/"-copy-N" suffix so repeated pastes stay
+      // "a-copy", "a-copy-2", "a-copy-3" … instead of "a-copy-copy-copy".
+      const baseId = String(snapshot.id).replace(/-copy(-\d+)?$/, "");
+      let newId = `${baseId}-copy`;
+      let counter = 2;
       while (existingIds.has(newId)) {
-        newId = `${snapshot.id}-copy-${counter++}`;
+        newId = `${baseId}-copy-${counter++}`;
       }
       existingIds.add(newId);
       idMap.set(snapshot.id, newId);
