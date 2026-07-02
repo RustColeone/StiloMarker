@@ -168,6 +168,8 @@ const elements = {
   viewMenu: query("#view-menu"),
   newProjectButton: query("#new-project-button"),
   openDirectoryButton: query("#open-directory-button"),
+  openServerDirectoryButton: query("#open-server-directory-button"),
+  openServerDialog: query("#open-server-dialog"),
   importFileButton: query("#import-file-button"),
   importFileInput: query("#import-file-input"),
   saveButton: query("#save-button"),
@@ -7060,6 +7062,17 @@ elements.openDirectoryButton.addEventListener("click", async () => {
   }
 });
 
+elements.openServerDirectoryButton?.addEventListener("click", () => {
+  closeMenus();
+  elements.openServerDialog.showModal();
+  logDebug("action", "Open server directory");
+  // Ping the configured server (Settings → Collaboration → Server URL) to learn
+  // whether it supports accounts, then show login / the workspace picker.
+  void pingCurrentServer({ silent: true }).then(() => {
+    if (syncState.account) void refreshWorkspaceList();
+  });
+});
+
 elements.importFileButton.addEventListener("click", () => elements.importFileInput.click());
 
 elements.importFileInput.addEventListener("change", async (event) => {
@@ -7799,6 +7812,7 @@ async function handleOpenWorkspace(team, name) {
     saveSettings(settings);
     logDebug("action", "Opened cloud workspace", `${team}/${name}`);
     await refreshWorkspaceList();
+    if (elements.openServerDialog?.open) elements.openServerDialog.close();
     render(controller.getProject());
   } catch (error) {
     workspaceMode = "private";

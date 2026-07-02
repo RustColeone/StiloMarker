@@ -399,33 +399,10 @@ p {
   background: var(--accent-soft);
 }
 
-.sidebar-funnel-button {
-  position: relative;
-}
-
-.sidebar-funnel-button::before,
-.sidebar-funnel-button::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-.sidebar-funnel-button::before {
-  top: 7px;
-  width: 12px;
-  height: 7px;
-  border: 1.5px solid currentColor;
-  border-bottom: 0;
-  clip-path: polygon(0 0, 100% 0, 68% 100%, 32% 100%);
-}
-
-.sidebar-funnel-button::after {
-  top: 14px;
-  width: 2px;
-  height: 6px;
-  background: currentColor;
-  border-radius: 999px;
+.sidebar-icon-svg {
+  width: 15px;
+  height: 15px;
+  display: block;
 }
 
 .workspace-shell > .workspace {
