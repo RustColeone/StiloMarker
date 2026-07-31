@@ -848,6 +848,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     listProjectFiles: () => [],
     resolveRelativeFilePath: () => null,
     generateScope: "connected",
+    autoPan: true,
     logDebug: null,
     ...defaultOptions,
   };
@@ -2394,6 +2395,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
         </div>
         <div class="bmap-inspector-actions">
           <button type="button" data-action="quick-generate" class="bmap-generate-btn">Quick Generate File</button>
+          <button type="button" data-action="set-origin" class="bmap-secondary-btn" title="Shift every node so this one sits at (0,0)">Set as Origin</button>
           <button type="button" data-action="delete" class="bmap-danger-btn">Delete Node</button>
         </div>
         </fieldset>
@@ -2558,7 +2560,41 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       requestQuickGenerate(getNodeById(node.id) ?? node, event.currentTarget);
     });
 
+    inspector.querySelector('[data-action="set-origin"]').addEventListener("click", () => {
+      if (isEditingEnabled()) {
+        setNodeAsOrigin(node.id);
+      }
+    });
+
     return inspector;
+  }
+
+  // Make a node's coordinate the new origin: shift every node (and every dangling
+  // connector endpoint) by that node's position so the chosen node lands at
+  // (0,0). Node-attached endpoints follow their nodes automatically.
+  function setNodeAsOrigin(nodeId) {
+    const origin = getNodeById(nodeId);
+    if (!origin) {
+      return;
+    }
+    const dx = origin.pos.x;
+    const dy = origin.pos.y;
+    if (dx === 0 && dy === 0) {
+      return;
+    }
+    for (const node of ast.nodes) {
+      node.pos = { x: node.pos.x - dx, y: node.pos.y - dy };
+    }
+    for (const connector of ast.connectors) {
+      for (const end of ["from", "to"]) {
+        const endpoint = parseEndpoint(connector[end]);
+        if (endpoint.dangling) {
+          connector[end] = formatPointEndpoint({ x: endpoint.point.x - dx, y: endpoint.point.y - dy });
+        }
+      }
+    }
+    renderScene();
+    commitAst("bmap:set-origin");
   }
 
   function buildConnectorInspector(connector, index) {
@@ -3522,6 +3558,48 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     ast = normalizeBmapAst(parseBmap(sourceText));
     ensureSelectionStillExists();
     renderScene();
+    if (documentChanged) {
+      maybeAutoPanToContent();
+    }
+  }
+
+  // On opening a diagram whose nodes all sit far from the origin, the default
+  // top-left view would look empty. If nothing is in view, pan to the node
+  // nearest the origin and centre it (opt-out via the autoPan option).
+  function maybeAutoPanToContent() {
+    if (!activeOptions.autoPan || ast.nodes.length === 0 || !canvasEl) {
+      return;
+    }
+    const rect = canvasEl.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      return;
+    }
+    const topLeft = clientToWorld(rect.left, rect.top);
+    const bottomRight = clientToWorld(rect.right, rect.bottom);
+    const anyVisible = ast.nodes.some((node) => {
+      const r = getNodeRect(node);
+      return r.x < bottomRight.x && r.x + r.width > topLeft.x
+        && r.y < bottomRight.y && r.y + r.height > topLeft.y;
+    });
+    if (anyVisible) {
+      return;
+    }
+    let best = null;
+    let bestDistance = Infinity;
+    for (const node of ast.nodes) {
+      const r = getNodeRect(node);
+      const cx = r.x + (r.width / 2);
+      const cy = r.y + (r.height / 2);
+      const distance = (cx * cx) + (cy * cy);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = { cx, cy };
+      }
+    }
+    if (best) {
+      pan = { x: (rect.width / 2) - (best.cx * zoom), y: (rect.height / 2) - (best.cy * zoom) };
+      applyViewportTransform();
+    }
   }
 
   return { render };
