@@ -122,6 +122,7 @@ const elements = {
   wordWrapSelect: query("#word-wrap-select"),
   indentStyleSelect: query("#indent-style-select"),
   bmapGenerateScopeSelect: query("#bmap-generate-scope-select"),
+  bmapAutoPanInput: query("#bmap-auto-pan-input"),
   serverUrlInput: query("#server-url-input"),
   autoReconnectInput: query("#auto-reconnect-input"),
   serverPinInput: query("#server-pin-input"),
@@ -2666,6 +2667,7 @@ elements.previewSelect.value = settings.preview;
 elements.wordWrapSelect.value = settings.wordWrap ? "on" : "off";
 elements.indentStyleSelect.value = settings.indentStyle;
 elements.bmapGenerateScopeSelect.value = settings.bmapGenerateScope === "all" ? "all" : "connected";
+if (elements.bmapAutoPanInput) elements.bmapAutoPanInput.checked = settings.bmapAutoPan !== false;
 if (elements.autoReconnectInput) elements.autoReconnectInput.checked = settings.autoReconnect !== false;
 if (elements.formatToolbarInput) elements.formatToolbarInput.checked = Boolean(settings.showFormatToolbar);
 
@@ -5099,6 +5101,7 @@ function renderPreviewContent(target, project, file) {
         updateFileContentFromPreview(file.id, nextSource, detail?.reason ?? "bmap preview edit");
       },
       generateScope: settings.bmapGenerateScope,
+      autoPan: settings.bmapAutoPan,
       onQuickGenerate(request) {
         return quickGenerateBmapFile(file.id, request);
       },
@@ -7612,6 +7615,12 @@ elements.formatToolbarInput?.addEventListener("change", (event) => {
   persistSettings();
   refreshFormatToolbar();
   logDebug("action", "Format toolbar setting changed", settings.showFormatToolbar ? "on" : "off");
+});
+
+elements.bmapAutoPanInput?.addEventListener("change", (event) => {
+  settings.bmapAutoPan = event.target.checked;
+  persistSettings();
+  logDebug("action", "Bmap auto-pan setting changed", settings.bmapAutoPan ? "on" : "off");
 });
 
 window.addEventListener("resize", () => {

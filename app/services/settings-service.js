@@ -19,6 +19,7 @@ function createDefaultSettings() {
     previewWidthCustomized: false,
     debugPanelHeight: 180,
     bmapGenerateScope: "connected",
+    bmapAutoPan: true,
     autoReconnect: true,
     chatModel: "",
     // Runtime memory: true while the user has an active/intended session, so the
