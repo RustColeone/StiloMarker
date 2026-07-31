@@ -1824,14 +1824,26 @@ p {
 
 /* Keep the Settings dialog a fixed size so switching tabs (a narrow Appearance
    list vs. the wide 2-column Collaboration tab) never resizes it — the user
-   never loses their place. */
+   never loses their place. The panel area is a fixed-height scroll region, so
+   long tabs scroll internally instead of growing the dialog. */
 #settings-dialog .settings-form {
   width: min(92vw, 900px);
   min-width: 0;
+  max-height: 88vh;
+}
+
+.settings-body {
+  min-height: 0; /* let the scroll region actually shrink/scroll */
+}
+
+#settings-dialog .settings-tab-strip {
+  min-height: 0;
 }
 
 #settings-dialog .settings-tab-panels {
-  min-height: 440px;
+  height: min(64vh, 520px);
+  overflow-y: auto;
+  padding-right: 10px;
 }
 
 .dialog-header {
@@ -2266,6 +2278,10 @@ dialog {
   color: var(--text);
   box-shadow: 0 18px 54px rgba(0, 0, 0, 0.35);
   padding: 18px;
+  /* Never let a dialog exceed the viewport; tall ones scroll instead of pushing
+     their actions off-screen. (Settings scrolls its panel area internally.) */
+  max-height: 92vh;
+  overflow: auto;
 }
 
 dialog::backdrop {
