@@ -8,6 +8,7 @@ function createDefaultSettings() {
     displayName: "",
     explorer: "expanded",
     preview: "shown",
+    source: "shown",
     wordWrap: true,
     indentStyle: "tab",
     explorerFilter: "all",

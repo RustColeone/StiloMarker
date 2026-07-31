@@ -908,6 +908,7 @@ p {
 
 .app-shell[data-explorer="collapsed"] .workspace-splitter,
 .app-shell[data-preview="hidden"] .editor-splitter,
+.app-shell[data-source="hidden"] .editor-splitter,
 .app-shell[data-chat="hidden"] .chat-splitter {
   display: none;
 }
@@ -1250,11 +1251,16 @@ p {
   text-overflow: ellipsis;
 }
 
-.app-shell[data-preview="hidden"] .editor-grid {
+.app-shell[data-preview="hidden"] .editor-grid,
+.app-shell[data-source="hidden"] .editor-grid {
   grid-template-columns: minmax(0, 1fr);
 }
 
 .app-shell[data-preview="hidden"] #preview-pane {
+  display: none;
+}
+
+.app-shell[data-source="hidden"] #source-pane {
   display: none;
 }
 
@@ -1318,6 +1324,14 @@ p {
 }
 
 .app-shell[data-preview="hidden"] .source-preview-toggle {
+  display: inline-flex;
+}
+
+.preview-source-toggle {
+  display: none;
+}
+
+.app-shell[data-source="hidden"] .preview-source-toggle {
   display: inline-flex;
 }
 
@@ -1821,20 +1835,32 @@ p {
   gap: 14px;
 }
 
-/* Tabbed settings dialog (mirrors the debug-panel tab pattern). */
+/* Tabbed settings dialog with a left navigation rail (IDE-style). */
+.settings-body {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+  min-height: 0;
+}
+
 .settings-tab-strip {
   display: flex;
+  flex-direction: column;
   gap: 2px;
-  margin-bottom: 12px;
-  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  min-width: 144px;
+  padding-right: 12px;
+  border-right: 1px solid var(--border);
 }
 
 .settings-tab {
-  min-width: 96px;
-  height: 30px;
-  padding: 0 14px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 12px;
+  text-align: left;
   border: 0;
-  border-bottom: 2px solid transparent;
+  border-left: 2px solid transparent;
+  border-radius: 4px;
   background: transparent;
   color: var(--text-dim);
   font-size: 12px;
@@ -1843,11 +1869,18 @@ p {
 
 .settings-tab:hover {
   color: var(--text);
+  background: var(--surface-1);
 }
 
 .settings-tab.is-active {
   color: var(--text);
-  border-bottom-color: var(--accent);
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+}
+
+.settings-tab-panels {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .settings-tab-panel[hidden] {
