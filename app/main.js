@@ -187,8 +187,11 @@ const elements = {
   exportSelectedButton: query("#export-selected-button"),
   toggleExplorerMenuButton: query("#toggle-explorer-menu-button"),
   togglePreviewButton: query("#toggle-preview-button"),
+  toggleSourceButton: query("#toggle-source-button"),
   toggleChatButton: query("#toggle-chat-button"),
   previewCollapseButton: query("#preview-collapse-button"),
+  sourceCollapseButton: query("#source-collapse-button"),
+  sourceToggleActivityButton: query("#source-toggle-activity-button"),
   sourceIndicator: query("#source-indicator"),
   sourceStatusText: query("#source-status-text"),
   browserIndicator: query("#browser-indicator"),
@@ -5250,6 +5253,7 @@ function applyWorkspaceSettings() {
 
   elements.app.dataset.explorer = settings.explorer;
   elements.app.dataset.preview = settings.preview;
+  elements.app.dataset.source = settings.source;
   elements.app.dataset.chat = settings.chatPanel;
   elements.app.dataset.wordWrap = settings.wordWrap ? "on" : "off";
   elements.app.dataset.debug = settings.debugPanel ? "on" : "off";
@@ -7293,9 +7297,24 @@ function toggleExplorer() {
 
 function togglePreview() {
   settings.preview = settings.preview === "hidden" ? "shown" : "hidden";
+  // Never collapse both panes.
+  if (settings.preview === "hidden" && settings.source === "hidden") {
+    settings.source = "shown";
+  }
   elements.previewSelect.value = settings.preview;
   persistSettings();
   logDebug("action", "Preview toggled", settings.preview);
+}
+
+function toggleSource() {
+  settings.source = settings.source === "hidden" ? "shown" : "hidden";
+  // Collapsing the source is a reading-focused mode — keep the preview visible.
+  if (settings.source === "hidden" && settings.preview === "hidden") {
+    settings.preview = "shown";
+    elements.previewSelect.value = "shown";
+  }
+  persistSettings();
+  logDebug("action", "Source toggled", settings.source);
 }
 
 function toggleChat() {
@@ -7404,12 +7423,15 @@ async function clearAllCache() {
 
 elements.toggleExplorerMenuButton.addEventListener("click", toggleExplorer);
 elements.togglePreviewButton.addEventListener("click", togglePreview);
+elements.toggleSourceButton?.addEventListener("click", toggleSource);
 elements.toggleChatButton.addEventListener("click", toggleChat);
 elements.toggleLogButton.addEventListener("click", toggleLogPanel);
 elements.explorerToggleButton.addEventListener("click", toggleExplorer);
 elements.previewToggleActivityButton.addEventListener("click", togglePreview);
+elements.sourceToggleActivityButton?.addEventListener("click", toggleSource);
 elements.chatToggleActivityButton.addEventListener("click", toggleChat);
 elements.previewCollapseButton.addEventListener("click", togglePreview);
+elements.sourceCollapseButton?.addEventListener("click", toggleSource);
 elements.chatCollapseButton.addEventListener("click", toggleChat);
 elements.logCollapseButton.addEventListener("click", toggleLogPanel);
 elements.chatNewThreadButton.addEventListener("click", createNewChatConversation);

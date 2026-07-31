@@ -55,6 +55,7 @@
             <button id="view-menu-button" class="menu-trigger" type="button">View</button>
             <div id="view-menu" class="menu-popover" hidden>
               <button id="toggle-explorer-menu-button" type="button">Toggle Explorer</button>
+              <button id="toggle-source-button" type="button">Toggle Source</button>
               <button id="toggle-preview-button" type="button">Toggle Preview</button>
               <button id="toggle-chat-button" type="button">Toggle Chat</button>
               <button id="toggle-log-button" type="button">Toggle Log</button>
@@ -139,6 +140,7 @@
                   <div class="pane-label" id="source-pane-label">Source</div>
                   <div id="source-tab-strip" class="tab-strip pane-tab-strip" aria-label="Open source tabs"></div>
                   <button id="preview-toggle-activity-button" class="pane-action source-preview-toggle" type="button" aria-label="Show preview" title="Show preview">◫</button>
+                  <button id="source-collapse-button" class="pane-action" type="button" aria-label="Collapse source" title="Collapse source (reading mode)">×</button>
                 </div>
               <div id="editor-format-toolbar" class="editor-format-toolbar" role="toolbar" aria-label="Editor formatting" hidden></div>
               <div class="editor-surface">
@@ -164,6 +166,7 @@
                 <div class="pane-header">
                   <div class="pane-label">Preview</div>
                   <div id="preview-tab-strip" class="tab-strip pane-tab-strip" aria-label="Open preview tabs"></div>
+                  <button id="source-toggle-activity-button" class="pane-action preview-source-toggle" type="button" aria-label="Show source" title="Show source">◫</button>
                   <button id="preview-collapse-button" class="pane-action" type="button" aria-label="Collapse preview" title="Collapse preview">×</button>
                 </div>
               <article id="preview-output" class="preview-output"></article>
@@ -271,10 +274,11 @@
           <p class="subtle-label">Theme, layout, and collaboration preferences.</p>
         </header>
 
-        <div id="settings-tab-strip" class="settings-tab-strip" role="tablist" aria-label="Settings sections">
+        <div class="settings-body">
+        <nav id="settings-tab-strip" class="settings-tab-strip" role="tablist" aria-orientation="vertical" aria-label="Settings sections">
           <button id="settings-tab-appearance" class="settings-tab is-active" type="button" role="tab" aria-selected="true" data-tab="appearance">Appearance</button>
           <button id="settings-tab-collaboration" class="settings-tab" type="button" role="tab" aria-selected="false" data-tab="collaboration">Collaboration</button>
-        </div>
+        </nav>
         <div class="settings-tab-panels">
           <section id="settings-panel-appearance" class="settings-section settings-tab-panel is-active" data-tab-panel="appearance">
             <h3>Appearance</h3>
@@ -428,6 +432,7 @@
               </div>
             </div>
           </div>
+        </div>
         </div>
 
         <menu class="dialog-actions">
