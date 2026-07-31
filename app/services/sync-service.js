@@ -1,3 +1,5 @@
+import { dataUrlToBytes } from "./file-content-service.js";
+
 function normalizeServerUrl(serverUrl) {
   const value = (serverUrl ?? "").trim();
   // Empty string means "same origin + current app base path" so the app
@@ -120,6 +122,26 @@ async function createWorkspace(serverUrl, accountToken, team, name, shareTeam = 
   return parseResponse(response);
 }
 
+async function uploadAsset(serverUrl, token, path, dataUrl) {
+  const { bytes } = dataUrlToBytes(dataUrl);
+  const baseUrl = normalizeServerUrl(serverUrl);
+  // Small sequential chunks keep every request well under a 1 MB proxy body
+  // limit, so large images upload without a 413 and without base64 in the ops.
+  const CHUNK = 256 * 1024;
+  let offset = 0;
+  do {
+    const chunk = bytes.subarray(offset, offset + CHUNK);
+    const response = await fetch(
+      `${baseUrl}/api/workspaces/asset?token=${encodeURIComponent(token)}&path=${encodeURIComponent(path)}&offset=${offset}`,
+      { method: "POST", headers: { "content-type": "application/octet-stream" }, body: chunk }
+    );
+    if (!response.ok) {
+      await throwForResponse("Image upload failed.", response);
+    }
+    offset += CHUNK;
+  } while (offset < bytes.length);
+}
+
 async function hostSession(serverUrl, displayName) {
   const baseUrl = normalizeServerUrl(serverUrl);
   const response = await fetch(`${baseUrl}/api/session/host`, {
@@ -240,5 +262,6 @@ export {
   pingServer,
   pushOperation,
   pushSessionState,
-  sanitizeProjectForSync
+  sanitizeProjectForSync,
+  uploadAsset
 };

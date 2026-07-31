@@ -986,6 +986,29 @@ class CollaborationBroker:
             return None
         return candidate
 
+    def _asset_dest(self, rel_path: str) -> Path:
+        base = self.workspace_dir.resolve()
+        dest = (self.workspace_dir / rel_path).resolve()
+        if not str(dest).startswith(str(base)):
+            raise PermissionError("Invalid asset path")
+        return dest
+
+    def write_asset_chunk(self, rel_path: str, offset: int, data: bytes) -> int:
+        """Append a binary chunk to an image asset at the given byte offset. Large
+        images upload in small sequential chunks (each safely under the proxy body
+        limit) instead of riding through the op stream as base64. The matching
+        node is created separately by a content-less create-file op. Returns the
+        file's new size."""
+        if self.workspace_dir is None:
+            raise PermissionError("This workspace does not store server assets")
+        dest = self._asset_dest(rel_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        mode = "wb" if offset == 0 else "r+b"
+        with open(dest, mode) as handle:
+            handle.seek(offset)
+            handle.write(data)
+        return dest.stat().st_size
+
     def _load_state(self):
         if self.workspace_dir is not None:
             return self._load_state_dir()
@@ -2039,6 +2062,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_create_workspace(parsed)
         if parsed.path == "/api/workspaces/open":
             return self._handle_open_workspace(parsed)
+        if parsed.path == "/api/workspaces/asset":
+            return self._handle_asset_upload(parsed)
         if parsed.path == "/api/session/host":
             return self._handle_host()
         if parsed.path == "/api/session/connect":
@@ -2099,6 +2124,26 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             self._write_json(HTTPStatus.OK, {"workspaces": self.registry.list_workspaces(token)})
         except PermissionError as error:
             self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+
+    def _handle_asset_upload(self, parsed):
+        """Receive one binary chunk of an image asset (see write_asset_chunk)."""
+        try:
+            token = self._extract_token(parsed)
+            broker = self.registry.broker_for_token(token)
+            broker.authorize(token)
+            query = parse_qs(parsed.query)
+            rel_path = query.get("path", [""])[0]
+            offset = int(query.get("offset", ["0"])[0])
+            if not rel_path:
+                raise ValueError("Asset path is required")
+            length = int(self.headers.get("content-length", "0"))
+            data = self.rfile.read(length) if length > 0 else b""
+            size = broker.write_asset_chunk(rel_path, offset, data)
+            self._write_json(HTTPStatus.OK, {"ok": True, "size": size})
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+        except (ValueError, TypeError) as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
 
     def _handle_asset(self, parsed):
         """Serve a directory-backed workspace's binary asset (image) by its

@@ -1,4 +1,4 @@
-import { connectToServer, fetchSessionState, hostSession, openEventStream, openWorkspaceSession, pushOperation, pushSessionState, sanitizeProjectForSync } from "./sync-service.js";
+import { connectToServer, fetchSessionState, hostSession, openEventStream, openWorkspaceSession, pushOperation, pushSessionState, sanitizeProjectForSync, uploadAsset } from "./sync-service.js";
 
 function fingerprintProject(project) {
   return JSON.stringify(sanitizeProjectForSync(project));
@@ -387,6 +387,9 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       sessionId: session.sessionId ?? session.workspace,
       revision: session.revision ?? 0,
       role: session.role ?? "master",
+      // Team cloud workspaces store files on disk + serve image bytes by URL, so
+      // images upload as binary assets instead of base64 in the op stream.
+      directoryBacked: true,
       eventSource: null
     };
     localRevision = connection.revision;
@@ -447,6 +450,15 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     reloadFromServer,
     hasPendingPatch(fileId) {
       return pendingTextPatches.has(fileId);
+    },
+    isDirectoryBacked() {
+      return Boolean(connection?.directoryBacked);
+    },
+    // Upload an image's bytes to the workspace's on-disk asset store (chunked),
+    // instead of pushing the base64 through the op stream.
+    async uploadAsset(path, dataUrl) {
+      if (!connection) throw new Error("Not connected.");
+      await uploadAsset(connection.serverUrl, connection.token, path, dataUrl);
     },
     getConnectionInfo() {
       if (!connection) return null;
