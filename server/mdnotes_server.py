@@ -1382,21 +1382,39 @@ class CollaborationBroker:
                     "Drop is only allowed when you are the sole author of all edits since the target."
                 )
 
-    def _admit(self, display_name: str, role: str):
+    def _admit(self, display_name: str, role: str, identity: str | None = None):
         """Mint a session token + presence for an already-authorized joiner.
-        Shared by PIN connect() and account/workspace opens (which have no PIN)."""
+        Shared by PIN connect() and account/workspace opens (which have no PIN).
+        `identity` (an account username) dedupes sessions — see evict_user()."""
         token = secrets.token_urlsafe(24)
         client_id = f"client-{uuid.uuid4().hex[:12]}"
         cleaned_name = display_name.strip()[:40]
         display_name = cleaned_name or f"Peer {client_id[-4:]}"
         with self.lock:
             self.tokens[token] = client_id
-            self.presence[token] = {"clientId": client_id, "displayName": display_name, "connectedAt": time.time()}
+            self.presence[token] = {"clientId": client_id, "displayName": display_name, "connectedAt": time.time(), "user": identity}
             if role == "master":
                 self.master_tokens.add(token)
         _log("CONNECT", f"{display_name} joined as {role}", clientId=client_id, revision=self.revision)
         self._broadcast_presence(f"{display_name} joined the session.")
         return {"token": token, "clientId": client_id, "displayName": display_name, "revision": self.revision, "sessionId": "default", "role": role}
+
+    def evict_user(self, identity: str) -> None:
+        """Drop any prior sessions for the same account (identity) so reopening a
+        workspace / refreshing doesn't pile up duplicate 'ghost' presences. The
+        old SSE loops are orphaned (their tokens invalidated) and expire on their
+        next write; only the newest session for the account remains."""
+        if not identity:
+            return
+        with self.lock:
+            stale = [tok for tok, entry in self.presence.items() if entry.get("user") == identity]
+            for tok in stale:
+                self.presence.pop(tok, None)
+                self.tokens.pop(tok, None)
+                self.master_tokens.discard(tok)
+                self.subscribers.pop(tok, None)
+        if stale:
+            self._broadcast_presence("Replaced a duplicate session.")
 
     def connect(self, pin: str, display_name: str = ""):
         if pin == self.master_pin:
@@ -1879,7 +1897,10 @@ class WorkspaceRegistry:
             if broker is None:
                 broker = self._make_workspace_broker(team, name)
                 self.brokers[workspace_id] = broker
-        session = broker._admit(identity["username"], "master")
+        # One live session per account per workspace — replace any stale ones so a
+        # refresh/reopen doesn't leave a pile of duplicate "me" presences.
+        broker.evict_user(identity["username"])
+        session = broker._admit(identity["username"], "master", identity=identity["username"])
         with self.lock:
             self.token_workspace[session["token"]] = workspace_id
         session["sessionId"] = workspace_id
