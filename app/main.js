@@ -10,6 +10,7 @@ import { buildModuleMapSection, replaceOrAppendModuleMap } from "./services/mtre
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
 import { applyTheme, loadSettings, saveSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
+import { clearViewStates, loadViewStates, saveViewStates } from "./services/view-state-service.js";
 import { createWorkspace, listWorkspaces, loginToServer, normalizeServerUrl, pingServer } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { appendUrlDbEntry, formatUrlDbEntryBody, moveUrlDbEntry, moveUrlDbEntryBetweenFiles, parseUrlDb, parseUrlDbEntryBody, removeUrlDbEntry, serializeUrlDb, updateUrlDbEntry } from "./services/urldb-service.js";
@@ -237,6 +238,36 @@ let previewOpenTabIds = controller.getProject().activeFileId ? [controller.getPr
 let previewFileId = controller.getProject().activeFileId ?? null;
 let previewUrlDbEntry = null;
 let sourceUrlDbEntry = null;
+// Per-document view state (bmap pan/zoom, editor scroll), cached so users resume
+// where they left off; persisted to localStorage.
+let viewStates = loadViewStates();
+
+function getViewState(fileId) {
+  return fileId ? viewStates[fileId] : null;
+}
+
+function setViewState(fileId, patch) {
+  if (!fileId) return;
+  viewStates[fileId] = { ...viewStates[fileId], ...patch };
+  saveViewStates(viewStates);
+}
+
+/** Snapshot the current preview bmap's pan/zoom and the active editor scroll, so
+ *  switching documents or leaving the page can resume them later. */
+function captureViewState() {
+  const project = controller.getProject();
+  if (previewFileId && previewBmapView) {
+    const pf = project.nodes[previewFileId];
+    if (pf && pf.kind === "file" && isBmapFileName(pf.name)) {
+      const view = previewBmapView.getView?.();
+      if (view) setViewState(previewFileId, { bmap: view });
+    }
+  }
+  const activeId = project.activeFileId;
+  if (activeId && elements.editorScroll) {
+    setViewState(activeId, { editorScroll: elements.editorScroll.scrollTop });
+  }
+}
 let mathJaxLoadPromise = null;
 let previewBmapView = null;
 
@@ -4296,6 +4327,7 @@ function openPreviewTab(fileId) {
 }
 
 function setActiveSourceFile(fileId) {
+  captureViewState(); // resume-position: snapshot the outgoing document first
   selectionNodeId = fileId;
   sourceUrlDbEntry = null;
   openSourceTab(fileId);
@@ -4315,6 +4347,7 @@ function setPreviewFile(fileId) {
   if (!node || node.kind !== "file") {
     return;
   }
+  captureViewState(); // resume-position: snapshot the outgoing preview first
   openPreviewTab(fileId);
   previewFileId = fileId;
   previewUrlDbEntry = null;
@@ -5059,6 +5092,7 @@ function renderPreviewContent(target, project, file) {
     previewBmapView.render({
       documentKey: file.id,
       source: file.content,
+      initialView: getViewState(file.id)?.bmap ?? null,
       onOpenLinkedFile(filePath) {
         const baseSegments = basePath.split("/").filter(Boolean);
         baseSegments.pop();
@@ -6299,6 +6333,11 @@ function updateStatus(project) {
   if (!_editorUpdating && fileChanged) {
     lastRenderedFileId = activeFile.id;
     loadEditorContent(nextText);
+    // Resume the reader's previous scroll position in this document.
+    const savedScroll = getViewState(activeFile.id)?.editorScroll;
+    if (savedScroll && elements.editorScroll) {
+      elements.editorScroll.scrollTop = savedScroll;
+    }
   } else {
     const domText = getEditorText();
     if (nextText !== domText) {
@@ -7390,6 +7429,8 @@ async function emptyEverything() {
   // Persist an empty project so the boot path doesn't fall back to loading the
   // default Template welcome workspace.
   saveProject(createProject("Workspace"));
+  clearViewStates();
+  viewStates = {};
   logDebug("action", "Workspace emptied");
   window.location.reload();
 }
@@ -7406,6 +7447,8 @@ async function clearAllCache() {
   }
 
   elements.settingsMenu.hidden = true;
+  clearViewStates(); // also drop cached resume positions
+  viewStates = {};
   try {
     const result = await clearOfflineShellData();
     logDebug(
@@ -8071,6 +8114,7 @@ elements.connectServerButton.addEventListener("click", async () => {
 });
 
 window.addEventListener("beforeunload", (event) => {
+  captureViewState(); // remember where the user was before they leave
   const activeFile = controller.getActiveFile();
   if (activeFile?.dirty) {
     event.preventDefault();
