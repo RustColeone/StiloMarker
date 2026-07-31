@@ -4695,7 +4695,10 @@ async function saveActiveWorkspaceFile() {
   const wroteToDisk = await saveProjectToHandles(project);
   controller.markSaved(activeFile.id);
   if (!wroteToDisk) {
-    notify("Saved in browser cache. Use Export to download files.");
+    // No live directory (e.g. Firefox / no File System Access) — the workspace
+    // lives in localStorage. Persist there silently rather than nagging on every
+    // save; Export remains the way to pull files out.
+    saveProject(project);
   }
 }
 
@@ -6350,11 +6353,33 @@ function publishSnapshot() {
   }
 }
 
-function publishOperation(operation) {
+async function publishOperation(operation) {
   if (!collaboration.isConnected() || workspaceMode !== "synced") {
     return;
   }
-  collaboration.publishOperation(operation).catch((error) => {
+  let op = operation;
+  // In a directory-backed cloud workspace, an image's bytes upload out-of-band
+  // (chunked binary) so a large image can't blow the op-stream body limit (413)
+  // or bloat sync as base64; the op then carries empty content and peers fetch
+  // the image by URL.
+  const opFileName = op.name ?? op.path?.split("/").pop() ?? "";
+  if (collaboration.isDirectoryBacked?.()
+    && (op.type === "create-file" || op.type === "update-file")
+    && isImageFileName(opFileName)
+    && typeof op.content === "string"
+    && op.content.startsWith("data:")) {
+    try {
+      const path = op.type === "create-file"
+        ? [op.parentPath, op.name].filter(Boolean).join("/")
+        : op.path;
+      await collaboration.uploadAsset(path, op.content);
+      op = { ...op, content: "" };
+    } catch (error) {
+      notify(error.message);
+      return;
+    }
+  }
+  collaboration.publishOperation(op).catch((error) => {
     notify(error.message);
   });
 }
