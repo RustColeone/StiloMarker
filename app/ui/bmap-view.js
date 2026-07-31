@@ -862,6 +862,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
   let keyboardBound = false; // document-level keydown handler attached once
   let contextMenuEl = null; // the floating right-click menu, portaled to <body>
   let toastTimer = null;
+  let autoPanTargetIsOrigin = true; // auto-pan aims at the origin unless a cached view was restored
 
   function setActiveOptions(nextOptions = {}) {
     activeOptions = {
@@ -3538,8 +3539,19 @@ function createBmapView({ container, ...defaultOptions } = {}) {
         connectPreview = null;
         stopGesture(false);
         cancelPastePreview();
-        pan = { x: 40, y: 40 };
-        zoom = 1;
+        // Resume the user's previous pan/zoom for this document when we have it;
+        // otherwise start at the default top-left. The auto-pan fallback then
+        // targets the restored location (or the origin on a fresh open).
+        const initialView = sourceOrOptions.initialView;
+        if (initialView && initialView.pan && Number.isFinite(initialView.pan.x) && Number.isFinite(initialView.pan.y)) {
+          pan = { x: initialView.pan.x, y: initialView.pan.y };
+          zoom = Number.isFinite(initialView.zoom) && initialView.zoom > 0 ? initialView.zoom : 1;
+          autoPanTargetIsOrigin = false;
+        } else {
+          pan = { x: 40, y: 40 };
+          zoom = 1;
+          autoPanTargetIsOrigin = true;
+        }
         setPopupHidden();
         // A freshly opened diagram defaults to read-only (view) mode so the
         // preview pane is not in edit mode until the user opts in via the pen.
@@ -3584,13 +3596,20 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     if (anyVisible) {
       return;
     }
+    // Aim at the origin on a fresh open, or at the restored view's centre when
+    // resuming a cached location — pan to whichever node is nearest that point.
+    const target = autoPanTargetIsOrigin
+      ? { x: 0, y: 0 }
+      : clientToWorld(rect.left + (rect.width / 2), rect.top + (rect.height / 2));
     let best = null;
     let bestDistance = Infinity;
     for (const node of ast.nodes) {
       const r = getNodeRect(node);
       const cx = r.x + (r.width / 2);
       const cy = r.y + (r.height / 2);
-      const distance = (cx * cx) + (cy * cy);
+      const dx = cx - target.x;
+      const dy = cy - target.y;
+      const distance = (dx * dx) + (dy * dy);
       if (distance < bestDistance) {
         bestDistance = distance;
         best = { cx, cy };
@@ -3602,7 +3621,13 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     }
   }
 
-  return { render };
+  return {
+    render,
+    // Current pan/zoom, so the host can cache and later restore the view.
+    getView() {
+      return { pan: { x: pan.x, y: pan.y }, zoom };
+    },
+  };
 }
 
 export { createBmapView, renderBmapToSvg };

@@ -1822,6 +1822,18 @@ p {
   gap: 14px;
 }
 
+/* Keep the Settings dialog a fixed size so switching tabs (a narrow Appearance
+   list vs. the wide 2-column Collaboration tab) never resizes it — the user
+   never loses their place. */
+#settings-dialog .settings-form {
+  width: min(92vw, 900px);
+  min-width: 0;
+}
+
+#settings-dialog .settings-tab-panels {
+  min-height: 440px;
+}
+
 .dialog-header {
   display: grid;
   gap: 6px;
