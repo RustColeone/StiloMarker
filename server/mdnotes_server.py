@@ -1207,10 +1207,14 @@ class CollaborationBroker:
         del self.project["nodes"][node_id]
 
     def _wipe_workspace_dir(self):
-        """Remove all files/dirs inside the workspace dir (keep the dir itself)."""
+        """Remove all files/dirs inside the workspace dir (keep the dir itself).
+        The access.json sidecar (per-project whitelist/blacklist) is preserved so
+        a publish/replace-project never resets who can reach the project."""
         if self.workspace_dir is None or not self.workspace_dir.exists():
             return
         for child in self.workspace_dir.iterdir():
+            if child.name == "access.json":
+                continue
             self._remove_path(child)
 
     def _apply_operation(self, operation):
@@ -1859,6 +1863,240 @@ class WorkspaceRegistry:
                     })
         return out
 
+    # ---- File-browser navigation (nested folders + per-project access) ---------
+    # Files that are storage bookkeeping, never shown as browseable entries.
+    _RESERVED_NAMES = {"index.json", "access.json", "manifest.json"}
+
+    def _safe_relpath(self, path: str) -> str:
+        """Sanitize a '/'-separated path relative to a team dir. Each segment is
+        validated with safe_component (which rejects '..', separators, etc.), so
+        the result can never escape the team directory. '' means the team root."""
+        raw = str(path or "").strip().strip("/")
+        if not raw:
+            return ""
+        return "/".join(self.safe_component(seg) for seg in raw.split("/") if seg)
+
+    def _abs_under_team(self, team: str, relpath: str) -> Path:
+        """Resolve relpath under team_<team>/ (the team root, which contains
+        workspaces/ and index.json), sandbox-checked as defence in depth."""
+        base = self._team_dir(team).parent.resolve()  # team_<team>/
+        candidate = (base / relpath).resolve() if relpath else base
+        if candidate != base and base not in candidate.parents:
+            raise PermissionError("Path escapes team directory")
+        return candidate
+
+    @staticmethod
+    def is_project_dir(directory: Path) -> bool:
+        """A directory is a project iff it carries a manifest.json."""
+        return (directory / "manifest.json").is_file()
+
+    def _legacy_meta(self, team: str, relpath: str) -> dict | None:
+        """If relpath is a legacy flat project (workspaces/<name>) recorded in the
+        team's index.json, return its meta dict; else None. Used to keep pre-
+        browser membership gating and open un-migrated single-file workspaces."""
+        parts = relpath.split("/")
+        if len(parts) != 2 or parts[0] != "workspaces":
+            return None
+        try:
+            index = self._read_index(team)
+        except (ValueError, PermissionError):
+            return None
+        return index["workspaces"].get(parts[1])
+
+    def _write_access_raw(self, project_dir: Path, data: dict) -> None:
+        project_dir.mkdir(parents=True, exist_ok=True)
+        (project_dir / "access.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    def read_access(self, team: str, relpath: str) -> dict:
+        """Per-project access. Returns {whitelist, blacklist, createdBy}. Empty
+        lists ⇒ everyone in the team. Lazy-migrates a legacy index.json members
+        list into the whitelist the first time so existing gating is preserved."""
+        proj = self._abs_under_team(team, relpath)
+        path = proj / "access.json"
+        data: dict = {}
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                data = {}
+        else:
+            meta = self._legacy_meta(team, relpath)
+            if meta is not None:
+                data = {
+                    "whitelist": list(meta.get("members", [])),
+                    "blacklist": [],
+                    "createdBy": meta.get("createdBy"),
+                }
+                if proj.is_dir():
+                    try:
+                        self._write_access_raw(proj, data)
+                    except OSError:
+                        pass
+        wl = [str(u).strip() for u in data.get("whitelist", []) if str(u).strip()]
+        bl = [str(u).strip() for u in data.get("blacklist", []) if str(u).strip()]
+        return {"whitelist": wl, "blacklist": bl, "createdBy": data.get("createdBy")}
+
+    def can_access(self, identity: dict, team: str, relpath: str) -> bool:
+        """teamMember AND (whitelist empty OR user in whitelist) AND (user not in
+        blacklist). Both lists empty ⇒ everyone in the team."""
+        if team not in identity["teams"]:
+            return False
+        access = self.read_access(team, relpath)
+        user = identity["username"]
+        if user in access["blacklist"]:
+            return False
+        if access["whitelist"] and user not in access["whitelist"]:
+            return False
+        return True
+
+    @staticmethod
+    def _mtime(path: Path):
+        """Last-modified time (epoch seconds) for a path, or None if unavailable."""
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return None
+
+    def browse(self, token: str, team: str = "", path: str = "") -> dict:
+        """Directory listing for the file browser. No team ⇒ the caller's teams.
+        With a team ⇒ the navigable subdirectories at path: projects (dir with a
+        manifest.json) the caller can access, and normal folders. Each entry
+        carries a ``modified`` epoch-seconds timestamp for the explorer view."""
+        identity = self._require_account(token)
+        if not team:
+            teams = []
+            for name in identity["teams"]:
+                modified = None
+                try:
+                    modified = self._mtime(self._team_dir(name).parent)
+                except (ValueError, PermissionError):
+                    modified = None
+                teams.append({"name": name, "modified": modified})
+            return {"teams": teams}
+        team = self._require_team(identity, team)
+        relpath = self._safe_relpath(path)
+        base = self._abs_under_team(team, relpath)
+        if not base.is_dir():
+            # A team with no content yet browses as an empty root, not an error.
+            if not relpath:
+                return {"team": team, "path": "", "entries": []}
+            raise ValueError("No such directory")
+        if relpath and self.is_project_dir(base):
+            raise ValueError("That is a project — open it instead")
+        entries = []
+        for child in sorted(base.iterdir(), key=lambda p: p.name.lower()):
+            name = child.name
+            if not child.is_dir() or name in self._RESERVED_NAMES:
+                continue
+            child_rel = f"{relpath}/{name}" if relpath else name
+            if self.is_project_dir(child):
+                if not self.can_access(identity, team, child_rel):
+                    continue
+                access = self.read_access(team, child_rel)
+                owner = access.get("createdBy")
+                entries.append({
+                    "name": name,
+                    "kind": "project",
+                    "path": child_rel,
+                    "createdBy": owner,
+                    "canEdit": owner in (None, identity["username"]),
+                    "modified": self._mtime(child),
+                })
+            else:
+                entries.append({
+                    "name": name,
+                    "kind": "folder",
+                    "path": child_rel,
+                    "modified": self._mtime(child),
+                })
+        return {"team": team, "path": relpath, "entries": entries}
+
+    def make_folder(self, token: str, team: str, path: str, name: str) -> dict:
+        """Create a normal (non-project) folder at path."""
+        identity = self._require_account(token)
+        team = self._require_team(identity, team)
+        relpath = self._safe_relpath(path)
+        name = self.safe_component(name)
+        parent = self._abs_under_team(team, relpath)
+        if relpath and parent.exists() and self.is_project_dir(parent):
+            raise ValueError("Cannot create folders inside a project")
+        parent.mkdir(parents=True, exist_ok=True)  # segments are all sandboxed
+        target = parent / name
+        if target.exists():
+            raise ValueError("A file or folder with that name already exists")
+        target.mkdir(parents=True)
+        new_rel = f"{relpath}/{name}" if relpath else name
+        _log("WORKSPACE", f"{identity['username']} mkdir {team}/{new_rel}")
+        return {"team": team, "path": new_rel, "name": name, "kind": "folder"}
+
+    def create_project(self, token: str, team: str, path: str, name: str) -> dict:
+        """Create an empty project directory (with manifest.json) at path. A
+        publish-to-cloud seeds content afterwards via the normal op stream."""
+        identity = self._require_account(token)
+        team = self._require_team(identity, team)
+        relpath = self._safe_relpath(path)
+        name = self.safe_component(name)
+        parent = self._abs_under_team(team, relpath)
+        if relpath and parent.exists() and self.is_project_dir(parent):
+            raise ValueError("Cannot nest a project inside another project")
+        parent.mkdir(parents=True, exist_ok=True)  # segments are all sandboxed
+        project_dir = parent / name
+        if project_dir.exists():
+            raise ValueError("A file or folder with that name already exists")
+        new_rel = f"{relpath}/{name}" if relpath else name
+        workspace_id = f"{team}/{new_rel}"
+        with self.lock:
+            broker = CollaborationBroker(
+                self.pin, None, master_pin=self.master_pin, workspace_dir=project_dir
+            )
+            broker.project = broker._default_project()
+            broker._persist_state()  # writes the file tree + manifest.json
+            self._write_access_raw(project_dir, {
+                "whitelist": [], "blacklist": [], "createdBy": identity["username"],
+            })
+            self.brokers[workspace_id] = broker
+        _log("WORKSPACE", f"{identity['username']} created project {workspace_id}")
+        return {
+            "team": team, "path": new_rel, "name": name, "kind": "project",
+            "id": workspace_id, "createdBy": identity["username"],
+        }
+
+    def set_access(self, token: str, team: str, path: str,
+                   whitelist: list, blacklist: list) -> dict:
+        """Replace a project's whitelist/blacklist. Only the recorded owner may
+        edit; if none is recorded, any member with access may set it first."""
+        identity = self._require_account(token)
+        team = self._require_team(identity, team)
+        relpath = self._safe_relpath(path)
+        proj = self._abs_under_team(team, relpath)
+        if not self.is_project_dir(proj):
+            raise ValueError("Not a project directory")
+        current = self.read_access(team, relpath)
+        owner = current.get("createdBy")
+        if owner and owner != identity["username"]:
+            raise PermissionError("Only the project owner can change access")
+        if not owner and not self.can_access(identity, team, relpath):
+            raise PermissionError("You do not have access to that project")
+        data = {
+            "whitelist": [str(u).strip() for u in (whitelist or []) if str(u).strip()],
+            "blacklist": [str(u).strip() for u in (blacklist or []) if str(u).strip()],
+            "createdBy": owner or identity["username"],
+        }
+        self._write_access_raw(proj, data)
+        _log("WORKSPACE", f"{identity['username']} set access on {team}/{relpath}")
+        return self.read_access(team, relpath)
+
+    def _make_workspace_broker_path(self, team: str, relpath: str) -> CollaborationBroker:
+        """Directory-backed broker for a project at an arbitrary path. Reuses the
+        legacy single-file migration for flat workspaces/<name> projects."""
+        parts = relpath.split("/")
+        if len(parts) == 2 and parts[0] == "workspaces":
+            return self._make_workspace_broker(team, parts[1])
+        workspace_dir = self._abs_under_team(team, relpath)
+        return CollaborationBroker(
+            self.pin, None, master_pin=self.master_pin, workspace_dir=workspace_dir
+        )
+
     def create_workspace(self, token: str, team: str, name: str, share_team: bool = False) -> dict:
         identity = self._require_account(token)
         team = self._require_team(identity, team)
@@ -1879,23 +2117,23 @@ class WorkspaceRegistry:
         _log("WORKSPACE", f"{identity['username']} created {team}/{name}", members=members)
         return {"team": team, "name": name, "id": f"{team}/{name}", "members": members, "createdBy": identity["username"]}
 
-    def open_workspace(self, token: str, team: str, name: str) -> dict:
-        """Admit a logged-in account into a team workspace (role master), loading
-        or creating its persisted broker. Returns a session bound to it."""
+    def open_workspace(self, token: str, team: str, path: str) -> dict:
+        """Admit a logged-in account into a team project (role master), loading
+        or creating its persisted broker. ``path`` points at a project directory
+        relative to the team root (e.g. ``workspaces/WorkNotes``)."""
         identity = self._require_account(token)
         team = self._require_team(identity, team)
-        name = self.safe_component(name)
-        index = self._read_index(team)
-        meta = index["workspaces"].get(name)
-        if meta is None:
+        relpath = self._safe_relpath(path)
+        project_dir = self._abs_under_team(team, relpath)
+        if not self.is_project_dir(project_dir) and self._legacy_meta(team, relpath) is None:
             raise PermissionError("Unknown workspace")
-        if identity["username"] not in meta.get("members", []):
+        if not self.can_access(identity, team, relpath):
             raise PermissionError("You do not have access to that workspace")
-        workspace_id = f"{team}/{name}"
+        workspace_id = f"{team}/{relpath}"
         with self.lock:
             broker = self.brokers.get(workspace_id)
             if broker is None:
-                broker = self._make_workspace_broker(team, name)
+                broker = self._make_workspace_broker_path(team, relpath)
                 self.brokers[workspace_id] = broker
         # One live session per account per workspace — replace any stale ones so a
         # refresh/reopen doesn't leave a pile of duplicate "me" presences.
@@ -2063,6 +2301,10 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_get_presence(parsed)
         if parsed.path == "/api/workspaces":
             return self._handle_list_workspaces(parsed)
+        if parsed.path == "/api/workspaces/browse":
+            return self._handle_browse(parsed)
+        if parsed.path == "/api/workspaces/access":
+            return self._handle_get_access(parsed)
         if parsed.path == "/api/workspaces/asset":
             return self._handle_asset(parsed)
         if parsed.path == "/api/events/stream":
@@ -2081,6 +2323,12 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_login()
         if parsed.path == "/api/workspaces":
             return self._handle_create_workspace(parsed)
+        if parsed.path == "/api/workspaces/mkdir":
+            return self._handle_mkdir(parsed)
+        if parsed.path == "/api/workspaces/create":
+            return self._handle_create_project(parsed)
+        if parsed.path == "/api/workspaces/access":
+            return self._handle_set_access(parsed)
         if parsed.path == "/api/workspaces/open":
             return self._handle_open_workspace(parsed)
         if parsed.path == "/api/workspaces/asset":
@@ -2212,9 +2460,97 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         try:
             token = self._extract_token(parsed)
             payload = self._read_json()
-            session = self.registry.open_workspace(token, str(payload.get("team", "")), str(payload.get("name", "")))
+            # Prefer the new (team, path) signature; fall back to a bare name so a
+            # migrating client's {team, name} still opens workspaces/<name>.
+            path = str(payload.get("path", "")).strip()
+            if not path and payload.get("name"):
+                path = f"workspaces/{payload.get('name')}"
+            session = self.registry.open_workspace(token, str(payload.get("team", "")), path)
             self._write_json(HTTPStatus.OK, session)
             self._log_request(200, f"opened {session['workspace']} as {session['displayName']!r}")
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+            self._log_request(403, str(error))
+        except ValueError as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            self._log_request(400, str(error))
+
+    def _handle_browse(self, parsed):
+        try:
+            token = self._extract_token(parsed)
+            query = parse_qs(parsed.query)
+            team = query.get("team", [""])[0]
+            path = query.get("path", [""])[0]
+            self._write_json(HTTPStatus.OK, self.registry.browse(token, team, path))
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+        except ValueError as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+
+    def _handle_mkdir(self, parsed):
+        try:
+            token = self._extract_token(parsed)
+            payload = self._read_json()
+            result = self.registry.make_folder(
+                token,
+                str(payload.get("team", "")),
+                str(payload.get("path", "")),
+                str(payload.get("name", "")),
+            )
+            self._write_json(HTTPStatus.OK, result)
+            self._log_request(200, f"mkdir {result['team']}/{result['path']}")
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+            self._log_request(403, str(error))
+        except ValueError as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            self._log_request(400, str(error))
+
+    def _handle_create_project(self, parsed):
+        try:
+            token = self._extract_token(parsed)
+            payload = self._read_json()
+            result = self.registry.create_project(
+                token,
+                str(payload.get("team", "")),
+                str(payload.get("path", "")),
+                str(payload.get("name", "")),
+            )
+            self._write_json(HTTPStatus.OK, result)
+            self._log_request(200, f"created project {result['id']}")
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+            self._log_request(403, str(error))
+        except ValueError as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            self._log_request(400, str(error))
+
+    def _handle_get_access(self, parsed):
+        try:
+            token = self._extract_token(parsed)
+            identity = self.registry._require_account(token)
+            query = parse_qs(parsed.query)
+            team = self.registry._require_team(identity, query.get("team", [""])[0])
+            path = self.registry._safe_relpath(query.get("path", [""])[0])
+            self._write_json(HTTPStatus.OK, self.registry.read_access(team, path))
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+        except ValueError as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+
+    def _handle_set_access(self, parsed):
+        try:
+            token = self._extract_token(parsed)
+            payload = self._read_json()
+            result = self.registry.set_access(
+                token,
+                str(payload.get("team", "")),
+                str(payload.get("path", "")),
+                payload.get("whitelist", []),
+                payload.get("blacklist", []),
+            )
+            self._write_json(HTTPStatus.OK, result)
+            self._log_request(200, "set access")
         except PermissionError as error:
             self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
             self._log_request(403, str(error))
@@ -2706,6 +3042,94 @@ def run_selftest():
         assert _reload["welcome.md"]["content"] == "# Hi", "text not re-hydrated on load"
         assert _reload["logo.png"]["content"] == "", "image should stay externalized on load"
         _sh.rmtree(_dir.parent, ignore_errors=True)
+
+        # --- file-browser navigation: nested folders, projects, access rules ----
+        _data = Path(_tf.mkdtemp())
+        _acct = AccountStore(None)
+        _acct.users = {
+            "alice": {"password": "pw", "teams": ["qa"]},
+            "bob": {"password": "pw", "teams": ["qa"]},
+            "carol": {"password": "pw", "teams": ["other"]},
+        }
+        _reg = WorkspaceRegistry("2468", state_file, master_pin="1367", accounts=_acct, data_dir=_data)
+        _alice = _reg.login("alice", "pw")["token"]
+        _bob = _reg.login("bob", "pw")["token"]
+        _alice_id = {"username": "alice", "teams": ["qa"]}
+        _bob_id = {"username": "bob", "teams": ["qa"]}
+
+        # No team → the caller's teams (name + modified); a fresh team is empty.
+        assert [t["name"] for t in _reg.browse(_alice)["teams"]] == ["qa"], "browse should list the caller's teams"
+        assert _reg.browse(_alice, "qa", "")["entries"] == [], "fresh team should browse empty"
+
+        # Create a normal folder, then a project inside it.
+        _reg.make_folder(_alice, "qa", "", "workspaces")
+        _created = _reg.create_project(_alice, "qa", "workspaces", "Alpha")
+        assert _created["id"] == "qa/workspaces/Alpha"
+        _alpha_dir = _data / "team_qa" / "workspaces" / "Alpha"
+        assert (_alpha_dir / "manifest.json").is_file(), "project must carry a manifest.json"
+        assert (_alpha_dir / "access.json").is_file(), "project must record access.json"
+
+        # Browse classifies dir-with-manifest as project, others as folder.
+        _root = {e["name"]: e for e in _reg.browse(_alice, "qa", "")["entries"]}
+        assert _root["workspaces"]["kind"] == "folder"
+        _ws = {e["name"]: e for e in _reg.browse(_alice, "qa", "workspaces")["entries"]}
+        assert _ws["Alpha"]["kind"] == "project" and _ws["Alpha"]["path"] == "workspaces/Alpha"
+        # Reserved bookkeeping files never appear as entries.
+        assert "manifest.json" not in _ws and "access.json" not in _ws and "index.json" not in _root
+
+        # Browsing into a project is rejected (open it instead).
+        try:
+            _reg.browse(_alice, "qa", "workspaces/Alpha")
+            assert False, "browsing into a project should fail"
+        except ValueError:
+            pass
+
+        # Open-by-path admits and binds a directory-backed broker.
+        _sess = _reg.open_workspace(_alice, "qa", "workspaces/Alpha")
+        assert _sess["workspace"] == "qa/workspaces/Alpha"
+        assert _reg.brokers["qa/workspaces/Alpha"].workspace_dir is not None, "opened broker not directory-backed"
+
+        # Access: both lists empty ⇒ everyone in the team.
+        assert _reg.can_access(_bob_id, "qa", "workspaces/Alpha"), "empty access should allow team members"
+        # Whitelist limits to listed members.
+        _reg.set_access(_alice, "qa", "workspaces/Alpha", ["alice"], [])
+        assert _reg.can_access(_alice_id, "qa", "workspaces/Alpha")
+        assert not _reg.can_access(_bob_id, "qa", "workspaces/Alpha"), "whitelist should exclude bob"
+        # Blacklist excludes a member even with an empty whitelist.
+        _reg.set_access(_alice, "qa", "workspaces/Alpha", [], ["bob"])
+        assert _reg.can_access(_alice_id, "qa", "workspaces/Alpha")
+        assert not _reg.can_access(_bob_id, "qa", "workspaces/Alpha"), "blacklist should exclude bob"
+        # Only the owner may change access.
+        try:
+            _reg.set_access(_bob, "qa", "workspaces/Alpha", [], [])
+            assert False, "non-owner should not edit access"
+        except PermissionError:
+            pass
+
+        # access.json survives a publish/replace-project wipe.
+        _reg.set_access(_alice, "qa", "workspaces/Alpha", ["alice"], [])
+        _broker = _reg.brokers["qa/workspaces/Alpha"]
+        _broker._apply_operation({"type": "replace-project", "project": _broker._default_project()})
+        assert (_alpha_dir / "access.json").is_file(), "access.json must survive replace-project"
+        assert _reg.read_access("qa", "workspaces/Alpha")["whitelist"] == ["alice"], "whitelist lost on publish"
+
+        # Lazy-migrate a legacy index.json members list into the whitelist.
+        _legacy = _data / "team_qa" / "workspaces" / "Legacy"
+        _legacy.mkdir(parents=True, exist_ok=True)
+        (_legacy / "manifest.json").write_text('{"project":{},"revision":0}', encoding="utf-8")
+        _reg._write_index("qa", {"workspaces": {"Legacy": {"members": ["bob"], "createdBy": "bob"}}})
+        _acc = _reg.read_access("qa", "workspaces/Legacy")
+        assert _acc["whitelist"] == ["bob"] and _acc["createdBy"] == "bob", "legacy members not migrated"
+        assert (_legacy / "access.json").is_file(), "migration should persist access.json"
+        assert not _reg.can_access(_alice_id, "qa", "workspaces/Legacy"), "migrated whitelist should gate alice"
+
+        # Path traversal in a browse path is rejected.
+        try:
+            _reg.browse(_alice, "qa", "../../etc")
+            assert False, "path traversal should be rejected"
+        except (ValueError, PermissionError):
+            pass
+        _sh.rmtree(_data, ignore_errors=True)
 
         print("Backend self-test passed.")
     finally:

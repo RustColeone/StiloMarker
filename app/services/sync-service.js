@@ -155,15 +155,84 @@ async function hostSession(serverUrl, displayName) {
   return parseResponse(response);
 }
 
-async function openWorkspaceSession(serverUrl, accountToken, team, name) {
+async function openWorkspaceSession(serverUrl, accountToken, team, path) {
   const baseUrl = normalizeServerUrl(serverUrl);
   const response = await fetch(`${baseUrl}/api/workspaces/open?token=${encodeURIComponent(accountToken)}`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({ team, name })
+    body: JSON.stringify({ team, path })
   });
   if (!response.ok) {
     await throwForResponse("Could not open workspace.", response);
+  }
+  return parseResponse(response);
+}
+
+// ---- File-browser navigation (nested folders + per-project access) -----------
+
+async function browseServer(serverUrl, accountToken, team = "", path = "") {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const params = new URLSearchParams({ token: accountToken });
+  if (team) params.set("team", team);
+  if (path) params.set("path", path);
+  const response = await fetch(`${baseUrl}/api/workspaces/browse?${params.toString()}`, {
+    method: "GET",
+    headers: { accept: "application/json" }
+  });
+  if (!response.ok) {
+    await throwForResponse("Could not browse the server.", response);
+  }
+  return parseResponse(response);
+}
+
+async function mkdirServer(serverUrl, accountToken, team, path, name) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const response = await fetch(`${baseUrl}/api/workspaces/mkdir?token=${encodeURIComponent(accountToken)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ team, path, name })
+  });
+  if (!response.ok) {
+    await throwForResponse("Could not create folder.", response);
+  }
+  return parseResponse(response);
+}
+
+async function createProjectServer(serverUrl, accountToken, team, path, name) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const response = await fetch(`${baseUrl}/api/workspaces/create?token=${encodeURIComponent(accountToken)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ team, path, name })
+  });
+  if (!response.ok) {
+    await throwForResponse("Could not create project.", response);
+  }
+  return parseResponse(response);
+}
+
+async function getAccess(serverUrl, accountToken, team, path) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const params = new URLSearchParams({ token: accountToken, team, path });
+  const response = await fetch(`${baseUrl}/api/workspaces/access?${params.toString()}`, {
+    method: "GET",
+    headers: { accept: "application/json" }
+  });
+  if (!response.ok) {
+    await throwForResponse("Could not read access list.", response);
+  }
+  return parseResponse(response);
+}
+
+async function setAccess(serverUrl, accountToken, team, path, whitelist, blacklist) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const response = await fetch(`${baseUrl}/api/workspaces/access?token=${encodeURIComponent(accountToken)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ team, path, whitelist, blacklist })
+  });
+  if (!response.ok) {
+    await throwForResponse("Could not update access list.", response);
   }
   return parseResponse(response);
 }
@@ -250,12 +319,16 @@ function openEventStream(serverUrl, token, onEvent, onError) {
 }
 
 export {
+  browseServer,
   connectToServer,
+  createProjectServer,
   createWorkspace,
   fetchSessionState,
+  getAccess,
   hostSession,
   listWorkspaces,
   loginToServer,
+  mkdirServer,
   normalizeServerUrl,
   openEventStream,
   openWorkspaceSession,
@@ -263,5 +336,6 @@ export {
   pushOperation,
   pushSessionState,
   sanitizeProjectForSync,
+  setAccess,
   uploadAsset
 };

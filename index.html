@@ -96,6 +96,7 @@
               <div id="project-name-label" class="sidebar-title">Workspace</div>
             </div>
             <div class="sidebar-actions">
+              <button id="explorer-anchor-button" class="sidebar-icon-button sidebar-anchor-button" type="button" aria-label="Dock or float the explorer" title="Float the explorer (overlay)" aria-pressed="false"><svg class="sidebar-icon-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="16" x2="12" y2="22"/><path d="M9 2h6l-1 6 3 3v2H7v-2l3-3-1-6z"/></svg></button>
               <button id="explorer-filter-button" class="sidebar-icon-button sidebar-funnel-button" type="button" aria-label="Filter items" title="Filter items"><svg class="sidebar-icon-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg></button>
               <button id="explorer-add-button" class="sidebar-add-button" type="button" aria-label="Add items" title="Add items">+</button>
             </div>
@@ -301,6 +302,14 @@
             </label>
 
             <label>
+              Explorer anchor
+              <select id="explorer-anchor-select">
+                <option value="docked">Docked (resizes content)</option>
+                <option value="floating">Floating (overlay)</option>
+              </select>
+            </label>
+
+            <label>
               Preview
               <select id="preview-select">
                 <option value="shown">Shown</option>
@@ -450,31 +459,64 @@
             <div class="eyebrow">Workspace</div>
             <h2>Open Server Directory</h2>
           </div>
-          <p class="subtle-label">Log in to your account server and open one of your cloud workspaces.</p>
+          <p class="subtle-label">Browse your teams' cloud folders and open a project.</p>
         </header>
 
-        <section class="settings-section">
+        <section class="settings-section browser-section">
           <!-- Log in from Settings → Collaboration → Account first; this dialog
-               is only for picking which cloud workspace to open. -->
+               is only for browsing/opening cloud projects. -->
           <p id="open-server-login-note" class="subtle-label" hidden>Log in first: Settings → Collaboration → Account.</p>
 
-          <div id="workspace-switcher" hidden>
-            <h4>Cloud workspaces</h4>
-            <ul id="workspace-list" class="workspace-list"></ul>
-            <div class="workspace-create-row">
-              <select id="workspace-team-select" aria-label="Team"></select>
-              <input id="workspace-name-input" type="text" maxlength="64" placeholder="New workspace name">
-              <label class="checkbox-row">
-                <input id="workspace-share-team" type="checkbox">
-                <span>Share to whole team</span>
-              </label>
-              <button id="workspace-create-button" type="button">Create</button>
+          <div id="server-browser" hidden>
+            <div class="browser-toolbar">
+              <nav id="browser-breadcrumb" class="browser-breadcrumb" aria-label="Location"></nav>
+              <div class="browser-actions">
+                <button id="browser-new-folder" type="button" class="browser-tool-btn" hidden>New Folder</button>
+                <button id="browser-new-project" type="button" class="browser-tool-btn" hidden>New Project</button>
+                <button id="browser-publish-here" type="button" class="browser-tool-btn" hidden>Publish current</button>
+              </div>
             </div>
+            <div class="browser-columns" aria-hidden="true">
+              <span class="browser-col-name">Name</span>
+              <span class="browser-col-date">Date Modified</span>
+              <span class="browser-col-actions"></span>
+            </div>
+            <ul id="browser-list" class="browser-list"></ul>
+            <p id="browser-status" class="subtle-label" hidden></p>
           </div>
         </section>
 
         <menu class="dialog-actions">
           <button value="cancel" type="submit">Close</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="access-dialog">
+      <form method="dialog" class="settings-form access-form">
+        <header class="dialog-header">
+          <div>
+            <div class="eyebrow">Access</div>
+            <h2 id="access-dialog-title">Project access</h2>
+          </div>
+          <p class="subtle-label">Empty lists mean everyone on the team can open this project. One username per line.</p>
+        </header>
+
+        <section class="settings-section">
+          <label>
+            Whitelist — only these users (blank = everyone)
+            <textarea id="access-whitelist" rows="4" placeholder="alice&#10;bob"></textarea>
+          </label>
+          <label>
+            Blacklist — never these users
+            <textarea id="access-blacklist" rows="3" placeholder="mallory"></textarea>
+          </label>
+          <p id="access-status" class="subtle-label" hidden></p>
+        </section>
+
+        <menu class="dialog-actions">
+          <button value="cancel" type="submit">Cancel</button>
+          <button id="access-save-button" value="default" type="submit">Save</button>
         </menu>
       </form>
     </dialog>

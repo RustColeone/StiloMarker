@@ -11,7 +11,7 @@ import { clearOfflineShellData, registerOfflineShell } from "./services/offline-
 import { applyTheme, loadSettings, saveSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
 import { clearViewStates, loadViewStates, saveViewStates } from "./services/view-state-service.js";
-import { createWorkspace, listWorkspaces, loginToServer, normalizeServerUrl, pingServer } from "./services/sync-service.js";
+import { browseServer, createProjectServer, getAccess, loginToServer, mkdirServer, normalizeServerUrl, pingServer, setAccess } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { appendUrlDbEntry, formatUrlDbEntryBody, moveUrlDbEntry, moveUrlDbEntryBetweenFiles, parseUrlDb, parseUrlDbEntryBody, removeUrlDbEntry, serializeUrlDb, updateUrlDbEntry } from "./services/urldb-service.js";
 import { createZip, downloadBlob } from "./services/zip-service.js";
@@ -39,6 +39,7 @@ const elements = {
   explorerTree: query("#explorer-tree"),
   explorerContextMenu: query("#explorer-context-menu"),
   explorerFilterButton: query("#explorer-filter-button"),
+  explorerAnchorButton: query("#explorer-anchor-button"),
   explorerAddButton: query("#explorer-add-button"),
   projectNameLabel: query("#project-name-label"),
   editorGutter: query("#editor-gutter"),
@@ -119,6 +120,7 @@ const elements = {
   toggleLogButton: query("#toggle-log-button"),
   themeSelect: query("#theme-select"),
   explorerSelect: query("#explorer-select"),
+  explorerAnchorSelect: query("#explorer-anchor-select"),
   previewSelect: query("#preview-select"),
   wordWrapSelect: query("#word-wrap-select"),
   indentStyleSelect: query("#indent-style-select"),
@@ -138,12 +140,18 @@ const elements = {
   accountLogoutButton: query("#account-logout-button"),
   accountStatusText: query("#account-status-text"),
   openServerLoginNote: query("#open-server-login-note"),
-  workspaceSwitcher: query("#workspace-switcher"),
-  workspaceList: query("#workspace-list"),
-  workspaceTeamSelect: query("#workspace-team-select"),
-  workspaceNameInput: query("#workspace-name-input"),
-  workspaceShareTeam: query("#workspace-share-team"),
-  workspaceCreateButton: query("#workspace-create-button"),
+  serverBrowser: query("#server-browser"),
+  browserBreadcrumb: query("#browser-breadcrumb"),
+  browserList: query("#browser-list"),
+  browserStatus: query("#browser-status"),
+  browserNewFolder: query("#browser-new-folder"),
+  browserNewProject: query("#browser-new-project"),
+  browserPublishHere: query("#browser-publish-here"),
+  accessDialog: query("#access-dialog"),
+  accessDialogTitle: query("#access-dialog-title"),
+  accessWhitelist: query("#access-whitelist"),
+  accessBlacklist: query("#access-blacklist"),
+  accessStatus: query("#access-status"),
   collabHosting: query("#collab-hosting"),
   hostTeamSelect: query("#host-team-select"),
   hostButton: query("#host-button"),
@@ -5286,6 +5294,7 @@ function applyWorkspaceSettings() {
     : defaultSplitPreviewWidth;
 
   elements.app.dataset.explorer = settings.explorer;
+  elements.app.dataset.explorerAnchor = settings.explorerAnchor;
   elements.app.dataset.preview = settings.preview;
   elements.app.dataset.source = settings.source;
   elements.app.dataset.chat = settings.chatPanel;
@@ -5306,6 +5315,15 @@ function applyWorkspaceSettings() {
   elements.toggleDebugMenuButton.textContent = settings.debugPanel ? "Hide Log Panel" : "Show Log Panel";
   elements.toggleChatButton.textContent = settings.chatPanel === "shown" ? "Hide Chat" : "Show Chat";
   elements.explorerFilterButton.classList.toggle("is-active", settings.explorerFilter !== "all");
+  if (elements.explorerAnchorSelect) elements.explorerAnchorSelect.value = settings.explorerAnchor;
+  if (elements.explorerAnchorButton) {
+    const floating = settings.explorerAnchor === "floating";
+    elements.explorerAnchorButton.classList.toggle("is-active", floating);
+    elements.explorerAnchorButton.setAttribute("aria-pressed", String(floating));
+    elements.explorerAnchorButton.title = floating
+      ? "Dock the explorer (fixed panel)"
+      : "Float the explorer (overlay)";
+  }
   renderDebugPanel();
 }
 
@@ -7146,7 +7164,7 @@ elements.openServerDirectoryButton?.addEventListener("click", () => {
     return;
   }
   elements.openServerDialog.showModal();
-  void refreshWorkspaceList();
+  openServerBrowser();
 });
 
 elements.importFileButton.addEventListener("click", () => elements.importFileInput.click());
@@ -7334,6 +7352,32 @@ function toggleExplorer() {
   logDebug("action", "Explorer toggled", settings.explorer);
 }
 
+function setExplorerAnchor(mode) {
+  const next = mode === "floating" ? "floating" : "docked";
+  if (settings.explorerAnchor === next) return;
+  settings.explorerAnchor = next;
+  if (elements.explorerAnchorSelect) elements.explorerAnchorSelect.value = next;
+  persistSettings();
+  logDebug("action", "Explorer anchor changed", next);
+}
+
+function toggleExplorerAnchor() {
+  setExplorerAnchor(settings.explorerAnchor === "floating" ? "docked" : "floating");
+}
+
+// In floating mode the explorer overlays the editor; a press outside it (that
+// isn't the toggle/pin controls or the explorer's own popovers) collapses it.
+function handleFloatingExplorerOutsidePress(event) {
+  if (settings.explorerAnchor !== "floating" || settings.explorer !== "expanded") return;
+  const target = event.target;
+  if (elements.explorerPanel?.contains(target)) return;
+  if (elements.explorerToggleButton?.contains(target)) return;
+  if (elements.explorerContextMenu?.contains(target)) return;
+  settings.explorer = "collapsed";
+  if (elements.explorerSelect) elements.explorerSelect.value = settings.explorer;
+  persistSettings();
+}
+
 function togglePreview() {
   settings.preview = settings.preview === "hidden" ? "shown" : "hidden";
   // Never collapse both panes.
@@ -7470,6 +7514,10 @@ elements.toggleSourceButton?.addEventListener("click", toggleSource);
 elements.toggleChatButton.addEventListener("click", toggleChat);
 elements.toggleLogButton.addEventListener("click", toggleLogPanel);
 elements.explorerToggleButton.addEventListener("click", toggleExplorer);
+elements.explorerAnchorButton?.addEventListener("click", toggleExplorerAnchor);
+elements.explorerAnchorSelect?.addEventListener("change", (event) => { setExplorerAnchor(event.target.value); });
+// Capture phase so the outside-press check runs before in-tree click handlers.
+document.addEventListener("pointerdown", handleFloatingExplorerOutsidePress, true);
 elements.previewToggleActivityButton.addEventListener("click", togglePreview);
 elements.sourceToggleActivityButton?.addEventListener("click", toggleSource);
 elements.chatToggleActivityButton.addEventListener("click", toggleChat);
@@ -7782,21 +7830,12 @@ function renderAccountControls() {
   } else {
     elements.accountStatusText.textContent = "";
   }
-  // Workspace picker (lives in the File → Open Server Directory dialog).
+  // File browser (lives in the File → Open Server Directory dialog).
   if (elements.openServerLoginNote) {
     elements.openServerLoginNote.hidden = loggedIn;
   }
-  if (elements.workspaceSwitcher) {
-    elements.workspaceSwitcher.hidden = !loggedIn;
-    if (loggedIn) {
-      const teams = syncState.account.teams ?? [];
-      elements.workspaceTeamSelect.replaceChildren(...teams.map((team) => {
-        const option = document.createElement("option");
-        option.value = team;
-        option.textContent = team;
-        return option;
-      }));
-    }
+  if (elements.serverBrowser) {
+    elements.serverBrowser.hidden = !loggedIn;
   }
   renderHostTargets();
 }
@@ -7848,16 +7887,19 @@ async function handleHost() {
       const name = await promptForName("Name this cloud workspace", "");
       if (!name) return;
       const localProject = controller.getProject();
-      await createWorkspace(settings.serverUrl, syncState.account.token, team, name, false);
+      // Publish into a new project directory under the team's workspaces/ folder,
+      // then open and push into it — same path the file browser's Publish uses.
+      const created = await createProjectServer(settings.serverUrl, syncState.account.token, team, "workspaces", name);
       workspaceMode = "synced";
-      await collaboration.openWorkspace(settings.serverUrl, syncState.account.token, team, name);
+      await collaboration.openWorkspace(settings.serverUrl, syncState.account.token, team, created.path);
       // The freshly-opened workspace is empty; push our local project into it.
       controller.replaceProject(localProject);
       await collaboration.publishSnapshot(localProject);
       settings.wasConnected = false;
-      elements.hostPinText.textContent = `Published to ${team}/${name}.`;
-      await refreshWorkspaceList();
-      logDebug("action", "Published local project to team workspace", `${team}/${name}`);
+      settings.lastWorkspace = { team, path: created.path };
+      saveSettings(settings);
+      elements.hostPinText.textContent = `Published to ${created.id}.`;
+      logDebug("action", "Published local project to team workspace", created.id);
     }
     render(controller.getProject());
   } catch (error) {
@@ -7872,38 +7914,292 @@ async function handleHost() {
   }
 }
 
-async function refreshWorkspaceList() {
-  if (!syncState.account || !elements.workspaceList) return;
-  try {
-    const workspaces = await listWorkspaces(settings.serverUrl, syncState.account.token);
-    elements.workspaceList.replaceChildren();
-    if (workspaces.length === 0) {
-      const empty = document.createElement("li");
-      empty.className = "workspace-empty subtle-label";
-      empty.textContent = "No workspaces yet. Create one below.";
-      elements.workspaceList.append(empty);
-      return;
-    }
-    for (const ws of workspaces) {
-      const item = document.createElement("li");
-      item.className = "workspace-item";
-      const label = document.createElement("span");
-      label.className = "workspace-item-label";
-      label.textContent = `${ws.team} / ${ws.name}`;
-      label.title = `Members: ${(ws.members ?? []).join(", ")}`;
-      const openBtn = document.createElement("button");
-      openBtn.type = "button";
-      openBtn.textContent = syncState.sessionId === ws.id && syncState.status === "connected" ? "Open ✓" : "Open";
-      openBtn.addEventListener("click", () => { void handleOpenWorkspace(ws.team, ws.name); });
-      item.append(label, openBtn);
-      elements.workspaceList.append(item);
-    }
-  } catch (error) {
-    logDebug("response", "Workspace list failed", error.message);
+// ---- Server file browser (Open Server Directory) ---------------------------
+// State for the current view: team === "" means the top-level team list.
+let browserState = { team: "", path: "", teams: [], entries: [] };
+
+function setBrowserStatus(message) {
+  if (!elements.browserStatus) return;
+  elements.browserStatus.textContent = message ?? "";
+  elements.browserStatus.hidden = !message;
+}
+
+function openServerBrowser() {
+  if (!syncState.account || !elements.serverBrowser) return;
+  elements.serverBrowser.hidden = false;
+  // Resume near the last-opened project (its parent folder), else the team list.
+  const last = settings.lastWorkspace;
+  const lastPath = last?.path ?? (last?.name ? `workspaces/${last.name}` : "");
+  if (last?.team && lastPath.includes("/")) {
+    void browseTo(last.team, lastPath.slice(0, lastPath.lastIndexOf("/")));
+  } else if (last?.team) {
+    void browseTo(last.team, "");
+  } else {
+    void browseTo("", "");
   }
 }
 
-async function handleOpenWorkspace(team, name) {
+async function browseTo(team, path) {
+  if (!syncState.account) return;
+  try {
+    const data = await browseServer(settings.serverUrl, syncState.account.token, team, path);
+    if (!team) {
+      browserState = { team: "", path: "", teams: data.teams ?? [], entries: [] };
+    } else {
+      browserState = {
+        team: data.team ?? team,
+        path: data.path ?? "",
+        teams: browserState.teams ?? [],
+        entries: data.entries ?? []
+      };
+    }
+    renderBrowser();
+  } catch (error) {
+    setBrowserStatus(error.message || "Could not browse the server.");
+    logDebug("response", "Browse failed", error.message);
+  }
+}
+
+function renderBrowser() {
+  renderBrowserBreadcrumb();
+  renderBrowserList();
+  const inTeam = Boolean(browserState.team);
+  if (elements.browserNewFolder) elements.browserNewFolder.hidden = !inTeam;
+  if (elements.browserNewProject) elements.browserNewProject.hidden = !inTeam;
+  if (elements.browserPublishHere) elements.browserPublishHere.hidden = !inTeam;
+}
+
+function renderBrowserBreadcrumb() {
+  const nav = elements.browserBreadcrumb;
+  if (!nav) return;
+  nav.replaceChildren();
+  const addCrumb = (label, onClick, isCurrent) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "breadcrumb-crumb";
+    btn.textContent = label;
+    if (isCurrent) {
+      btn.setAttribute("aria-current", "true");
+    } else {
+      btn.addEventListener("click", onClick);
+    }
+    nav.append(btn);
+  };
+  const addSep = () => {
+    const sep = document.createElement("span");
+    sep.className = "breadcrumb-sep";
+    sep.textContent = "›";
+    nav.append(sep);
+  };
+  addCrumb("Teams", () => void browseTo("", ""), !browserState.team);
+  if (browserState.team) {
+    const segs = browserState.path ? browserState.path.split("/") : [];
+    addSep();
+    addCrumb(browserState.team, () => void browseTo(browserState.team, ""), segs.length === 0);
+    let acc = "";
+    segs.forEach((seg, index) => {
+      acc = acc ? `${acc}/${seg}` : seg;
+      const target = acc;
+      addSep();
+      addCrumb(seg, () => void browseTo(browserState.team, target), index === segs.length - 1);
+    });
+  }
+}
+
+function renderBrowserList() {
+  const list = elements.browserList;
+  if (!list) return;
+  list.replaceChildren();
+  setBrowserStatus("");
+  if (!browserState.team) {
+    const teams = browserState.teams ?? [];
+    if (teams.length === 0) {
+      setBrowserStatus("You are not a member of any team yet.");
+      return;
+    }
+    for (const team of teams) {
+      // Tolerate both shapes: older servers return team names as plain strings,
+      // newer ones return { name, modified } for the Date Modified column.
+      const name = typeof team === "string" ? team : team.name;
+      const modified = typeof team === "string" ? null : team.modified;
+      list.append(makeBrowserRow({ name, kind: "team", modified }));
+    }
+    return;
+  }
+  const entries = browserState.entries ?? [];
+  if (entries.length === 0) {
+    setBrowserStatus("This folder is empty. Use the buttons above to add a folder or project.");
+    return;
+  }
+  for (const entry of entries) list.append(makeBrowserRow(entry));
+}
+
+function formatModified(seconds) {
+  if (!seconds) return "—";
+  const date = new Date(seconds * 1000);
+  if (Number.isNaN(date.getTime())) return "—";
+  return `${date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })} ${date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+function makeBrowserRow(entry) {
+  const li = document.createElement("li");
+  li.className = "browser-item";
+
+  const nameCell = document.createElement("div");
+  nameCell.className = "browser-item-name";
+  const icon = document.createElement("span");
+  icon.className = "browser-item-icon";
+  icon.textContent = entry.kind === "project" ? "📄" : entry.kind === "team" ? "👥" : "📁";
+  const label = document.createElement("button");
+  label.type = "button";
+  label.className = "browser-item-label";
+  label.textContent = entry.name;
+  nameCell.append(icon, label);
+
+  const dateCell = document.createElement("span");
+  dateCell.className = "browser-item-date";
+  dateCell.textContent = formatModified(entry.modified);
+
+  const actions = document.createElement("div");
+  actions.className = "browser-item-actions";
+
+  if (entry.kind === "team") {
+    label.addEventListener("click", () => void browseTo(entry.name, ""));
+  } else if (entry.kind === "folder") {
+    label.addEventListener("click", () => void browseTo(browserState.team, entry.path));
+  } else if (entry.kind === "project") {
+    const isOpen = syncState.sessionId === `${browserState.team}/${entry.path}` && syncState.status === "connected";
+    label.classList.add("is-project");
+    label.title = entry.createdBy ? `Owner: ${entry.createdBy}` : "";
+    label.addEventListener("click", () => void handleOpenWorkspace(browserState.team, entry.path));
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "browser-open-btn";
+    openBtn.textContent = isOpen ? "Open ✓" : "Open";
+    openBtn.addEventListener("click", () => void handleOpenWorkspace(browserState.team, entry.path));
+    actions.append(openBtn);
+    if (entry.canEdit) {
+      const accessBtn = document.createElement("button");
+      accessBtn.type = "button";
+      accessBtn.className = "browser-access-btn";
+      accessBtn.textContent = "Access";
+      accessBtn.title = "Edit who can open this project";
+      accessBtn.addEventListener("click", () => void openAccessEditor(browserState.team, entry.path, entry.name));
+      actions.append(accessBtn);
+    }
+  }
+  li.append(nameCell, dateCell, actions);
+  return li;
+}
+
+async function handleNewFolder() {
+  if (!syncState.account || !browserState.team) return;
+  const name = await promptForName("New folder name", "");
+  if (!name) return;
+  try {
+    await mkdirServer(settings.serverUrl, syncState.account.token, browserState.team, browserState.path, name);
+    logDebug("action", "Created cloud folder", `${browserState.team}/${browserState.path}/${name}`);
+    await browseTo(browserState.team, browserState.path);
+  } catch (error) {
+    setBrowserStatus(error.message || "Could not create folder.");
+  }
+}
+
+async function handleNewProject() {
+  if (!syncState.account || !browserState.team) return;
+  const name = await promptForName("New project name", "");
+  if (!name) return;
+  try {
+    await createProjectServer(settings.serverUrl, syncState.account.token, browserState.team, browserState.path, name);
+    logDebug("action", "Created cloud project", `${browserState.team}/${browserState.path}/${name}`);
+    await browseTo(browserState.team, browserState.path);
+  } catch (error) {
+    setBrowserStatus(error.message || "Could not create project.");
+  }
+}
+
+// Publish the current local project as a new cloud project at the browsed path,
+// then open it — the same flow as Collaboration → Share to team, unified here.
+async function handlePublishHere() {
+  if (!syncState.account || !browserState.team) return;
+  const name = await promptForName("Publish current workspace as", "");
+  if (!name) return;
+  const team = browserState.team;
+  const path = browserState.path;
+  try {
+    if (workspaceMode === "private") {
+      privateProjectSnapshot = controller.getProject();
+    }
+    const localProject = controller.getProject();
+    const created = await createProjectServer(settings.serverUrl, syncState.account.token, team, path, name);
+    workspaceMode = "synced";
+    await collaboration.openWorkspace(settings.serverUrl, syncState.account.token, team, created.path);
+    controller.replaceProject(localProject);
+    await collaboration.publishSnapshot(localProject);
+    settings.wasConnected = false;
+    settings.lastWorkspace = { team, path: created.path };
+    saveSettings(settings);
+    logDebug("action", "Published local project to cloud", created.id);
+    if (elements.openServerDialog?.open) elements.openServerDialog.close();
+    render(controller.getProject());
+  } catch (error) {
+    workspaceMode = "private";
+    if (privateProjectSnapshot) {
+      controller.replaceProject(privateProjectSnapshot);
+      privateProjectSnapshot = null;
+    }
+    notify(error.message || "Could not publish workspace.");
+    logDebug("response", "Publish failed", error.message);
+    render(controller.getProject());
+  }
+}
+
+let accessEditorTarget = null;
+
+function setAccessStatus(message) {
+  if (!elements.accessStatus) return;
+  elements.accessStatus.textContent = message ?? "";
+  elements.accessStatus.hidden = !message;
+}
+
+async function openAccessEditor(team, path, name) {
+  if (!syncState.account) return;
+  accessEditorTarget = { team, path };
+  if (elements.accessDialogTitle) elements.accessDialogTitle.textContent = `Access — ${name}`;
+  if (elements.accessWhitelist) elements.accessWhitelist.value = "";
+  if (elements.accessBlacklist) elements.accessBlacklist.value = "";
+  setAccessStatus("");
+  try {
+    const data = await getAccess(settings.serverUrl, syncState.account.token, team, path);
+    if (elements.accessWhitelist) elements.accessWhitelist.value = (data.whitelist ?? []).join("\n");
+    if (elements.accessBlacklist) elements.accessBlacklist.value = (data.blacklist ?? []).join("\n");
+  } catch (error) {
+    setAccessStatus(error.message || "Could not load the access list.");
+  }
+  elements.accessDialog?.showModal();
+}
+
+async function saveAccessEditor() {
+  if (!accessEditorTarget || !syncState.account) return;
+  const parseList = (value) => String(value ?? "").split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
+  try {
+    await setAccess(
+      settings.serverUrl,
+      syncState.account.token,
+      accessEditorTarget.team,
+      accessEditorTarget.path,
+      parseList(elements.accessWhitelist?.value),
+      parseList(elements.accessBlacklist?.value)
+    );
+    logDebug("action", "Updated project access", `${accessEditorTarget.team}/${accessEditorTarget.path}`);
+    elements.accessDialog?.close();
+    await browseTo(browserState.team, browserState.path);
+  } catch (error) {
+    setAccessStatus(error.message || "Could not save the access list.");
+  }
+}
+
+async function handleOpenWorkspace(team, path) {
   if (!syncState.account) return;
   try {
     // Preserve the user's local project once, so leaving the cloud workspace
@@ -7913,12 +8209,11 @@ async function handleOpenWorkspace(team, name) {
       privateProjectSnapshot = controller.getProject();
     }
     workspaceMode = "synced";
-    await collaboration.openWorkspace(settings.serverUrl, syncState.account.token, team, name);
+    await collaboration.openWorkspace(settings.serverUrl, syncState.account.token, team, path);
     settings.wasConnected = false; // cloud opens are account-driven, not PIN auto-reconnect
-    settings.lastWorkspace = { team, name }; // reopened on next boot
+    settings.lastWorkspace = { team, path }; // reopened on next boot
     saveSettings(settings);
-    logDebug("action", "Opened cloud workspace", `${team}/${name}`);
-    await refreshWorkspaceList();
+    logDebug("action", "Opened cloud workspace", `${team}/${path}`);
     if (elements.openServerDialog?.open) elements.openServerDialog.close();
     render(controller.getProject());
   } catch (error) {
@@ -7930,27 +8225,6 @@ async function handleOpenWorkspace(team, name) {
     notify(error.message || "Could not open workspace.");
     logDebug("response", "Open workspace failed", error.message);
     render(controller.getProject());
-  }
-}
-
-async function handleCreateWorkspace() {
-  if (!syncState.account) return;
-  const team = elements.workspaceTeamSelect.value;
-  const name = elements.workspaceNameInput.value.trim();
-  const shareTeam = elements.workspaceShareTeam.checked;
-  if (!name) {
-    notify("Enter a workspace name.");
-    return;
-  }
-  try {
-    await createWorkspace(settings.serverUrl, syncState.account.token, team, name, shareTeam);
-    elements.workspaceNameInput.value = "";
-    elements.workspaceShareTeam.checked = false;
-    logDebug("action", "Created cloud workspace", `${team}/${name}`);
-    await refreshWorkspaceList();
-  } catch (error) {
-    notify(error.message || "Could not create workspace.");
-    logDebug("response", "Create workspace failed", error.message);
   }
 }
 
@@ -7970,7 +8244,6 @@ async function performLogin(username, password, { silent = false } = {}) {
   logDebug("response", "Account login succeeded", `${result.username} teams=${(result.teams ?? []).join(",")}`);
   if (!silent) flashStatusPanel("success", elements.accountSection);
   renderAccountControls();
-  await refreshWorkspaceList();
   render(controller.getProject());
 }
 
@@ -8011,7 +8284,7 @@ function handleAccountLogout() {
   settings.accountPassword = "";
   settings.lastWorkspace = null;
   saveSettings(settings);
-  elements.workspaceList?.replaceChildren();
+  elements.browserList?.replaceChildren();
   logDebug("action", "Account logged out");
   renderAccountControls();
   render(controller.getProject());
@@ -8019,7 +8292,15 @@ function handleAccountLogout() {
 
 elements.accountLoginButton?.addEventListener("click", () => { void handleAccountLogin(); });
 elements.accountLogoutButton?.addEventListener("click", handleAccountLogout);
-elements.workspaceCreateButton?.addEventListener("click", () => { void handleCreateWorkspace(); });
+elements.browserNewFolder?.addEventListener("click", () => { void handleNewFolder(); });
+elements.browserNewProject?.addEventListener("click", () => { void handleNewProject(); });
+elements.browserPublishHere?.addEventListener("click", () => { void handlePublishHere(); });
+elements.accessDialog?.querySelector("form")?.addEventListener("submit", (event) => {
+  // "Cancel" (value=cancel) lets the dialog close normally; Save persists first.
+  if (event.submitter && event.submitter.value === "cancel") return;
+  event.preventDefault();
+  void saveAccessEditor();
+});
 elements.hostButton?.addEventListener("click", () => { void handleHost(); });
 renderHostTargets();
 elements.accountPasswordInput?.addEventListener("keydown", (event) => {
@@ -8144,8 +8425,10 @@ async function restoreSessionOnBoot() {
       try {
         await performLogin(settings.accountUsername, settings.accountPassword, { silent: true });
         const last = settings.lastWorkspace;
-        if (last?.team && last?.name && syncState.account) {
-          await handleOpenWorkspace(last.team, last.name);
+        // Migrate the legacy {team, name} shape to {team, path}.
+        const lastPath = last?.path ?? (last?.name ? `workspaces/${last.name}` : "");
+        if (last?.team && lastPath && syncState.account) {
+          await handleOpenWorkspace(last.team, lastPath);
         }
       } catch (error) {
         logDebug("response", "Startup auto-login failed", error.message);
