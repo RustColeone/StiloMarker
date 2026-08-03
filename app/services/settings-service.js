@@ -7,6 +7,7 @@ function createDefaultSettings() {
     serverPin: "",
     displayName: "",
     explorer: "expanded",
+    explorerAnchor: "docked",
     preview: "shown",
     source: "shown",
     wordWrap: true,

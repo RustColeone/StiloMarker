@@ -374,11 +374,11 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
   // Open a persistent team workspace as a logged-in account. Unlike connect()'s
   // master branch (which pushes the local project), a cloud workspace already
   // holds the canonical project, so we always PULL it.
-  async function openWorkspace(serverUrl, accountToken, team, name) {
+  async function openWorkspace(serverUrl, accountToken, team, path) {
     disconnect();
     emitStatus("reachable", "Opening workspace…");
 
-    const session = await openWorkspaceSession(serverUrl, accountToken, team, name);
+    const session = await openWorkspaceSession(serverUrl, accountToken, team, path);
     connection = {
       serverUrl,
       token: session.token,

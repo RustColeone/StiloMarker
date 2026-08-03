@@ -355,6 +355,59 @@ p {
   grid-template-columns: var(--activity-width) 0 0 minmax(0, 1fr) 0 0;
 }
 
+/* ---- Floating (overlay) explorer anchor ---------------------------------- */
+/* The sidebar column collapses to 0 so the editor keeps full width; the panel
+   is lifted out of flow and slides over the workspace, so opening/closing it
+   never reflows the content (Edge-style vertical-tab flyout). */
+.app-shell[data-explorer-anchor="floating"] .workspace-shell {
+  position: relative;
+  grid-template-columns: var(--activity-width) 0 0 minmax(0, 1fr) var(--splitter-size) var(--chat-width);
+}
+
+.app-shell[data-explorer-anchor="floating"][data-chat="hidden"] .workspace-shell {
+  grid-template-columns: var(--activity-width) 0 0 minmax(0, 1fr) 0 0;
+}
+
+.app-shell[data-explorer-anchor="floating"] .workspace-shell > .workspace-splitter {
+  display: none;
+}
+
+.app-shell[data-explorer-anchor="floating"] .workspace-shell > .sidebar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* The shell is a positioned grid container and this panel keeps grid-column: 2,
+     so its abs-pos containing block is that (zero-width) grid track, which begins
+     exactly at the activity bar's right edge. So left is measured from there:
+     -1px overlaps the activity bar's 1px border, leaving no gutter seam. */
+  left: -1px;
+  width: var(--sidebar-width);
+  z-index: 35;
+  padding-top: 10px;
+  border-right: 1px solid var(--border);
+  box-shadow: 6px 0 22px rgba(0, 0, 0, 0.30);
+  /* Collapsed: tucked away + non-interactive; expanded: slides into view. */
+  transform: translateX(-6px);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.16s ease, opacity 0.16s ease;
+}
+
+.app-shell[data-explorer-anchor="floating"][data-explorer="expanded"] .workspace-shell > .sidebar {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Pin control rotates + highlights when the explorer is floating (unpinned). */
+.sidebar-anchor-button .sidebar-icon-svg {
+  transition: transform 0.16s ease;
+}
+
+.app-shell[data-explorer-anchor="floating"] .sidebar-anchor-button .sidebar-icon-svg {
+  transform: rotate(45deg);
+}
+
 .workspace-shell > .activity-bar {
   grid-column: 1;
 }
@@ -2021,56 +2074,187 @@ p {
   border-top: 1px dashed var(--border);
 }
 
-#workspace-switcher[hidden] {
+/* ---- Server file browser (Open Server Directory) ------------------------- */
+/* Shared column template so the header row and every item line up. */
+#server-browser {
+  --browser-date-col: 160px;
+  --browser-actions-col: 122px;
+}
+
+#server-browser[hidden] {
   display: none;
 }
 
-.workspace-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 4px;
+/* Keep the dialog a stable size regardless of how many entries are listed. */
+#open-server-dialog .settings-form {
+  width: min(94vw, 680px);
 }
 
-.workspace-item {
+.browser-section {
+  min-height: 0;
+}
+
+.browser-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--surface-0);
+  flex-wrap: wrap;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
 }
 
-.workspace-item-label {
+.browser-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+  min-width: 0;
   font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.workspace-item button {
-  flex: none;
+.breadcrumb-crumb {
+  min-height: 22px;
+  padding: 1px 6px;
+  font-size: 12px;
+  color: var(--accent-strong);
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.breadcrumb-crumb:hover {
+  background: var(--surface-2);
+}
+
+.breadcrumb-crumb[aria-current="true"] {
+  color: var(--text);
+  font-weight: 600;
+  cursor: default;
+}
+
+.breadcrumb-sep {
+  color: var(--text-muted);
+  font-size: 12px;
+  user-select: none;
+}
+
+.browser-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.browser-tool-btn {
   min-height: 24px;
   padding: 0 10px;
   font-size: 11px;
 }
 
-.workspace-empty {
-  padding: 4px 2px;
+.browser-tool-btn[hidden] {
+  display: none;
 }
 
-.workspace-create-row {
+/* Column header row — sits directly on top of the list to form one box. */
+.browser-columns {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 6px;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr) var(--browser-date-col) var(--browser-actions-col);
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-bottom: none;
 }
 
-.workspace-create-row .checkbox-row {
-  grid-column: 1 / -1;
+.browser-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  /* Fixed height (not max-height) so the dialog never resizes with content. */
+  height: min(46vh, 340px);
+  overflow-y: auto;
+  background: var(--surface-0);
+  border: 1px solid var(--border);
+}
+
+.browser-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--browser-date-col) var(--browser-actions-col);
+  gap: 8px;
+  align-items: center;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+}
+
+.browser-item:last-child {
+  border-bottom: none;
+}
+
+.browser-item:hover {
+  /* Distinct from the surface tones so rows never blend into the panel. */
+  background: var(--accent-soft);
+}
+
+.browser-item-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.browser-item-icon {
+  flex: none;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.browser-item-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  border: none;
+  padding: 2px 0;
+}
+
+.browser-item-label:hover {
+  text-decoration: underline;
+}
+
+.browser-item-date {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.browser-item-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.browser-item-actions button {
+  min-height: 24px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+.access-form textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 12px;
 }
 
 .presence-list {
