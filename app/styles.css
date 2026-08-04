@@ -2084,11 +2084,10 @@ p {
   border-top: 1px dashed var(--border);
 }
 
-/* ---- Server file browser (Open Server Directory) ------------------------- */
+/* ---- Unified file browser (Open a workspace) ---------------------------- */
 /* Shared column template so the header row and every item line up. */
 #server-browser {
   --browser-date-col: 160px;
-  --browser-actions-col: 122px;
 }
 
 #server-browser[hidden] {
@@ -2168,7 +2167,7 @@ p {
 /* Column header row — sits directly on top of the list to form one box. */
 .browser-columns {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--browser-date-col) var(--browser-actions-col);
+  grid-template-columns: minmax(0, 1fr) var(--browser-date-col);
   gap: 8px;
   padding: 5px 10px;
   font-size: 10px;
@@ -2193,12 +2192,14 @@ p {
 
 .browser-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--browser-date-col) var(--browser-actions-col);
+  grid-template-columns: minmax(0, 1fr) var(--browser-date-col);
   gap: 8px;
   align-items: center;
   padding: 4px 10px;
   border-bottom: 1px solid var(--border);
   background: transparent;
+  cursor: default;
+  user-select: none;
 }
 
 .browser-item:last-child {
@@ -2208,6 +2209,11 @@ p {
 .browser-item:hover {
   /* Distinct from the surface tones so rows never blend into the panel. */
   background: var(--accent-soft);
+}
+
+.browser-item.is-selected {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .browser-item-name {
@@ -2231,13 +2237,10 @@ p {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: transparent;
-  border: none;
-  padding: 2px 0;
 }
 
-.browser-item-label:hover {
-  text-decoration: underline;
+.browser-item.is-selected .browser-item-label {
+  font-weight: 600;
 }
 
 .browser-item-date {
@@ -2248,16 +2251,69 @@ p {
   text-overflow: ellipsis;
 }
 
-.browser-item-actions {
-  display: flex;
-  gap: 6px;
-  justify-content: flex-end;
+/* Storage side toggle (This device / Server) at the top of the browser. */
+.browser-side-toggle {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 0;
+  margin-bottom: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  overflow: hidden;
 }
 
-.browser-item-actions button {
-  min-height: 24px;
-  padding: 0 10px;
-  font-size: 11px;
+.browser-side-toggle[hidden] {
+  display: none;
+}
+
+.side-tab {
+  min-height: 26px;
+  padding: 0 14px;
+  font-size: 12px;
+  border: none;
+  border-radius: 0;
+  background: var(--surface-1);
+  color: var(--text-muted);
+}
+
+.side-tab + .side-tab {
+  border-left: 1px solid var(--border-strong);
+}
+
+.side-tab.is-active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.side-tab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Bottom action bar — the only place to Open/Access a selected row. */
+.browser-actionbar {
+  align-items: center;
+  margin-top: 10px;
+}
+
+.browser-selection-label {
+  margin-right: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.browser-primary-btn:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.browser-tool-btn.is-suggested {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
 }
 
 .access-form textarea {
