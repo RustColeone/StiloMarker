@@ -109,6 +109,7 @@ const elements = {
   settingsButton: query("#settings-button"),
   settingsDialog: query("#settings-dialog"),
   settingsTabStrip: query("#settings-tab-strip"),
+  settingsTabsButton: query("#settings-tabs-button"),
   accountLockedNote: query("#account-locked-note"),
   settingsMenuButton: query("#settings-menu-button"),
   settingsMenu: query("#settings-menu"),
@@ -170,6 +171,12 @@ const elements = {
   workspaceModeToggle: query("#workspace-mode-toggle"),
   sessionIdLabel: query("#session-id-label"),
   explorerToggleButton: query("#explorer-toggle-button"),
+  mobileExplorerButton: query("#mobile-explorer-button"),
+  mobilePaneToggle: query("#mobile-pane-toggle"),
+  mobilePaneCaption: query("#mobile-pane-caption"),
+  mobileChatToggle: query("#mobile-chat-toggle"),
+  mobileMenuButton: query("#mobile-menu-button"),
+  menuBar: query(".menu-bar"),
   fileMenuButton: query("#file-menu-button"),
   editMenuButton: query("#edit-menu-button"),
   selectionMenuButton: query("#selection-menu-button"),
@@ -298,6 +305,11 @@ const syncState = {
 
 // "private" = user's local workspace; "synced" = connected server workspace.
 let workspaceMode = "private";
+
+// Mobile pane state (drives #app[data-mobile-view]). Declared here so the layout
+// pass that runs during module load can read it before its helpers execute.
+let mobileView = "source";         // source | preview | chat
+let lastMobilePaneView = "source"; // last non-chat view, restored when leaving chat
 let privateProjectSnapshot = null;
 // Forward declaration — assigned after `collaboration` is created.
 let switchWorkspaceMode;
@@ -4370,6 +4382,9 @@ function openFileFromExplorer(fileId) {
   }
   logDebug("action", "File opened", getPath(project, fileId));
   setActiveSourceFile(fileId);
+  // On mobile the explorer is a flyout overlay — close it so the opened file
+  // is visible without an extra tap.
+  setMobileExplorerOpen(false);
   if (isBmapFileName(node.name)) {
     setPreviewFile(fileId);
     if (settings.preview === "hidden") {
@@ -5324,6 +5339,9 @@ function applyWorkspaceSettings() {
       ? "Dock the explorer (fixed panel)"
       : "Float the explorer (overlay)";
   }
+  if (!elements.app.dataset.mobileExplorer) elements.app.dataset.mobileExplorer = "closed";
+  if (!elements.app.dataset.mobileMenu) elements.app.dataset.mobileMenu = "closed";
+  applyMobileViewState();
   renderDebugPanel();
 }
 
@@ -6246,9 +6264,12 @@ function renderPresence(presence) {
   elements.presenceList.replaceChildren();
 
   if (presence.length === 0) {
+    const connected = syncState.status === "connected";
     const emptyStrip = document.createElement("span");
     emptyStrip.className = "subtle-label";
-    emptyStrip.textContent = "No collaborators connected.";
+    emptyStrip.textContent = connected
+      ? "Connected — no one else here yet."
+      : "No collaborators connected.";
     elements.presenceStrip.append(emptyStrip);
 
     const emptyList = document.createElement("span");
@@ -6284,10 +6305,31 @@ function updateStatus(project) {
         ? "Server reachable"
         : "Server offline";
   elements.serverStatusText.textContent = syncState.detail;
-  elements.sessionDetailText.textContent = syncState.sessionId
-    ? `Session ${syncState.sessionId} at revision ${syncState.revision}${syncState.displayName ? ` as ${syncState.displayName}` : ""}${syncState.role ? ` (${syncState.role})` : ""}.`
-    : "Not connected to a shared session.";
-  elements.sessionIdLabel.textContent = syncState.sessionId ? `${syncState.sessionId} · r${syncState.revision}` : "Offline";
+  // Session panel (also the sole connection readout on mobile, where the status
+  // bar is hidden): derive everything from the live connection status, not just
+  // a shared-session PIN — a cloud workspace is a "connected" session too.
+  const sessionConnected = syncState.status === "connected";
+  const sessionReachable = syncState.status === "reachable";
+  const sessionName = syncState.sessionId
+    ? (syncState.sessionId === "default"
+        ? "Shared session"
+        : syncState.sessionId.split("/").filter(Boolean).pop() || syncState.sessionId)
+    : null;
+  if (sessionConnected) {
+    elements.sessionIdLabel.textContent = `${sessionName ?? "Connected"} · r${syncState.revision}`;
+    elements.sessionIdLabel.title = syncState.sessionId ?? "Connected";
+    elements.sessionDetailText.textContent = sessionName
+      ? `${sessionName} at revision ${syncState.revision}${syncState.displayName ? ` as ${syncState.displayName}` : ""}${syncState.role ? ` (${syncState.role})` : ""}.`
+      : (syncState.detail || "Connected to the server.");
+  } else if (sessionReachable) {
+    elements.sessionIdLabel.textContent = "Reachable";
+    elements.sessionIdLabel.title = "";
+    elements.sessionDetailText.textContent = syncState.detail || "Server reachable — not in a shared session.";
+  } else {
+    elements.sessionIdLabel.textContent = "Offline";
+    elements.sessionIdLabel.title = "";
+    elements.sessionDetailText.textContent = "Not connected to a shared session.";
+  }
   elements.presenceSummaryText.textContent = collaboratorCount === 1 ? "1 collaborator online" : `${collaboratorCount} collaborators online`;
 
   if (elements.workspaceModeRow) {
@@ -7411,14 +7453,107 @@ function toggleChat() {
   logDebug("action", "Chat toggled", settings.chatPanel);
 }
 
+// ── Mobile view state ──────────────────────────────────────────────────────
+// On narrow screens the source/preview/chat panes share one slot; #app's
+// data-mobile-view picks which is visible. These helpers are inert on desktop
+// (the mobile CSS is gated behind a media query) but keep the button state and
+// ARIA in sync everywhere.
+function applyMobileViewState() {
+  elements.app.dataset.mobileView = mobileView;
+  // The chat panel is normally gated by the global `[hidden] { display:none
+  // !important }` rule (driven by settings.chatPanel). In the mobile chat view
+  // it must win over that, so drop the attribute and let the cascade decide per
+  // viewport. Desktop is unaffected: mobileView stays "source" there, so this
+  // reduces to the original settings-driven expression.
+  if (elements.chatPanel) {
+    elements.chatPanel.hidden = settings.chatPanel === "hidden" && mobileView !== "chat";
+  }
+  if (elements.mobilePaneToggle) {
+    const target = mobileView === "source" ? "preview" : "source";
+    const label = target === "preview" ? "Switch to preview" : "Switch to source";
+    elements.mobilePaneToggle.setAttribute("aria-label", label);
+    elements.mobilePaneToggle.title = label;
+  }
+  elements.mobileChatToggle?.classList.toggle("is-active", mobileView === "chat");
+  elements.mobileChatToggle?.setAttribute("aria-pressed", String(mobileView === "chat"));
+  // Topbar caption (replaces the per-pane header on mobile): SOURCE/PREVIEW plus
+  // the active file name, truncated by CSS to the available width.
+  if (elements.mobilePaneCaption) {
+    let caption = "";
+    if (mobileView === "chat") {
+      caption = "CHAT";
+    } else if (mobileView === "preview") {
+      const name = controller.getProject()?.nodes?.[previewFileId]?.name;
+      caption = name ? `PREVIEW — ${name}` : "PREVIEW";
+    } else {
+      const name = controller.getActiveFile()?.name;
+      caption = name ? `SOURCE — ${name}` : "SOURCE";
+    }
+    elements.mobilePaneCaption.textContent = caption;
+  }
+}
+
+function setMobileView(view) {
+  mobileView = view;
+  if (view === "source" || view === "preview") lastMobilePaneView = view;
+  if (view === "preview") {
+    // Mobile has a single pane toggle, so the preview should mirror the file
+    // you're editing rather than a stale/independent preview target.
+    const activeFile = controller.getActiveFile();
+    if (activeFile && isPreviewableFileName(activeFile.name) && previewFileId !== activeFile.id) {
+      setPreviewFile(activeFile.id);
+    }
+  }
+  applyMobileViewState();
+}
+
+function toggleMobilePane() {
+  // From chat, this returns to the previous pane; otherwise swaps source/preview.
+  if (mobileView === "chat") {
+    setMobileView(lastMobilePaneView);
+    return;
+  }
+  setMobileView(mobileView === "source" ? "preview" : "source");
+}
+
+function toggleMobileChat() {
+  if (mobileView === "chat") {
+    setMobileView(lastMobilePaneView);
+    return;
+  }
+  setMobileView("chat");
+  void refreshChatStatus({ silent: true });
+  chatState.shouldScrollToBottom = true;
+  renderChatPanel(controller.getProject());
+}
+
+function setMobileExplorerOpen(open) {
+  elements.app.dataset.mobileExplorer = open ? "open" : "closed";
+  elements.mobileExplorerButton?.classList.toggle("is-active", open);
+  elements.mobileExplorerButton?.setAttribute("aria-expanded", String(open));
+}
+
+function toggleMobileExplorer() {
+  setMobileExplorerOpen(elements.app.dataset.mobileExplorer !== "open");
+}
+
+function setMobileMenuOpen(open) {
+  elements.app.dataset.mobileMenu = open ? "open" : "closed";
+  elements.mobileMenuButton?.classList.toggle("is-active", open);
+  elements.mobileMenuButton?.setAttribute("aria-expanded", String(open));
+  if (!open) closeMenus();
+}
+
+function toggleMobileMenu() {
+  setMobileMenuOpen(elements.app.dataset.mobileMenu !== "open");
+}
+
 function toggleChatHistoryPane() {
   if (!elements.chatHistoryPane) return;
   const willShow = elements.chatHistoryPane.hidden;
   elements.chatHistoryPane.hidden = !willShow;
   elements.chatHistoryToggleButton?.setAttribute("aria-pressed", String(willShow));
-}
-
-function toggleLogPanel() {
+}function toggleLogPanel() {
   settings.debugPanel = !settings.debugPanel;
   persistSettings();
   logDebug("action", settings.debugPanel ? "Log panel enabled" : "Log panel disabled");
@@ -7525,6 +7660,38 @@ elements.previewCollapseButton.addEventListener("click", togglePreview);
 elements.sourceCollapseButton?.addEventListener("click", toggleSource);
 elements.chatCollapseButton.addEventListener("click", toggleChat);
 elements.logCollapseButton.addEventListener("click", toggleLogPanel);
+
+// Mobile topbar controls (inert on desktop where the buttons are hidden).
+elements.mobileExplorerButton?.addEventListener("click", toggleMobileExplorer);
+elements.mobilePaneToggle?.addEventListener("click", toggleMobilePane);
+elements.mobileChatToggle?.addEventListener("click", toggleMobileChat);
+elements.mobileMenuButton?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  toggleMobileMenu();
+});
+// Choosing a command from the ⋮ dropdown dismisses it (menu triggers, which only
+// open sub-popovers, are left alone). Inert on desktop.
+elements.menuBar?.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (button && !button.classList.contains("menu-trigger")) {
+    setMobileMenuOpen(false);
+  }
+});
+
+// Dismiss the mobile flyouts when tapping outside them.
+document.addEventListener("pointerdown", (event) => {
+  const target = event.target;
+  if (elements.app.dataset.mobileMenu === "open"
+    && !elements.menuBar?.contains(target)
+    && !elements.mobileMenuButton?.contains(target)) {
+    setMobileMenuOpen(false);
+  }
+  if (elements.app.dataset.mobileExplorer === "open"
+    && !elements.explorerPanel?.contains(target)
+    && !elements.mobileExplorerButton?.contains(target)) {
+    setMobileExplorerOpen(false);
+  }
+}, true);
 elements.chatNewThreadButton.addEventListener("click", createNewChatConversation);
 elements.chatHistoryToggleButton?.addEventListener("click", toggleChatHistoryPane);
 
@@ -7628,6 +7795,9 @@ function switchSettingsTab(tab) {
   elements.settingsDialog.querySelectorAll(".settings-tab-panel").forEach((panel) => {
     panel.hidden = panel.dataset.tabPanel !== tab;
   });
+  // On mobile the rail is a ≡ flyout — collapse it once a section is chosen.
+  elements.settingsDialog.dataset.tabs = "closed";
+  elements.settingsTabsButton?.setAttribute("aria-expanded", "false");
 }
 
 function openSettingsDialog(tab = "appearance") {
@@ -7636,6 +7806,25 @@ function openSettingsDialog(tab = "appearance") {
   }
   switchSettingsTab(tab);
 }
+
+elements.settingsTabsButton?.addEventListener("click", () => {
+  const open = elements.settingsDialog.dataset.tabs !== "open";
+  elements.settingsDialog.dataset.tabs = open ? "open" : "closed";
+  elements.settingsTabsButton.setAttribute("aria-expanded", String(open));
+});
+
+// While the section rail is open (mobile flyout), a tap anywhere outside it
+// should just dismiss the rail — not activate the half-covered control behind
+// it. Capture the click first so it never reaches that control.
+elements.settingsDialog?.addEventListener("click", (event) => {
+  if (elements.settingsDialog.dataset.tabs !== "open") return;
+  if (elements.settingsTabStrip?.contains(event.target)) return;
+  if (elements.settingsTabsButton?.contains(event.target)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  elements.settingsDialog.dataset.tabs = "closed";
+  elements.settingsTabsButton?.setAttribute("aria-expanded", "false");
+}, true);
 
 elements.settingsTabStrip?.querySelectorAll(".settings-tab").forEach((button) => {
   button.addEventListener("click", () => switchSettingsTab(button.dataset.tab));

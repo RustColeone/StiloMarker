@@ -10,6 +10,8 @@
   <body>
     <div id="app" class="app-shell">
       <header class="topbar">
+        <button id="mobile-explorer-button" class="topbar-mobile-btn topbar-mobile-only" type="button" aria-label="Open explorer" title="Explorer" aria-expanded="false">&#8801;</button>
+
         <div class="brand-cluster">
           <div class="brand-mark" aria-hidden="true">S</div>
           <div class="brand-block">
@@ -17,6 +19,8 @@
             <h1>Stilo Marker</h1>
           </div>
         </div>
+
+        <div id="mobile-pane-caption" class="mobile-pane-caption topbar-mobile-only" aria-live="polite"></div>
 
         <nav class="menu-bar" aria-label="Application menus">
           <div class="menu-group">
@@ -75,6 +79,12 @@
         </nav>
 
         <div class="window-caption" aria-hidden="true">Markdown IDE</div>
+
+        <div class="topbar-mobile-actions topbar-mobile-only">
+          <button id="mobile-pane-toggle" class="topbar-mobile-btn" type="button" aria-label="Switch to preview" title="Switch to preview">&#9707;</button>
+          <button id="mobile-chat-toggle" class="topbar-mobile-btn" type="button" aria-label="Toggle chat" title="Chat" aria-pressed="false"><svg class="topbar-mobile-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></button>
+          <button id="mobile-menu-button" class="topbar-mobile-btn" type="button" aria-label="Open menu" title="Menu" aria-expanded="false">&#8942;</button>
+        </div>
 
         <input id="import-file-input" type="file" accept=".md,.mtree,.urldb,.bmap,.png,.jpg,.jpeg,.gif,.svg,.webp,.bmp,.zip" hidden>
         <input id="replace-file-input" type="file" accept=".png,.jpg,.jpeg,.gif,.svg,.webp,.bmp" hidden>
@@ -268,11 +278,13 @@
     <dialog id="settings-dialog">
       <form method="dialog" class="settings-form">
         <header class="dialog-header">
+          <button id="settings-tabs-button" class="dialog-nav-button" type="button" aria-label="Show settings sections" aria-expanded="false">&#8801;</button>
           <div>
             <div class="eyebrow">Workbench</div>
             <h2>Settings</h2>
           </div>
           <p class="subtle-label">Theme, layout, and collaboration preferences.</p>
+          <button class="dialog-close-corner" type="submit" value="cancel" formnovalidate aria-label="Close">&#215;</button>
         </header>
 
         <div class="settings-body">
@@ -443,10 +455,6 @@
           </div>
         </div>
         </div>
-
-        <menu class="dialog-actions">
-          <button value="cancel" type="submit">Close</button>
-        </menu>
       </form>
     </dialog>
 
@@ -460,6 +468,7 @@
             <h2>Open Server Directory</h2>
           </div>
           <p class="subtle-label">Browse your teams' cloud folders and open a project.</p>
+          <button class="dialog-close-corner" type="submit" value="cancel" formnovalidate aria-label="Close">&#215;</button>
         </header>
 
         <section class="settings-section browser-section">
@@ -485,10 +494,6 @@
             <p id="browser-status" class="subtle-label" hidden></p>
           </div>
         </section>
-
-        <menu class="dialog-actions">
-          <button value="cancel" type="submit">Close</button>
-        </menu>
       </form>
     </dialog>
 
@@ -529,6 +534,7 @@
             <h2>Module Map</h2>
           </div>
           <p id="mtree-source-text" class="subtle-label">Choose a .mtree file from the explorer to generate a module map.</p>
+          <button class="dialog-close-corner" type="submit" value="cancel" formnovalidate aria-label="Close">&#215;</button>
         </header>
 
         <div class="settings-grid mtree-tools-grid">
@@ -617,7 +623,6 @@
 
         <menu class="dialog-actions">
           <button id="mtree-create-button" type="button">Write to Target</button>
-          <button value="cancel" type="submit">Close</button>
         </menu>
       </form>
     </dialog>
@@ -630,6 +635,7 @@
             <h2>Add File</h2>
           </div>
           <p id="add-file-target-text" class="subtle-label">Add a markdown, mtree, or image file into the selected folder.</p>
+          <button class="dialog-close-corner" type="submit" value="cancel" formnovalidate aria-label="Close">&#215;</button>
         </header>
 
         <div class="settings-grid add-file-grid">
@@ -662,7 +668,6 @@
 
         <menu class="dialog-actions">
           <button id="add-file-submit-button" type="button">Add File</button>
-          <button value="cancel" type="submit">Close</button>
         </menu>
       </form>
     </dialog>

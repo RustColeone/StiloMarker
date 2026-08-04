@@ -23,6 +23,13 @@ const MIN_SNAP_STEP = 10;
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 3;
 const ZOOM_STEP = 0.15;
+// Touch viewport smoothing. VIEWPORT_EASE is how far the rendered pan/zoom moves
+// toward its target each frame; PINCH_INPUT_EASE low-passes noisy finger
+// readings; MOMENTUM_DECAY/_MIN control the post-release coast.
+const VIEWPORT_EASE = 0.35;
+const PINCH_INPUT_EASE = 0.5;
+const MOMENTUM_DECAY = 0.9;
+const MOMENTUM_MIN = 0.15;
 const SNAP_STEP_OPTIONS = [10, 20, 25, 50, 100];
 
 // Default ink for node name/body text. Node boxes are always light, so this is a
@@ -57,6 +64,16 @@ let popupEscOff = null;
 let popupZoom = 1;
 
 const POPUP_ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5];
+
+// Touch: a second tap within this window (and close to the first) arms a
+// marquee selection drag, so a plain finger drag pans while double-tap-drag
+// selects.
+const TOUCH_DOUBLE_TAP_MS = 320;
+const TOUCH_DOUBLE_TAP_DIST = 32;
+
+// Trash-bin glyph for the toolbar Delete button (kept as an inline SVG so it
+// scales with the button and needs no icon font or asset request).
+const TRASH_ICON_SVG = `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7m2.5 0-.7 12.1A1.9 1.9 0 0 1 14.9 21H9.1a1.9 1.9 0 0 1-1.9-1.9L6.5 7M10 11v6M14 11v6"/></svg>`;
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -834,6 +851,16 @@ function createBmapView({ container, ...defaultOptions } = {}) {
   let historyIndex = -1;
   let pan = { x: 40, y: 40 };
   let zoom = 1;
+  // Live two-finger touch points (pointerId -> {x, y}) and the in-flight pinch.
+  const activeTouchPoints = new Map();
+  let pinchState = null;
+  let pinchListenersBound = false;
+  // Smoothed viewport target that the render eases toward, so raw finger jitter
+  // and post-release flicks feel damped rather than jumping frame-to-frame.
+  let targetPan = { x: pan.x, y: pan.y };
+  let targetZoom = zoom;
+  let panVelocity = { x: 0, y: 0 };
+  let viewportAnimId = null;
   let gesture = null;
   let connectPreview = null;
   let currentDocumentKey = null;
@@ -863,6 +890,8 @@ function createBmapView({ container, ...defaultOptions } = {}) {
   let contextMenuEl = null; // the floating right-click menu, portaled to <body>
   let toastTimer = null;
   let autoPanTargetIsOrigin = true; // auto-pan aims at the origin unless a cached view was restored
+  let lastTouchTapAt = 0; // timestamp of the last finger tap on empty canvas (double-tap detection)
+  let lastTouchTapPos = null; // client coords of that tap
 
   function setActiveOptions(nextOptions = {}) {
     activeOptions = {
@@ -1431,6 +1460,12 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       { separator: true },
       { label: "Select All", disabled: !hasContent, run: () => selectAll() },
       { separator: true },
+      {
+        label: inspectorCollapsed ? "Show Inspector" : "Hide Inspector",
+        disabled: !editing,
+        run: () => toggleInspectorCollapsed(),
+      },
+      { separator: true },
       { label: "Undo", disabled: !editing || !canUndo, run: () => applyHistory(-1) },
       { label: "Redo", disabled: !editing || !canRedo, run: () => applyHistory(1) },
     ];
@@ -1524,6 +1559,230 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     ].join(",");
     canvasEl.style.backgroundSize = `${minorScreen}px ${minorScreen}px, ${majorScreen}px ${majorScreen}px`;
     canvasEl.style.backgroundPosition = `${minorOffsetX}px ${minorOffsetY}px, ${majorOffsetX}px ${majorOffsetY}px`;
+  }
+
+  // ── Pinch-to-zoom (two-finger touch) ──────────────────────────────────────
+  // The world point under the midpoint of the two fingers is pinned there for
+  // the whole gesture, so zooming keeps whatever sits between the fingers
+  // centred (and moving both fingers pans the diagram along with them). The
+  // listeners bind to the document once — renderScene() rebuilds the canvas
+  // element on every render, so per-canvas binding would leak handlers.
+  function twoTouchPoints() {
+    const iterator = activeTouchPoints.values();
+    return [iterator.next().value, iterator.next().value];
+  }
+
+  function beginPinch() {
+    const [a, b] = twoTouchPoints();
+    if (!a || !b || !canvasEl) {
+      return;
+    }
+    // Abandon any single-finger gesture (pan/marquee/node-drag) that the first
+    // finger started so only the pinch drives the viewport.
+    if (gesture) {
+      stopGesture(false);
+    }
+    canvasEl.classList.remove("is-panning");
+    const rect = canvasEl.getBoundingClientRect();
+    const midX = ((a.x + b.x) / 2) - rect.left;
+    const midY = ((a.y + b.y) / 2) - rect.top;
+    // Start the smoothed target from wherever the view currently sits and kill
+    // any leftover momentum so a fresh pinch never inherits a stale flick.
+    targetPan = { x: pan.x, y: pan.y };
+    targetZoom = zoom;
+    panVelocity = { x: 0, y: 0 };
+    pinchState = {
+      startDist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+      startZoom: zoom,
+      // EMA-smoothed finger readings; seeded so the first frame is a no-op.
+      smoothDist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+      smoothMid: { x: midX, y: midY },
+      anchorWorld: {
+        x: (midX - pan.x) / zoom,
+        y: (midY - pan.y) / zoom,
+      },
+    };
+    ensureViewportAnim();
+  }
+
+  function updatePinch() {
+    if (!pinchState || activeTouchPoints.size < 2 || !canvasEl) {
+      return;
+    }
+    const [a, b] = twoTouchPoints();
+    if (!a || !b) {
+      return;
+    }
+    const rect = canvasEl.getBoundingClientRect();
+    const midX = ((a.x + b.x) / 2) - rect.left;
+    const midY = ((a.y + b.y) / 2) - rect.top;
+    const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+    // Low-pass the raw finger distance/midpoint. Touch sensors report noisy
+    // positions; feeding them straight into the zoom ratio is what produced the
+    // sudden hops to much larger/smaller. Smoothing kills single-frame spikes.
+    pinchState.smoothDist += (dist - pinchState.smoothDist) * PINCH_INPUT_EASE;
+    pinchState.smoothMid.x += (midX - pinchState.smoothMid.x) * PINCH_INPUT_EASE;
+    pinchState.smoothMid.y += (midY - pinchState.smoothMid.y) * PINCH_INPUT_EASE;
+
+    targetZoom = clamp(
+      pinchState.startZoom * (pinchState.smoothDist / pinchState.startDist),
+      MIN_ZOOM,
+      MAX_ZOOM,
+    );
+    const nextX = pinchState.smoothMid.x - (pinchState.anchorWorld.x * targetZoom);
+    const nextY = pinchState.smoothMid.y - (pinchState.anchorWorld.y * targetZoom);
+    // Pinch follows the finger midpoint but never feeds momentum: a momentum
+    // kick when a finger briefly drops mid-pinch is what produced the hop.
+    targetPan.x = nextX;
+    targetPan.y = nextY;
+    ensureViewportAnim();
+  }
+
+  // Single rAF loop for the touch viewport. During a live pinch it eases the
+  // applied pan/zoom toward the smoothed finger target. With no active pinch it
+  // runs pure pan inertia (pan += decaying velocity) for a released flick, and
+  // otherwise eases onto the resting target — keeping deceleration monotonic.
+  function stepViewportAnim() {
+    viewportAnimId = null;
+    if (!canvasEl) {
+      return;
+    }
+    if (pinchState) {
+      pan.x += (targetPan.x - pan.x) * VIEWPORT_EASE;
+      pan.y += (targetPan.y - pan.y) * VIEWPORT_EASE;
+      zoom += (targetZoom - zoom) * VIEWPORT_EASE;
+      applyViewportTransform();
+      viewportAnimId = requestAnimationFrame(stepViewportAnim);
+      return;
+    }
+
+    // Finish easing any leftover zoom from a just-ended pinch.
+    zoom += (targetZoom - zoom) * VIEWPORT_EASE;
+    const speed = Math.hypot(panVelocity.x, panVelocity.y);
+    if (speed > MOMENTUM_MIN) {
+      // Inertial coast: apply velocity straight to the pan and decay it.
+      pan.x += panVelocity.x;
+      pan.y += panVelocity.y;
+      panVelocity.x *= MOMENTUM_DECAY;
+      panVelocity.y *= MOMENTUM_DECAY;
+      targetPan.x = pan.x;
+      targetPan.y = pan.y;
+    } else {
+      panVelocity.x = 0;
+      panVelocity.y = 0;
+      // Ease onto the resting target (used by the tail of a pinch settle).
+      pan.x += (targetPan.x - pan.x) * VIEWPORT_EASE;
+      pan.y += (targetPan.y - pan.y) * VIEWPORT_EASE;
+    }
+    applyViewportTransform();
+
+    const settled =
+      speed <= MOMENTUM_MIN &&
+      Math.abs(targetPan.x - pan.x) < 0.1 &&
+      Math.abs(targetPan.y - pan.y) < 0.1 &&
+      Math.abs(targetZoom - zoom) < 0.0005;
+    if (!settled) {
+      viewportAnimId = requestAnimationFrame(stepViewportAnim);
+    } else {
+      // Snap exactly onto the target so cached views/coordinate math are precise.
+      pan.x = targetPan.x;
+      pan.y = targetPan.y;
+      zoom = targetZoom;
+      applyViewportTransform();
+    }
+  }
+
+  function ensureViewportAnim() {
+    if (viewportAnimId == null) {
+      viewportAnimId = requestAnimationFrame(stepViewportAnim);
+    }
+  }
+
+  // Freeze the smoothed viewport wherever it currently sits — used when a
+  // single-finger pan/drag takes over so momentum doesn't fight the gesture.
+  function stopViewportAnim() {
+    if (viewportAnimId != null) {
+      cancelAnimationFrame(viewportAnimId);
+      viewportAnimId = null;
+    }
+    panVelocity.x = 0;
+    panVelocity.y = 0;
+    targetPan.x = pan.x;
+    targetPan.y = pan.y;
+    targetZoom = zoom;
+  }
+
+  // Hand a released touch-pan off to the momentum phase of the viewport loop.
+  // velocity is in px/ms (screen space); it coasts the pan with decay.
+  function startPanMomentum(velocity) {
+    const PER_FRAME = 16;
+    let vx = velocity.x * PER_FRAME;
+    let vy = velocity.y * PER_FRAME;
+    const mag = Math.hypot(vx, vy);
+    if (mag <= MOMENTUM_MIN) {
+      return;
+    }
+    const CAP = 36;
+    if (mag > CAP) {
+      vx = (vx / mag) * CAP;
+      vy = (vy / mag) * CAP;
+    }
+    panVelocity.x = vx;
+    panVelocity.y = vy;
+    targetPan.x = pan.x;
+    targetPan.y = pan.y;
+    targetZoom = zoom;
+    ensureViewportAnim();
+  }
+
+  function bindPinchZoom() {
+    if (pinchListenersBound) {
+      return;
+    }
+    pinchListenersBound = true;
+
+    // Capture-phase so a second finger is tracked even when it lands on a node
+    // whose own pointerdown stops propagation.
+    document.addEventListener("pointerdown", (event) => {
+      if (event.pointerType !== "touch" || !canvasEl || !canvasEl.contains(event.target)) {
+        return;
+      }
+      activeTouchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (activeTouchPoints.size === 2) {
+        // Swallow this pointerdown so the canvas's own handler doesn't also
+        // start a single-finger pan for the second finger.
+        event.preventDefault();
+        event.stopPropagation();
+        beginPinch();
+      }
+    }, true);
+
+    document.addEventListener("pointermove", (event) => {
+      if (event.pointerType !== "touch" || !activeTouchPoints.has(event.pointerId)) {
+        return;
+      }
+      activeTouchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (pinchState) {
+        event.preventDefault();
+        updatePinch();
+      }
+    }, { passive: false });
+
+    const releaseTouch = (event) => {
+      if (event.pointerType !== "touch" || !activeTouchPoints.has(event.pointerId)) {
+        return;
+      }
+      activeTouchPoints.delete(event.pointerId);
+      if (pinchState && activeTouchPoints.size < 2) {
+        pinchState = null;
+        // Let the animation loop finish easing onto the final zoom/pan target.
+        // panVelocity stays 0 here, so the pinch never coasts (which is what
+        // used to hop when a finger dropped briefly mid-pinch).
+        ensureViewportAnim();
+      }
+    };
+    document.addEventListener("pointerup", releaseTouch);
+    document.addEventListener("pointercancel", releaseTouch);
   }
 
   function addNode(shape) {
@@ -1754,11 +2013,28 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     if (gesture.kind === "pan") {
       const dx = event.clientX - gesture.startClient.x;
       const dy = event.clientY - gesture.startClient.y;
+      // A pan that actually travels is not a tap, so it must not seed the next
+      // finger touch into a false double-tap (which would arm selection mode).
+      if ((Math.abs(dx) + Math.abs(dy)) > 8) {
+        lastTouchTapAt = 0;
+        lastTouchTapPos = null;
+      }
       // A right-drag that actually moves is a pan; remember that so the trailing
       // contextmenu event opens nothing (vs. a stationary right-click → menu).
       if (gesture.fromButton === 2 && (Math.abs(dx) + Math.abs(dy)) > 4) {
         rightDragPanned = true;
       }
+      // Track an EMA of the finger speed (px/ms) so a released touch-pan can
+      // coast with momentum.
+      const now = performance.now();
+      const dt = Math.max(now - gesture.lastTime, 1);
+      const instVX = (event.clientX - gesture.lastClient.x) / dt;
+      const instVY = (event.clientY - gesture.lastClient.y) / dt;
+      gesture.velocity.x += (instVX - gesture.velocity.x) * 0.4;
+      gesture.velocity.y += (instVY - gesture.velocity.y) * 0.4;
+      gesture.lastClient.x = event.clientX;
+      gesture.lastClient.y = event.clientY;
+      gesture.lastTime = now;
       pan = {
         x: gesture.startPan.x + dx,
         y: gesture.startPan.y + dy,
@@ -1845,6 +2121,23 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     }
     const finishedGesture = gesture;
     stopGesture(false);
+
+    if (finishedGesture.kind === "pan") {
+      const movedDistance = Math.abs(finishedGesture.startClient.x - event.clientX)
+        + Math.abs(finishedGesture.startClient.y - event.clientY);
+      if (finishedGesture.fromButton === 0 && movedDistance < 4) {
+        // A stationary primary-button tap/click on empty canvas clears the
+        // current selection — tap-to-deselect (touch and left-click).
+        if (selection.length > 0) {
+          selection = [];
+          renderScene();
+        }
+      } else if (finishedGesture.pointerType === "touch" && finishedGesture.velocity) {
+        // A flung touch pan coasts to a stop with momentum.
+        startPanMomentum(finishedGesture.velocity);
+      }
+      return;
+    }
 
     if (finishedGesture.kind === "move-node") {
       const movedDistance = Math.abs(finishedGesture.startClient.x - event.clientX)
@@ -1981,11 +2274,16 @@ function createBmapView({ container, ...defaultOptions } = {}) {
   }
 
   function startPan(event) {
+    stopViewportAnim();
     startGesture({
       kind: "pan",
       fromButton: event.button,
+      pointerType: event.pointerType,
       startClient: { x: event.clientX, y: event.clientY },
-      startPan: { ...pan }
+      startPan: { ...pan },
+      lastClient: { x: event.clientX, y: event.clientY },
+      lastTime: performance.now(),
+      velocity: { x: 0, y: 0 },
     });
     // Show the grabbing hand for the duration of the pan. :active is unreliable
     // for right/middle buttons, so the class is toggled explicitly here.
@@ -2107,10 +2405,14 @@ function createBmapView({ container, ...defaultOptions } = {}) {
 
     const left = document.createElement("div");
     left.className = "bmap-toolbar-group";
+    const deleteBtn = makeToolbarButton("", "Delete selected node or connector", deleteSelected, selection.length === 0 || !isEditingEnabled());
+    deleteBtn.classList.add("bmap-toolbar-btn-icon");
+    deleteBtn.innerHTML = TRASH_ICON_SVG;
+    deleteBtn.setAttribute("aria-label", "Delete");
     left.append(
-      makeToolbarButton("Add Rect", "Add a rectangular node", () => addNode("rect"), !isEditingEnabled()),
-      makeToolbarButton("Add Oval", "Add an oval node", () => addNode("circle"), !isEditingEnabled()),
-      makeToolbarButton("Delete", "Delete selected node or connector", deleteSelected, selection.length === 0 || !isEditingEnabled()),
+      makeToolbarButton("+ Rect", "Add a rectangular node", () => addNode("rect"), !isEditingEnabled()),
+      makeToolbarButton("+ Oval", "Add an oval node", () => addNode("circle"), !isEditingEnabled()),
+      deleteBtn,
     );
 
     const snapField = document.createElement("label");
@@ -2130,9 +2432,17 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       setSnapStep(snapSelect.value);
     });
     snapField.append(snapLabel, snapSelect);
+    left.append(snapField);
 
+    toolbar.append(left);
+    return toolbar;
+  }
+
+  // The selection/snap status floats over the top-right of the canvas rather
+  // than occupying a toolbar row, keeping the toolbar compact.
+  function buildStatusFloat() {
     const status = document.createElement("div");
-    status.className = "bmap-toolbar-status";
+    status.className = "bmap-status-float";
     const nodeCount = selection.filter((item) => item.type === "node").length;
     const connectorCount = selection.filter((item) => item.type === "connector").length;
     if (selection.length === 0) {
@@ -2147,9 +2457,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       if (connectorCount) parts.push(`${connectorCount} connector${connectorCount === 1 ? "" : "s"}`);
       status.textContent = `Selected ${parts.join(" + ")}`;
     }
-
-    toolbar.append(left, snapField, status);
-    return toolbar;
+    return status;
   }
 
   const IMAGE_EXT_RE = /\.(png|jpe?g|gif|svg|webp|bmp)$/i;
@@ -2978,7 +3286,10 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     collapseBtn.type = "button";
     collapseBtn.className = "bmap-inspector-collapse-btn";
     collapseBtn.title = inspectorCollapsed ? "Show inspector" : "Collapse inspector";
-    collapseBtn.textContent = inspectorCollapsed ? "\u2039" : "\u203A";
+    const collapseGlyph = document.createElement("span");
+    collapseGlyph.className = "bmap-inspector-collapse-glyph";
+    collapseGlyph.textContent = inspectorCollapsed ? "\u2039" : "\u203A";
+    collapseBtn.append(collapseGlyph);
     collapseBtn.setAttribute("aria-expanded", String(!inspectorCollapsed));
     collapseBtn.addEventListener("click", toggleInspectorCollapsed);
 
@@ -3412,6 +3723,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
 
     canvas.append(inner, controls);
     stage.append(canvas);
+    stage.append(buildStatusFloat());
     workspace.append(stage, buildInspector());
     root.append(toolbar, workspace);
     container.append(root);
@@ -3467,6 +3779,28 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       if (!isEmptyCanvasTarget(event.target)) {
         return;
       }
+      // Touch has no right/middle button, so a plain finger drag pans (the
+      // natural "grab the paper" gesture) and a double-tap-then-drag arms a
+      // marquee selection instead. This keeps press-and-hold from selecting.
+      if (event.pointerType === "touch" && event.button === 0) {
+        event.preventDefault();
+        canvas.focus({ preventScroll: true });
+        const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
+        const near = lastTouchTapPos
+          && Math.abs(event.clientX - lastTouchTapPos.x) <= TOUCH_DOUBLE_TAP_DIST
+          && Math.abs(event.clientY - lastTouchTapPos.y) <= TOUCH_DOUBLE_TAP_DIST;
+        const isDoubleTap = near && (now - lastTouchTapAt) <= TOUCH_DOUBLE_TAP_MS;
+        if (isDoubleTap) {
+          lastTouchTapAt = 0;
+          lastTouchTapPos = null;
+          startMarquee(event);
+        } else {
+          lastTouchTapAt = now;
+          lastTouchTapPos = { x: event.clientX, y: event.clientY };
+          startPan(event);
+        }
+        return;
+      }
       // Controls are identical in both modes: right/middle-drag pans, left-drag
       // draws a marquee selection rectangle. Read-only mode still selects (for
       // highlighting); it just can't edit what's selected.
@@ -3520,6 +3854,10 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       pan.y = mouseY - ((mouseY - pan.y) * (zoom / previousZoom));
       applyViewportTransform();
     }, { passive: false });
+
+    // Pinch-to-zoom listeners live on the document and bind only once, since
+    // renderScene() rebuilds this canvas element on every render.
+    bindPinchZoom();
 
     applyViewportTransform();
   }
