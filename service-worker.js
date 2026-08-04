@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v41";
+const CACHE_NAME = "mdnotes-shell-v42";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -15,6 +15,7 @@ const APP_SHELL = [
   "./app/services/markdown-service.js",
   "./app/services/mtree-module-map-service.js",
   "./app/services/offline-service.js",
+  "./app/services/opfs-service.js",
   "./app/services/settings-service.js",
   "./app/services/storage-service.js",
   "./app/services/sync-service.js",

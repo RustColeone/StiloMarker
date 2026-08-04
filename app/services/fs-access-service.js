@@ -73,15 +73,12 @@ async function ensureReadWritePermission(handle) {
   return (await handle.requestPermission(options)) === "granted";
 }
 
-async function importDirectory() {
-  const directoryHandle = await window.showDirectoryPicker();
-  const granted = await ensureReadWritePermission(directoryHandle);
-  if (!granted) {
-    throw new Error("Directory permission was not granted.");
-  }
-
-  let project = createProject(directoryHandle.name || "Directory");
-  project.sourceMode = "filesystem";
+// Walk any FileSystemDirectoryHandle (an OS-picked folder *or* an OPFS folder —
+// they share the same handle API) into a live project whose handles map back to
+// the directory, so edits can be flushed via saveProjectToHandles.
+async function buildProjectFromDirectoryHandle(directoryHandle, name, sourceMode = "filesystem") {
+  let project = createProject(name || directoryHandle.name || "Directory");
+  project.sourceMode = sourceMode;
   project.handles = { [ROOT_ID]: directoryHandle };
 
   async function walk(folderHandle, parentId) {
@@ -116,8 +113,19 @@ async function importDirectory() {
   return project;
 }
 
+async function importDirectory() {
+  const directoryHandle = await window.showDirectoryPicker();
+  const granted = await ensureReadWritePermission(directoryHandle);
+  if (!granted) {
+    throw new Error("Directory permission was not granted.");
+  }
+  return buildProjectFromDirectoryHandle(directoryHandle, directoryHandle.name || "Directory", "filesystem");
+}
+
 async function saveProjectToHandles(project) {
-  if (project.sourceMode !== "filesystem" || !project.handles) {
+  // "opfs" projects live in the browser's Origin Private File System but use the
+  // same handle API as an OS-picked "filesystem" directory, so they persist here.
+  if ((project.sourceMode !== "filesystem" && project.sourceMode !== "opfs") || !project.handles) {
     return false;
   }
 
@@ -211,4 +219,12 @@ async function importZipArchive(file) {
   return project;
 }
 
-export { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess };
+export {
+  buildProjectFromDirectoryHandle,
+  buildSourceIndex,
+  importDirectory,
+  importSingleFile,
+  importZipArchive,
+  saveProjectToHandles,
+  supportsDirectoryAccess
+};
