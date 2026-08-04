@@ -1,7 +1,7 @@
 import { ROOT_ID, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isAllowedFileName, isBmapFileName, isImageFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
 import { createProjectController, seedDefaultProject } from "./domain/project-service.js";
 import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
-import { supportsOpfs, createProjectOpfs, openProjectOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs } from "./services/opfs-service.js";
+import { supportsOpfs, listOpfsDir, mkdirOpfs, createProjectOpfs, openProjectOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs } from "./services/opfs-service.js";
 import { createCollaborationRuntime } from "./services/collaboration-service.js";
 import { fetchChatStatus, fetchServerChatWorkspace, pushServerChatWorkspace, sendChatRequest, sendGenerationRequest } from "./services/chat-api-service.js";
 import { createChatMessage, createChatThread, deriveChatTitle, loadChatWorkspace, saveChatWorkspace } from "./services/chat-storage-service.js";
@@ -143,12 +143,20 @@ const elements = {
   accountStatusText: query("#account-status-text"),
   openServerLoginNote: query("#open-server-login-note"),
   serverBrowser: query("#server-browser"),
+  browserTitle: query("#browser-title"),
+  browserSubtitle: query("#browser-subtitle"),
+  browserSideToggle: query("#browser-side-toggle"),
+  browserSideLocal: query("#browser-side-local"),
+  browserSideServer: query("#browser-side-server"),
   browserBreadcrumb: query("#browser-breadcrumb"),
   browserList: query("#browser-list"),
   browserStatus: query("#browser-status"),
   browserNewFolder: query("#browser-new-folder"),
   browserNewProject: query("#browser-new-project"),
   browserPublishHere: query("#browser-publish-here"),
+  browserOpenBtn: query("#browser-open-btn"),
+  browserAccessBtn: query("#browser-access-btn"),
+  browserSelectionLabel: query("#browser-selection-label"),
   accessDialog: query("#access-dialog"),
   accessDialogTitle: query("#access-dialog-title"),
   accessWhitelist: query("#access-whitelist"),
@@ -188,7 +196,7 @@ const elements = {
   viewMenu: query("#view-menu"),
   newProjectButton: query("#new-project-button"),
   openDirectoryButton: query("#open-directory-button"),
-  openServerDirectoryButton: query("#open-server-directory-button"),
+  openProjectButton: query("#open-project-button"),
   openServerDialog: query("#open-server-dialog"),
   importFileButton: query("#import-file-button"),
   importFileInput: query("#import-file-input"),
@@ -7230,51 +7238,19 @@ elements.exportSelectedButton.addEventListener("click", () => exportNode(getSele
 
 elements.newProjectButton.addEventListener("click", async () => {
   logDebug("action", "New project requested");
-  try {
-    // Side toggle: when signed into a server, offer server vs. local; otherwise
-    // the new project lands in the persistent local (OPFS) store.
-    if (syncState.account && supportsOpfs()) {
-      const onServer = await showConfirmDialog({
-        title: "New project location",
-        message: "You're signed into a server. Create this project on the server? Choose Cancel to keep it local on this device.",
-        acceptLabel: "On the server"
-      });
-      if (onServer) {
-        elements.openServerDialog.showModal();
-        openServerBrowser();
-        return;
-      }
-    } else if (syncState.account && !supportsOpfs()) {
-      elements.openServerDialog.showModal();
-      openServerBrowser();
-      return;
-    }
-
-    if (!supportsOpfs()) {
-      // Older browser without OPFS: fall back to an in-browser workspace.
-      controller.replaceProject(seedDefaultProject());
-      selectionNodeId = controller.getProject().activeFileId ?? controller.getProject().rootId;
-      initializePaneState(controller.getProject());
-      publishSnapshot();
-      logDebug("action", "New in-browser project created");
-      return;
-    }
-
-    const name = await promptForName("New project name", "Workspace");
-    if (!name) return;
-    const { path } = await createProjectOpfs("", name);
-    const project = await openProjectOpfs(path);
-    controller.replaceProject(project);
-    settings.lastLocalProject = { path };
-    saveSettings(settings);
-    selectionNodeId = project.activeFileId ?? project.rootId;
-    initializePaneState(project);
+  closeMenus();
+  // No local store and no server account: keep the legacy in-browser workspace.
+  if (!supportsOpfs() && !syncState.account) {
+    controller.replaceProject(seedDefaultProject());
+    selectionNodeId = controller.getProject().activeFileId ?? controller.getProject().rootId;
+    initializePaneState(controller.getProject());
     publishSnapshot();
-    logDebug("action", "Created local project", path);
-  } catch (error) {
-    notify(error.message || "Could not create the project.");
-    logDebug("response", "New project failed", error.message);
+    logDebug("action", "New in-browser project created");
+    return;
   }
+  // Otherwise open the unified browser so the user can pick where it lives
+  // (this device or a team folder) and create it there.
+  openFileBrowser({ side: supportsOpfs() ? "local" : "server", intent: "create" });
 });
 
 elements.openDirectoryButton.addEventListener("click", async () => {
@@ -7304,18 +7280,12 @@ elements.openDirectoryButton.addEventListener("click", async () => {
   }
 });
 
-elements.openServerDirectoryButton?.addEventListener("click", () => {
+elements.openProjectButton?.addEventListener("click", () => {
   closeMenus();
-  logDebug("action", "Open server directory");
-  if (!syncState.account) {
-    // Account login lives in Settings → Collaboration → Account; send them there
-    // to sign in first, pinging the configured server on the way.
-    openSettingsDialog("collaboration");
-    void pingCurrentServer({ silent: true });
-    return;
-  }
-  elements.openServerDialog.showModal();
-  openServerBrowser();
+  logDebug("action", "Open project browser");
+  // Default to the server side when signed in (it replaces the old "Open Server
+  // Directory"), else start on this device. The in-dialog toggle switches sides.
+  openFileBrowser({ side: syncState.account ? "server" : "local", intent: "open" });
 });
 
 elements.importFileButton.addEventListener("click", () => elements.importFileInput.click());
@@ -8128,13 +8098,8 @@ function renderAccountControls() {
   } else {
     elements.accountStatusText.textContent = "";
   }
-  // File browser (lives in the File → Open Server Directory dialog).
-  if (elements.openServerLoginNote) {
-    elements.openServerLoginNote.hidden = loggedIn;
-  }
-  if (elements.serverBrowser) {
-    elements.serverBrowser.hidden = !loggedIn;
-  }
+  // The unified file browser manages its own visibility (openFileBrowser) and
+  // its login hint (renderBrowserSideToggle); nothing to toggle on login here.
   renderHostTargets();
 }
 
@@ -8212,9 +8177,89 @@ async function handleHost() {
   }
 }
 
-// ---- Server file browser (Open Server Directory) ---------------------------
-// State for the current view: team === "" means the top-level team list.
-let browserState = { team: "", path: "", teams: [], entries: [] };
+// ---- Unified file browser (Open a workspace) -------------------------------
+// One browser drives two backing stores through a small provider interface:
+//   serverProvider — team cloud folders (needs an account)
+//   opfsProvider   — this device's local (OPFS) store
+// It navigates an opaque `path` string and lists provider entries of the shape
+// { name, kind, path, modified, canEdit?, createdBy? }.
+
+function splitServerPath(path) {
+  // The server addresses a workspace by (team, team-relative path); fold that
+  // into one string whose FIRST segment is the team name.
+  const segs = String(path || "").split("/").filter(Boolean);
+  return { team: segs[0] ?? "", rel: segs.slice(1).join("/") };
+}
+
+const serverProvider = {
+  id: "server",
+  rootLabel: "Teams",
+  supportsAccess: true,
+  supportsPublish: true,
+  canCreateAt(path) {
+    return splitServerPath(path).team !== "";
+  },
+  async list(path) {
+    const { team, rel } = splitServerPath(path);
+    const data = await browseServer(settings.serverUrl, syncState.account.token, team, rel);
+    if (!team) {
+      // Team list. Older servers return name strings; newer ones { name, modified }.
+      const entries = (data.teams ?? []).map((item) => {
+        const name = typeof item === "string" ? item : item.name;
+        const modified = typeof item === "string" ? null : item.modified;
+        return { name, kind: "team", path: name, modified };
+      });
+      return { path: "", entries, atRoot: true };
+    }
+    const entries = (data.entries ?? []).map((entry) => ({ ...entry, path: `${team}/${entry.path}` }));
+    return { path, entries, atRoot: false };
+  },
+  async mkdir(path, name) {
+    const { team, rel } = splitServerPath(path);
+    await mkdirServer(settings.serverUrl, syncState.account.token, team, rel, name);
+  },
+  async createProject(path, name) {
+    const { team, rel } = splitServerPath(path);
+    const created = await createProjectServer(settings.serverUrl, syncState.account.token, team, rel, name);
+    return { path: `${team}/${created.path}`, name };
+  },
+  async openProject(entry) {
+    const { team, rel } = splitServerPath(entry.path);
+    await handleOpenWorkspace(team, rel);
+  },
+  async openAccess(entry) {
+    const { team, rel } = splitServerPath(entry.path);
+    await openAccessEditor(team, rel, entry.name);
+  }
+};
+
+const opfsProvider = {
+  id: "local",
+  rootLabel: "This device",
+  supportsAccess: false,
+  supportsPublish: false,
+  canCreateAt() {
+    return true;
+  },
+  async list(path) {
+    const { entries } = await listOpfsDir(path);
+    return { path, entries, atRoot: path === "" };
+  },
+  async mkdir(path, name) {
+    await mkdirOpfs(path, name);
+  },
+  async createProject(path, name) {
+    const created = await createProjectOpfs(path, name);
+    return { path: created.path, name };
+  },
+  async openProject(entry) {
+    await openLocalProjectFromBrowser(entry);
+  }
+};
+
+// Current browser view. `provider` is one of the objects above, `path` is that
+// provider's opaque location, `selection` is the highlighted entry (or null).
+let browserState = { provider: opfsProvider, intent: "open", path: "", entries: [], atRoot: true, selection: null };
 
 function setBrowserStatus(message) {
   if (!elements.browserStatus) return;
@@ -8222,49 +8267,126 @@ function setBrowserStatus(message) {
   elements.browserStatus.hidden = !message;
 }
 
-function openServerBrowser() {
-  if (!syncState.account || !elements.serverBrowser) return;
-  elements.serverBrowser.hidden = false;
-  // Resume near the last-opened project (its parent folder), else the team list.
-  const last = settings.lastWorkspace;
-  const lastPath = last?.path ?? (last?.name ? `workspaces/${last.name}` : "");
-  if (last?.team && lastPath.includes("/")) {
-    void browseTo(last.team, lastPath.slice(0, lastPath.lastIndexOf("/")));
-  } else if (last?.team) {
-    void browseTo(last.team, "");
-  } else {
-    void browseTo("", "");
-  }
+// Where each side lands when first shown or after switching the toggle.
+function defaultPathForProvider(provider) {
+  // Server resumes in the last-used team; local starts at its root.
+  if (provider.id === "server") return settings.lastWorkspace?.team ?? "";
+  return "";
 }
 
-async function browseTo(team, path) {
-  if (!syncState.account) return;
+function openFileBrowser({ side, intent = "open" } = {}) {
+  if (!elements.openServerDialog) return;
+  const opfsOk = supportsOpfs();
+  const serverOk = Boolean(syncState.account);
+  // Honour the requested side but fall back when it isn't available.
+  let chosen = side;
+  if (chosen === "server" && !serverOk) chosen = opfsOk ? "local" : "server";
+  if (chosen === "local" && !opfsOk) chosen = serverOk ? "server" : "local";
+  if (chosen !== "server" && chosen !== "local") chosen = serverOk ? "server" : "local";
+
+  browserState.provider = chosen === "server" ? serverProvider : opfsProvider;
+  browserState.intent = intent;
+  browserState.selection = null;
+
+  if (elements.browserTitle) {
+    elements.browserTitle.textContent = intent === "create" ? "New project" : "Open a workspace";
+  }
+  if (elements.browserSubtitle) {
+    elements.browserSubtitle.textContent = intent === "create"
+      ? "Choose where it lives, then press New Project."
+      : "Browse your device and team folders, then open a project.";
+  }
+  if (elements.browserNewProject) {
+    elements.browserNewProject.classList.toggle("is-suggested", intent === "create");
+  }
+  if (elements.serverBrowser) elements.serverBrowser.hidden = false;
+  if (!elements.openServerDialog.open) elements.openServerDialog.showModal();
+  void browseTo(defaultPathForProvider(browserState.provider));
+}
+
+function switchBrowserSide(side) {
+  if (side === browserState.provider?.id) return;
+  if (side === "server" && !syncState.account) {
+    // Not signed in: close and route to the account login, pinging the server.
+    if (elements.openServerDialog?.open) elements.openServerDialog.close();
+    openSettingsDialog("collaboration");
+    void pingCurrentServer({ silent: true });
+    return;
+  }
+  if (side === "local" && !supportsOpfs()) return;
+  browserState.provider = side === "server" ? serverProvider : opfsProvider;
+  browserState.selection = null;
+  void browseTo(defaultPathForProvider(browserState.provider));
+}
+
+// Open an existing local (OPFS) project, first leaving any live cloud session so
+// we cleanly return to a private, on-device workspace.
+async function openLocalProjectFromBrowser(entry) {
+  const project = await openProjectOpfs(entry.path);
+  if (collaboration.isConnected() && workspaceMode === "synced") {
+    collaboration.disconnect("Opened a local workspace.");
+  }
+  workspaceMode = "private";
+  privateProjectSnapshot = null;
+  settings.wasConnected = false;
+  settings.lastLocalProject = { path: entry.path };
+  saveSettings(settings);
+  controller.replaceProject(project);
+  selectionNodeId = project.activeFileId ?? project.rootId;
+  initializePaneState(project);
+  if (elements.openServerDialog?.open) elements.openServerDialog.close();
+  logDebug("action", "Opened local project", entry.path);
+  render(project);
+}
+
+async function browseTo(path) {
+  const provider = browserState.provider;
+  if (!provider) return;
   try {
-    const data = await browseServer(settings.serverUrl, syncState.account.token, team, path);
-    if (!team) {
-      browserState = { team: "", path: "", teams: data.teams ?? [], entries: [] };
-    } else {
-      browserState = {
-        team: data.team ?? team,
-        path: data.path ?? "",
-        teams: browserState.teams ?? [],
-        entries: data.entries ?? []
-      };
-    }
+    const view = await provider.list(path);
+    browserState.path = view.path ?? path;
+    browserState.entries = view.entries ?? [];
+    browserState.atRoot = Boolean(view.atRoot);
+    browserState.selection = null;
     renderBrowser();
   } catch (error) {
-    setBrowserStatus(error.message || "Could not browse the server.");
+    browserState.entries = [];
+    renderBrowser();
+    setBrowserStatus(error.message || "Could not open this location.");
     logDebug("response", "Browse failed", error.message);
   }
 }
 
 function renderBrowser() {
+  renderBrowserSideToggle();
   renderBrowserBreadcrumb();
   renderBrowserList();
-  const inTeam = Boolean(browserState.team);
-  if (elements.browserNewFolder) elements.browserNewFolder.hidden = !inTeam;
-  if (elements.browserNewProject) elements.browserNewProject.hidden = !inTeam;
-  if (elements.browserPublishHere) elements.browserPublishHere.hidden = !inTeam;
+  const provider = browserState.provider;
+  const canCreate = provider?.canCreateAt?.(browserState.path) ?? false;
+  if (elements.browserNewFolder) elements.browserNewFolder.hidden = !canCreate;
+  if (elements.browserNewProject) elements.browserNewProject.hidden = !canCreate;
+  if (elements.browserPublishHere) elements.browserPublishHere.hidden = !(canCreate && provider?.supportsPublish);
+  renderBrowserActionbar();
+}
+
+function renderBrowserSideToggle() {
+  const opfsOk = supportsOpfs();
+  const serverOk = Boolean(syncState.account);
+  const current = browserState.provider?.id;
+  if (elements.browserSideToggle) elements.browserSideToggle.hidden = !(opfsOk || serverOk);
+  if (elements.browserSideLocal) {
+    elements.browserSideLocal.disabled = !opfsOk;
+    elements.browserSideLocal.classList.toggle("is-active", current === "local");
+    elements.browserSideLocal.setAttribute("aria-selected", String(current === "local"));
+  }
+  if (elements.browserSideServer) {
+    elements.browserSideServer.classList.toggle("is-active", current === "server");
+    elements.browserSideServer.setAttribute("aria-selected", String(current === "server"));
+  }
+  if (elements.openServerLoginNote) {
+    // Only nag about logging in while the Server side is actually selected.
+    elements.openServerLoginNote.hidden = serverOk || current !== "server";
+  }
 }
 
 function renderBrowserBreadcrumb() {
@@ -8289,19 +8411,15 @@ function renderBrowserBreadcrumb() {
     sep.textContent = "›";
     nav.append(sep);
   };
-  addCrumb("Teams", () => void browseTo("", ""), !browserState.team);
-  if (browserState.team) {
-    const segs = browserState.path ? browserState.path.split("/") : [];
+  addCrumb(browserState.provider?.rootLabel ?? "Home", () => void browseTo(""), browserState.path === "");
+  const segs = browserState.path ? browserState.path.split("/") : [];
+  let acc = "";
+  segs.forEach((seg, index) => {
+    acc = acc ? `${acc}/${seg}` : seg;
+    const target = acc;
     addSep();
-    addCrumb(browserState.team, () => void browseTo(browserState.team, ""), segs.length === 0);
-    let acc = "";
-    segs.forEach((seg, index) => {
-      acc = acc ? `${acc}/${seg}` : seg;
-      const target = acc;
-      addSep();
-      addCrumb(seg, () => void browseTo(browserState.team, target), index === segs.length - 1);
-    });
-  }
+    addCrumb(seg, () => void browseTo(target), index === segs.length - 1);
+  });
 }
 
 function renderBrowserList() {
@@ -8309,24 +8427,16 @@ function renderBrowserList() {
   if (!list) return;
   list.replaceChildren();
   setBrowserStatus("");
-  if (!browserState.team) {
-    const teams = browserState.teams ?? [];
-    if (teams.length === 0) {
-      setBrowserStatus("You are not a member of any team yet.");
-      return;
-    }
-    for (const team of teams) {
-      // Tolerate both shapes: older servers return team names as plain strings,
-      // newer ones return { name, modified } for the Date Modified column.
-      const name = typeof team === "string" ? team : team.name;
-      const modified = typeof team === "string" ? null : team.modified;
-      list.append(makeBrowserRow({ name, kind: "team", modified }));
-    }
-    return;
-  }
+  const provider = browserState.provider;
   const entries = browserState.entries ?? [];
   if (entries.length === 0) {
-    setBrowserStatus("This folder is empty. Use the buttons above to add a folder or project.");
+    if (provider?.id === "server" && browserState.atRoot) {
+      setBrowserStatus("You are not a member of any team yet.");
+    } else if (provider?.canCreateAt?.(browserState.path)) {
+      setBrowserStatus("This folder is empty. Use New Folder or New Project above to add something.");
+    } else {
+      setBrowserStatus("This folder is empty.");
+    }
     return;
   }
   for (const entry of entries) list.append(makeBrowserRow(entry));
@@ -8339,78 +8449,109 @@ function formatModified(seconds) {
   return `${date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })} ${date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
 }
 
+function isSameEntry(left, right) {
+  return Boolean(left && right && left.path === right.path && left.kind === right.kind);
+}
+
+// A row is just selectable text now: single-click selects, double-click acts
+// (enter a folder/team or open a project). The Open/Access buttons live in the
+// bottom action bar and follow the current selection.
 function makeBrowserRow(entry) {
   const li = document.createElement("li");
   li.className = "browser-item";
+  li.setAttribute("role", "option");
+  li.tabIndex = -1;
+  const selected = isSameEntry(entry, browserState.selection);
+  li.setAttribute("aria-selected", String(selected));
+  if (selected) li.classList.add("is-selected");
 
   const nameCell = document.createElement("div");
   nameCell.className = "browser-item-name";
   const icon = document.createElement("span");
   icon.className = "browser-item-icon";
-  icon.textContent = entry.kind === "project" ? "📄" : entry.kind === "team" ? "👥" : "📁";
-  const label = document.createElement("button");
-  label.type = "button";
+  icon.textContent = entry.kind === "project" ? "📄"
+    : entry.kind === "team" ? "👥"
+    : entry.kind === "file" ? "📃"
+    : "📁";
+  const label = document.createElement("span");
   label.className = "browser-item-label";
   label.textContent = entry.name;
+  if (entry.kind === "project" && entry.createdBy) label.title = `Owner: ${entry.createdBy}`;
   nameCell.append(icon, label);
 
   const dateCell = document.createElement("span");
   dateCell.className = "browser-item-date";
   dateCell.textContent = formatModified(entry.modified);
 
-  const actions = document.createElement("div");
-  actions.className = "browser-item-actions";
-
-  if (entry.kind === "team") {
-    label.addEventListener("click", () => void browseTo(entry.name, ""));
-  } else if (entry.kind === "folder") {
-    label.addEventListener("click", () => void browseTo(browserState.team, entry.path));
-  } else if (entry.kind === "project") {
-    const isOpen = syncState.sessionId === `${browserState.team}/${entry.path}` && syncState.status === "connected";
-    label.classList.add("is-project");
-    label.title = entry.createdBy ? `Owner: ${entry.createdBy}` : "";
-    label.addEventListener("click", () => void handleOpenWorkspace(browserState.team, entry.path));
-    const openBtn = document.createElement("button");
-    openBtn.type = "button";
-    openBtn.className = "browser-open-btn";
-    openBtn.textContent = isOpen ? "Open ✓" : "Open";
-    openBtn.addEventListener("click", () => void handleOpenWorkspace(browserState.team, entry.path));
-    actions.append(openBtn);
-    if (entry.canEdit) {
-      const accessBtn = document.createElement("button");
-      accessBtn.type = "button";
-      accessBtn.className = "browser-access-btn";
-      accessBtn.textContent = "Access";
-      accessBtn.title = "Edit who can open this project";
-      accessBtn.addEventListener("click", () => void openAccessEditor(browserState.team, entry.path, entry.name));
-      actions.append(accessBtn);
-    }
-  }
-  li.append(nameCell, dateCell, actions);
+  li.append(nameCell, dateCell);
+  li.addEventListener("click", () => selectBrowserEntry(entry));
+  li.addEventListener("dblclick", () => activateBrowserEntry(entry));
   return li;
 }
 
+function selectBrowserEntry(entry) {
+  browserState.selection = entry;
+  renderBrowserList();
+  renderBrowserActionbar();
+}
+
+function activateBrowserEntry(entry) {
+  if (entry.kind === "team" || entry.kind === "folder") {
+    void browseTo(entry.path);
+  } else if (entry.kind === "project") {
+    void browserState.provider?.openProject(entry);
+  }
+  // Loose files aren't openable from the browser.
+}
+
+function renderBrowserActionbar() {
+  const sel = browserState.selection;
+  const provider = browserState.provider;
+  if (elements.browserSelectionLabel) {
+    elements.browserSelectionLabel.textContent = sel ? sel.name : "";
+  }
+  if (elements.browserOpenBtn) {
+    if (!sel || sel.kind === "file") {
+      elements.browserOpenBtn.disabled = true;
+      elements.browserOpenBtn.textContent = "Open";
+    } else if (sel.kind === "project") {
+      elements.browserOpenBtn.disabled = false;
+      elements.browserOpenBtn.textContent = "Open project";
+    } else {
+      elements.browserOpenBtn.disabled = false;
+      elements.browserOpenBtn.textContent = "Open";
+    }
+  }
+  if (elements.browserAccessBtn) {
+    const canAccess = Boolean(sel && sel.kind === "project" && provider?.supportsAccess && sel.canEdit);
+    elements.browserAccessBtn.hidden = !canAccess;
+  }
+}
+
 async function handleNewFolder() {
-  if (!syncState.account || !browserState.team) return;
+  const provider = browserState.provider;
+  if (!provider?.canCreateAt?.(browserState.path)) return;
   const name = await promptForName("New folder name", "");
   if (!name) return;
   try {
-    await mkdirServer(settings.serverUrl, syncState.account.token, browserState.team, browserState.path, name);
-    logDebug("action", "Created cloud folder", `${browserState.team}/${browserState.path}/${name}`);
-    await browseTo(browserState.team, browserState.path);
+    await provider.mkdir(browserState.path, name);
+    logDebug("action", "Created folder", `${provider.id}:${browserState.path}/${name}`);
+    await browseTo(browserState.path);
   } catch (error) {
     setBrowserStatus(error.message || "Could not create folder.");
   }
 }
 
 async function handleNewProject() {
-  if (!syncState.account || !browserState.team) return;
+  const provider = browserState.provider;
+  if (!provider?.canCreateAt?.(browserState.path)) return;
   const name = await promptForName("New project name", "");
   if (!name) return;
   try {
-    await createProjectServer(settings.serverUrl, syncState.account.token, browserState.team, browserState.path, name);
-    logDebug("action", "Created cloud project", `${browserState.team}/${browserState.path}/${name}`);
-    await browseTo(browserState.team, browserState.path);
+    const created = await provider.createProject(browserState.path, name);
+    logDebug("action", "Created project", `${provider.id}:${created?.path ?? name}`);
+    // "New Project" means start working: open the freshly created project.
+    await provider.openProject({ name: created?.name ?? name, kind: "project", path: created?.path });
   } catch (error) {
     setBrowserStatus(error.message || "Could not create project.");
   }
@@ -8419,11 +8560,11 @@ async function handleNewProject() {
 // Publish the current local project as a new cloud project at the browsed path,
 // then open it — the same flow as Collaboration → Share to team, unified here.
 async function handlePublishHere() {
-  if (!syncState.account || !browserState.team) return;
+  const { team, rel } = splitServerPath(browserState.path);
+  if (!syncState.account || !team) return;
   const name = await promptForName("Publish current workspace as", "");
   if (!name) return;
-  const team = browserState.team;
-  const path = browserState.path;
+  const path = rel;
   try {
     if (workspaceMode === "private") {
       privateProjectSnapshot = controller.getProject();
@@ -8491,7 +8632,7 @@ async function saveAccessEditor() {
     );
     logDebug("action", "Updated project access", `${accessEditorTarget.team}/${accessEditorTarget.path}`);
     elements.accessDialog?.close();
-    await browseTo(browserState.team, browserState.path);
+    await browseTo(browserState.path);
   } catch (error) {
     setAccessStatus(error.message || "Could not save the access list.");
   }
@@ -8593,6 +8734,15 @@ elements.accountLogoutButton?.addEventListener("click", handleAccountLogout);
 elements.browserNewFolder?.addEventListener("click", () => { void handleNewFolder(); });
 elements.browserNewProject?.addEventListener("click", () => { void handleNewProject(); });
 elements.browserPublishHere?.addEventListener("click", () => { void handlePublishHere(); });
+elements.browserSideLocal?.addEventListener("click", () => switchBrowserSide("local"));
+elements.browserSideServer?.addEventListener("click", () => switchBrowserSide("server"));
+elements.browserOpenBtn?.addEventListener("click", () => {
+  if (browserState.selection) activateBrowserEntry(browserState.selection);
+});
+elements.browserAccessBtn?.addEventListener("click", () => {
+  const sel = browserState.selection;
+  if (sel && browserState.provider?.openAccess) void browserState.provider.openAccess(sel);
+});
 elements.accessDialog?.querySelector("form")?.addEventListener("submit", (event) => {
   // "Cancel" (value=cancel) lets the dialog close normally; Save persists first.
   if (event.submitter && event.submitter.value === "cancel") return;

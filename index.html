@@ -27,8 +27,8 @@
             <button id="file-menu-button" class="menu-trigger" type="button">File</button>
             <div id="file-menu" class="menu-popover" hidden>
               <button id="new-project-button" type="button">New Project</button>
+              <button id="open-project-button" type="button">Open Project…</button>
               <button id="open-directory-button" type="button">Import Local Folder</button>
-              <button id="open-server-directory-button" type="button">Open Server Directory</button>
               <button id="import-file-button" type="button">Import File or Zip</button>
               <button id="save-button" type="button">Save</button>
               <button id="save-pdf-button" type="button">Save as PDF</button>
@@ -458,23 +458,26 @@
       </form>
     </dialog>
 
-    <!-- Open Server Directory: log into an account server and pick a cloud
-         workspace to open. Uses the Server URL configured in Settings. -->
+    <!-- Open a workspace: one File-Browser that lists both this device's local
+         (OPFS) store and your teams' cloud folders, switchable with the toggle. -->
     <dialog id="open-server-dialog">
       <form method="dialog" class="settings-form open-server-form">
         <header class="dialog-header">
           <div>
             <div class="eyebrow">Workspace</div>
-            <h2>Open Server Directory</h2>
+            <h2 id="browser-title">Open a workspace</h2>
           </div>
-          <p class="subtle-label">Browse your teams' cloud folders and open a project.</p>
+          <p id="browser-subtitle" class="subtle-label">Browse your device and team folders, then open a project.</p>
           <button class="dialog-close-corner" type="submit" value="cancel" formnovalidate aria-label="Close">&#215;</button>
         </header>
 
         <section class="settings-section browser-section">
-          <!-- Log in from Settings → Collaboration → Account first; this dialog
-               is only for browsing/opening cloud projects. -->
-          <p id="open-server-login-note" class="subtle-label" hidden>Log in first: Settings → Collaboration → Account.</p>
+          <div id="browser-side-toggle" class="browser-side-toggle" role="tablist" aria-label="Storage location" hidden>
+            <button id="browser-side-local" type="button" class="side-tab" role="tab" aria-selected="true">This device</button>
+            <button id="browser-side-server" type="button" class="side-tab" role="tab" aria-selected="false">Server</button>
+          </div>
+          <!-- Shown only while the Server side is selected without a login. -->
+          <p id="open-server-login-note" class="subtle-label" hidden>Log in to browse server folders: Settings → Collaboration → Account.</p>
 
           <div id="server-browser" hidden>
             <div class="browser-toolbar">
@@ -488,10 +491,14 @@
             <div class="browser-columns" aria-hidden="true">
               <span class="browser-col-name">Name</span>
               <span class="browser-col-date">Date Modified</span>
-              <span class="browser-col-actions"></span>
             </div>
-            <ul id="browser-list" class="browser-list"></ul>
+            <ul id="browser-list" class="browser-list" role="listbox" aria-label="Files and folders"></ul>
             <p id="browser-status" class="subtle-label" hidden></p>
+            <menu class="dialog-actions browser-actionbar">
+              <span id="browser-selection-label" class="subtle-label browser-selection-label"></span>
+              <button id="browser-access-btn" type="button" hidden>Access</button>
+              <button id="browser-open-btn" type="button" class="browser-primary-btn" disabled>Open</button>
+            </menu>
           </div>
         </section>
       </form>
