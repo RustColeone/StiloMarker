@@ -856,6 +856,32 @@ p {
   color: #3dba72;
 }
 
+.tree-row.is-project-root {
+  margin-bottom: 2px;
+}
+
+.tree-row.is-project-root .tree-label {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.tree-icon.is-project {
+  width: 13px;
+  height: 13px;
+  margin-top: 1px;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 3px;
+}
+
+.tree-icon.is-project::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  background: var(--accent);
+  border-radius: 1px;
+}
+
 .icon-button {
   width: 16px;
   min-width: 16px;

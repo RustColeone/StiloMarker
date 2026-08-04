@@ -2939,6 +2939,12 @@ const explorer = createExplorerView({
     const node = controller.getProject().nodes[nodeId];
     return node?.kind === "file" && isPreviewableFileName(node.name);
   },
+  canManagePreview() {
+    return Boolean(syncState.account)
+      && workspaceMode === "synced"
+      && collaboration.isConnected()
+      && Boolean(settings.lastWorkspace?.team);
+  },
   onAction(action, target, options) {
     selectionNodeId = target.nodeId;
     sourceUrlDbEntry = target.entryId ? { fileId: target.nodeId, entryId: target.entryId } : null;
@@ -6957,6 +6963,15 @@ async function handleExplorerAction(action, target, options = {}) {
     await deleteSelected();
     return;
   }
+  if (action === "manage-preview") {
+    const ws = settings.lastWorkspace;
+    if (ws?.team && ws?.path != null) {
+      await openAccessEditor(ws.team, ws.path, controller.getProject().name);
+    } else {
+      notify("Open a server workspace to manage its preview access.");
+    }
+    return;
+  }
   if (action === "export") {
     exportNode(nodeId);
     return;
@@ -8632,7 +8647,9 @@ async function saveAccessEditor() {
     );
     logDebug("action", "Updated project access", `${accessEditorTarget.team}/${accessEditorTarget.path}`);
     elements.accessDialog?.close();
-    await browseTo(browserState.path);
+    if (elements.openServerDialog?.open) {
+      await browseTo(browserState.path);
+    }
   } catch (error) {
     setAccessStatus(error.message || "Could not save the access list.");
   }

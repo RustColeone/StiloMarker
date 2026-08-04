@@ -24,7 +24,7 @@ function getFileIconClass(node) {
   return "is-file";
 }
 
-function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenUrlDbEntry, onToggleFolder, onSelectNode, onAction, canPasteTarget, canPreviewFile, onDragNodeStart, onDragUrlDbEntryStart, getFilterMode, getAssetPreviewSrc, getUrlDbEntries, getSelectedTarget }) {
+function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenUrlDbEntry, onToggleFolder, onSelectNode, onAction, canPasteTarget, canPreviewFile, canManagePreview, onDragNodeStart, onDragUrlDbEntryStart, getFilterMode, getAssetPreviewSrc, getUrlDbEntries, getSelectedTarget }) {
   let menuTarget = null;
   let currentProject = null;
   let activeMenuMode = null;
@@ -163,13 +163,28 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
     ];
   }
 
+  function getProjectRootMenuEntries() {
+    const entries = [["Export as Zip", "export"]];
+    if (canManagePreview?.() === true) {
+      entries.push(["Manage Preview", "manage-preview"]);
+    }
+    return entries;
+  }
+
   function showMenu(x, y, target, mode = "default") {
     menuTarget = target;
     activeMenuMode = mode;
     contextMenu.replaceChildren();
 
     const node = currentProject?.nodes?.[target?.nodeId] ?? null;
-    const entries = mode === "filter" ? getFilterEntries() : getMenuEntries(node, mode, target);
+    let entries;
+    if (mode === "filter") {
+      entries = getFilterEntries();
+    } else if (mode === "project-root") {
+      entries = getProjectRootMenuEntries();
+    } else {
+      entries = getMenuEntries(node, mode, target);
+    }
 
     const runAction = (action) => {
       const actionTarget = menuTarget;
@@ -226,7 +241,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
         entryId: row.dataset.entryId || null
       };
       onSelectNode?.(target);
-      showMenu(event.clientX, event.clientY, target);
+      showMenu(event.clientX, event.clientY, target, row.dataset.projectRoot ? "project-root" : "default");
       return;
     }
 
@@ -268,9 +283,50 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
     row.addEventListener("mouseleave", hidePreviewTooltip);
   }
 
+  // Virtual project-name row pinned to the top of the tree. It is a display-only
+  // placeholder (no files live directly "on" it); its context menu exports the
+  // whole project and, for server workspaces, opens the preview access editor.
+  function createProjectRootRow(project) {
+    const row = document.createElement("div");
+    const selectedTarget = getSelectedTarget?.() ?? { nodeId: ROOT_ID, entryId: null };
+    const isSelected = selectedTarget.nodeId === ROOT_ID && !selectedTarget.entryId;
+    row.className = `tree-row is-project-root${isSelected ? " is-active" : ""}`;
+    row.setAttribute("role", "treeitem");
+    row.dataset.nodeId = ROOT_ID;
+    row.dataset.projectRoot = "1";
+    row.title = project?.name ?? "Project";
+
+    const indent = document.createElement("span");
+    indent.className = "tree-depth";
+    indent.style.setProperty("--depth", "0");
+    row.append(indent);
+
+    const toggle = document.createElement("span");
+    toggle.className = "icon-button is-ghost";
+    toggle.textContent = "·";
+    row.append(toggle);
+
+    const icon = document.createElement("span");
+    icon.className = "tree-icon is-project";
+    icon.setAttribute("aria-hidden", "true");
+    row.append(icon);
+
+    const label = document.createElement("span");
+    label.className = "tree-label";
+    label.textContent = project?.name ?? "Project";
+    row.append(label);
+
+    row.addEventListener("click", () => {
+      onSelectNode?.({ nodeId: ROOT_ID, entryId: null });
+    });
+
+    return row;
+  }
+
   function render(project, pendingPaths = new Set()) {
     currentProject = project;
     container.replaceChildren();
+    container.append(createProjectRootRow(project));
     const filterMode = getFilterMode?.() ?? "all";
     const rows = listVisibleNodes(project).filter(({ node }) => nodeMatchesFilter(node, filterMode));
 
@@ -301,7 +357,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
 
       const indent = document.createElement("span");
       indent.className = "tree-depth";
-      indent.style.setProperty("--depth", String(depth));
+      indent.style.setProperty("--depth", String(depth + 1));
       row.append(indent);
 
       const toggle = document.createElement("button");
@@ -358,7 +414,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
 
           const childIndent = document.createElement("span");
           childIndent.className = "tree-depth";
-          childIndent.style.setProperty("--depth", String(depth + 1));
+          childIndent.style.setProperty("--depth", String(depth + 2));
           childRow.append(childIndent);
 
           const childToggle = document.createElement("span");
