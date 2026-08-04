@@ -1,6 +1,7 @@
 import { ROOT_ID, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isAllowedFileName, isBmapFileName, isImageFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
 import { createProjectController, seedDefaultProject } from "./domain/project-service.js";
 import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
+import { supportsOpfs, createProjectOpfs, openProjectOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs } from "./services/opfs-service.js";
 import { createCollaborationRuntime } from "./services/collaboration-service.js";
 import { fetchChatStatus, fetchServerChatWorkspace, pushServerChatWorkspace, sendChatRequest, sendGenerationRequest } from "./services/chat-api-service.js";
 import { createChatMessage, createChatThread, deriveChatTitle, loadChatWorkspace, saveChatWorkspace } from "./services/chat-storage-service.js";
@@ -4753,6 +4754,13 @@ async function saveActiveWorkspaceFile() {
   if (!activeFile) {
     return;
   }
+  if (project.sourceMode === "opfs") {
+    // Local workspace: flush through the shared guarded writer so an explicit
+    // save never races the debounced background flush.
+    await flushOpfsProject();
+    controller.markSaved(activeFile.id);
+    return;
+  }
   const wroteToDisk = await saveProjectToHandles(project);
   controller.markSaved(activeFile.id);
   if (!wroteToDisk) {
@@ -6287,13 +6295,18 @@ function renderPresence(presence) {
 
 function updateStatus(project) {
   const liveDirectory = project.sourceMode === "filesystem";
+  const localWorkspace = project.sourceMode === "opfs";
   const browserSupported = supportsDirectoryAccess();
   const collaboratorCount = syncState.presence.length;
   ensureOpenTabs(project);
   renderTabs(project);
 
   elements.projectNameLabel.textContent = project.name;
-  elements.sourceStatusText.textContent = liveDirectory ? "Live directory" : "In-browser workspace";
+  elements.sourceStatusText.textContent = liveDirectory
+    ? "Live directory"
+    : localWorkspace
+      ? "Local workspace"
+      : "In-browser workspace";
   elements.browserStatusText.textContent = browserSupported ? "Chromium directory access available" : "Fallback import/export mode";
   elements.serverStatusBarText.textContent = syncState.account
     ? (syncState.status === "connected"
@@ -6430,10 +6443,55 @@ function updateStatus(project) {
   renderChatPanel(project);
 }
 
+// Local (OPFS) projects mirror every change back to their OPFS directory. Writes
+// are debounced and guarded against overlap so a burst of edits collapses into a
+// single flush, and a change arriving mid-flush re-arms one more pass.
+let opfsFlushTimer = null;
+let opfsFlushInFlight = false;
+let opfsFlushPending = false;
+
+function scheduleOpfsFlush(project) {
+  if (project?.sourceMode !== "opfs") {
+    return;
+  }
+  opfsFlushPending = true;
+  if (opfsFlushTimer) {
+    return;
+  }
+  opfsFlushTimer = setTimeout(() => {
+    opfsFlushTimer = null;
+    void flushOpfsProject();
+  }, 500);
+}
+
+async function flushOpfsProject() {
+  if (opfsFlushInFlight) {
+    return;
+  }
+  const project = controller.getProject();
+  if (project?.sourceMode !== "opfs") {
+    opfsFlushPending = false;
+    return;
+  }
+  opfsFlushInFlight = true;
+  opfsFlushPending = false;
+  try {
+    await saveProjectToHandles(project);
+  } catch (error) {
+    logDebug("response", "Local workspace save failed", error.message);
+  } finally {
+    opfsFlushInFlight = false;
+    if (opfsFlushPending) {
+      scheduleOpfsFlush(controller.getProject());
+    }
+  }
+}
+
 function render(project) {
   explorer.render(project, new Set(agentPendingDecorations.keys()));
   updateStatus(project);
   saveProject(project);
+  scheduleOpfsFlush(project);
 }
 
 controller.subscribe(render);
@@ -7170,27 +7228,78 @@ elements.savePdfButton.addEventListener("click", printPreviewAsPdf);
 elements.exportButton.addEventListener("click", () => exportNode(controller.getProject().rootId));
 elements.exportSelectedButton.addEventListener("click", () => exportNode(getSelectedNode(controller.getProject())?.id ?? controller.getProject().rootId));
 
-elements.newProjectButton.addEventListener("click", () => {
-  logDebug("action", "New project created");
-  controller.replaceProject(seedDefaultProject());
-  selectionNodeId = controller.getProject().activeFileId ?? controller.getProject().rootId;
-  initializePaneState(controller.getProject());
-  publishSnapshot();
+elements.newProjectButton.addEventListener("click", async () => {
+  logDebug("action", "New project requested");
+  try {
+    // Side toggle: when signed into a server, offer server vs. local; otherwise
+    // the new project lands in the persistent local (OPFS) store.
+    if (syncState.account && supportsOpfs()) {
+      const onServer = await showConfirmDialog({
+        title: "New project location",
+        message: "You're signed into a server. Create this project on the server? Choose Cancel to keep it local on this device.",
+        acceptLabel: "On the server"
+      });
+      if (onServer) {
+        elements.openServerDialog.showModal();
+        openServerBrowser();
+        return;
+      }
+    } else if (syncState.account && !supportsOpfs()) {
+      elements.openServerDialog.showModal();
+      openServerBrowser();
+      return;
+    }
+
+    if (!supportsOpfs()) {
+      // Older browser without OPFS: fall back to an in-browser workspace.
+      controller.replaceProject(seedDefaultProject());
+      selectionNodeId = controller.getProject().activeFileId ?? controller.getProject().rootId;
+      initializePaneState(controller.getProject());
+      publishSnapshot();
+      logDebug("action", "New in-browser project created");
+      return;
+    }
+
+    const name = await promptForName("New project name", "Workspace");
+    if (!name) return;
+    const { path } = await createProjectOpfs("", name);
+    const project = await openProjectOpfs(path);
+    controller.replaceProject(project);
+    settings.lastLocalProject = { path };
+    saveSettings(settings);
+    selectionNodeId = project.activeFileId ?? project.rootId;
+    initializePaneState(project);
+    publishSnapshot();
+    logDebug("action", "Created local project", path);
+  } catch (error) {
+    notify(error.message || "Could not create the project.");
+    logDebug("response", "New project failed", error.message);
+  }
 });
 
 elements.openDirectoryButton.addEventListener("click", async () => {
   if (!supportsDirectoryAccess()) {
-    notify("Directory access is only available in Chromium-based browsers.");
+    notify("Folder import is only available in Chromium-based browsers.");
     return;
   }
   try {
-    logDebug("action", "Open directory requested");
-    const project = await importDirectory();
+    logDebug("action", "Import folder requested");
+    // Copy a real OS folder into the persistent local store, then open it from
+    // there. Without OPFS, fall back to a live (session-only) directory link.
+    const project = supportsOpfs()
+      ? await importOsFolderIntoOpfs("")
+      : await importDirectory();
     controller.replaceProject(project);
+    if (project.sourceMode === "opfs" && project.localPath) {
+      settings.lastLocalProject = { path: project.localPath };
+      saveSettings(settings);
+    }
     selectionNodeId = project.activeFileId ?? project.rootId;
     initializePaneState(project);
     publishSnapshot();
+    logDebug("action", "Imported folder", project.localPath ?? project.name);
   } catch (error) {
+    if (error?.name === "AbortError") return; // user dismissed the picker
     notify(error.message);
   }
 });
@@ -8594,6 +8703,31 @@ window.addEventListener("beforeunload", (event) => {
 
 registerOfflineShell();
 void refreshChatStatus({ silent: true });
+
+// Re-attach the persistent local (OPFS) workspace opened last time, so a reload
+// keeps saving straight back to the same directory (no permission prompt needed).
+async function reopenLocalProjectOnBoot() {
+  const path = controller.getProject()?.localPath ?? settings.lastLocalProject?.path;
+  if (controller.getProject()?.sourceMode !== "opfs" || !path || !supportsOpfs()) {
+    return;
+  }
+  try {
+    // Resolve the handle first (async), then attach to whatever the live project
+    // is at that moment — an edit racing boot can't strand the handle on a clone.
+    const dir = await getOpfsDirectoryHandle(path);
+    const project = controller.getProject();
+    project.sourceMode = "opfs";
+    project.localPath = path;
+    project.handles = { [ROOT_ID]: dir };
+    logDebug("action", "Reattached local workspace", path);
+  } catch (error) {
+    // The directory is gone (or OPFS unavailable) — keep the in-browser copy.
+    controller.getProject().sourceMode = "memory";
+    logDebug("response", "Local workspace reattach failed", error.message);
+  }
+}
+
+void reopenLocalProjectOnBoot();
 
 // Restore the previous session on boot so a refresh isn't a fresh start:
 //   1. Ping the stored server (or same-origin) to learn its capabilities.

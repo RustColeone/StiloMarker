@@ -9,6 +9,9 @@ function loadProject() {
       return null;
     }
     const project = deserializeProject(raw);
+    // An OS-picked "filesystem" directory can't be reopened without a fresh user
+    // gesture, so it downgrades to an in-browser copy. An "opfs" project keeps its
+    // mode: its directory is re-attachable on boot without any permission prompt.
     if (project.sourceMode === "filesystem") {
       project.sourceMode = "memory";
     }
@@ -19,8 +22,10 @@ function loadProject() {
 }
 
 function saveProject(project) {
-  const serializableProject = structuredClone(project);
-  delete serializableProject.handles;
+  // Live directory handles aren't JSON-serializable and are re-acquired at
+  // runtime, so drop them before cloning rather than cloning then deleting.
+  const { handles, ...rest } = project;
+  const serializableProject = structuredClone(rest);
   globalThis.localStorage?.setItem(PROJECT_KEY, serializeProject(serializableProject));
 }
 
