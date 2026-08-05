@@ -2086,6 +2086,46 @@ class WorkspaceRegistry:
         _log("WORKSPACE", f"{identity['username']} set access on {team}/{relpath}")
         return self.read_access(team, relpath)
 
+    def delete_entry(self, token: str, team: str, path: str) -> dict:
+        """Delete a project or folder at ``path``. A project may only be removed
+        by its recorded owner (createdBy); a folder may be removed by any team
+        member, but only if it holds no projects owned by someone else (so a
+        folder delete can't bypass the per-project owner rule). The team root
+        itself can never be deleted."""
+        identity = self._require_account(token)
+        team = self._require_team(identity, team)
+        relpath = self._safe_relpath(path)
+        if not relpath:
+            raise ValueError("Cannot delete the team root")
+        target = self._abs_under_team(team, relpath)
+        if not target.is_dir():
+            raise ValueError("No such folder or project")
+        if target.name in self._RESERVED_NAMES:
+            raise ValueError("Cannot delete a reserved entry")
+        if self.is_project_dir(target):
+            access = self.read_access(team, relpath)
+            owner = access.get("createdBy")
+            if owner and owner != identity["username"]:
+                raise PermissionError("Only the project owner can delete this project")
+            if not owner and not self.can_access(identity, team, relpath):
+                raise PermissionError("You do not have access to that project")
+        else:
+            base = self._abs_under_team(team, "")
+            for manifest in target.rglob("manifest.json"):
+                proj_rel = manifest.parent.relative_to(base).as_posix()
+                owner = self.read_access(team, proj_rel).get("createdBy")
+                if owner and owner != identity["username"]:
+                    raise PermissionError("This folder contains projects owned by others")
+        workspace_id = f"{team}/{relpath}"
+        with self.lock:
+            # Drop any live broker (and nested project brokers) so an open
+            # session can't recreate files after the tree is gone.
+            for wid in [w for w in self.brokers if w == workspace_id or w.startswith(workspace_id + "/")]:
+                self.brokers.pop(wid, None)
+            shutil.rmtree(target)
+        _log("WORKSPACE", f"{identity['username']} deleted {workspace_id}")
+        return {"team": team, "path": relpath, "deleted": True}
+
     def _make_workspace_broker_path(self, team: str, relpath: str) -> CollaborationBroker:
         """Directory-backed broker for a project at an arbitrary path. Reuses the
         legacy single-file migration for flat workspaces/<name> projects."""
@@ -2327,6 +2367,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_mkdir(parsed)
         if parsed.path == "/api/workspaces/create":
             return self._handle_create_project(parsed)
+        if parsed.path == "/api/workspaces/delete":
+            return self._handle_delete(parsed)
         if parsed.path == "/api/workspaces/access":
             return self._handle_set_access(parsed)
         if parsed.path == "/api/workspaces/open":
@@ -2551,6 +2593,24 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             )
             self._write_json(HTTPStatus.OK, result)
             self._log_request(200, "set access")
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+            self._log_request(403, str(error))
+        except ValueError as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            self._log_request(400, str(error))
+
+    def _handle_delete(self, parsed):
+        try:
+            token = self._extract_token(parsed)
+            payload = self._read_json()
+            result = self.registry.delete_entry(
+                token,
+                str(payload.get("team", "")),
+                str(payload.get("path", "")),
+            )
+            self._write_json(HTTPStatus.OK, result)
+            self._log_request(200, f"deleted {result['team']}/{result['path']}")
         except PermissionError as error:
             self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
             self._log_request(403, str(error))

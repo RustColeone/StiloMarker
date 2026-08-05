@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v45";
+const CACHE_NAME = "mdnotes-shell-v47";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -53,6 +53,21 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) {
+    return;
+  }
+
+  // API responses are dynamic (server browse, access, workspace state): always
+  // hit the network and never serve a cached copy, or the UI would show stale
+  // data after server-side changes (e.g. a deleted project lingering in a list).
+  if (url.pathname.includes("/api/")) {
+    event.respondWith(
+      fetch(event.request, { cache: "no-store" }).catch(
+        () => new Response(JSON.stringify({ error: "offline" }), {
+          status: 503,
+          headers: { "content-type": "application/json" }
+        })
+      )
+    );
     return;
   }
 

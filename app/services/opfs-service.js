@@ -208,6 +208,20 @@ async function importOsFolderIntoOpfs(basePath = "") {
   return openProjectOpfs(path);
 }
 
+// Delete a local (OPFS) folder or project by path. Resolves the parent handle
+// and removes the leaf entry recursively so a whole project tree goes at once.
+async function deleteOpfsEntry(path) {
+  const segments = splitPath(path);
+  if (segments.length === 0) {
+    throw new Error("Nothing to delete.");
+  }
+  const name = segments[segments.length - 1];
+  const parentPath = segments.slice(0, -1).join("/");
+  const root = await getOpfsRoot();
+  const parent = await getDirectoryHandleAtPath(root, parentPath, false);
+  await parent.removeEntry(name, { recursive: true });
+}
+
 export {
   supportsOpfs,
   listOpfsDir,
@@ -216,5 +230,6 @@ export {
   openProjectOpfs,
   getOpfsDirectoryHandle,
   saveProjectOpfs,
-  importOsFolderIntoOpfs
+  importOsFolderIntoOpfs,
+  deleteOpfsEntry
 };

@@ -1,7 +1,7 @@
 import { ROOT_ID, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isAllowedFileName, isBmapFileName, isImageFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
 import { createProjectController, seedDefaultProject } from "./domain/project-service.js";
 import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
-import { supportsOpfs, listOpfsDir, mkdirOpfs, createProjectOpfs, openProjectOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs } from "./services/opfs-service.js";
+import { supportsOpfs, listOpfsDir, mkdirOpfs, createProjectOpfs, openProjectOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs, deleteOpfsEntry } from "./services/opfs-service.js";
 import { createCollaborationRuntime } from "./services/collaboration-service.js";
 import { fetchChatStatus, fetchServerChatWorkspace, pushServerChatWorkspace, sendChatRequest, sendGenerationRequest } from "./services/chat-api-service.js";
 import { createChatMessage, createChatThread, deriveChatTitle, loadChatWorkspace, saveChatWorkspace } from "./services/chat-storage-service.js";
@@ -12,7 +12,7 @@ import { clearOfflineShellData, registerOfflineShell } from "./services/offline-
 import { applyTheme, loadSettings, saveSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
 import { clearViewStates, loadViewStates, saveViewStates } from "./services/view-state-service.js";
-import { browseServer, createProjectServer, getAccess, loginToServer, mkdirServer, normalizeServerUrl, pingServer, setAccess } from "./services/sync-service.js";
+import { browseServer, createProjectServer, deleteServer, getAccess, loginToServer, mkdirServer, normalizeServerUrl, pingServer, setAccess } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { appendUrlDbEntry, formatUrlDbEntryBody, moveUrlDbEntry, moveUrlDbEntryBetweenFiles, parseUrlDb, parseUrlDbEntryBody, removeUrlDbEntry, serializeUrlDb, updateUrlDbEntry } from "./services/urldb-service.js";
 import { createZip, downloadBlob } from "./services/zip-service.js";
@@ -156,6 +156,8 @@ const elements = {
   browserPublishHere: query("#browser-publish-here"),
   browserOpenBtn: query("#browser-open-btn"),
   browserAccessBtn: query("#browser-access-btn"),
+  browserSelectToggle: query("#browser-select-toggle"),
+  browserDeleteBtn: query("#browser-delete-btn"),
   browserSelectionLabel: query("#browser-selection-label"),
   accessDialog: query("#access-dialog"),
   accessDialogTitle: query("#access-dialog-title"),
@@ -197,6 +199,7 @@ const elements = {
   newProjectButton: query("#new-project-button"),
   openDirectoryButton: query("#open-directory-button"),
   openProjectButton: query("#open-project-button"),
+  fileManagerButton: query("#file-manager-button"),
   openServerDialog: query("#open-server-dialog"),
   importFileButton: query("#import-file-button"),
   importFileInput: query("#import-file-input"),
@@ -7303,6 +7306,12 @@ elements.openProjectButton?.addEventListener("click", () => {
   openFileBrowser({ side: syncState.account ? "server" : "local", intent: "open" });
 });
 
+elements.fileManagerButton?.addEventListener("click", () => {
+  closeMenus();
+  logDebug("action", "Open file manager");
+  openFileBrowser({ side: syncState.account ? "server" : "local", mode: "manage" });
+});
+
 elements.importFileButton.addEventListener("click", () => elements.importFileInput.click());
 
 elements.importFileInput.addEventListener("change", async (event) => {
@@ -8242,6 +8251,10 @@ const serverProvider = {
     const { team, rel } = splitServerPath(entry.path);
     await handleOpenWorkspace(team, rel);
   },
+  async delete(entry) {
+    const { team, rel } = splitServerPath(entry.path);
+    await deleteServer(settings.serverUrl, syncState.account.token, team, rel);
+  },
   async openAccess(entry) {
     const { team, rel } = splitServerPath(entry.path);
     await openAccessEditor(team, rel, entry.name);
@@ -8269,12 +8282,15 @@ const opfsProvider = {
   },
   async openProject(entry) {
     await openLocalProjectFromBrowser(entry);
+  },
+  async delete(entry) {
+    await deleteOpfsEntry(entry.path);
   }
 };
 
 // Current browser view. `provider` is one of the objects above, `path` is that
 // provider's opaque location, `selection` is the highlighted entry (or null).
-let browserState = { provider: opfsProvider, intent: "open", path: "", entries: [], atRoot: true, selection: null };
+let browserState = { provider: opfsProvider, intent: "open", mode: "open", multiSelect: false, checked: new Set(), path: "", entries: [], atRoot: true, selection: null };
 
 function setBrowserStatus(message) {
   if (!elements.browserStatus) return;
@@ -8289,7 +8305,7 @@ function defaultPathForProvider(provider) {
   return "";
 }
 
-function openFileBrowser({ side, intent = "open" } = {}) {
+function openFileBrowser({ side, intent = "open", mode = "open" } = {}) {
   if (!elements.openServerDialog) return;
   const opfsOk = supportsOpfs();
   const serverOk = Boolean(syncState.account);
@@ -8301,15 +8317,22 @@ function openFileBrowser({ side, intent = "open" } = {}) {
 
   browserState.provider = chosen === "server" ? serverProvider : opfsProvider;
   browserState.intent = intent;
+  browserState.mode = mode;
+  browserState.multiSelect = false;
+  browserState.checked = new Set();
   browserState.selection = null;
 
   if (elements.browserTitle) {
-    elements.browserTitle.textContent = intent === "create" ? "New project" : "Open a workspace";
+    elements.browserTitle.textContent = mode === "manage"
+      ? "File Manager"
+      : intent === "create" ? "New project" : "Open a workspace";
   }
   if (elements.browserSubtitle) {
-    elements.browserSubtitle.textContent = intent === "create"
-      ? "Choose where it lives, then press New Project."
-      : "Browse your device and team folders, then open a project.";
+    elements.browserSubtitle.textContent = mode === "manage"
+      ? "Browse, organize, and delete your projects across this device and team folders."
+      : intent === "create"
+        ? "Choose where it lives, then press New Project."
+        : "Browse your device and team folders, then open a project.";
   }
   if (elements.browserNewProject) {
     elements.browserNewProject.classList.toggle("is-suggested", intent === "create");
@@ -8363,6 +8386,7 @@ async function browseTo(path) {
     browserState.entries = view.entries ?? [];
     browserState.atRoot = Boolean(view.atRoot);
     browserState.selection = null;
+    browserState.checked.clear();
     renderBrowser();
   } catch (error) {
     browserState.entries = [];
@@ -8381,6 +8405,12 @@ function renderBrowser() {
   if (elements.browserNewFolder) elements.browserNewFolder.hidden = !canCreate;
   if (elements.browserNewProject) elements.browserNewProject.hidden = !canCreate;
   if (elements.browserPublishHere) elements.browserPublishHere.hidden = !(canCreate && provider?.supportsPublish);
+  if (elements.browserSelectToggle) {
+    const manage = browserState.mode === "manage";
+    elements.browserSelectToggle.hidden = !manage;
+    elements.browserSelectToggle.classList.toggle("is-active", browserState.multiSelect);
+    elements.browserSelectToggle.textContent = browserState.multiSelect ? "Done" : "Select";
+  }
   renderBrowserActionbar();
 }
 
@@ -8498,9 +8528,37 @@ function makeBrowserRow(entry) {
   dateCell.className = "browser-item-date";
   dateCell.textContent = formatModified(entry.modified);
 
+  const multi = browserState.mode === "manage" && browserState.multiSelect;
+  if (multi && entry.kind !== "team") {
+    const check = document.createElement("input");
+    check.type = "checkbox";
+    check.className = "browser-item-check";
+    check.checked = browserState.checked.has(entry.path);
+    check.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setChecked(entry, check.checked);
+      li.classList.toggle("is-checked", check.checked);
+      renderBrowserActionbar();
+    });
+    nameCell.prepend(check);
+    if (check.checked) li.classList.add("is-checked");
+  }
+
   li.append(nameCell, dateCell);
-  li.addEventListener("click", () => selectBrowserEntry(entry));
-  li.addEventListener("dblclick", () => activateBrowserEntry(entry));
+  li.addEventListener("click", () => {
+    if (multi && entry.kind !== "team") {
+      const now = !browserState.checked.has(entry.path);
+      setChecked(entry, now);
+      renderBrowserList();
+      renderBrowserActionbar();
+    } else {
+      selectBrowserEntry(entry);
+    }
+  });
+  li.addEventListener("dblclick", () => {
+    if (multi && entry.kind === "project") return;
+    activateBrowserEntry(entry);
+  });
   return li;
 }
 
@@ -8522,10 +8580,20 @@ function activateBrowserEntry(entry) {
 function renderBrowserActionbar() {
   const sel = browserState.selection;
   const provider = browserState.provider;
+  const manageMulti = browserState.mode === "manage" && browserState.multiSelect;
+  // Multi-select management bar: show a count + Delete, and hide the single-
+  // selection Open/Access controls. (Move/Copy join this bar in a later phase.)
+  if (elements.browserDeleteBtn) {
+    elements.browserDeleteBtn.hidden = !manageMulti;
+    elements.browserDeleteBtn.disabled = browserState.checked.size === 0;
+  }
   if (elements.browserSelectionLabel) {
-    elements.browserSelectionLabel.textContent = sel ? sel.name : "";
+    elements.browserSelectionLabel.textContent = manageMulti
+      ? `${browserState.checked.size} selected`
+      : (sel ? sel.name : "");
   }
   if (elements.browserOpenBtn) {
+    elements.browserOpenBtn.hidden = manageMulti;
     if (!sel || sel.kind === "file") {
       elements.browserOpenBtn.disabled = true;
       elements.browserOpenBtn.textContent = "Open";
@@ -8538,7 +8606,7 @@ function renderBrowserActionbar() {
     }
   }
   if (elements.browserAccessBtn) {
-    const canAccess = Boolean(sel && sel.kind === "project" && provider?.supportsAccess && sel.canEdit);
+    const canAccess = !manageMulti && Boolean(sel && sel.kind === "project" && provider?.supportsAccess && sel.canEdit);
     elements.browserAccessBtn.hidden = !canAccess;
   }
 }
@@ -8570,6 +8638,85 @@ async function handleNewProject() {
   } catch (error) {
     setBrowserStatus(error.message || "Could not create project.");
   }
+}
+
+function setChecked(entry, on) {
+  if (on) browserState.checked.add(entry.path);
+  else browserState.checked.delete(entry.path);
+}
+
+function toggleMultiSelect() {
+  if (browserState.mode !== "manage") return;
+  browserState.multiSelect = !browserState.multiSelect;
+  if (browserState.multiSelect) {
+    browserState.selection = null;
+  } else {
+    browserState.checked.clear();
+  }
+  renderBrowser();
+}
+
+// Does `entry` (a project, or a folder that holds it) correspond to the project
+// currently open in the editor? Used to fall back to a blank workspace when the
+// open project is deleted out from under the user.
+function isOpenEntry(provider, entry) {
+  const within = (openPath) => Boolean(openPath) && (openPath === entry.path || openPath.startsWith(`${entry.path}/`));
+  if (provider?.id === "local") {
+    return within(controller.getProject()?.localPath);
+  }
+  if (provider?.id === "server" && workspaceMode === "synced" && settings.lastWorkspace) {
+    return within(`${settings.lastWorkspace.team}/${settings.lastWorkspace.path}`);
+  }
+  return false;
+}
+
+// Lightweight reset when the open project vanishes: leave any live session and
+// drop back to a fresh default workspace (no reload, no extra confirmation).
+function fallbackToDefaultAfterDelete() {
+  if (collaboration.isConnected() && workspaceMode === "synced") {
+    collaboration.disconnect("The open workspace was deleted.");
+  }
+  workspaceMode = "private";
+  privateProjectSnapshot = null;
+  settings.lastLocalProject = null;
+  settings.lastWorkspace = null;
+  settings.wasConnected = false;
+  saveSettings(settings);
+  const project = seedDefaultProject();
+  controller.replaceProject(project);
+  selectionNodeId = project.activeFileId ?? project.rootId;
+  initializePaneState(project);
+  render(project);
+}
+
+async function handleDeleteSelected() {
+  const provider = browserState.provider;
+  if (!provider?.delete) return;
+  const targets = browserState.entries.filter((entry) => browserState.checked.has(entry.path));
+  if (targets.length === 0) return;
+  const label = targets.length === 1 ? `"${targets[0].name}"` : `${targets.length} items`;
+  const confirmed = await showConfirmDialog({
+    title: "Delete",
+    message: `Delete ${label}? This permanently removes ${targets.length === 1 ? "it" : "them"} and cannot be undone.`,
+    acceptLabel: "Delete"
+  });
+  if (!confirmed) return;
+  let openWasDeleted = false;
+  const failures = [];
+  for (const entry of targets) {
+    try {
+      const wasOpen = isOpenEntry(provider, entry);
+      await provider.delete(entry);
+      if (wasOpen) openWasDeleted = true;
+      logDebug("action", "Deleted entry", `${provider.id}:${entry.path}`);
+    } catch (error) {
+      failures.push(`${entry.name}: ${error.message || "failed"}`);
+    }
+  }
+  browserState.checked.clear();
+  if (openWasDeleted) fallbackToDefaultAfterDelete();
+  await browseTo(browserState.path);
+  if (failures.length) setBrowserStatus(`Could not delete — ${failures.join("; ")}`);
 }
 
 // Publish the current local project as a new cloud project at the browsed path,
@@ -8760,6 +8907,8 @@ elements.browserAccessBtn?.addEventListener("click", () => {
   const sel = browserState.selection;
   if (sel && browserState.provider?.openAccess) void browserState.provider.openAccess(sel);
 });
+elements.browserSelectToggle?.addEventListener("click", toggleMultiSelect);
+elements.browserDeleteBtn?.addEventListener("click", () => { void handleDeleteSelected(); });
 elements.accessDialog?.querySelector("form")?.addEventListener("submit", (event) => {
   // "Cancel" (value=cancel) lets the dialog close normally; Save persists first.
   if (event.submitter && event.submitter.value === "cancel") return;

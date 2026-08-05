@@ -237,6 +237,19 @@ async function setAccess(serverUrl, accountToken, team, path, whitelist, blackli
   return parseResponse(response);
 }
 
+async function deleteServer(serverUrl, accountToken, team, path) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const response = await fetch(`${baseUrl}/api/workspaces/delete?token=${encodeURIComponent(accountToken)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ team, path })
+  });
+  if (!response.ok) {
+    await throwForResponse("Could not delete this item.", response);
+  }
+  return parseResponse(response);
+}
+
 function sanitizeProjectForSync(project) {
   const syncProject = structuredClone(project);
   delete syncProject.handles;
@@ -323,6 +336,7 @@ export {
   connectToServer,
   createProjectServer,
   createWorkspace,
+  deleteServer,
   fetchSessionState,
   getAccess,
   hostSession,
