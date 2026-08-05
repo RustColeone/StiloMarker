@@ -250,6 +250,32 @@ async function deleteServer(serverUrl, accountToken, team, path) {
   return parseResponse(response);
 }
 
+async function exportProjectServer(serverUrl, accountToken, team, path) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const params = new URLSearchParams({ token: accountToken, team, path });
+  const response = await fetch(`${baseUrl}/api/workspaces/export?${params.toString()}`, {
+    method: "GET",
+    headers: { accept: "application/json" }
+  });
+  if (!response.ok) {
+    await throwForResponse("Could not read this project.", response);
+  }
+  return parseResponse(response);
+}
+
+async function importProjectServer(serverUrl, accountToken, team, path, name, project) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const response = await fetch(`${baseUrl}/api/workspaces/import?token=${encodeURIComponent(accountToken)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ team, path, name, project })
+  });
+  if (!response.ok) {
+    await throwForResponse("Could not copy the project to the server.", response);
+  }
+  return parseResponse(response);
+}
+
 function sanitizeProjectForSync(project) {
   const syncProject = structuredClone(project);
   delete syncProject.handles;
@@ -337,9 +363,11 @@ export {
   createProjectServer,
   createWorkspace,
   deleteServer,
+  exportProjectServer,
   fetchSessionState,
   getAccess,
   hostSession,
+  importProjectServer,
   listWorkspaces,
   loginToServer,
   mkdirServer,

@@ -222,6 +222,58 @@ async function deleteOpfsEntry(path) {
   await parent.removeEntry(name, { recursive: true });
 }
 
+// Read a local project into a portable, JSON-clean project model (text inline,
+// images as data: URLs) so it can be copied/moved to any provider. Handles and
+// the on-disk source index are stripped — the destination re-roots its own.
+async function exportProjectModelOpfs(path) {
+  const project = await openProjectOpfs(path);
+  const segments = splitPath(path);
+  const name = segments[segments.length - 1] || project.name || "Workspace";
+  const model = {
+    id: project.id,
+    name: project.name,
+    sourceMode: "memory",
+    rootId: project.rootId,
+    activeFileId: project.activeFileId ?? null,
+    nodes: project.nodes
+  };
+  return { name, project: model };
+}
+
+// Write a portable project model into a NEW local project directory under
+// destPath (name is uniquified). The model is re-rooted onto the fresh handle
+// and fully flushed (empty source index ⇒ every file is created).
+async function importProjectModelOpfs(destPath, name, project) {
+  const clean = sanitizeName(name);
+  const root = await getOpfsRoot();
+  const parent = await getDirectoryHandleAtPath(root, destPath, true);
+  const finalName = await uniqueDirName(parent, clean);
+  const dir = await parent.getDirectoryHandle(finalName, { create: true });
+  await writeManifest(dir, finalName);
+  const rootId = project.rootId ?? ROOT_ID;
+  const nodes = JSON.parse(JSON.stringify(project.nodes ?? {}));
+  // saveProjectToHandles walks the tree via listVisibleNodes, which only
+  // descends folders whose `expanded` flag is set. A portable model may carry
+  // collapsed folders, so force every folder open to flush the whole tree.
+  for (const node of Object.values(nodes)) {
+    if (node && node.kind === "folder") node.expanded = true;
+  }
+  const model = {
+    id: project.id ?? `project-${finalName}`,
+    name: finalName,
+    sourceMode: "opfs",
+    rootId,
+    activeFileId: project.activeFileId ?? null,
+    nodes,
+    handles: { [rootId]: dir, [ROOT_ID]: dir },
+    sourceIndex: {}
+  };
+  if (model.nodes[rootId]) model.nodes[rootId].name = finalName;
+  await saveProjectToHandles(model);
+  const path = destPath ? `${destPath}/${finalName}` : finalName;
+  return { path, name: finalName };
+}
+
 export {
   supportsOpfs,
   listOpfsDir,
@@ -231,5 +283,7 @@ export {
   getOpfsDirectoryHandle,
   saveProjectOpfs,
   importOsFolderIntoOpfs,
-  deleteOpfsEntry
+  deleteOpfsEntry,
+  exportProjectModelOpfs,
+  importProjectModelOpfs
 };
