@@ -8441,9 +8441,9 @@ function renderBrowserSideToggle() {
   const opfsOk = supportsOpfs();
   const serverOk = Boolean(syncState.account);
   const current = browserState.provider?.id;
-  // Picking a destination is single-provider for now (Copy across local/server
-  // arrives in a later phase), so the side switch is hidden while picking.
-  if (elements.browserSideToggle) elements.browserSideToggle.hidden = browserState.mode === "pick" || !(opfsOk || serverOk);
+  // The side switch stays available while picking a destination, so a Copy/Move
+  // can land on the other side (device ↔ team) than it started from.
+  if (elements.browserSideToggle) elements.browserSideToggle.hidden = !(opfsOk || serverOk);
   if (elements.browserSideLocal) {
     elements.browserSideLocal.disabled = !opfsOk;
     elements.browserSideLocal.classList.toggle("is-active", current === "local");
@@ -8800,7 +8800,7 @@ function beginTransfer(op) {
   browserState.selection = null;
   const verb = op === "move" ? "Move" : "Copy";
   if (elements.browserTitle) elements.browserTitle.textContent = `${verb} ${entries.length} item${entries.length === 1 ? "" : "s"}…`;
-  if (elements.browserSubtitle) elements.browserSubtitle.textContent = "Open the destination folder, then press Select this folder.";
+  if (elements.browserSubtitle) elements.browserSubtitle.textContent = "Switch device or team if you like, open a folder, then press Select this folder.";
   void browseTo(browserState.path);
 }
 
