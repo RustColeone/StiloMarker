@@ -2126,6 +2126,98 @@ class WorkspaceRegistry:
         _log("WORKSPACE", f"{identity['username']} deleted {workspace_id}")
         return {"team": team, "path": relpath, "deleted": True}
 
+    def export_project(self, token: str, team: str, path: str) -> dict:
+        """Return a portable copy of a project as ``{name, project}`` where
+        ``project`` is the full model with text hydrated inline and image bytes
+        inlined as data: URLs. Any team member with access may export (to copy
+        or duplicate a project)."""
+        identity = self._require_account(token)
+        team = self._require_team(identity, team)
+        relpath = self._safe_relpath(path)
+        if not relpath:
+            raise ValueError("Not a project")
+        proj = self._abs_under_team(team, relpath)
+        if not self.is_project_dir(proj):
+            raise ValueError("Not a project directory")
+        if not self.can_access(identity, team, relpath):
+            raise PermissionError("You do not have access to that project")
+        workspace_id = f"{team}/{relpath}"
+        # A live broker's in-memory project is fresher than disk; else load it.
+        with self.lock:
+            broker = self.brokers.get(workspace_id)
+        if broker is None:
+            broker = CollaborationBroker(
+                self.pin, None, master_pin=self.master_pin, workspace_dir=proj
+            )
+        with broker.lock:
+            project = copy.deepcopy(broker.project)
+        # Inline image bytes as data: URLs so the payload is self-contained.
+        for node_id, node in project.get("nodes", {}).items():
+            if node.get("kind") == "file" and is_image_name(node.get("name", "")):
+                rel = broker._path_in(project, node_id)
+                fpath = (proj / rel) if rel else None
+                if fpath and fpath.is_file():
+                    raw = fpath.read_bytes()
+                    mime = mimetypes.guess_type(node.get("name", ""))[0] or "application/octet-stream"
+                    node["content"] = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+                else:
+                    node["content"] = ""
+        return {"team": team, "path": relpath, "name": proj.name, "project": project}
+
+    def import_project(self, token: str, team: str, path: str, name: str, project: dict) -> dict:
+        """Create a new project at ``path`` from a portable ``{name, project}``
+        payload (see export_project). Image nodes carrying data: URLs are
+        externalized to files; a fresh access.json records the importer as owner.
+        Node names are validated so a crafted payload cannot escape the project
+        directory."""
+        identity = self._require_account(token)
+        team = self._require_team(identity, team)
+        relpath = self._safe_relpath(path)
+        name = self.safe_component(name)
+        if not isinstance(project, dict) or not isinstance(project.get("nodes"), dict):
+            raise ValueError("Invalid project payload")
+        root_id = project.get("rootId")
+        for node in project["nodes"].values():
+            if node.get("id") == root_id:
+                continue
+            nm = str(node.get("name", ""))
+            if "/" in nm or "\\" in nm or nm in ("", ".", ".."):
+                raise ValueError("Invalid file or folder name in payload")
+        parent = self._abs_under_team(team, relpath)
+        if relpath and parent.exists() and self.is_project_dir(parent):
+            raise ValueError("Cannot nest a project inside another project")
+        parent.mkdir(parents=True, exist_ok=True)
+        final = name
+        counter = 2
+        while (parent / final).exists():
+            final = f"{name}-{counter}"
+            counter += 1
+        project_dir = parent / final
+        new_rel = f"{relpath}/{final}" if relpath else final
+        workspace_id = f"{team}/{new_rel}"
+        model = copy.deepcopy(project)
+        model["sourceMode"] = "memory"
+        if root_id and root_id in model.get("nodes", {}):
+            model["nodes"][root_id]["name"] = final
+        model["name"] = final
+        with self.lock:
+            broker = CollaborationBroker(
+                self.pin, None, master_pin=self.master_pin, workspace_dir=project_dir
+            )
+            broker.project = model
+            broker.revision = 0
+            broker._externalize_images(model)   # data: URLs -> files, content stripped
+            broker._persist_state()             # writes text files + manifest.json
+            self._write_access_raw(project_dir, {
+                "whitelist": [], "blacklist": [], "createdBy": identity["username"],
+            })
+            self.brokers[workspace_id] = broker
+        _log("WORKSPACE", f"{identity['username']} imported project {workspace_id}")
+        return {
+            "team": team, "path": new_rel, "name": final, "kind": "project",
+            "id": workspace_id, "createdBy": identity["username"],
+        }
+
     def _make_workspace_broker_path(self, team: str, relpath: str) -> CollaborationBroker:
         """Directory-backed broker for a project at an arbitrary path. Reuses the
         legacy single-file migration for flat workspaces/<name> projects."""
@@ -2345,6 +2437,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_browse(parsed)
         if parsed.path == "/api/workspaces/access":
             return self._handle_get_access(parsed)
+        if parsed.path == "/api/workspaces/export":
+            return self._handle_export_project(parsed)
         if parsed.path == "/api/workspaces/asset":
             return self._handle_asset(parsed)
         if parsed.path == "/api/events/stream":
@@ -2369,6 +2463,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_create_project(parsed)
         if parsed.path == "/api/workspaces/delete":
             return self._handle_delete(parsed)
+        if parsed.path == "/api/workspaces/import":
+            return self._handle_import_project(parsed)
         if parsed.path == "/api/workspaces/access":
             return self._handle_set_access(parsed)
         if parsed.path == "/api/workspaces/open":
@@ -2611,6 +2707,41 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             )
             self._write_json(HTTPStatus.OK, result)
             self._log_request(200, f"deleted {result['team']}/{result['path']}")
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+            self._log_request(403, str(error))
+        except ValueError as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            self._log_request(400, str(error))
+
+    def _handle_export_project(self, parsed):
+        try:
+            token = self._extract_token(parsed)
+            query = parse_qs(parsed.query)
+            team = query.get("team", [""])[0]
+            path = query.get("path", [""])[0]
+            self._write_json(HTTPStatus.OK, self.registry.export_project(token, team, path))
+            self._log_request(200, f"exported {team}/{path}")
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+            self._log_request(403, str(error))
+        except ValueError as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            self._log_request(400, str(error))
+
+    def _handle_import_project(self, parsed):
+        try:
+            token = self._extract_token(parsed)
+            payload = self._read_json()
+            result = self.registry.import_project(
+                token,
+                str(payload.get("team", "")),
+                str(payload.get("path", "")),
+                str(payload.get("name", "")),
+                payload.get("project") or {},
+            )
+            self._write_json(HTTPStatus.OK, result)
+            self._log_request(200, f"imported project {result['id']}")
         except PermissionError as error:
             self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
             self._log_request(403, str(error))

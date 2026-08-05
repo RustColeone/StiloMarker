@@ -1,7 +1,7 @@
 import { ROOT_ID, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isAllowedFileName, isBmapFileName, isImageFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
 import { createProjectController, seedDefaultProject } from "./domain/project-service.js";
 import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
-import { supportsOpfs, listOpfsDir, mkdirOpfs, createProjectOpfs, openProjectOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs, deleteOpfsEntry } from "./services/opfs-service.js";
+import { supportsOpfs, listOpfsDir, mkdirOpfs, createProjectOpfs, openProjectOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs, deleteOpfsEntry, exportProjectModelOpfs, importProjectModelOpfs } from "./services/opfs-service.js";
 import { createCollaborationRuntime } from "./services/collaboration-service.js";
 import { fetchChatStatus, fetchServerChatWorkspace, pushServerChatWorkspace, sendChatRequest, sendGenerationRequest } from "./services/chat-api-service.js";
 import { createChatMessage, createChatThread, deriveChatTitle, loadChatWorkspace, saveChatWorkspace } from "./services/chat-storage-service.js";
@@ -12,7 +12,7 @@ import { clearOfflineShellData, registerOfflineShell } from "./services/offline-
 import { applyTheme, loadSettings, saveSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
 import { clearViewStates, loadViewStates, saveViewStates } from "./services/view-state-service.js";
-import { browseServer, createProjectServer, deleteServer, getAccess, loginToServer, mkdirServer, normalizeServerUrl, pingServer, setAccess } from "./services/sync-service.js";
+import { browseServer, createProjectServer, deleteServer, exportProjectServer, getAccess, importProjectServer, loginToServer, mkdirServer, normalizeServerUrl, pingServer, setAccess } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { appendUrlDbEntry, formatUrlDbEntryBody, moveUrlDbEntry, moveUrlDbEntryBetweenFiles, parseUrlDb, parseUrlDbEntryBody, removeUrlDbEntry, serializeUrlDb, updateUrlDbEntry } from "./services/urldb-service.js";
 import { createZip, downloadBlob } from "./services/zip-service.js";
@@ -158,6 +158,10 @@ const elements = {
   browserAccessBtn: query("#browser-access-btn"),
   browserSelectToggle: query("#browser-select-toggle"),
   browserDeleteBtn: query("#browser-delete-btn"),
+  browserMoveBtn: query("#browser-move-btn"),
+  browserCopyBtn: query("#browser-copy-btn"),
+  browserPickBtn: query("#browser-pick-btn"),
+  browserPickCancel: query("#browser-pick-cancel"),
   browserSelectionLabel: query("#browser-selection-label"),
   accessDialog: query("#access-dialog"),
   accessDialogTitle: query("#access-dialog-title"),
@@ -8255,6 +8259,16 @@ const serverProvider = {
     const { team, rel } = splitServerPath(entry.path);
     await deleteServer(settings.serverUrl, syncState.account.token, team, rel);
   },
+  async exportModel(entry) {
+    const { team, rel } = splitServerPath(entry.path);
+    const data = await exportProjectServer(settings.serverUrl, syncState.account.token, team, rel);
+    return { name: data.name ?? entry.name, project: data.project };
+  },
+  async importModel(destPath, name, project) {
+    const { team, rel } = splitServerPath(destPath);
+    const created = await importProjectServer(settings.serverUrl, syncState.account.token, team, rel, name, project);
+    return { path: `${team}/${created.path}`, name: created.name };
+  },
   async openAccess(entry) {
     const { team, rel } = splitServerPath(entry.path);
     await openAccessEditor(team, rel, entry.name);
@@ -8285,12 +8299,19 @@ const opfsProvider = {
   },
   async delete(entry) {
     await deleteOpfsEntry(entry.path);
+  },
+  async exportModel(entry) {
+    const pkg = await exportProjectModelOpfs(entry.path);
+    return { name: pkg.name ?? entry.name, project: pkg.project };
+  },
+  async importModel(destPath, name, project) {
+    return importProjectModelOpfs(destPath, name, project);
   }
 };
 
 // Current browser view. `provider` is one of the objects above, `path` is that
 // provider's opaque location, `selection` is the highlighted entry (or null).
-let browserState = { provider: opfsProvider, intent: "open", mode: "open", multiSelect: false, checked: new Set(), path: "", entries: [], atRoot: true, selection: null };
+let browserState = { provider: opfsProvider, intent: "open", mode: "open", multiSelect: false, checked: new Set(), pendingTransfer: null, path: "", entries: [], atRoot: true, selection: null };
 
 function setBrowserStatus(message) {
   if (!elements.browserStatus) return;
@@ -8320,6 +8341,7 @@ function openFileBrowser({ side, intent = "open", mode = "open" } = {}) {
   browserState.mode = mode;
   browserState.multiSelect = false;
   browserState.checked = new Set();
+  browserState.pendingTransfer = null;
   browserState.selection = null;
 
   if (elements.browserTitle) {
@@ -8402,9 +8424,10 @@ function renderBrowser() {
   renderBrowserList();
   const provider = browserState.provider;
   const canCreate = provider?.canCreateAt?.(browserState.path) ?? false;
+  const picking = browserState.mode === "pick";
   if (elements.browserNewFolder) elements.browserNewFolder.hidden = !canCreate;
-  if (elements.browserNewProject) elements.browserNewProject.hidden = !canCreate;
-  if (elements.browserPublishHere) elements.browserPublishHere.hidden = !(canCreate && provider?.supportsPublish);
+  if (elements.browserNewProject) elements.browserNewProject.hidden = !canCreate || picking;
+  if (elements.browserPublishHere) elements.browserPublishHere.hidden = picking || !(canCreate && provider?.supportsPublish);
   if (elements.browserSelectToggle) {
     const manage = browserState.mode === "manage";
     elements.browserSelectToggle.hidden = !manage;
@@ -8418,7 +8441,9 @@ function renderBrowserSideToggle() {
   const opfsOk = supportsOpfs();
   const serverOk = Boolean(syncState.account);
   const current = browserState.provider?.id;
-  if (elements.browserSideToggle) elements.browserSideToggle.hidden = !(opfsOk || serverOk);
+  // Picking a destination is single-provider for now (Copy across local/server
+  // arrives in a later phase), so the side switch is hidden while picking.
+  if (elements.browserSideToggle) elements.browserSideToggle.hidden = browserState.mode === "pick" || !(opfsOk || serverOk);
   if (elements.browserSideLocal) {
     elements.browserSideLocal.disabled = !opfsOk;
     elements.browserSideLocal.classList.toggle("is-active", current === "local");
@@ -8551,12 +8576,16 @@ function makeBrowserRow(entry) {
       setChecked(entry, now);
       renderBrowserList();
       renderBrowserActionbar();
+    } else if (browserState.mode === "pick") {
+      // Destination picking: only folders/teams are meaningful targets.
+      if (entry.kind === "team" || entry.kind === "folder") selectBrowserEntry(entry);
     } else {
       selectBrowserEntry(entry);
     }
   });
   li.addEventListener("dblclick", () => {
     if (multi && entry.kind === "project") return;
+    if (browserState.mode === "pick" && entry.kind === "project") return;
     activateBrowserEntry(entry);
   });
   return li;
@@ -8580,20 +8609,51 @@ function activateBrowserEntry(entry) {
 function renderBrowserActionbar() {
   const sel = browserState.selection;
   const provider = browserState.provider;
+  const picking = browserState.mode === "pick";
   const manageMulti = browserState.mode === "manage" && browserState.multiSelect;
-  // Multi-select management bar: show a count + Delete, and hide the single-
-  // selection Open/Access controls. (Move/Copy join this bar in a later phase.)
+  const count = browserState.checked.size;
+  // Multi-select management bar: a count + Move/Copy/Delete, with the single-
+  // selection Open/Access controls hidden.
+  const canTransfer = manageMulti && count > 0;
+  if (elements.browserMoveBtn) {
+    elements.browserMoveBtn.hidden = !manageMulti;
+    elements.browserMoveBtn.disabled = !canTransfer;
+  }
+  if (elements.browserCopyBtn) {
+    elements.browserCopyBtn.hidden = !manageMulti;
+    elements.browserCopyBtn.disabled = !canTransfer;
+  }
   if (elements.browserDeleteBtn) {
     elements.browserDeleteBtn.hidden = !manageMulti;
-    elements.browserDeleteBtn.disabled = browserState.checked.size === 0;
+    elements.browserDeleteBtn.disabled = count === 0;
+  }
+  // Destination picker: primary "Select this folder" + Cancel. The current
+  // browsed folder is the drop target, so it's enabled only where projects can
+  // be created (a team subfolder, or any local folder).
+  const canDrop = picking && Boolean(provider?.canCreateAt?.(browserState.path));
+  if (elements.browserPickBtn) {
+    elements.browserPickBtn.hidden = !picking;
+    elements.browserPickBtn.disabled = !canDrop;
+  }
+  if (elements.browserPickCancel) {
+    elements.browserPickCancel.hidden = !picking;
   }
   if (elements.browserSelectionLabel) {
-    elements.browserSelectionLabel.textContent = manageMulti
-      ? `${browserState.checked.size} selected`
-      : (sel ? sel.name : "");
+    if (picking) {
+      const op = browserState.pendingTransfer?.op === "move" ? "Move" : "Copy";
+      const n = browserState.pendingTransfer?.entries?.length ?? 0;
+      const here = browserState.path ? `“${browserState.path.split("/").pop()}”` : (provider?.rootLabel ?? "here");
+      elements.browserSelectionLabel.textContent = canDrop
+        ? `${op} ${n} item${n === 1 ? "" : "s"} into ${here}`
+        : "Open a folder to drop into";
+    } else {
+      elements.browserSelectionLabel.textContent = manageMulti
+        ? `${count} selected`
+        : (sel ? sel.name : "");
+    }
   }
   if (elements.browserOpenBtn) {
-    elements.browserOpenBtn.hidden = manageMulti;
+    elements.browserOpenBtn.hidden = manageMulti || picking;
     if (!sel || sel.kind === "file") {
       elements.browserOpenBtn.disabled = true;
       elements.browserOpenBtn.textContent = "Open";
@@ -8606,7 +8666,7 @@ function renderBrowserActionbar() {
     }
   }
   if (elements.browserAccessBtn) {
-    const canAccess = !manageMulti && Boolean(sel && sel.kind === "project" && provider?.supportsAccess && sel.canEdit);
+    const canAccess = !manageMulti && !picking && Boolean(sel && sel.kind === "project" && provider?.supportsAccess && sel.canEdit);
     elements.browserAccessBtn.hidden = !canAccess;
   }
 }
@@ -8717,6 +8777,83 @@ async function handleDeleteSelected() {
   if (openWasDeleted) fallbackToDefaultAfterDelete();
   await browseTo(browserState.path);
   if (failures.length) setBrowserStatus(`Could not delete — ${failures.join("; ")}`);
+}
+
+// Restore the File Manager title/subtitle after a destination-pick detour.
+function setManageChrome() {
+  if (elements.browserTitle) elements.browserTitle.textContent = "File Manager";
+  if (elements.browserSubtitle) {
+    elements.browserSubtitle.textContent = "Browse, organize, and delete your projects across this device and team folders.";
+  }
+}
+
+// Capture the checked items and flip the browser into destination-pick mode:
+// the user navigates to a folder and presses "Select this folder" to drop them.
+function beginTransfer(op) {
+  if (browserState.mode !== "manage") return;
+  const entries = browserState.entries.filter((entry) => browserState.checked.has(entry.path));
+  if (entries.length === 0) return;
+  browserState.pendingTransfer = { op, sourceProvider: browserState.provider, sourcePath: browserState.path, entries };
+  browserState.mode = "pick";
+  browserState.multiSelect = false;
+  browserState.checked.clear();
+  browserState.selection = null;
+  const verb = op === "move" ? "Move" : "Copy";
+  if (elements.browserTitle) elements.browserTitle.textContent = `${verb} ${entries.length} item${entries.length === 1 ? "" : "s"}…`;
+  if (elements.browserSubtitle) elements.browserSubtitle.textContent = "Open the destination folder, then press Select this folder.";
+  void browseTo(browserState.path);
+}
+
+// Abandon a pending Move/Copy and return to the source folder in manage mode.
+function cancelPick() {
+  const pending = browserState.pendingTransfer;
+  browserState.pendingTransfer = null;
+  browserState.mode = "manage";
+  browserState.multiSelect = false;
+  browserState.checked.clear();
+  browserState.selection = null;
+  setManageChrome();
+  if (pending?.sourceProvider) browserState.provider = pending.sourceProvider;
+  void browseTo(pending?.sourcePath ?? browserState.path);
+}
+
+// Drop the pending items into the currently browsed folder. Each project is read
+// into a portable model from the source and written as a fresh project at the
+// destination; a Move deletes the source afterwards. Copy/Move use one uniform
+// path so it also works across providers once that is enabled.
+async function handleSelectDestination() {
+  const pending = browserState.pendingTransfer;
+  if (!pending) return;
+  const destProvider = browserState.provider;
+  const destPath = browserState.path;
+  if (!destProvider?.canCreateAt?.(destPath) || !destProvider.importModel) return;
+  const { op, sourceProvider, entries } = pending;
+  setBrowserStatus(`${op === "move" ? "Moving" : "Copying"} ${entries.length} item${entries.length === 1 ? "" : "s"}…`);
+  const failures = [];
+  let openWasMoved = false;
+  for (const entry of entries) {
+    try {
+      const pkg = await sourceProvider.exportModel(entry);
+      await destProvider.importModel(destPath, pkg.name ?? entry.name, pkg.project);
+      if (op === "move") {
+        const wasOpen = isOpenEntry(sourceProvider, entry);
+        await sourceProvider.delete(entry);
+        if (wasOpen) openWasMoved = true;
+      }
+      logDebug("action", `${op} entry`, `${sourceProvider.id}:${entry.path} -> ${destProvider.id}:${destPath}`);
+    } catch (error) {
+      failures.push(`${entry.name}: ${error.message || "failed"}`);
+    }
+  }
+  browserState.pendingTransfer = null;
+  browserState.mode = "manage";
+  browserState.multiSelect = false;
+  browserState.checked.clear();
+  browserState.selection = null;
+  setManageChrome();
+  if (openWasMoved) fallbackToDefaultAfterDelete();
+  await browseTo(destPath);
+  if (failures.length) setBrowserStatus(`Could not ${op} — ${failures.join("; ")}`);
 }
 
 // Publish the current local project as a new cloud project at the browsed path,
@@ -8909,6 +9046,10 @@ elements.browserAccessBtn?.addEventListener("click", () => {
 });
 elements.browserSelectToggle?.addEventListener("click", toggleMultiSelect);
 elements.browserDeleteBtn?.addEventListener("click", () => { void handleDeleteSelected(); });
+elements.browserMoveBtn?.addEventListener("click", () => beginTransfer("move"));
+elements.browserCopyBtn?.addEventListener("click", () => beginTransfer("copy"));
+elements.browserPickBtn?.addEventListener("click", () => { void handleSelectDestination(); });
+elements.browserPickCancel?.addEventListener("click", cancelPick);
 elements.accessDialog?.querySelector("form")?.addEventListener("submit", (event) => {
   // "Cancel" (value=cancel) lets the dialog close normally; Save persists first.
   if (event.submitter && event.submitter.value === "cancel") return;
