@@ -28,11 +28,12 @@
             <div id="file-menu" class="menu-popover" hidden>
               <button id="new-project-button" type="button">New Project</button>
               <button id="open-project-button" type="button">Open Project…</button>
+              <button id="file-manager-button" type="button">File Manager</button>
               <button id="open-directory-button" type="button">Import Local Folder</button>
               <button id="import-file-button" type="button">Import File or Zip</button>
               <button id="save-button" type="button">Save</button>
               <button id="save-pdf-button" type="button">Save as PDF</button>
-              <button id="export-button" type="button">Export</button>
+              <button id="export-button" type="button">Export Project Zipped</button>
               <button id="export-selected-button" type="button">Export Selected</button>
             </div>
           </div>
@@ -483,6 +484,7 @@
             <div class="browser-toolbar">
               <nav id="browser-breadcrumb" class="browser-breadcrumb" aria-label="Location"></nav>
               <div class="browser-actions">
+                <button id="browser-select-toggle" type="button" class="browser-tool-btn" hidden>Select</button>
                 <button id="browser-new-folder" type="button" class="browser-tool-btn" hidden>New Folder</button>
                 <button id="browser-new-project" type="button" class="browser-tool-btn" hidden>New Project</button>
                 <button id="browser-publish-here" type="button" class="browser-tool-btn" hidden>Publish current</button>
@@ -496,6 +498,7 @@
             <p id="browser-status" class="subtle-label" hidden></p>
             <menu class="dialog-actions browser-actionbar">
               <span id="browser-selection-label" class="subtle-label browser-selection-label"></span>
+              <button id="browser-delete-btn" type="button" class="browser-danger-btn" hidden>Delete</button>
               <button id="browser-access-btn" type="button" hidden>Access</button>
               <button id="browser-open-btn" type="button" class="browser-primary-btn" disabled>Open</button>
             </menu>

@@ -2250,6 +2250,21 @@ p {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
+/* Multi-select (File Manager) checkbox + checked row. */
+.browser-item-check {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.browser-item.is-checked {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 .browser-item-name {
   display: flex;
   align-items: center;
@@ -2348,6 +2363,26 @@ p {
   border-color: var(--accent);
   background: var(--accent);
   color: #ffffff;
+}
+
+.browser-tool-btn.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* Delete button in the File Manager action bar. */
+.browser-danger-btn {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  color: var(--danger);
+}
+
+.browser-danger-btn:not(:disabled):hover {
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface-0));
+}
+
+.browser-danger-btn[hidden] {
+  display: none;
 }
 
 .access-form textarea {
