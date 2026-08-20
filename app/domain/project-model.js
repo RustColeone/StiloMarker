@@ -207,6 +207,20 @@ function markFileSaved(project, fileId) {
   return next;
 }
 
+// Clear the dirty flag on several files in one pass (auto-save). Unknown or
+// non-file ids are skipped so a stale id can't throw mid-flush.
+function markFilesSaved(project, fileIds) {
+  const next = cloneProject(project);
+  for (const fileId of fileIds ?? []) {
+    const file = next.nodes[fileId];
+    if (file?.kind === "file" && file.dirty) {
+      file.dirty = false;
+      file.sourceVersion += 1;
+    }
+  }
+  return next;
+}
+
 function renameNode(project, nodeId, name) {
   const next = cloneProject(project);
   const node = getNode(next, nodeId);
@@ -448,6 +462,7 @@ export {
   isUrlDbFileName,
   listVisibleNodes,
   markFileSaved,
+  markFilesSaved,
   moveNode,
   removeNodeRecursive,
   renameNode,

@@ -76,6 +76,10 @@ class ChatProxy:
         self.reasoning_effort = os.environ.get("DEEPSEEK_REASONING_EFFORT", "high").strip().lower() or "high"
         self.enable_thinking = _truthy(os.environ.get("DEEPSEEK_ENABLE_THINKING"))
         self.broker = None  # wired in build_server after construction
+        # Per-request key/URL override (a client bringing its own key). Stored on a
+        # thread-local because each request runs on its own ThreadingHTTPServer
+        # worker, so overrides never leak between concurrent requests.
+        self._req = threading.local()
         self.max_tool_iterations = 6   # read-then-edit needs headroom; agent often explores first (Q2)
         self.max_ops_per_turn = 20
         manual_path = os.path.join(os.path.dirname(__file__), "MANUAL.md")
@@ -87,6 +91,14 @@ class ChatProxy:
 
     def is_configured(self) -> bool:
         return bool(self.api_key and self.model and self.api_url)
+
+    # Effective key/URL for the request in flight: a client-supplied key (own-key
+    # mode) takes precedence over the server's own credentials.
+    def _eff_key(self) -> str:
+        return getattr(self._req, "api_key", "") or self.api_key
+
+    def _eff_url(self) -> str:
+        return getattr(self._req, "api_url", "") or self.api_url
 
     def public_status(self) -> dict:
         if not self.is_configured():
@@ -342,7 +354,7 @@ class ChatProxy:
         payload = dict(base_payload)
         payload["stream"] = True
         request = Request(
-            self.api_url,
+            self._eff_url(),
             data=json.dumps(payload).encode("utf-8"),
             headers=headers,
             method="POST",
@@ -389,6 +401,13 @@ class ChatProxy:
                 if isinstance(text, str) and text:
                     content_parts.append(text)
                     emit({"type": "delta", "text": text})
+
+                # Reasoning-model chain-of-thought arrives as a separate field
+                # (reasoning_content). Surface it live so the UI can show what the
+                # agent is thinking, without mixing it into the committed answer.
+                reasoning = delta.get("reasoning_content")
+                if isinstance(reasoning, str) and reasoning:
+                    emit({"type": "reasoning", "text": reasoning})
 
                 for tc in (delta.get("tool_calls") or []):
                     idx = tc.get("index", 0)
@@ -563,12 +582,35 @@ class ChatProxy:
         return str(content or "").strip()
 
     def chat(self, messages: list[dict], context_files: list[dict], project_name: str,
-             client_project: dict | None = None, progress=None, model: str | None = None) -> dict:
-        if not self.is_configured():
-            raise ValueError("Chat server is not configured. Set DEEPSEEK_API_KEY or MDNOTES_CHAT_API_KEY on the server.")
+             client_project: dict | None = None, progress=None, model: str | None = None,
+             override: dict | None = None) -> dict:
+        # A client bringing its own key overrides the server's for THIS request
+        # only (thread-local, cleared in finally). When own-key mode is used the
+        # client also picks the model freely (its key, its allowlist).
+        override = override or {}
+        own_key = str(override.get("apiKey") or "").strip()
+        own_url = str(override.get("apiUrl") or "").strip()
+        own_model = str(override.get("model") or "").strip()
+        self._req.api_key = own_key
+        self._req.api_url = own_url
+        try:
+            return self._chat_inner(messages, context_files, project_name, client_project,
+                                    progress, model, bool(own_key), own_model)
+        finally:
+            self._req.api_key = ""
+            self._req.api_url = ""
 
-        # Honor a client model override only if it is in the allowlist.
-        active_model = model if (model and model in self.models) else self.model
+    def _chat_inner(self, messages, context_files, project_name, client_project,
+                    progress, model, own_key: bool, own_model: str) -> dict:
+        if not (self._eff_key() and self._eff_url()):
+            raise ValueError("Chat is not configured. Add your API key in Settings → Agent, or set DEEPSEEK_API_KEY on the server.")
+
+        # Own-key mode trusts the client's model choice; server mode validates
+        # against the server's allowlist.
+        if own_key:
+            active_model = own_model or model or self.model
+        else:
+            active_model = model if (model and model in self.models) else self.model
 
         # Resolve the project the agent reasons about.
         # Prefer the client-supplied project (the workspace the user is actually
@@ -672,7 +714,7 @@ class ChatProxy:
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {self._eff_key()}",
         }
         if self.organization:
             headers["OpenAI-Organization"] = self.organization
@@ -806,13 +848,13 @@ class ChatProxy:
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {self._eff_key()}",
         }
         if self.organization:
             headers["OpenAI-Organization"] = self.organization
 
         request = Request(
-            self.api_url,
+            self._eff_url(),
             data=json.dumps(payload).encode("utf-8"),
             headers=headers,
             method="POST",
@@ -1213,7 +1255,7 @@ class CollaborationBroker:
         if self.workspace_dir is None or not self.workspace_dir.exists():
             return
         for child in self.workspace_dir.iterdir():
-            if child.name == "access.json":
+            if child.name in ("access.json", "user-state.json"):
                 continue
             self._remove_path(child)
 
@@ -1386,32 +1428,40 @@ class CollaborationBroker:
                     "Drop is only allowed when you are the sole author of all edits since the target."
                 )
 
-    def _admit(self, display_name: str, role: str, identity: str | None = None):
+    def _admit(self, display_name: str, role: str, identity: str | None = None, device: str | None = None):
         """Mint a session token + presence for an already-authorized joiner.
         Shared by PIN connect() and account/workspace opens (which have no PIN).
-        `identity` (an account username) dedupes sessions — see evict_user()."""
+        `identity` (an account username) + `device` dedupe sessions — see
+        evict_user(): the SAME account on the SAME device (a refresh/reconnect)
+        replaces its old session, but the same account on a DIFFERENT device is a
+        legitimate second presence (self-collaboration across devices)."""
         token = secrets.token_urlsafe(24)
         client_id = f"client-{uuid.uuid4().hex[:12]}"
         cleaned_name = display_name.strip()[:40]
         display_name = cleaned_name or f"Peer {client_id[-4:]}"
         with self.lock:
             self.tokens[token] = client_id
-            self.presence[token] = {"clientId": client_id, "displayName": display_name, "connectedAt": time.time(), "user": identity}
+            self.presence[token] = {"clientId": client_id, "displayName": display_name, "connectedAt": time.time(), "user": identity, "device": device}
             if role == "master":
                 self.master_tokens.add(token)
         _log("CONNECT", f"{display_name} joined as {role}", clientId=client_id, revision=self.revision)
         self._broadcast_presence(f"{display_name} joined the session.")
         return {"token": token, "clientId": client_id, "displayName": display_name, "revision": self.revision, "sessionId": "default", "role": role}
 
-    def evict_user(self, identity: str) -> None:
-        """Drop any prior sessions for the same account (identity) so reopening a
-        workspace / refreshing doesn't pile up duplicate 'ghost' presences. The
-        old SSE loops are orphaned (their tokens invalidated) and expire on their
-        next write; only the newest session for the account remains."""
+    def evict_user(self, identity: str, device: str | None = None) -> None:
+        """Drop prior sessions for the same account so a refresh/reconnect doesn't
+        pile up duplicate 'ghost' presences. When `device` is given, only evict
+        the SAME account on the SAME device — a different device stays connected so
+        the user can genuinely collaborate with themselves across devices (and two
+        windows never evict each other into a reconnect war). The old SSE loops are
+        orphaned (tokens invalidated) and expire on their next write."""
         if not identity:
             return
         with self.lock:
-            stale = [tok for tok, entry in self.presence.items() if entry.get("user") == identity]
+            stale = [
+                tok for tok, entry in self.presence.items()
+                if entry.get("user") == identity and (device is None or entry.get("device") == device)
+            ]
             for tok in stale:
                 self.presence.pop(tok, None)
                 self.tokens.pop(tok, None)
@@ -1865,7 +1915,7 @@ class WorkspaceRegistry:
 
     # ---- File-browser navigation (nested folders + per-project access) ---------
     # Files that are storage bookkeeping, never shown as browseable entries.
-    _RESERVED_NAMES = {"index.json", "access.json", "manifest.json"}
+    _RESERVED_NAMES = {"index.json", "access.json", "manifest.json", "user-state.json"}
 
     def _safe_relpath(self, path: str) -> str:
         """Sanitize a '/'-separated path relative to a team dir. Each segment is
@@ -1948,6 +1998,55 @@ class WorkspaceRegistry:
         if access["whitelist"] and user not in access["whitelist"]:
             return False
         return True
+
+    # ---- Per-user resume state (which files a user had open) -------------------
+    def read_user_state(self, team: str, relpath: str, username: str) -> dict:
+        """The caller's saved open-files state for this project, or an empty
+        default. Stored per-user in a user-state.json sidecar keyed by username."""
+        proj = self._abs_under_team(team, relpath)
+        path = proj / "user-state.json"
+        data = {}
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                data = {}
+        entry = data.get(username) if isinstance(data, dict) else None
+        if not isinstance(entry, dict):
+            return {"openFiles": [], "activeFile": None}
+        open_files = [str(p) for p in entry.get("openFiles", []) if isinstance(p, str)]
+        active = entry.get("activeFile")
+        return {"openFiles": open_files, "activeFile": active if isinstance(active, str) else None}
+
+    def write_user_state(self, token: str, team: str, path: str,
+                         open_files: list, active_file) -> dict:
+        """Persist the caller's open-files state for a project they can access."""
+        identity = self._require_account(token)
+        team = self._require_team(identity, team)
+        relpath = self._safe_relpath(path)
+        proj = self._abs_under_team(team, relpath)
+        if not self.is_project_dir(proj):
+            raise ValueError("Not a project directory")
+        if not self.can_access(identity, team, relpath):
+            raise PermissionError("You do not have access to that workspace")
+        sidecar = proj / "user-state.json"
+        data = {}
+        if sidecar.exists():
+            try:
+                data = json.loads(sidecar.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                data = {}
+        if not isinstance(data, dict):
+            data = {}
+        # Cap the stored list defensively so a runaway client can't bloat the file.
+        cleaned = [str(p) for p in (open_files or []) if isinstance(p, str)][:200]
+        data[identity["username"]] = {
+            "openFiles": cleaned,
+            "activeFile": active_file if isinstance(active_file, str) else None,
+            "updatedAt": time.time(),
+        }
+        sidecar.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        return {"ok": True}
 
     @staticmethod
     def _mtime(path: Path):
@@ -2249,7 +2348,7 @@ class WorkspaceRegistry:
         _log("WORKSPACE", f"{identity['username']} created {team}/{name}", members=members)
         return {"team": team, "name": name, "id": f"{team}/{name}", "members": members, "createdBy": identity["username"]}
 
-    def open_workspace(self, token: str, team: str, path: str) -> dict:
+    def open_workspace(self, token: str, team: str, path: str, device: str | None = None) -> dict:
         """Admit a logged-in account into a team project (role master), loading
         or creating its persisted broker. ``path`` points at a project directory
         relative to the team root (e.g. ``workspaces/WorkNotes``)."""
@@ -2267,15 +2366,52 @@ class WorkspaceRegistry:
             if broker is None:
                 broker = self._make_workspace_broker_path(team, relpath)
                 self.brokers[workspace_id] = broker
-        # One live session per account per workspace — replace any stale ones so a
-        # refresh/reopen doesn't leave a pile of duplicate "me" presences.
-        broker.evict_user(identity["username"])
-        session = broker._admit(identity["username"], "master", identity=identity["username"])
+        # One live session per account PER DEVICE — a refresh/reconnect on the same
+        # device replaces its old session, but the same account on another device
+        # stays connected (self-collaboration across devices; no reconnect war).
+        broker.evict_user(identity["username"], device)
+        session = broker._admit(identity["username"], "master", identity=identity["username"], device=device)
+        self.set_last_workspace(identity["username"], team, relpath)  # cross-device resume
         with self.lock:
             self.token_workspace[session["token"]] = workspace_id
         session["sessionId"] = workspace_id
         session["workspace"] = workspace_id
+        # Resume state: which files this user had open here last time, so the
+        # client can restore their tabs on open/reconnect.
+        session["resume"] = self.read_user_state(team, relpath, identity["username"])
         return session
+
+    # ---- Per-user global prefs (last workspace, for cross-device resume) -------
+    def _user_prefs_path(self) -> Path | None:
+        return (self.data_dir / "user-prefs.json") if self.data_dir else None
+
+    def _read_user_prefs_all(self) -> dict:
+        path = self._user_prefs_path()
+        if not path or not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def user_prefs(self, username: str) -> dict:
+        entry = self._read_user_prefs_all().get(username)
+        return entry if isinstance(entry, dict) else {}
+
+    def set_last_workspace(self, username: str, team: str, path: str) -> None:
+        """Remember the workspace this account last opened, so ANY device can
+        offer to resume it on next login (client localStorage is per-browser)."""
+        prefs_path = self._user_prefs_path()
+        if not prefs_path:
+            return
+        try:
+            data = self._read_user_prefs_all()
+            data[username] = {"lastWorkspace": {"team": team, "path": path}, "updatedAt": time.time()}
+            prefs_path.parent.mkdir(parents=True, exist_ok=True)
+            prefs_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except OSError:
+            pass
 
     def login(self, username: str, password: str) -> dict:
         """Authenticate an account and mint an *account* token (distinct from a
@@ -2288,7 +2424,13 @@ class WorkspaceRegistry:
         with self.lock:
             self.account_tokens[token] = identity["username"]
         _log("AUTH", f"{identity['username']} logged in", teams=identity["teams"])
-        return {"token": token, "username": identity["username"], "teams": identity["teams"]}
+        return {
+            "token": token,
+            "username": identity["username"],
+            "teams": identity["teams"],
+            # Cross-device resume: the last workspace this account opened anywhere.
+            "lastWorkspace": self.user_prefs(identity["username"]).get("lastWorkspace"),
+        }
 
     def account_for_token(self, token: str) -> dict | None:
         with self.lock:
@@ -2467,6 +2609,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_import_project(parsed)
         if parsed.path == "/api/workspaces/access":
             return self._handle_set_access(parsed)
+        if parsed.path == "/api/workspaces/user-state":
+            return self._handle_set_user_state(parsed)
         if parsed.path == "/api/workspaces/open":
             return self._handle_open_workspace(parsed)
         if parsed.path == "/api/workspaces/asset":
@@ -2603,7 +2747,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             path = str(payload.get("path", "")).strip()
             if not path and payload.get("name"):
                 path = f"workspaces/{payload.get('name')}"
-            session = self.registry.open_workspace(token, str(payload.get("team", "")), path)
+            device = str(payload.get("device") or "").strip()[:64] or None
+            session = self.registry.open_workspace(token, str(payload.get("team", "")), path, device)
             self._write_json(HTTPStatus.OK, session)
             self._log_request(200, f"opened {session['workspace']} as {session['displayName']!r}")
         except PermissionError as error:
@@ -2696,6 +2841,23 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
             self._log_request(400, str(error))
 
+    def _handle_set_user_state(self, parsed):
+        try:
+            token = self._extract_token(parsed)
+            payload = self._read_json()
+            result = self.registry.write_user_state(
+                token,
+                str(payload.get("team", "")),
+                str(payload.get("path", "")),
+                payload.get("openFiles", []),
+                payload.get("activeFile"),
+            )
+            self._write_json(HTTPStatus.OK, result)
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+        except ValueError as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+
     def _handle_delete(self, parsed):
         try:
             token = self._extract_token(parsed)
@@ -2778,13 +2940,11 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             self._log_request(400, str(error))
 
     def _handle_chat_status(self):
-        try:
-            self.chat_proxy.authorize_client(self.client_address[0])
-            self._write_json(HTTPStatus.OK, self.chat_proxy.public_status())
-            self._log_request(200, "chat status")
-        except PermissionError as error:
-            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
-            self._log_request(403, str(error))
+        # Status is public info (no key leaves the server). Report it even to
+        # remote clients — they combine `localOnly` with their own-key setting to
+        # decide availability, instead of getting an opaque 403.
+        self._write_json(HTTPStatus.OK, self.chat_proxy.public_status())
+        self._log_request(200, "chat status")
 
     def _handle_chat(self):
         # Streams NDJSON progress events over a chunked response so (a) the user
@@ -2792,8 +2952,17 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         # resetting on each chunk/heartbeat — without this a multi-minute agent turn
         # returns a 504 even though the backend is still working.
         try:
-            self.chat_proxy.authorize_client(self.client_address[0])
             payload = self._read_json()
+            # A client bringing its own key may use the agent from anywhere; only
+            # when relying on the SERVER's key do we enforce the localhost gate
+            # (which protects the server's key from arbitrary remote callers).
+            override = {
+                "apiKey": str(payload.get("apiKey") or "").strip(),
+                "apiUrl": str(payload.get("apiUrl") or "").strip(),
+                "model": str(payload.get("apiModel") or "").strip(),
+            }
+            if not override["apiKey"]:
+                self.chat_proxy.authorize_client(self.client_address[0])
             messages = payload.get("messages")
             context_files = payload.get("contextFiles") or []
             project_name = str(payload.get("projectName", "Workspace"))
@@ -2859,7 +3028,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         try:
             response = self.chat_proxy.chat(
                 messages, context_files, project_name, client_project,
-                progress=write_event, model=requested_model
+                progress=write_event, model=requested_model, override=override
             )
             write_event({"type": "result", "response": response})
             self._log_request(200, f"chat messages={len(messages)} context={len(response['contextPaths'])} (stream)")
@@ -3010,6 +3179,11 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "keep-alive")
+        # Critical for remote (reverse-proxied) clients: without this nginx BUFFERS
+        # the event stream, so operation/cursor events never arrive in real time —
+        # collaboration silently appears "dead" (no live content, no peer cursors)
+        # even though the server is broadcasting. The chat stream already sets this.
+        self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
         _log("SSE", f"Stream opened  {self.client_address[0]}  ({sub_count} subscriber(s))", client=display_name)
 
@@ -3211,6 +3385,29 @@ def run_selftest():
         persisted = json.loads(state_file.read_text(encoding="utf-8"))
         assert persisted["revision"] == 4
 
+        # --- OT rebase test: concurrent edits in DIFFERENT regions must not
+        # misplace text. Two clients both branch from the same revision; the
+        # second's offsets are STALE relative to the first's insert and MUST be
+        # rebased forward, or its text lands in the wrong place (the exact
+        # "characters ended up shifted while two devices edited" bug). ---
+        create_ot = Request(
+            f"{base_url}/api/operations?token={token}",
+            data=json.dumps({"operation": {"type": "create-file", "parentPath": "", "name": "ot.md", "content": "0123456789"}}).encode("utf-8"),
+            headers={"Content-Type": "application/json"}, method="POST")
+        rev0 = json.loads(urlopen(create_ot).read().decode("utf-8"))["revision"]
+        # Client A (based on rev0): insert "AAA" at offset 2.
+        urlopen(Request(f"{base_url}/api/operations?token={token}",
+            data=json.dumps({"operation": {"type": "patch-file", "path": "ot.md", "start": 2, "end": 2, "removedText": "", "text": "AAA", "baseRevision": rev0}}).encode("utf-8"),
+            headers={"Content-Type": "application/json"}, method="POST"))
+        # Client B (ALSO based on rev0 — never saw A): insert "BBB" at offset 8.
+        urlopen(Request(f"{base_url}/api/operations?token={token}",
+            data=json.dumps({"operation": {"type": "patch-file", "path": "ot.md", "start": 8, "end": 8, "removedText": "", "text": "BBB", "baseRevision": rev0}}).encode("utf-8"),
+            headers={"Content-Type": "application/json"}, method="POST"))
+        snap = json.loads(urlopen(f"{base_url}/api/session/state?token={token}").read().decode("utf-8"))
+        ot_file = next(n for n in snap["project"]["nodes"].values() if n.get("name") == "ot.md")
+        # After A: "01AAA23456789"; B's offset 8 rebases +3 → 11 → "01AAA234567BBB89".
+        assert ot_file["content"] == "01AAA234567BBB89", f"OT rebase misplaced text: {ot_file['content']!r}"
+
         # --- directory-backed workspace: real files + externalized image asset ---
         import base64 as _b64, tempfile as _tf, shutil as _sh
         _dir = Path(_tf.mkdtemp()) / "WorkNotes"
@@ -3320,6 +3517,32 @@ def run_selftest():
             assert False, "path traversal should be rejected"
         except (ValueError, PermissionError):
             pass
+
+        # Per-user resume state: save + read back is per account, and survives a
+        # publish (user-state.json is preserved like access.json).
+        _alpha_broker = _reg.brokers["qa/workspaces/Alpha"]
+        _alpha_broker._persist_state()  # restore manifest.json (an earlier test wiped it)
+        assert _reg.read_user_state("qa", "workspaces/Alpha", "alice")["openFiles"] == [], "default resume is empty"
+        _reg.write_user_state(_alice, "qa", "workspaces/Alpha", ["welcome.md", "docs/spec.md"], "welcome.md")
+        _rs = _reg.read_user_state("qa", "workspaces/Alpha", "alice")
+        assert _rs["openFiles"] == ["welcome.md", "docs/spec.md"] and _rs["activeFile"] == "welcome.md", "resume not saved"
+        assert _reg.read_user_state("qa", "workspaces/Alpha", "bob")["openFiles"] == [], "resume must be per-user"
+        assert (_alpha_dir / "user-state.json").is_file(), "resume sidecar not written"
+        # A publish (replace-project + persist) must preserve the resume sidecar.
+        _alpha_broker._apply_operation({"type": "replace-project", "project": _alpha_broker._default_project()})
+        _alpha_broker._persist_state()
+        assert (_alpha_dir / "user-state.json").is_file(), "user-state.json must survive replace-project"
+        assert _reg.read_user_state("qa", "workspaces/Alpha", "alice")["activeFile"] == "welcome.md", "resume lost on publish"
+        # open_workspace hands the resume state back to the client.
+        _sess2 = _reg.open_workspace(_alice, "qa", "workspaces/Alpha")
+        assert _sess2.get("resume", {}).get("activeFile") == "welcome.md", "open should return resume state"
+
+        # Cross-device resume: opening records the account's last workspace, and a
+        # fresh login (a different device) gets it back.
+        _login = _reg.login("alice", "pw")
+        assert _login.get("lastWorkspace", {}).get("path") == "workspaces/Alpha", "login should return last workspace"
+        assert _login["lastWorkspace"]["team"] == "qa", "last workspace team"
+
         _sh.rmtree(_data, ignore_errors=True)
 
         print("Backend self-test passed.")

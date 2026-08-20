@@ -228,9 +228,110 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
     contextMenu.style.left = `${x}px`;
     contextMenu.style.top = `${y}px`;
     contextMenu.hidden = false;
+    // Keep the menu inside the viewport — essential for touch long-press near an
+    // edge, where an unclamped menu would render partly (or fully) off-screen.
+    const rect = contextMenu.getBoundingClientRect();
+    const margin = 8;
+    if (rect.right > window.innerWidth - margin) {
+      contextMenu.style.left = `${Math.max(margin, window.innerWidth - margin - rect.width)}px`;
+    }
+    if (rect.bottom > window.innerHeight - margin) {
+      contextMenu.style.top = `${Math.max(margin, window.innerHeight - margin - rect.height)}px`;
+    }
   }
 
-  document.addEventListener("click", hideMenu);
+  // Close the menu on any click outside it. Clicks on a menu item are handled by
+  // the item's own listener (which hides + runs the action), so excluding the
+  // menu here avoids a race that could dismiss it before the action fires.
+  document.addEventListener("click", (event) => {
+    if (contextMenu.hidden || contextMenu.contains(event.target)) return;
+    hideMenu();
+  });
+
+  // Touch long-press → context menu. The native `contextmenu` event is unreliable
+  // on mobile (text selection / callout can swallow it), so detect a stationary
+  // ~500 ms hold on a row ourselves and open the same menu.
+  let pressTimer = null;
+  let pressStart = null;
+  let longPressFired = false;
+  let movedAfterOpen = false;
+
+  function clearPressTimer() {
+    if (pressTimer) {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+    }
+  }
+
+  surface.addEventListener("touchstart", (event) => {
+    if (event.touches.length !== 1) {
+      clearPressTimer();
+      pressStart = null;
+      return;
+    }
+    const touch = event.touches[0];
+    const row = event.target.closest(".tree-row");
+    const inSurface = row ? container.contains(row) : surface.contains(event.target);
+    if (!inSurface) {
+      clearPressTimer();
+      pressStart = null;
+      return;
+    }
+    pressStart = { x: touch.clientX, y: touch.clientY };
+    longPressFired = false;
+    movedAfterOpen = false;
+    clearPressTimer();
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      longPressFired = true;
+      const target = row
+        ? { nodeId: row.dataset.nodeId, entryId: row.dataset.entryId || null }
+        : { nodeId: ROOT_ID, entryId: null };
+      onSelectNode?.(target);
+      const mode = row?.dataset.projectRoot ? "project-root" : "default";
+      showMenu(pressStart.x, pressStart.y, target, mode);
+    }, 500);
+  }, { passive: true });
+
+  surface.addEventListener("touchmove", (event) => {
+    if (!pressStart) return;
+    const touch = event.touches[0];
+    const dist = Math.hypot(touch.clientX - pressStart.x, touch.clientY - pressStart.y);
+    if (longPressFired) {
+      if (dist > 6) movedAfterOpen = true; // dragging toward a menu item
+    } else if (dist > 10) {
+      clearPressTimer(); // moved before the hold completed → it's a scroll
+      pressStart = null;
+    }
+  }, { passive: true });
+
+  surface.addEventListener("touchend", (event) => {
+    clearPressTimer();
+    if (longPressFired) {
+      // Every touch event of this gesture fires on the row where it STARTED, so
+      // a natural hold-drag-release onto a menu item never reaches the button.
+      // Bridge it: if the finger moved after the menu opened, activate whatever
+      // menu item sits under the release point. Either way swallow the click that
+      // would otherwise open the file / dismiss the just-opened menu.
+      event.preventDefault();
+      if (movedAfterOpen) {
+        const touch = event.changedTouches[0];
+        const el = touch ? document.elementFromPoint(touch.clientX, touch.clientY) : null;
+        const button = el?.closest?.(".explorer-context-menu button");
+        if (button) button.click();
+      }
+      longPressFired = false;
+      movedAfterOpen = false;
+      pressStart = null;
+    }
+  }, { passive: false });
+
+  surface.addEventListener("touchcancel", () => {
+    clearPressTimer();
+    pressStart = null;
+    longPressFired = false;
+    movedAfterOpen = false;
+  }, { passive: true });
 
   surface.addEventListener("contextmenu", (event) => {
     const row = event.target.closest(".tree-row");

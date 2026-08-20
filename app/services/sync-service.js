@@ -155,12 +155,12 @@ async function hostSession(serverUrl, displayName) {
   return parseResponse(response);
 }
 
-async function openWorkspaceSession(serverUrl, accountToken, team, path) {
+async function openWorkspaceSession(serverUrl, accountToken, team, path, device) {
   const baseUrl = normalizeServerUrl(serverUrl);
   const response = await fetch(`${baseUrl}/api/workspaces/open?token=${encodeURIComponent(accountToken)}`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({ team, path })
+    body: JSON.stringify({ team, path, device })
   });
   if (!response.ok) {
     await throwForResponse("Could not open workspace.", response);
@@ -233,6 +233,21 @@ async function setAccess(serverUrl, accountToken, team, path, whitelist, blackli
   });
   if (!response.ok) {
     await throwForResponse("Could not update access list.", response);
+  }
+  return parseResponse(response);
+}
+
+// Persist which files the user has open in a cloud workspace, so they can be
+// restored on the next open/reconnect (per-user, server-side resume state).
+async function saveUserState(serverUrl, accountToken, team, path, openFiles, activeFile) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const response = await fetch(`${baseUrl}/api/workspaces/user-state?token=${encodeURIComponent(accountToken)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ team, path, openFiles, activeFile })
+  });
+  if (!response.ok) {
+    await throwForResponse("Could not save resume state.", response);
   }
   return parseResponse(response);
 }
@@ -338,6 +353,21 @@ async function pushOperation(serverUrl, token, operation) {
   return parseResponse(response);
 }
 
+// Best-effort cursor/selection broadcast. MUST go through normalizeServerUrl like
+// pushOperation — otherwise, on a same-origin subpath deploy (serverUrl === ""),
+// a raw `${serverUrl}/api/...` becomes a root-absolute "/api/..." that skips the
+// app's base path (e.g. /stilomarker/) and never reaches the backend, silently
+// killing cursor sync while content sync keeps working.
+async function pushCursor(serverUrl, token, { fileId, selStart, selEnd }) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const response = await fetch(`${baseUrl}/api/session/presence?token=${encodeURIComponent(token)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ fileId, selStart, selEnd })
+  });
+  return response.ok;
+}
+
 function openEventStream(serverUrl, token, onEvent, onError) {
   const baseUrl = normalizeServerUrl(serverUrl);
   const eventSource = new EventSource(`${baseUrl}/api/events/stream?token=${encodeURIComponent(token)}`);
@@ -375,9 +405,11 @@ export {
   openEventStream,
   openWorkspaceSession,
   pingServer,
+  pushCursor,
   pushOperation,
   pushSessionState,
   sanitizeProjectForSync,
+  saveUserState,
   setAccess,
   uploadAsset
 };
