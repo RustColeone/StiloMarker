@@ -6,6 +6,7 @@ import {
   createProject,
   getNode,
   markFileSaved,
+  markFilesSaved,
   moveNode,
   removeNodeRecursive,
   renameNode,
@@ -79,6 +80,9 @@ function createProjectController(initialProject = seedDefaultProject()) {
     },
     markSaved(fileId) {
       return apply((current) => markFileSaved(current, fileId));
+    },
+    markManySaved(fileIds) {
+      return apply((current) => markFilesSaved(current, fileIds));
     },
     getActiveFile() {
       return project.activeFileId ? getNode(project, project.activeFileId) : null;

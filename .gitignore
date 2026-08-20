@@ -7,5 +7,9 @@ venv/
 # (whitelist.example.json is the safe, committed template.)
 server/whitelist.json
 
+# Server runtime env holds a real chat API key — never commit it.
+server/stilomarker.env
+*.env
+
 # Per-team cloud workspace storage (runtime data)
 data/

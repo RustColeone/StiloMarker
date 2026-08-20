@@ -8,6 +8,7 @@ function createDefaultSettings() {
     displayName: "",
     explorer: "expanded",
     explorerAnchor: "docked",
+    autoSave: true,
     preview: "shown",
     source: "shown",
     wordWrap: true,
@@ -36,7 +37,16 @@ function createDefaultSettings() {
     accountUsername: "",
     accountPassword: "",
     accountSuccess: {},
-    lastWorkspace: null
+    lastWorkspace: null,
+    // Agent (chat) source: "server" uses this server's configured key; "own"
+    // sends the user's own key to the proxy (works from anywhere, their bill).
+    agentSource: "server",
+    agentApiKey: "",
+    agentApiUrl: "",
+    agentModel: "",
+    // "team/path" when the locally-stored project is a cloud workspace's content,
+    // so a reload with unsaved edits can push local instead of pulling over it.
+    syncedProjectId: null
   };
 }
 

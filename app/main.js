@@ -12,7 +12,7 @@ import { clearOfflineShellData, registerOfflineShell } from "./services/offline-
 import { applyTheme, loadSettings, saveSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
 import { clearViewStates, loadViewStates, saveViewStates } from "./services/view-state-service.js";
-import { browseServer, createProjectServer, deleteServer, exportProjectServer, getAccess, importProjectServer, loginToServer, mkdirServer, normalizeServerUrl, pingServer, setAccess } from "./services/sync-service.js";
+import { browseServer, createProjectServer, deleteServer, exportProjectServer, getAccess, importProjectServer, loginToServer, mkdirServer, normalizeServerUrl, pingServer, saveUserState, setAccess } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { appendUrlDbEntry, formatUrlDbEntryBody, moveUrlDbEntry, moveUrlDbEntryBetweenFiles, parseUrlDb, parseUrlDbEntryBody, removeUrlDbEntry, serializeUrlDb, updateUrlDbEntry } from "./services/urldb-service.js";
 import { createZip, downloadBlob } from "./services/zip-service.js";
@@ -52,6 +52,7 @@ const elements = {
   editorAutocomplete: query("#editor-autocomplete"),
   editorFormatToolbar: query("#editor-format-toolbar"),
   formatToolbarInput: query("#format-toolbar-input"),
+  autoSaveInput: query("#auto-save-input"),
   editorAutocompleteLabel: query("#editor-autocomplete-label"),
   editorAutocompleteList: query("#editor-autocomplete-list"),
   preview: query("#preview-output"),
@@ -98,8 +99,22 @@ const elements = {
   inputDialogMessage: query("#input-dialog-message"),
   inputDialogLabel: query("#input-dialog-label"),
   inputDialogInput: query("#input-dialog-input"),
+  inputDialogAutoExt: query("#input-dialog-auto-ext"),
+  inputDialogAutoExtRow: query(".input-dialog-ext-row"),
   inputDialogSubmitButton: query("#input-dialog-submit-button"),
   inputDialogCancelButton: query("#input-dialog-cancel-button"),
+  editorEmptyState: query("#editor-empty-state"),
+  welcomeResume: query("#welcome-resume"),
+  welcomeNewFile: query("#welcome-new-file"),
+  welcomeOpenServer: query("#welcome-open-server"),
+  welcomeOpenLocal: query("#welcome-open-local"),
+  newFileDialog: query("#new-file-dialog"),
+  newFileType: query("#new-file-type"),
+  newFileFolder: query("#new-file-folder"),
+  newFileName: query("#new-file-name"),
+  newFileStatus: query("#new-file-status"),
+  newFileCancelButton: query("#new-file-cancel-button"),
+  newFileSubmitButton: query("#new-file-submit-button"),
   bookmarkEntryDialog: query("#bookmark-entry-dialog"),
   bookmarkEntryDialogTitle: query("#bookmark-entry-dialog-title"),
   bookmarkEntryDialogMessage: query("#bookmark-entry-dialog-message"),
@@ -111,6 +126,13 @@ const elements = {
   settingsDialog: query("#settings-dialog"),
   settingsTabStrip: query("#settings-tab-strip"),
   settingsTabsButton: query("#settings-tabs-button"),
+  agentSourceSelect: query("#agent-source-select"),
+  agentSourceNote: query("#agent-source-note"),
+  agentOwnFields: query("#agent-own-fields"),
+  agentApiKeyInput: query("#agent-api-key-input"),
+  agentApiUrlInput: query("#agent-api-url-input"),
+  agentModelInput: query("#agent-model-input"),
+  agentStatusLine: query("#agent-status-line"),
   accountLockedNote: query("#account-locked-note"),
   settingsMenuButton: query("#settings-menu-button"),
   settingsMenu: query("#settings-menu"),
@@ -182,6 +204,7 @@ const elements = {
   sessionDetailText: query("#session-detail-text"),
   presenceList: query("#presence-list"),
   presenceStrip: query("#presence-strip"),
+  presenceDots: query("#presence-dots"),
   workspaceModeRow: query("#workspace-mode-row"),
   workspaceModeToggle: query("#workspace-mode-toggle"),
   sessionIdLabel: query("#session-id-label"),
@@ -189,6 +212,7 @@ const elements = {
   mobileExplorerButton: query("#mobile-explorer-button"),
   mobilePaneToggle: query("#mobile-pane-toggle"),
   mobilePaneCaption: query("#mobile-pane-caption"),
+  mobileRenameButton: query("#mobile-rename-button"),
   mobileChatToggle: query("#mobile-chat-toggle"),
   mobileMenuButton: query("#mobile-menu-button"),
   menuBar: query(".menu-bar"),
@@ -362,6 +386,10 @@ const chatState = {
   activity: [],
   activityExpanded: false,
   streamingText: "",
+  reasoningText: "",
+  turnStartedAt: 0,
+  // Message ids whose persisted "Thought for…" section is expanded.
+  expandedReasoning: new Set(),
   shouldScrollToBottom: false
 };
 const autocompleteState = {
@@ -830,6 +858,28 @@ function describeAgentActivity(event) {
   return "Working…";
 }
 
+function formatThinkingLabel(ms) {
+  if (!ms || ms < 1500) return "Thought for a moment";
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `Thought for ${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `Thought for ${minutes}m ${seconds % 60}s`;
+}
+
+/** Collapsible "Thought for…" section persisted on an assistant message. */
+function renderMessageReasoning(message) {
+  if (message.role !== "assistant" || !message.reasoning) return "";
+  const expanded = chatState.expandedReasoning.has(message.id);
+  return `
+    <div class="chat-thought${expanded ? " is-open" : ""}">
+      <button type="button" class="chat-thought-toggle" data-chat-thought-toggle="${escapeHtmlAttribute(message.id)}" aria-expanded="${expanded ? "true" : "false"}">
+        <span class="chat-thought-caret" aria-hidden="true">▸</span>
+        <span class="chat-thought-label">${escapeHtmlAttribute(formatThinkingLabel(message.reasoningMs))}</span>
+      </button>
+      ${expanded ? `<div class="chat-thought-body">${escapeHtmlAttribute(message.reasoning)}</div>` : ""}
+    </div>`;
+}
+
 /** Render the live agent activity log shown inside the thinking indicator. */
 function renderAgentActivity() {
   if (!chatState.activity.length) {
@@ -910,8 +960,15 @@ function renderChatPanel(project) {
   const streamingHtml = chatState.streamingText
     ? `<div class="chat-stream-preview">${renderMarkdown(chatState.streamingText)}</div>`
     : "";
+  // Reasoning-model chain-of-thought, shown live as muted "thinking" text above
+  // the answer (like an IDE agent's greyed thought stream). Only present when the
+  // model streams reasoning_content.
+  const reasoningHtml = chatState.reasoningText
+    ? `<div class="chat-reasoning" aria-label="Agent thinking">${escapeHtmlAttribute(chatState.reasoningText)}</div>`
+    : "";
   const thinkingHtml = chatState.sending
     ? `<div class="chat-thinking" aria-label="Agent is working" aria-live="polite">
+        ${reasoningHtml}
         ${streamingHtml}
         <div class="chat-thinking-foot">
           <div class="chat-thinking-dots">
@@ -951,6 +1008,7 @@ function renderChatPanel(project) {
             <span class="chat-message-role">${escapeHtmlAttribute(roleLabel)}</span>
             <span class="chat-message-time">${escapeHtmlAttribute(formatChatTimestamp(message.createdAt))}</span>
           </div>
+          ${renderMessageReasoning(message)}
           <div class="chat-message-content">${contentHtml}</div>
           ${contextBadgesHtml}
           ${proposalCardHtml}
@@ -1028,6 +1086,67 @@ function addActiveFileToChatContext() {
   addChatContextPath(getPath(project, project.activeFileId));
 }
 
+// Own-key mode: the request override sent to the proxy (empty in server mode or
+// when no key is entered, so the server's own key is used instead).
+function agentRequestOverride() {
+  if (settings.agentSource !== "own") return {};
+  const apiKey = (settings.agentApiKey || "").trim();
+  if (!apiKey) return {};
+  const override = { apiKey };
+  const url = (settings.agentApiUrl || "").trim();
+  const model = (settings.agentModel || "").trim();
+  if (url) override.apiUrl = url;
+  if (model) override.apiModel = model;
+  return override;
+}
+
+// True when own-key mode is selected and a key is entered — the agent is usable
+// through the proxy regardless of whether the server itself has a key.
+function agentOwnKeyReady() {
+  return settings.agentSource === "own" && Boolean((settings.agentApiKey || "").trim());
+}
+
+// Populate the Agent settings controls from `settings` and toggle the own-key
+// fields. Called when the settings dialog opens.
+function applyAgentSettingsControls() {
+  if (elements.agentSourceSelect) elements.agentSourceSelect.value = settings.agentSource === "own" ? "own" : "server";
+  const own = settings.agentSource === "own";
+  if (elements.agentOwnFields) elements.agentOwnFields.hidden = !own;
+  if (elements.agentApiKeyInput) elements.agentApiKeyInput.value = settings.agentApiKey || "";
+  if (elements.agentApiUrlInput) elements.agentApiUrlInput.value = settings.agentApiUrl || "";
+  if (elements.agentModelInput) elements.agentModelInput.value = settings.agentModel || "";
+  if (elements.agentSourceNote) {
+    elements.agentSourceNote.textContent = own
+      ? "The agent uses your key, sent to this server's proxy per request. Works from anywhere; billed to you."
+      : "Uses the key configured on the server you're connected to. Requires the server to have a key and to allow your session.";
+  }
+  applyAgentSettingsStatus();
+}
+
+// Reflect the live agent availability into the Agent tab's status line.
+function applyAgentSettingsStatus() {
+  if (!elements.agentStatusLine) return;
+  const el = elements.agentStatusLine;
+  let text;
+  let ok = false;
+  if (agentOwnKeyReady()) {
+    text = "Ready — using your own API key.";
+    ok = true;
+  } else if (settings.agentSource === "own") {
+    text = "Enter your API key below to enable the agent.";
+  } else if (chatState.configured) {
+    text = `Ready — ${chatState.provider ?? "server"}${chatState.model ? " · " + chatState.model : ""}.`;
+    ok = true;
+  } else if (chatState.status === "offline") {
+    text = "Server unreachable — can't check the agent.";
+  } else {
+    text = chatState.detail || "This server has no agent key. Switch to “My own API key”, or set one on the server.";
+  }
+  el.textContent = text;
+  el.classList.toggle("is-success", ok);
+  el.classList.toggle("is-error", !ok);
+}
+
 async function refreshChatStatus({ silent = false } = {}) {
   chatState.status = "checking";
   if (!silent) {
@@ -1035,31 +1154,48 @@ async function refreshChatStatus({ silent = false } = {}) {
     renderChatPanel(controller.getProject());
   }
 
+  const ownReady = agentOwnKeyReady();
   try {
     const status = await fetchChatStatus(settings.serverUrl);
-    chatState.configured = Boolean(status.configured);
-    chatState.localOnly = status.localOnly !== false;
-    chatState.provider = status.provider ?? null;
-    chatState.model = status.model ?? null;
-    chatState.models = Array.isArray(status.models) && status.models.length
-      ? status.models
-      : (status.model ? [status.model] : []);
-    // Keep the user's saved choice if the server still offers it, else default.
-    chatState.selectedModel = chatState.models.includes(settings.chatModel)
-      ? settings.chatModel
-      : (status.model ?? chatState.models[0] ?? null);
-    chatState.status = chatState.configured ? "ready" : "unconfigured";
-    chatState.detail = status.message ?? (chatState.configured ? "Chat is ready." : "Chat is not configured.");
+    // Own-key mode is "configured" whenever a key is entered (the proxy will use
+    // it and bypass the server's localhost gate), independent of the server key.
+    chatState.configured = ownReady || Boolean(status.configured);
+    chatState.localOnly = ownReady ? false : status.localOnly !== false;
+    if (ownReady) {
+      chatState.provider = "Your key";
+      chatState.model = (settings.agentModel || "").trim() || "custom";
+      chatState.models = [chatState.model];
+      chatState.selectedModel = chatState.model;
+      chatState.status = "ready";
+      chatState.detail = "Using your own API key.";
+    } else {
+      chatState.provider = status.provider ?? null;
+      chatState.model = status.model ?? null;
+      chatState.models = Array.isArray(status.models) && status.models.length
+        ? status.models
+        : (status.model ? [status.model] : []);
+      // Keep the user's saved choice if the server still offers it, else default.
+      chatState.selectedModel = chatState.models.includes(settings.chatModel)
+        ? settings.chatModel
+        : (status.model ?? chatState.models[0] ?? null);
+      chatState.status = chatState.configured ? "ready" : "unconfigured";
+      chatState.detail = chatState.configured
+        ? (status.message ?? "Chat is ready.")
+        : "Agent needs a key — click to open Settings → Agent and use your own, or set one on the server.";
+    }
   } catch (error) {
-    chatState.configured = false;
-    chatState.provider = null;
-    chatState.model = null;
-    chatState.models = [];
-    chatState.selectedModel = null;
-    chatState.status = error?.status === 403 ? "restricted" : "offline";
-    chatState.detail = error instanceof Error ? error.message : String(error);
+    // The status check failed (server unreachable, etc). Own-key mode is still
+    // "usable" optimistically — the actual send surfaces any real failure.
+    chatState.configured = ownReady;
+    chatState.provider = ownReady ? "Your key" : null;
+    chatState.model = ownReady ? ((settings.agentModel || "").trim() || "custom") : null;
+    chatState.models = ownReady ? [chatState.model] : [];
+    chatState.selectedModel = ownReady ? chatState.model : null;
+    chatState.status = ownReady ? "ready" : (error?.status === 403 ? "restricted" : "offline");
+    chatState.detail = ownReady ? "Using your own API key." : (error instanceof Error ? error.message : String(error));
   }
 
+  applyAgentSettingsStatus();
   renderChatPanel(controller.getProject());
 }
 
@@ -1117,6 +1253,8 @@ async function runAgentTurn(thread, project) {
   chatState.activity = [];
   chatState.activityExpanded = false;
   chatState.streamingText = "";
+  chatState.reasoningText = "";
+  chatState.turnStartedAt = Date.now();
   chatState.shouldScrollToBottom = true;
   persistChatWorkspaceState(project);
   renderChatPanel(project);
@@ -1136,7 +1274,9 @@ async function runAgentTurn(thread, project) {
         .filter((message) => message.role === "user" || message.role === "assistant")
         .map((message) => ({ role: message.role, content: message.content })),
       contextFiles,
-      project: buildAgentProjectSnapshot(project)
+      project: buildAgentProjectSnapshot(project),
+      // Own-key mode: pass the user's key/url/model so the proxy uses them.
+      ...agentRequestOverride()
     }, (event) => {
       if (event.type === "delta") {
         chatState.streamingText += event.text || "";
@@ -1144,9 +1284,17 @@ async function runAgentTurn(thread, project) {
         renderChatPanel(project);
         return;
       }
+      // Reasoning-model chain-of-thought (shown live as muted "thinking" text).
+      if (event.type === "reasoning") {
+        chatState.reasoningText += event.text || "";
+        chatState.shouldScrollToBottom = true;
+        renderChatPanel(project);
+        return;
+      }
       // A new model turn starts fresh: clear any streamed text from the prior turn.
       if (event.type === "status") {
         chatState.streamingText = "";
+        chatState.reasoningText = "";
       }
       const line = describeAgentActivity(event);
       if (!line) {
@@ -1172,6 +1320,12 @@ async function runAgentTurn(thread, project) {
     chatState.model = response.model ?? chatState.model;
     const proposals = Array.isArray(response.proposedOperations) ? response.proposedOperations : [];
     const msgExtra = {};
+    // Persist the reasoning stream so the answer keeps a collapsible "Thought
+    // for…" section (like an IDE agent), not just a live-only thought stream.
+    if (chatState.reasoningText.trim()) {
+      msgExtra.reasoning = chatState.reasoningText;
+      msgExtra.reasoningMs = Math.max(0, Date.now() - (chatState.turnStartedAt || Date.now()));
+    }
     if (proposals.length > 0) {
       msgExtra.proposedOperations = proposals;
       msgExtra.batchId = response.batchId ?? null;
@@ -1200,6 +1354,7 @@ async function runAgentTurn(thread, project) {
     chatState.sending = false;
     chatState.activity = [];
     chatState.streamingText = "";
+    chatState.reasoningText = "";
     chatState.shouldScrollToBottom = true;
     renderChatPanel(project);
   }
@@ -1492,13 +1647,31 @@ function showConfirmDialog({ title = "Confirm Action", message, acceptLabel = "C
   });
 }
 
-function showInputDialog({ title = "Rename Item", message = "Enter a value.", label = "Name", value = "", submitLabel = "Save" }) {
+function showInputDialog({ title = "Rename Item", message = "Enter a value.", label = "Name", value = "", submitLabel = "Save", extension = "" }) {
   return new Promise((resolve) => {
     elements.inputDialogTitle.textContent = title;
     elements.inputDialogMessage.textContent = message;
     elements.inputDialogLabel.textContent = label;
-    elements.inputDialogInput.value = value;
     elements.inputDialogSubmitButton.textContent = submitLabel;
+
+    // "Auto file extension": only offered when the caller knows the extension
+    // (file renames). On by default — the input then shows just the base name so
+    // the extension can't be edited by accident; it's re-appended on save.
+    const ext = String(extension || "");
+    const hasExt = ext.length > 0;
+    const endsWithExt = (v) => v.toLowerCase().endsWith(ext.toLowerCase());
+    const stripExt = (v) => (hasExt && endsWithExt(v) ? v.slice(0, -ext.length) : v);
+    if (elements.inputDialogAutoExtRow) elements.inputDialogAutoExtRow.hidden = !hasExt;
+    if (elements.inputDialogAutoExt) elements.inputDialogAutoExt.checked = hasExt;
+    elements.inputDialogInput.value = hasExt ? stripExt(value) : value;
+
+    const handleToggle = () => {
+      if (!hasExt) return;
+      const cur = elements.inputDialogInput.value;
+      elements.inputDialogInput.value = elements.inputDialogAutoExt.checked
+        ? stripExt(cur)
+        : (endsWithExt(cur) ? cur : `${cur}${ext}`);
+    };
 
     const handleCancel = () => {
       elements.inputDialog.close("cancel");
@@ -1507,14 +1680,20 @@ function showInputDialog({ title = "Rename Item", message = "Enter a value.", la
     const handleClose = () => {
       elements.inputDialog.removeEventListener("close", handleClose);
       elements.inputDialogCancelButton.removeEventListener("click", handleCancel);
-      const result = elements.inputDialog.returnValue === "accept"
+      elements.inputDialogAutoExt?.removeEventListener("change", handleToggle);
+      let result = elements.inputDialog.returnValue === "accept"
         ? elements.inputDialogInput.value.trim() || null
         : null;
+      // Re-attach the extension when auto is on and the user didn't type it.
+      if (result && hasExt && elements.inputDialogAutoExt?.checked && !endsWithExt(result)) {
+        result = `${result}${ext}`;
+      }
       resolve(result);
     };
 
     elements.inputDialog.addEventListener("close", handleClose, { once: true });
     elements.inputDialogCancelButton.addEventListener("click", handleCancel);
+    elements.inputDialogAutoExt?.addEventListener("change", handleToggle);
     elements.inputDialog.showModal();
     elements.inputDialogInput.focus();
     elements.inputDialogInput.select();
@@ -1628,6 +1807,31 @@ function notify(message) {
   showNoticeDialog(message);
 }
 
+// Lightweight, auto-dismissing feedback for successful actions (open/create/
+// rename/…). Unlike notify(), it never blocks — important on mobile where a modal
+// for every tap would be heavy. Errors should still use notify().
+let toastHost = null;
+function showToast(message, { duration = 2200 } = {}) {
+  const text = String(message ?? "").trim();
+  if (!text) return;
+  toastHost = toastHost || document.getElementById("toast-host");
+  if (!toastHost) return;
+  const toast = document.createElement("div");
+  toast.className = "app-toast";
+  toast.setAttribute("role", "status");
+  toast.textContent = text;
+  toastHost.append(toast);
+  // Trigger the enter transition on the next frame.
+  requestAnimationFrame(() => toast.classList.add("is-visible"));
+  const remove = () => {
+    toast.classList.remove("is-visible");
+    toast.addEventListener("transitionend", () => toast.remove(), { once: true });
+    // Fallback in case the transitionend never fires.
+    setTimeout(() => toast.remove(), 400);
+  };
+  setTimeout(remove, duration);
+}
+
 async function confirmAction(message) {
   logDebug("action", "Confirm requested", String(message));
   const result = await showConfirmDialog({ message: String(message) });
@@ -1635,11 +1839,17 @@ async function confirmAction(message) {
   return result;
 }
 
-async function promptForName(message, defaultValue = "") {
+async function promptForName(message, defaultValue = "", options = {}) {
   logDebug("action", "Prompt requested", `${message} :: ${defaultValue}`);
-  const result = await showInputDialog({ title: message, message, value: defaultValue, submitLabel: "Save" });
+  const result = await showInputDialog({ title: message, message, value: defaultValue, submitLabel: "Save", ...options });
   logDebug("response", result ? `Prompt value: ${result}` : "Prompt cancelled", message);
   return result;
+}
+
+// The extension to manage for a filename ("" for folders / no extension).
+function fileExtensionOf(name) {
+  const dot = String(name || "").lastIndexOf(".");
+  return dot > 0 ? name.slice(dot) : "";
 }
 
 function splitPathSegments(path) {
@@ -2132,10 +2342,18 @@ function showEditorAutocomplete(force = false) {
 
 /** Return the plain-text content of the editor by reading each logical-line
  *  div's textContent and joining with newlines. */
+// A "line" is any direct element child of #editor-content. Normally these are
+// all .editor-line (renderEditorContent only makes those), but a mobile keyboard
+// / autocorrect / swipe edit can transiently insert a plain <div>; treating those
+// as lines too keeps text from being dropped and offsets from collapsing to 0.
+function editorLineEls() {
+  return Array.from(elements.editorContent.querySelectorAll(":scope > *"));
+}
+
 function getEditorText() {
-  const lines = elements.editorContent.querySelectorAll(":scope > .editor-line");
+  const lines = editorLineEls();
   if (lines.length === 0) return "";
-  return Array.from(lines).map((line) => line.textContent).join("\n");
+  return lines.map((line) => line.textContent).join("\n");
 }
 
 /** Walk text nodes inside `root` counting characters until `targetOffset` is
@@ -2166,9 +2384,7 @@ function findTextNodeAt(root, targetOffset) {
 /** Convert an integer plain-text offset to a { node, offset } DOM position
  *  inside the contenteditable. */
 function textOffsetToDomPosition(textOffset) {
-  const lineEls = Array.from(
-    elements.editorContent.querySelectorAll(":scope > .editor-line")
-  );
+  const lineEls = editorLineEls();
   let remaining = textOffset;
   for (const line of lineEls) {
     const lineLen = line.textContent.length;
@@ -2191,20 +2407,46 @@ function textOffsetToDomPosition(textOffset) {
 /** Convert a DOM (container, domOffset) position to an integer plain-text
  *  offset relative to the start of the editor content. */
 function domPositionToTextOffset(container, domOffset) {
-  // Find the ancestor .editor-line that is a direct child of the editor.
-  let lineEl = container.nodeType === Node.TEXT_NODE
-    ? container.parentElement
-    : container;
-  while (lineEl && lineEl.parentElement !== elements.editorContent) {
-    lineEl = lineEl.parentElement;
+  // A selection boundary can BE the editor root itself: Ctrl+A commonly makes
+  // both endpoints the root (#editor-content) with a child index. Summing the
+  // preceding lines' text here is essential — without it the offset collapsed to
+  // 0, so getEditorSelection() reported an empty selection and Ctrl+A + paste
+  // inserted at the top WITHOUT removing the selection (the "everything mixed up"
+  // corruption).
+  if (container === elements.editorContent) {
+    const kids = Array.from(elements.editorContent.childNodes);
+    const count = kids.length;
+    const limit = Math.min(Math.max(0, domOffset), count);
+    let offset = 0;
+    for (let i = 0; i < limit; i += 1) {
+      offset += kids[i].textContent?.length ?? 0;
+      if (i < count - 1) offset += 1; // newline between lines (none after the last)
+    }
+    return offset;
   }
-  if (!lineEl) return 0;
 
-  const lineEls = Array.from(
-    elements.editorContent.querySelectorAll(":scope > .editor-line")
-  );
-  const lineIndex = lineEls.indexOf(lineEl);
-  if (lineIndex < 0) return 0;
+  // Walk up to the direct child of #editor-content that hosts this position.
+  let lineEl = container;
+  while (lineEl && lineEl.parentNode !== elements.editorContent) {
+    lineEl = lineEl.parentNode;
+  }
+
+  const lineEls = editorLineEls();
+  const lineIndex = lineEl ? lineEls.indexOf(lineEl) : -1;
+  if (lineIndex < 0) {
+    // The caret sits in a node that is a DIRECT child of the editor but not an
+    // element we indexed (e.g. a bare text node the browser left, common on
+    // mobile). Count characters up to it via raw child nodes so we never
+    // collapse the caret to offset 0 (the historic caret-jump-to-top bug).
+    const kids = Array.from(elements.editorContent.childNodes);
+    let node = container;
+    while (node && node.parentNode !== elements.editorContent) node = node.parentNode;
+    const idx = node ? kids.indexOf(node) : -1;
+    if (idx < 0) return 0;
+    let offset = 0;
+    for (let i = 0; i < idx; i += 1) offset += (kids[i].textContent?.length ?? 0) + 1;
+    return offset + getOffsetWithinTextRoot(node, container, domOffset);
+  }
 
   // Characters contributed by all preceding lines + their newlines.
   let offset = 0;
@@ -2270,6 +2512,7 @@ function applyEditorRender(text, selStart, selEnd) {
       elements.editorContent.focus({ preventScroll: true });
     }
     setEditorSelection(selStart, selEnd);
+    caretIntoView();
   } finally {
     _editorUpdating = false;
   }
@@ -2426,11 +2669,16 @@ function renderRemoteCursors(cursors) {
   container.textContent = "";
   if (!activeFile) return;
 
+  // Match peers by PATH, not node id: the server generates its own node ids on
+  // create-file/-folder, so the creating client and everyone else hold DIFFERENT
+  // ids for the same file. Paths are stable across sessions (content sync already
+  // uses them), so a path match is what actually lines cursors up.
+  const activePath = getPath(controller.getProject(), activeFile.id);
   const scrollEl = elements.editorScroll;
   const scrollRect = elements.editorScroll.getBoundingClientRect();
 
   for (const cursor of cursors) {
-    if (cursor.fileId !== activeFile.id) continue;
+    if (cursor.fileId !== activePath) continue;
     const color = clientColor(cursor.clientId);
     const selStart = Number(cursor.selStart);
     const selEnd = Number(cursor.selEnd);
@@ -2444,14 +2692,40 @@ function renderRemoteCursors(cursors) {
         const selRange = document.createRange();
         selRange.setStart(startPos.node, startPos.offset);
         selRange.setEnd(endPos.node, endPos.offset);
-        const rects = Array.from(selRange.getClientRects());
-        for (const rect of rects) {
-          if (rect.width === 0 && rect.height === 0) continue;
+        // getClientRects() on a range spanning block-level .editor-line divs
+        // returns BOTH the block line-box and the inline text-box for the same
+        // span. Drawing both (each at opacity 0.25) stacks into a visibly doubled
+        // highlight. Keep the tighter rects and drop any that substantially
+        // overlap one already kept — a genuine multi-line selection has one
+        // non-overlapping rect per line.
+        const rawRects = Array.from(selRange.getClientRects())
+          .filter((r) => r.width > 0 && r.height > 0)
+          .sort((a, b) => a.width * a.height - b.width * b.height); // tighter first
+        const keptRects = [];
+        for (const rect of rawRects) {
+          const overlapsKept = keptRects.some((k) => {
+            const ix = Math.min(k.right, rect.right) - Math.max(k.left, rect.left);
+            const iy = Math.min(k.bottom, rect.bottom) - Math.max(k.top, rect.top);
+            if (ix <= 0 || iy <= 0) return false;
+            const minArea = Math.min(k.width * k.height, rect.width * rect.height) || 1;
+            return ix * iy > 0.5 * minArea;
+          });
+          if (overlapsKept) continue;
+          keptRects.push(rect);
+          // An empty line yields the full-width block box (no inline text box).
+          // The source shows the native empty-line selection as a small sliver —
+          // match it by clamping to a space width when the line has no content.
+          let width = rect.width;
+          const probe = document.elementFromPoint(rect.left + 2, (rect.top + rect.bottom) / 2);
+          const probeLine = probe?.closest?.(".editor-line");
+          if (probeLine && (probeLine.textContent ?? "").length === 0) {
+            width = getEditorSpaceWidth();
+          }
           const highlightEl = document.createElement("div");
           highlightEl.className = "remote-selection";
           highlightEl.style.top = `${rect.top - scrollRect.top + scrollEl.scrollTop}px`;
           highlightEl.style.left = `${rect.left - scrollRect.left + scrollEl.scrollLeft}px`;
-          highlightEl.style.width = `${rect.width}px`;
+          highlightEl.style.width = `${width}px`;
           highlightEl.style.height = `${rect.height}px`;
           highlightEl.style.background = color;
           container.appendChild(highlightEl);
@@ -2464,11 +2738,21 @@ function renderRemoteCursors(cursors) {
       const anchorRange = document.createRange();
       anchorRange.setStart(pos.node, pos.offset);
       anchorRange.collapse(true);
-      const rect = anchorRange.getBoundingClientRect();
+      // A collapsed range's getBoundingClientRect() is EMPTY (all zeros) at a line
+      // start / empty line in Chrome — which planted the caret off-screen at
+      // negative coords, so no remote caret was ever visible. Prefer getClientRects
+      // and fall back to the hosting line box.
+      let rect = anchorRange.getClientRects()[0] || anchorRange.getBoundingClientRect();
+      if (!rect || (!rect.height && !rect.width && !rect.top && !rect.left)) {
+        const anchorEl = pos.node.nodeType === Node.ELEMENT_NODE ? pos.node : pos.node.parentElement;
+        const lineEl = anchorEl?.closest?.(".editor-line");
+        if (lineEl) rect = lineEl.getBoundingClientRect();
+      }
+      if (!rect) continue;
 
       const top = rect.top - scrollRect.top + scrollEl.scrollTop;
       const left = rect.left - scrollRect.left + scrollEl.scrollLeft;
-      const height = rect.height || 18;
+      const height = rect.height || getEditorLineHeight();
 
       const cursorEl = document.createElement("div");
       cursorEl.className = "remote-cursor";
@@ -2484,8 +2768,10 @@ function renderRemoteCursors(cursors) {
       cursorEl.appendChild(label);
 
       container.appendChild(cursorEl);
-    } catch {
-      // ignore positioning errors (file re-renders, rapid navigation, etc.)
+    } catch (err) {
+      // Surface (throttled) instead of silently swallowing — this is how a
+      // remote caret can vanish without a trace.
+      logCursorDebug(`caret render error: ${err?.message || err}`);
     }
   }
 }
@@ -2494,10 +2780,51 @@ function renderRemoteCursors(cursors) {
 // when the user scrolls or file content changes.
 const remoteCursorsByClient = new Map();
 
+// Throttled diagnostic (shows in the Log panel) so cursor delivery/rendering can
+// be confirmed without flooding.
+let _lastCursorLog = 0;
+function logCursorDebug(message) {
+  const now = Date.now();
+  if (now - _lastCursorLog < 1500) return;
+  _lastCursorLog = now;
+  logDebug("response", "Remote cursor", message);
+}
+
 function onRemoteCursor(event) {
   if (!event.clientId) return;
   remoteCursorsByClient.set(event.clientId, event);
   renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
+}
+
+// Drop cached cursors for peers that are no longer present — otherwise a
+// disconnected peer's caret/selection lingers on screen (e.g. a stale red cursor
+// left over after that collaborator left). Reconciled against the presence list,
+// which the server updates on join/leave.
+function pruneRemoteCursors(presence) {
+  const alive = new Set((presence ?? []).map((p) => p.clientId).filter(Boolean));
+  let changed = false;
+  for (const clientId of Array.from(remoteCursorsByClient.keys())) {
+    if (!alive.has(clientId)) {
+      remoteCursorsByClient.delete(clientId);
+      changed = true;
+    }
+  }
+  if (changed) renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
+}
+
+// Remote carets/highlights are positioned from each peer's viewport rect against
+// the (overflow:hidden) editor frame, so when THIS user scrolls #editor-content
+// the overlay must be recomputed or it stays pinned to the old screen position.
+// rAF-coalesced so fast scrolling re-renders at most once per frame.
+let _remoteCursorRaf = 0;
+function scheduleRemoteCursorRender() {
+  if (_remoteCursorRaf) return;
+  _remoteCursorRaf = requestAnimationFrame(() => {
+    _remoteCursorRaf = 0;
+    if (remoteCursorsByClient.size) {
+      renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
+    }
+  });
 }
 
 // Broadcast local selection to peers on selectionchange (debounced).
@@ -2516,7 +2843,9 @@ function attachSelectionChangeListener() {
     // is sent automatically once the patch is confirmed by the server.
     const path = getPath(controller.getProject(), activeFile.id);
     if (collaboration.hasPendingPatch(path)) return;
-    collaboration.scheduleAwareness(activeFile.id, sel.start, sel.end);
+    // Broadcast the PATH as the file identifier so peers (who may hold a different
+    // node id for the same file) can match it — see renderRemoteCursors.
+    collaboration.scheduleAwareness(path, sel.start, sel.end);
   });
 }
 
@@ -2740,6 +3069,7 @@ elements.bmapGenerateScopeSelect.value = settings.bmapGenerateScope === "all" ? 
 if (elements.bmapAutoPanInput) elements.bmapAutoPanInput.checked = settings.bmapAutoPan !== false;
 if (elements.autoReconnectInput) elements.autoReconnectInput.checked = settings.autoReconnect !== false;
 if (elements.formatToolbarInput) elements.formatToolbarInput.checked = Boolean(settings.showFormatToolbar);
+if (elements.autoSaveInput) elements.autoSaveInput.checked = settings.autoSave !== false;
 
 // Per-turn agent checkpoints (Phase 6 / subtask 6.1).
 // batchId → { project: deepClone, baseRevision: number, soleAuthored: boolean }
@@ -2807,10 +3137,22 @@ const collaboration = createCollaborationRuntime({
     }
   },
   onStatusChange(nextState) {
-    const wasConnected = syncState.status === "connected";
+    const prevStatus = syncState.status;
+    const wasConnected = prevStatus === "connected";
+    // Cloud sync now recovers dropped streams on its own (see collaboration-
+    // service). Surface it so the user knows their work is safe, not lost.
+    if (nextState.status === "reconnecting" && prevStatus !== "reconnecting") {
+      showToast("Connection lost — reconnecting… your changes are kept.");
+    }
+    if (nextState.status === "connected" && prevStatus === "reconnecting") {
+      showToast("Reconnected — changes synced.");
+    }
     syncState.status = nextState.status;
     syncState.detail = nextState.detail;
     syncState.presence = nextState.presence ?? [];
+    // Reconcile remote carets against who's actually present, so a departed
+    // peer's cursor/selection doesn't linger.
+    pruneRemoteCursors(syncState.presence);
     syncState.sessionId = nextState.sessionId;
     syncState.revision = nextState.revision ?? 0;
     syncState.displayName = nextState.displayName ?? null;
@@ -2854,7 +3196,19 @@ const collaboration = createCollaborationRuntime({
       scheduleReconnect?.();
     }
     if (nextState.status === "offline" && workspaceMode === "synced") {
-      // Lost connection: restore the user's private workspace.
+      // A cloud workspace's content is what the user is actively editing; reverting
+      // to the pre-open private snapshot here is what made "everything suddenly go
+      // empty / back to a previous version". Keep the current project ON SCREEN and
+      // just drop to private mode (edits stay local, safe in localStorage); a
+      // reconnect or reload re-syncs. Only a PIN/guest session (no cloud workspace)
+      // should restore the user's own private project.
+      const wasCloud = Boolean(settings.syncedProjectId) || Boolean(settings.lastWorkspace?.team);
+      if (wasCloud) {
+        workspaceMode = "private";
+        privateProjectSnapshot = null; // don't later clobber the on-screen content
+        render(controller.getProject());
+        return;
+      }
       switchWorkspaceMode?.("private");
       return;
     }
@@ -2868,7 +3222,9 @@ const collaboration = createCollaborationRuntime({
     const activeFile = controller.getActiveFile();
     if (activeFile && collaboration.isConnected()) {
       const sel = getEditorSelection();
-      collaboration.scheduleAwareness(activeFile.id, sel.start, sel.end);
+      // Path (not node id) so peers can match it — see renderRemoteCursors.
+      const path = getPath(controller.getProject(), activeFile.id);
+      collaboration.scheduleAwareness(path, sel.start, sel.end);
     }
   },
   onChatWorkspaceUpdate(workspace) {
@@ -2902,6 +3258,9 @@ switchWorkspaceMode = function (nextMode) {
       controller.replaceProject(privateProjectSnapshot);
     }
     privateProjectSnapshot = null;
+    // The local project is no longer a cloud workspace's content.
+    settings.syncedProjectId = null;
+    saveSettings(settings);
     render(controller.getProject());
   }
 };
@@ -3541,6 +3900,23 @@ function getEditorLineHeight() {
   return Number.isFinite(lineHeight) ? lineHeight : 20.8;
 }
 
+// Width of a single space in the editor font — used to render a remote selection
+// on an EMPTY line as a small sliver (matching the browser's native empty-line
+// selection on the source), instead of the full-width block box getClientRects
+// hands back for a contentless line. Cached per font string.
+let _editorSpaceWidthCache = null;
+function getEditorSpaceWidth() {
+  const cs = globalThis.getComputedStyle(elements.editorContent);
+  const font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  if (_editorSpaceWidthCache && _editorSpaceWidthCache.font === font) return _editorSpaceWidthCache.width;
+  const canvas = _editorSpaceWidthCache?.canvas || document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  ctx.font = font;
+  const width = ctx.measureText(" ").width || Number.parseFloat(cs.fontSize) * 0.3 || 4;
+  _editorSpaceWidthCache = { font, width, canvas };
+  return width;
+}
+
 function getLeadingIndentColumns(line) {
   let columns = 0;
   for (const character of line) {
@@ -4007,6 +4383,43 @@ function syncEditorScroll() {
   }
 }
 
+// Keep the caret visible while typing. The per-keystroke innerHTML rebuild +
+// focus({preventScroll:true}) suppresses the browser's native "scroll caret into
+// view", so after Enter/typing the caret can sit below the fold. This re-adds it
+// but as a NO-OP whenever the caret is already visible, so it never fights
+// mouse-driven scrolling. The real scroller is #editor-content (not #editor-scroll,
+// which is overflow:hidden).
+function caretIntoView(margin = getEditorLineHeight()) {
+  if (document.activeElement !== elements.editorContent) return;
+  const sel = globalThis.getSelection?.();
+  if (!sel || sel.rangeCount === 0) return;
+  const range = sel.getRangeAt(0).cloneRange();
+  if (!elements.editorContent.contains(range.startContainer)) return;
+  range.collapse(false); // track the focus/end offset — where the caret lands after the edit
+  let caretRect = range.getClientRects()[0];
+  if (!caretRect) {
+    const b = range.getBoundingClientRect();
+    if (b && (b.height || b.top)) caretRect = b;
+  }
+  if (!caretRect) {
+    // Empty line: fall back to the line box (same pattern as the autocomplete positioner).
+    const anchor = sel.focusNode;
+    const el = anchor?.nodeType === Node.ELEMENT_NODE ? anchor : anchor?.parentElement;
+    const lineEl = el?.closest?.(".editor-line");
+    if (lineEl) caretRect = lineEl.getBoundingClientRect();
+  }
+  if (!caretRect) return;
+  const view = elements.editorContent.getBoundingClientRect();
+  const topLimit = view.top + margin;
+  const bottomLimit = view.bottom - margin;
+  let delta = 0;
+  if (caretRect.bottom > bottomLimit) delta = caretRect.bottom - bottomLimit; // below → scroll down
+  else if (caretRect.top < topLimit) delta = caretRect.top - topLimit;        // above → scroll up
+  if (delta === 0) return; // already visible → leave the user's scroll position alone
+  elements.editorContent.scrollTop += delta;
+  syncEditorScroll();
+}
+
 function forwardEditorWheel(event) {
   const hasVertical = event.deltaY !== 0;
   const hasHorizontal = event.deltaX !== 0;
@@ -4374,6 +4787,55 @@ function setActiveSourceFile(fileId) {
   sourceUrlDbEntry = null;
   openSourceTab(fileId);
   controller.setActiveFile(fileId);
+  scheduleSaveUserState();
+}
+
+// ---- Per-user resume: persist which files are open in a cloud workspace so
+// they can be restored on the next open/reconnect. Server-side, per account.
+let saveUserStateTimer = null;
+function scheduleSaveUserState() {
+  if (workspaceMode !== "synced" || !syncState.account) return;
+  const ws = settings.lastWorkspace;
+  if (!ws?.team || ws.path == null) return;
+  if (saveUserStateTimer) clearTimeout(saveUserStateTimer);
+  saveUserStateTimer = setTimeout(() => {
+    saveUserStateTimer = null;
+    const project = controller.getProject();
+    const openFiles = sourceOpenTabIds
+      .map((id) => (project.nodes[id]?.kind === "file" ? getPath(project, id) : null))
+      .filter(Boolean);
+    const activeId = project.activeFileId;
+    const activeFile = activeId && project.nodes[activeId]?.kind === "file"
+      ? getPath(project, activeId)
+      : null;
+    saveUserState(settings.serverUrl, syncState.account.token, ws.team, ws.path, openFiles, activeFile)
+      .catch((error) => logDebug("response", "Save resume state failed", error.message));
+  }, 1200);
+}
+
+// Restore the tabs the user had open here last time (from the open response's
+// `resume`). Paths are resolved back to node ids in the freshly-pulled project.
+function restoreResumeState(resume) {
+  if (!resume || (!resume.openFiles?.length && !resume.activeFile)) return;
+  const project = controller.getProject();
+  const pathToId = new Map();
+  for (const node of Object.values(project.nodes)) {
+    if (node.kind === "file") pathToId.set(getPath(project, node.id), node.id);
+  }
+  const openIds = (resume.openFiles ?? [])
+    .map((path) => pathToId.get(path))
+    .filter(Boolean);
+  for (const id of openIds) openSourceTab(id);
+  const activeId = resume.activeFile ? pathToId.get(resume.activeFile) : null;
+  if (activeId) {
+    setActiveSourceFile(activeId);
+  } else if (openIds.length) {
+    setActiveSourceFile(openIds[0]);
+  }
+  if (openIds.length) {
+    render(controller.getProject());
+    logDebug("action", "Restored resume state", `${openIds.length} file(s)`);
+  }
 }
 
 function setActiveSourceUrlDbEntry(fileId, entryId) {
@@ -4404,6 +4866,7 @@ function openFileFromExplorer(fileId) {
   }
   logDebug("action", "File opened", getPath(project, fileId));
   setActiveSourceFile(fileId);
+  showToast(`Opened ${node.name}`);
   // On mobile the explorer is a flyout overlay — close it so the opened file
   // is visible without an extra tap.
   setMobileExplorerOpen(false);
@@ -4860,6 +5323,7 @@ function closeSourceTab(fileId) {
   const project = controller.getProject();
   const wasActive = project.activeFileId === fileId;
   sourceOpenTabIds = sourceOpenTabIds.filter((tabId) => tabId !== fileId);
+  scheduleSaveUserState();
 
   if (!wasActive) {
     updateStatus(project);
@@ -5623,6 +6087,16 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  // Expand / collapse a persisted "Thought for…" section on an assistant message.
+  const thoughtToggle = event.target.closest("[data-chat-thought-toggle]");
+  if (thoughtToggle) {
+    const id = thoughtToggle.getAttribute("data-chat-thought-toggle");
+    if (chatState.expandedReasoning.has(id)) chatState.expandedReasoning.delete(id);
+    else chatState.expandedReasoning.add(id);
+    renderChatPanel(controller.getProject());
+    return;
+  }
+
   // Jump to first changed line in editor (Phase 5 / subtask 5.3)
   const jumpBtn = event.target.closest("[data-batch-jump]");
   if (jumpBtn) {
@@ -6282,15 +6756,34 @@ function createPresenceChip(entry) {
   chip.className = "presence-chip";
   const avatar = document.createElement("span");
   avatar.className = "presence-avatar";
+  // Color the avatar by the same palette as the peer's cursor, so the person and
+  // their caret are visually linked.
+  if (entry.clientId) avatar.style.background = clientColor(entry.clientId);
   const label = document.createElement("span");
   label.textContent = entry.displayName || entry.clientId;
   chip.append(avatar, label);
   return chip;
 }
 
+// Colored dots (one per connected session, matching cursor colors) shown next to
+// the status-bar collaborator count, so collaboration state — and who is who — is
+// visible at a glance.
+function renderPeerBadge(presence) {
+  const dotsEl = elements.presenceDots;
+  if (!dotsEl) return;
+  dotsEl.replaceChildren();
+  for (const entry of presence.slice(0, 6)) {
+    const dot = document.createElement("span");
+    dot.className = "peer-badge-dot";
+    if (entry.clientId) dot.style.background = clientColor(entry.clientId);
+    dotsEl.append(dot);
+  }
+}
+
 function renderPresence(presence) {
   elements.presenceStrip.replaceChildren();
   elements.presenceList.replaceChildren();
+  renderPeerBadge(presence);
 
   if (presence.length === 0) {
     const connected = syncState.status === "connected";
@@ -6384,7 +6877,7 @@ function updateStatus(project) {
 
   setStatusDot(elements.sourceIndicator, liveDirectory ? "is-success" : "is-warning");
   setStatusDot(elements.browserIndicator, browserSupported ? "is-success" : "is-warning");
-  setStatusDot(elements.serverIndicator, syncState.status === "connected" ? "is-success" : syncState.status === "reachable" ? "is-warning" : "is-danger");
+  setStatusDot(elements.serverIndicator, syncState.status === "connected" ? "is-success" : (syncState.status === "reachable" || syncState.status === "reconnecting") ? "is-warning" : "is-danger");
 
   renderPresence(syncState.presence);
 
@@ -6392,8 +6885,12 @@ function updateStatus(project) {
   const previewFile = previewFileId ? project.nodes[previewFileId] : null;
   const selectedEntry = getSelectedUrlDbEntry(project);
   if (!activeFile) {
-    elements.editorContent.contentEditable = "true";
-    elements.editorContent.dataset.placeholder = "Select or create a .md, .mtree, .urldb, or image file";
+    // No file open: make the pane non-editable and show the create-a-file overlay
+    // instead of a plain (typable) placeholder.
+    elements.editorContent.contentEditable = "false";
+    elements.editorContent.dataset.noFile = "true";
+    if (elements.editorEmptyState) elements.editorEmptyState.hidden = false;
+    renderWelcomeState();
     if (lastRenderedFileId !== null) {
       lastRenderedFileId = null;
       loadEditorContent("");
@@ -6408,6 +6905,8 @@ function updateStatus(project) {
     return;
   }
 
+  elements.editorContent.dataset.noFile = "false";
+  if (elements.editorEmptyState) elements.editorEmptyState.hidden = true;
   const isTextFile = isTextFileName(activeFile.name);
   elements.editorContent.contentEditable = isTextFile ? "true" : "false";
   elements.editorContent.dataset.placeholder = isTextFile
@@ -6434,7 +6933,13 @@ function updateStatus(project) {
     }
   } else {
     const domText = getEditorText();
-    if (nextText !== domText) {
+    // Never rebuild the editor DOM mid-IME-composition. During composition the
+    // DOM holds in-progress characters the model hasn't received yet (the `input`
+    // handler defers to compositionend), so nextText !== domText transiently. A
+    // rebuild here — triggered by ANY unrelated render (auto-save, presence, a
+    // remote op on another file) — would abort the composition and slam the caret
+    // to offset 0. The model catches up on compositionend, which re-syncs cleanly.
+    if (nextText !== domText && !editorIsComposing) {
       if (editorHasFocus) {
         // External same-file changes invalidate snapshot-based undo history.
         // Keep the caret stable when possible, then fence the history stack at
@@ -6513,9 +7018,71 @@ function render(project) {
   updateStatus(project);
   saveProject(project);
   scheduleOpfsFlush(project);
+  scheduleAutoSave(project);
 }
 
 controller.subscribe(render);
+
+// ---- Auto-save: idle + periodic durable flush for non-real-disk workspaces.
+// Clears the dirty flag (and thus the ● tab dot + beforeunload nag) once content
+// is durably stored: localStorage for memory/import, OPFS for local workspaces,
+// the server for synced cloud workspaces. A real OS folder (sourceMode
+// "filesystem") still requires an explicit Ctrl+S, so it is left untouched.
+const AUTOSAVE_IDLE_MS = 1500;
+const AUTOSAVE_PERIODIC_MS = 15000;
+let autoSaveIdleTimer = null;
+
+function dirtyFileIds(project) {
+  return Object.values(project.nodes)
+    .filter((node) => node.kind === "file" && node.dirty)
+    .map((node) => node.id);
+}
+
+function scheduleAutoSave(project = controller.getProject()) {
+  if (!settings.autoSave || project.sourceMode === "filesystem") return;
+  if (!dirtyFileIds(project).length) return;
+  if (autoSaveIdleTimer) clearTimeout(autoSaveIdleTimer);
+  autoSaveIdleTimer = setTimeout(() => {
+    autoSaveIdleTimer = null;
+    void runAutoSave("idle");
+  }, AUTOSAVE_IDLE_MS);
+}
+
+async function runAutoSave(reason) {
+  if (!settings.autoSave) return;
+  // Don't churn a render (markManySaved) mid-IME-composition; wait until it ends.
+  if (editorIsComposing) return;
+  const project = controller.getProject();
+  if (project.sourceMode === "filesystem") return; // explicit save only
+  const dirty = dirtyFileIds(project);
+  if (!dirty.length) return;
+  try {
+    if (project.sourceMode === "opfs") {
+      await flushOpfsProject(); // durable: mirror to the OPFS directory
+    }
+    // memory/import already mirror to localStorage on every render.
+    const synced = workspaceMode === "synced" && collaboration.isConnected?.();
+    const savable = synced
+      // Only clear dirty once the server has confirmed the text (nothing pending
+      // / in-flight / mid-reconnect) so the ● never lies about being saved.
+      ? dirty.filter((id) => !collaboration.hasUnsyncedText?.(getPath(project, id)))
+      : dirty;
+    if (savable.length) {
+      controller.markManySaved(savable);
+      logDebug("response", `Auto-saved ${savable.length} file(s) (${reason})`);
+    }
+  } catch (error) {
+    logDebug("response", "Auto-save failed", error.message);
+  }
+}
+
+// Periodic safety net so a long, uninterrupted typing session (idle timer keeps
+// resetting) still gets flushed regularly.
+window.setInterval(() => {
+  if (settings.autoSave && dirtyFileIds(controller.getProject()).length) {
+    void runAutoSave("periodic");
+  }
+}, AUTOSAVE_PERIODIC_MS);
 
 if (!storedProject) {
   void loadTemplateProject()
@@ -6686,6 +7253,12 @@ function createItem(kind) {
       const name = getNextDefaultFolderName(project, parent.id);
       controller.createFolder(parent.id, name);
       publishOperation({ type: "create-folder", parentPath, name });
+      // Select the new folder so the next create/rename targets it; keep the
+      // explorer open so the user can rename or add inside it right away.
+      const created = findChildByName(controller.getProject(), parent.id, name);
+      if (created) selectionNodeId = created.id;
+      render(controller.getProject());
+      showToast(`Created folder ${name}`);
       return;
     }
 
@@ -6693,8 +7266,122 @@ function createItem(kind) {
     const content = kind === "bmap" ? createDefaultBmap() : "";
     controller.createFile(parent.id, name, content);
     publishOperation({ type: "create-file", parentPath, name, content });
+    // Open the new file as the active document (so it's what you're editing) but
+    // leave the explorer open so it can be renamed/managed without reopening it.
+    const created = findChildByName(controller.getProject(), parent.id, name);
+    if (created) {
+      selectionNodeId = created.id;
+      setActiveSourceFile(created.id);
+    }
+    showToast(`Created ${name}`);
   } catch (error) {
     notify(error.message);
+  }
+}
+
+// Rename a specific file by id (used by the mobile pane's pen button so the user
+// can rename the doc they're viewing without opening the explorer).
+async function renameFileById(fileId) {
+  const project = controller.getProject();
+  const node = project.nodes[fileId];
+  if (!node || node.id === project.rootId || node.kind !== "file") {
+    showToast("No file to rename");
+    return;
+  }
+  const currentPath = getPath(project, node.id);
+  const name = await promptForName("Rename file", node.name, { extension: fileExtensionOf(node.name) });
+  if (!name || name === node.name) {
+    return;
+  }
+  try {
+    controller.rename(node.id, name);
+    publishOperation({ type: "rename-node", path: currentPath, name });
+    showToast(`Renamed to ${name}`);
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+// The file the mobile pane's pen button should act on: the previewed file in
+// preview view, otherwise the active source file. Null in chat view.
+function currentMobileFileId() {
+  if (mobileView === "chat") return null;
+  if (mobileView === "preview") return previewFileId;
+  return controller.getActiveFile()?.id ?? null;
+}
+
+// Every folder in the project as {id, label} for the New File destination picker
+// (root first, then nested by path).
+function listProjectFolders(project) {
+  const out = [{ id: project.rootId, label: project.name || "Workspace" }];
+  const walk = (nodeId) => {
+    const node = project.nodes[nodeId];
+    for (const childId of node?.children ?? []) {
+      const child = project.nodes[childId];
+      if (child?.kind === "folder") {
+        out.push({ id: child.id, label: getPath(project, child.id) });
+        walk(child.id);
+      }
+    }
+  };
+  walk(project.rootId);
+  return out;
+}
+
+// Create a file of `kind` in `parentId` with a chosen base name (extension is
+// appended by kind), then open it. Shared by the New File dialog.
+function createFileInFolder(kind, parentId, baseName) {
+  const project = controller.getProject();
+  const parent = project.nodes[parentId] ?? project.nodes[project.rootId];
+  const parentPath = parent.id === project.rootId ? "" : getPath(project, parent.id);
+  const ext = `.${kind}`;
+  let name = String(baseName || "").trim();
+  if (!name) name = getNextDefaultFileName(project, parent.id, kind);
+  else if (!name.toLowerCase().endsWith(ext)) name = `${name}${ext}`;
+  const content = kind === "bmap" ? createDefaultBmap() : "";
+  controller.createFile(parent.id, name, content);
+  publishOperation({ type: "create-file", parentPath, name, content });
+  const created = findChildByName(controller.getProject(), parent.id, name);
+  if (created) {
+    selectionNodeId = created.id;
+    setActiveSourceFile(created.id);
+  }
+  showToast(`Created ${name}`);
+  return created;
+}
+
+function openNewFileDialog() {
+  if (!elements.newFileDialog) return;
+  const project = controller.getProject();
+  const folders = listProjectFolders(project);
+  elements.newFileFolder.replaceChildren(...folders.map(({ id, label }) => {
+    const option = document.createElement("option");
+    option.value = id;
+    option.textContent = label;
+    return option;
+  }));
+  // Default the destination to the currently selected folder (or its parent).
+  elements.newFileFolder.value = getSelectedParent(project).id;
+  elements.newFileName.value = "";
+  if (elements.newFileStatus) elements.newFileStatus.hidden = true;
+  elements.newFileDialog.showModal();
+  elements.newFileName.focus();
+}
+
+function handleNewFileSubmit(event) {
+  event.preventDefault();
+  try {
+    createFileInFolder(
+      elements.newFileType.value,
+      elements.newFileFolder.value,
+      elements.newFileName.value.trim()
+    );
+    elements.newFileDialog.close();
+  } catch (error) {
+    if (elements.newFileStatus) {
+      elements.newFileStatus.textContent = error.message || "Could not create the file.";
+      elements.newFileStatus.hidden = false;
+    }
   }
 }
 
@@ -6726,7 +7413,10 @@ async function renameSelected() {
     return;
   }
   const currentPath = getPath(project, node.id);
-  const name = await promptForName("Rename item", node.name);
+  // Folders have no extension → the auto-extension toggle is hidden for them.
+  const name = await promptForName("Rename item", node.name, {
+    extension: node.kind === "file" ? fileExtensionOf(node.name) : ""
+  });
   if (!name) {
     return;
   }
@@ -6734,6 +7424,7 @@ async function renameSelected() {
   try {
     controller.rename(node.id, name);
     publishOperation({ type: "rename-node", path: currentPath, name });
+    showToast(`Renamed to ${name}`);
   } catch (error) {
     notify(error.message);
   }
@@ -6768,8 +7459,10 @@ async function deleteSelected() {
   if (!await confirmAction(`Delete ${node.name}?`)) {
     return;
   }
+  const removedName = node.name;
   controller.remove(node.id);
   publishOperation({ type: "delete-node", path });
+  showToast(`Deleted ${removedName}`);
 }
 
 function collectFileEntries(project, nodeId) {
@@ -6895,10 +7588,12 @@ async function handleExplorerAction(action, target, options = {}) {
   logDebug("action", "Explorer action", action);
   if (action === "open-source") {
     setActiveSourceFile(nodeId);
+    showToast(`Opened ${controller.getProject().nodes[nodeId]?.name ?? "file"}`);
     return;
   }
   if (action === "open-preview") {
     setPreviewFile(nodeId);
+    showToast(`Preview: ${controller.getProject().nodes[nodeId]?.name ?? "file"}`);
     return;
   }
   if (action.startsWith("filter-")) {
@@ -6909,6 +7604,7 @@ async function handleExplorerAction(action, target, options = {}) {
   }
   if (action === "copy") {
     copyExplorerTarget(target);
+    showToast(`Copied ${controller.getProject().nodes[nodeId]?.name ?? "item"}`);
     return;
   }
   if (action === "paste") {
@@ -7145,6 +7841,7 @@ elements.editorContent.addEventListener("input", (event) => {
     elements.editorContent.focus({ preventScroll: true });
   }
   setEditorSelection(start, end);
+  caretIntoView();
   if (
     inputType === "insertParagraph" ||
     inputType === "insertLineBreak" ||
@@ -7160,7 +7857,10 @@ elements.editorContent.addEventListener("input", (event) => {
   showEditorAutocomplete();
 });
 
-elements.editorContent.addEventListener("scroll", syncEditorScroll);
+elements.editorContent.addEventListener("scroll", () => {
+  syncEditorScroll();
+  scheduleRemoteCursorRender(); // keep peer carets/highlights pinned to the text while scrolling
+});
 elements.editorContent.addEventListener("keydown", handleEditorKeydown);
 elements.editorContent.addEventListener("mousedown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.button === 0) {
@@ -7598,6 +8298,10 @@ function applyMobileViewState() {
     }
     elements.mobilePaneCaption.textContent = caption;
   }
+  // The pen (rename) button only makes sense when a real file is on screen.
+  if (elements.mobileRenameButton) {
+    elements.mobileRenameButton.hidden = currentMobileFileId() == null;
+  }
 }
 
 function setMobileView(view) {
@@ -7771,6 +8475,39 @@ elements.logCollapseButton.addEventListener("click", toggleLogPanel);
 // Mobile topbar controls (inert on desktop where the buttons are hidden).
 elements.mobileExplorerButton?.addEventListener("click", toggleMobileExplorer);
 elements.mobilePaneToggle?.addEventListener("click", toggleMobilePane);
+elements.mobileRenameButton?.addEventListener("click", () => {
+  const id = currentMobileFileId();
+  if (!id) { showToast("No file to rename"); return; }
+  void renameFileById(id);
+});
+// Update the welcome (no-file) page's contextual actions: a Resume button for
+// the last cloud workspace, and Open-a-workspace only when signed in.
+function renderWelcomeState() {
+  const last = settings.lastWorkspace;
+  const canResume = Boolean(syncState.account && last?.team && (last.path != null || last.name));
+  if (elements.welcomeResume) {
+    elements.welcomeResume.hidden = !canResume;
+    if (canResume) {
+      const label = (last.path || `workspaces/${last.name}`).split("/").pop();
+      elements.welcomeResume.textContent = `Resume ${label}`;
+    }
+  }
+  if (elements.welcomeOpenServer) {
+    elements.welcomeOpenServer.hidden = !syncState.account;
+  }
+}
+
+elements.welcomeNewFile?.addEventListener("click", openNewFileDialog);
+elements.welcomeOpenLocal?.addEventListener("click", () => elements.openDirectoryButton?.click());
+elements.welcomeOpenServer?.addEventListener("click", () => elements.openServerDirectoryButton?.click());
+elements.welcomeResume?.addEventListener("click", () => {
+  const last = settings.lastWorkspace;
+  if (!last?.team) return;
+  const path = last.path ?? (last.name ? `workspaces/${last.name}` : "");
+  if (path) void handleOpenWorkspace(last.team, path);
+});
+elements.newFileDialog?.querySelector("form")?.addEventListener("submit", handleNewFileSubmit);
+elements.newFileCancelButton?.addEventListener("click", () => elements.newFileDialog.close("cancel"));
 elements.mobileChatToggle?.addEventListener("click", toggleMobileChat);
 elements.mobileMenuButton?.addEventListener("click", (event) => {
   event.stopPropagation();
@@ -7795,7 +8532,10 @@ document.addEventListener("pointerdown", (event) => {
   }
   if (elements.app.dataset.mobileExplorer === "open"
     && !elements.explorerPanel?.contains(target)
-    && !elements.mobileExplorerButton?.contains(target)) {
+    && !elements.mobileExplorerButton?.contains(target)
+    // The quick-add / context / filter menu lives outside the panel; interacting
+    // with it must not dismiss the explorer the user is still managing.
+    && !elements.explorerContextMenu?.contains(target)) {
     setMobileExplorerOpen(false);
   }
 }, true);
@@ -7813,7 +8553,9 @@ elements.chatModelSelect?.addEventListener("change", (event) => {
 // usable, otherwise just re-check the backend.
 elements.chatStatusText.addEventListener("click", () => {
   if (chatState.status !== "ready") {
-    if (!elements.settingsDialog.open) elements.settingsDialog.showModal();
+    // The agent is separate from login — send them straight to the Agent tab.
+    openSettingsDialog("agent");
+    return;
   }
   void refreshChatStatus({ silent: true });
 });
@@ -7911,8 +8653,37 @@ function openSettingsDialog(tab = "appearance") {
   if (!elements.settingsDialog.open) {
     elements.settingsDialog.showModal();
   }
+  applyAgentSettingsControls();
+  // Re-check the agent backend so the Agent tab shows fresh status.
+  void refreshChatStatus({ silent: true });
   switchSettingsTab(tab);
 }
+
+// ── Agent settings ──────────────────────────────────────────────────────────
+elements.agentSourceSelect?.addEventListener("change", (event) => {
+  settings.agentSource = event.target.value === "own" ? "own" : "server";
+  saveSettings(settings);
+  applyAgentSettingsControls();
+  logDebug("action", "Agent source changed", settings.agentSource);
+  void refreshChatStatus({ silent: true });
+});
+function bindAgentField(inputEl, key) {
+  inputEl?.addEventListener("input", (event) => {
+    settings[key] = event.target.value;
+  });
+  // Persist + re-evaluate availability only when the field loses focus, so we
+  // don't thrash on every keystroke of a pasted key.
+  inputEl?.addEventListener("change", () => {
+    settings[key] = settings[key]?.trim() ?? "";
+    inputEl.value = settings[key];
+    saveSettings(settings);
+    applyAgentSettingsStatus();
+    void refreshChatStatus({ silent: true });
+  });
+}
+bindAgentField(elements.agentApiKeyInput, "agentApiKey");
+bindAgentField(elements.agentApiUrlInput, "agentApiUrl");
+bindAgentField(elements.agentModelInput, "agentModel");
 
 elements.settingsTabsButton?.addEventListener("click", () => {
   const open = elements.settingsDialog.dataset.tabs !== "open";
@@ -8019,6 +8790,12 @@ elements.bmapGenerateScopeSelect.addEventListener("change", (event) => {
   logDebug("action", "Bmap generate scope changed", settings.bmapGenerateScope);
 });
 
+elements.autoSaveInput?.addEventListener("change", (event) => {
+  settings.autoSave = event.target.checked;
+  saveSettings(settings);
+  logDebug("action", "Auto-save setting changed", settings.autoSave ? "on" : "off");
+  if (settings.autoSave) scheduleAutoSave();
+});
 elements.formatToolbarInput?.addEventListener("change", (event) => {
   settings.showFormatToolbar = event.target.checked;
   persistSettings();
@@ -8939,7 +9716,28 @@ async function saveAccessEditor() {
   }
 }
 
-async function handleOpenWorkspace(team, path) {
+// A per-TAB id so the server can tell "this tab reconnected/refreshed" (replace
+// its old session) from "another tab/window/device" (a real second collaborator,
+// including self-collaboration between two windows of the same browser). It lives
+// in sessionStorage — unique per tab, but it SURVIVES a reload, so a refresh
+// still dedups while two separate windows coexist. localStorage was wrong here:
+// it's shared across a browser's tabs, so two windows got the same id and evicted
+// each other into a reconnect war (no cursor/content sync between them).
+function getDeviceId() {
+  try {
+    const KEY = "mdnotes.deviceId";
+    let id = globalThis.sessionStorage?.getItem(KEY);
+    if (!id) {
+      id = globalThis.crypto?.randomUUID?.() ?? `dev-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+      globalThis.sessionStorage?.setItem(KEY, id);
+    }
+    return id;
+  } catch {
+    return "dev-ephemeral";
+  }
+}
+
+async function handleOpenWorkspace(team, path, options = {}) {
   if (!syncState.account) return;
   try {
     // Preserve the user's local project once, so leaving the cloud workspace
@@ -8949,13 +9747,23 @@ async function handleOpenWorkspace(team, path) {
       privateProjectSnapshot = controller.getProject();
     }
     workspaceMode = "synced";
-    await collaboration.openWorkspace(settings.serverUrl, syncState.account.token, team, path);
+    const session = await collaboration.openWorkspace(
+      settings.serverUrl, syncState.account.token, team, path,
+      { reconcileLocal: Boolean(options.reconcileLocal), device: getDeviceId() }
+    );
     settings.wasConnected = false; // cloud opens are account-driven, not PIN auto-reconnect
     settings.lastWorkspace = { team, path }; // reopened on next boot
+    settings.syncedProjectId = `${team}/${path}`; // the local project IS this cloud workspace now
     saveSettings(settings);
-    logDebug("action", "Opened cloud workspace", `${team}/${path}`);
+    logDebug("action", options.reconcileLocal ? "Reopened cloud workspace (restored local)" : "Opened cloud workspace", `${team}/${path}`);
     if (elements.openServerDialog?.open) elements.openServerDialog.close();
     render(controller.getProject());
+    // Restore the files this user had open here last time (server-side resume).
+    restoreResumeState(session?.resume);
+    // Reveal the freshly-loaded tree — on mobile the explorer is a closed flyout,
+    // so without this the just-opened project looks "empty" until the user taps ≡.
+    setMobileExplorerOpen(true);
+    showToast(`Opened ${path.split("/").pop() || controller.getProject().name}`);
   } catch (error) {
     workspaceMode = "private";
     if (privateProjectSnapshot) {
@@ -8976,6 +9784,11 @@ async function performLogin(username, password, { silent = false } = {}) {
   settings.accountUsername = result.username;
   settings.accountPassword = password;
   settings.accountSuccess = { ...settings.accountSuccess, [normalizeServerUrl(settings.serverUrl)]: result.username };
+  // Cross-device resume: if THIS browser has no remembered workspace but the
+  // account opened one elsewhere, adopt it so boot / the welcome page can resume.
+  if (!settings.lastWorkspace?.team && result.lastWorkspace?.team) {
+    settings.lastWorkspace = { team: result.lastWorkspace.team, path: result.lastWorkspace.path };
+  }
   if (!settings.displayName) {
     settings.displayName = result.username;
     if (elements.displayNameInput) elements.displayNameInput.value = result.username;
@@ -9023,6 +9836,7 @@ function handleAccountLogout() {
   settings.accountSuccess = rest;
   settings.accountPassword = "";
   settings.lastWorkspace = null;
+  settings.syncedProjectId = null;
   saveSettings(settings);
   elements.browserList?.replaceChildren();
   logDebug("action", "Account logged out");
@@ -9208,7 +10022,14 @@ async function restoreSessionOnBoot() {
         // Migrate the legacy {team, name} shape to {team, path}.
         const lastPath = last?.path ?? (last?.name ? `workspaces/${last.name}` : "");
         if (last?.team && lastPath && syncState.account) {
-          await handleOpenWorkspace(last.team, lastPath);
+          // If the locally-stored project IS this workspace and still has unsaved
+          // edits (auto-save couldn't flush them — e.g. reloaded mid-outage),
+          // push local into the server instead of pulling a stale copy over it.
+          const storedIsThisWorkspace = settings.syncedProjectId === `${last.team}/${lastPath}`;
+          const hasUnsavedLocal = dirtyFileIds(controller.getProject()).length > 0;
+          await handleOpenWorkspace(last.team, lastPath, {
+            reconcileLocal: storedIsThisWorkspace && hasUnsavedLocal
+          });
         }
       } catch (error) {
         logDebug("response", "Startup auto-login failed", error.message);
