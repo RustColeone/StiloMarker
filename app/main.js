@@ -319,8 +319,10 @@ function captureViewState() {
     }
   }
   const activeId = project.activeFileId;
-  if (activeId && elements.editorScroll) {
-    setViewState(activeId, { editorScroll: elements.editorScroll.scrollTop });
+  if (activeId && elements.editorContent) {
+    // The REAL scroller is #editor-content (#editor-scroll is overflow:hidden and
+    // always reports scrollTop 0), so persist the content scroll for this file.
+    setViewState(activeId, { editorScroll: elements.editorContent.scrollTop });
   }
 }
 let mathJaxLoadPromise = null;
@@ -2503,6 +2505,11 @@ function setEditorSelection(start, end) {
 function applyEditorRender(text, selStart, selEnd) {
   _editorUpdating = true;
   try {
+    // renderEditorContent replaces innerHTML, which resets scrollTop to 0. Save
+    // and restore it so an in-place edit (e.g. backspacing one char mid-document)
+    // doesn't jump the view. caretIntoView() below then only nudges the scroll
+    // when the edit actually pushed the caret out of the viewport.
+    const savedScroll = elements.editorContent.scrollTop;
     renderEditorContent(text);
     // Setting innerHTML can cause the contenteditable to lose focus in some
     // browsers.  Restore focus explicitly so that the subsequent
@@ -2512,6 +2519,8 @@ function applyEditorRender(text, selStart, selEnd) {
       elements.editorContent.focus({ preventScroll: true });
     }
     setEditorSelection(selStart, selEnd);
+    elements.editorContent.scrollTop = savedScroll;
+    syncEditorScroll();
     caretIntoView();
   } finally {
     _editorUpdating = false;
@@ -6926,10 +6935,12 @@ function updateStatus(project) {
   if (!_editorUpdating && fileChanged) {
     lastRenderedFileId = activeFile.id;
     loadEditorContent(nextText);
-    // Resume the reader's previous scroll position in this document.
+    // Resume the reader's previous scroll position in this document. The real
+    // scroller is #editor-content (#editor-scroll is overflow:hidden).
     const savedScroll = getViewState(activeFile.id)?.editorScroll;
-    if (savedScroll && elements.editorScroll) {
-      elements.editorScroll.scrollTop = savedScroll;
+    if (savedScroll && elements.editorContent) {
+      elements.editorContent.scrollTop = savedScroll;
+      syncEditorScroll();
     }
   } else {
     const domText = getEditorText();
@@ -7295,6 +7306,10 @@ async function renameFileById(fileId) {
   }
   try {
     controller.rename(node.id, name);
+    // Re-key any queued text patch from the old path to the new one BEFORE
+    // publishing the rename, so a pending edit isn't sent against the old path
+    // (which the server just renamed → 400 → disconnect / "server unreachable").
+    collaboration.remapPatchPath(currentPath, getPath(controller.getProject(), node.id));
     publishOperation({ type: "rename-node", path: currentPath, name });
     showToast(`Renamed to ${name}`);
   } catch (error) {
@@ -7423,6 +7438,10 @@ async function renameSelected() {
 
   try {
     controller.rename(node.id, name);
+    // Re-key any queued text patch from the old path to the new one BEFORE
+    // publishing the rename, so a pending edit isn't sent against the old path
+    // (which the server just renamed → 400 → disconnect / "server unreachable").
+    collaboration.remapPatchPath(currentPath, getPath(controller.getProject(), node.id));
     publishOperation({ type: "rename-node", path: currentPath, name });
     showToast(`Renamed to ${name}`);
   } catch (error) {
@@ -7461,6 +7480,9 @@ async function deleteSelected() {
   }
   const removedName = node.name;
   controller.remove(node.id);
+  // Drop any queued patch for the deleted file/folder so it isn't sent against a
+  // path the server just removed (→ 400 → disconnect).
+  collaboration.dropPatchPath(path);
   publishOperation({ type: "delete-node", path });
   showToast(`Deleted ${removedName}`);
 }
