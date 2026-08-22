@@ -333,6 +333,46 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     });
   }
 
+  // A rename/move changes a file's path (and, for a folder, all of its
+  // descendants'). Text patches are keyed by path, so a queued patch for the OLD
+  // path would be sent against a file the server just renamed → 400 "File path
+  // not found" → sendTextPatch's catch disconnects ("server unreachable"). Re-key
+  // any not-yet-sent pending patch to the NEW path so it lands correctly instead.
+  // In-flight patches already left under the old path and clear themselves on
+  // their own HTTP response, so they need no remap.
+  function remapPatchPath(oldPath, newPath) {
+    if (!oldPath || !newPath || oldPath === newPath) return;
+    const remapped = (key) =>
+      key === oldPath ? newPath
+        : key.startsWith(`${oldPath}/`) ? `${newPath}${key.slice(oldPath.length)}`
+          : null;
+    for (const key of Array.from(pendingTextPatches.keys())) {
+      const nk = remapped(key);
+      if (!nk || nk === key) continue;
+      const entry = pendingTextPatches.get(key);
+      pendingTextPatches.delete(key);
+      if (entry.timer) window.clearTimeout(entry.timer);
+      entry.timer = window.setTimeout(() => sendTextPatch(nk), 250);
+      pendingTextPatches.set(nk, entry);
+    }
+  }
+
+  // A deleted file/folder can never receive a queued patch — drop them so they
+  // don't 400 and disconnect. Covers a folder's descendants via path prefix.
+  function dropPatchPath(path) {
+    if (!path) return;
+    const matches = (key) => key === path || key.startsWith(`${path}/`);
+    for (const key of Array.from(pendingTextPatches.keys())) {
+      if (!matches(key)) continue;
+      const entry = pendingTextPatches.get(key);
+      if (entry?.timer) window.clearTimeout(entry.timer);
+      pendingTextPatches.delete(key);
+    }
+    for (const key of Array.from(inFlightPatches.keys())) {
+      if (matches(key)) inFlightPatches.delete(key);
+    }
+  }
+
   function buildPatchOp(path, previousContent, nextContent, baseRevision = localRevision) {
     if (previousContent === nextContent) return null;
 
@@ -639,6 +679,8 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     scheduleTextPatch,
     scheduleSnapshot,
     scheduleAwareness,
+    remapPatchPath,
+    dropPatchPath,
     reloadFromServer,
     hasPendingPatch(fileId) {
       return pendingTextPatches.has(fileId);
