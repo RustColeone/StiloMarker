@@ -1,5 +1,12 @@
 import { dataUrlToBytes } from "./file-content-service.js";
 
+// This client's app version, sent with sync requests so the server can refuse a
+// stale tab (one on an old cached service worker) before it can clobber newer
+// content. MUST be bumped together with the service-worker CACHE_NAME
+// (mdnotes-shell-vN) on every deploy; the server's MIN_CLIENT_VERSION gate uses it.
+// Pre-gate clients (≤ v73) send no version and are read as 0 → always refused.
+const CLIENT_VERSION = 79;
+
 function normalizeServerUrl(serverUrl) {
   const value = (serverUrl ?? "").trim();
   // Empty string means "same origin + current app base path" so the app
@@ -160,7 +167,7 @@ async function openWorkspaceSession(serverUrl, accountToken, team, path, device)
   const response = await fetch(`${baseUrl}/api/workspaces/open?token=${encodeURIComponent(accountToken)}`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({ team, path, device })
+    body: JSON.stringify({ team, path, device, version: CLIENT_VERSION })
   });
   if (!response.ok) {
     await throwForResponse("Could not open workspace.", response);
@@ -343,7 +350,7 @@ async function pushOperation(serverUrl, token, operation) {
       "content-type": "application/json",
       accept: "application/json"
     },
-    body: JSON.stringify({ operation })
+    body: JSON.stringify({ operation, version: CLIENT_VERSION })
   });
 
   if (!response.ok) {

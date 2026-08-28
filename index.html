@@ -42,6 +42,8 @@
           <div class="menu-group">
             <button id="edit-menu-button" class="menu-trigger" type="button">Edit</button>
             <div id="edit-menu" class="menu-popover" hidden>
+              <button id="find-replace-menu-button" type="button">Find &amp; Replace</button>
+              <button id="snapshots-button" type="button">Snapshots…</button>
               <button id="rename-selected-button" type="button">Rename Selected</button>
               <button id="delete-selected-button" type="button">Delete Selected</button>
             </div>
@@ -54,6 +56,7 @@
               <button id="new-mtree-button" type="button">New MTREE</button>
               <button id="new-urldb-button" type="button">New URL Album</button>
               <button id="new-bmap-button" type="button">New Diagram</button>
+              <button id="create-snapshot-button" type="button">Create Snapshot</button>
             </div>
           </div>
 
@@ -157,6 +160,24 @@
                 </div>
               <div id="editor-format-toolbar" class="editor-format-toolbar" role="toolbar" aria-label="Editor formatting" hidden></div>
               <div class="editor-surface">
+                <div id="editor-find-bar" class="editor-find-bar" hidden>
+                  <div class="find-row">
+                    <input id="find-input" class="find-input" type="text" placeholder="Find" aria-label="Find" autocomplete="off" spellcheck="false">
+                    <span id="find-count" class="find-count">No results</span>
+                    <button id="find-toggle-case" class="find-toggle" type="button" title="Match case" aria-pressed="false">Aa</button>
+                    <button id="find-toggle-word" class="find-toggle" type="button" title="Match whole word" aria-pressed="false">|ab|</button>
+                    <button id="find-toggle-regex" class="find-toggle" type="button" title="Use regular expression" aria-pressed="false">.*</button>
+                    <button id="find-prev" class="find-nav" type="button" title="Previous match (Shift+Enter)" aria-label="Previous match">&#8593;</button>
+                    <button id="find-next" class="find-nav" type="button" title="Next match (Enter)" aria-label="Next match">&#8595;</button>
+                    <button id="find-toggle-replace" class="find-nav" type="button" title="Toggle Replace" aria-label="Toggle replace">&#8646;</button>
+                    <button id="find-close" class="find-nav" type="button" title="Close (Esc)" aria-label="Close find">&#215;</button>
+                  </div>
+                  <div id="find-replace-row" class="find-row" hidden>
+                    <input id="replace-input" class="find-input" type="text" placeholder="Replace" aria-label="Replace" autocomplete="off" spellcheck="false">
+                    <button id="replace-one" class="find-btn" type="button" title="Replace next (Enter)">Replace</button>
+                    <button id="replace-all" class="find-btn" type="button" title="Replace all">All</button>
+                  </div>
+                </div>
                 <div id="editor-gutter" class="editor-gutter" aria-hidden="true"></div>
                 <div id="editor-scroll" class="editor-scroll">
                   <div id="editor-content" class="editor-content"
@@ -166,6 +187,7 @@
                        data-placeholder="Select or create a .md or .mtree file"></div>
                   <div id="editor-drop-caret" class="editor-drop-caret" aria-hidden="true" hidden></div>
                   <div id="editor-cursors" class="editor-cursors" aria-hidden="true"></div>
+                  <div id="editor-search-highlights" class="editor-search-highlights" aria-hidden="true"></div>
                   <div id="editor-agent-bar" class="editor-agent-bar" hidden aria-live="polite"></div>
                   <div id="editor-empty-state" class="editor-empty-state" hidden>
                     <div class="welcome-card">
@@ -197,6 +219,18 @@
                   <button id="preview-collapse-button" class="pane-action" type="button" aria-label="Collapse preview" title="Collapse preview">×</button>
                 </div>
               <article id="preview-output" class="preview-output"></article>
+              <div id="preview-diff-view" class="preview-diff-view" hidden>
+                <div class="diff-toolbar">
+                  <span id="preview-diff-label" class="preview-diff-label"></span>
+                  <span id="preview-diff-stats" class="preview-diff-stats"></span>
+                  <button id="diff-prev-change" type="button" class="pane-action" aria-label="Previous change" title="Previous change">&#8593;</button>
+                  <button id="diff-next-change" type="button" class="pane-action" aria-label="Next change" title="Next change">&#8595;</button>
+                </div>
+                <div class="diff-scroll-wrap">
+                  <div id="diff-body" class="diff-body"></div>
+                  <div id="diff-ruler" class="diff-ruler" aria-hidden="true"></div>
+                </div>
+              </div>
             </div>
           </section>
 
@@ -845,6 +879,34 @@
         <menu class="dialog-actions">
           <button id="new-file-cancel-button" value="cancel" type="button">Cancel</button>
           <button id="new-file-submit-button" value="accept" type="submit">Create</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="snapshots-dialog" class="app-dialog">
+      <form method="dialog" class="app-dialog-form">
+        <header class="dialog-header">
+          <div>
+            <div class="eyebrow">History</div>
+            <h2>Snapshots</h2>
+          </div>
+          <p class="subtle-label">Per-file version history (Ctrl+S or “Create Snapshot” makes one). Select a version, then compare it with the current file, restore it, or delete it.</p>
+          <button class="dialog-close-corner" type="submit" value="cancel" formnovalidate aria-label="Close">&#215;</button>
+        </header>
+        <div class="settings-actions-row snapshots-toolbar">
+          <label class="snapshots-file-label">
+            File
+            <select id="snapshots-file-select" aria-label="File to show history for"></select>
+          </label>
+          <button id="snapshots-create-button" type="button" class="browser-tool-btn">Snapshot Now</button>
+        </div>
+        <ul id="snapshots-list" class="snapshots-list" role="listbox" aria-label="Snapshots"></ul>
+        <p id="snapshots-empty" class="subtle-label" hidden>No snapshots yet for this file.</p>
+        <menu class="dialog-actions snapshots-actionbar">
+          <span id="snapshots-selection-label" class="subtle-label browser-selection-label"></span>
+          <button id="snapshots-compare-btn" type="button" disabled>Compare</button>
+          <button id="snapshots-restore-btn" type="button" disabled>Restore</button>
+          <button id="snapshots-delete-btn" type="button" class="browser-danger-btn" disabled>Delete</button>
         </menu>
       </form>
     </dialog>

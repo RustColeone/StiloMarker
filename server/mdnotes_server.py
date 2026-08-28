@@ -41,6 +41,15 @@ def _read_int_env(name: str, default: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, value))
 
 
+# Minimum client (app) version allowed to open or mutate a workspace. A stale tab
+# — e.g. one still running an old cached service worker — is refused (HTTP 426) so
+# it cannot clobber newer content with its out-of-date local copy; the client then
+# force-updates. Bump this (or set MDNOTES_MIN_CLIENT_VERSION) when a client-side
+# fix MUST be adopted before a client is allowed to sync again. Keep it in step
+# with the client's CLIENT_VERSION / the service-worker CACHE_NAME (mdnotes-shell-vN).
+MIN_CLIENT_VERSION = _read_int_env("MDNOTES_MIN_CLIENT_VERSION", 73, 0, 1_000_000)
+
+
 class ChatProxy:
     def __init__(self):
         self.api_key = (
@@ -2656,6 +2665,35 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             raise PermissionError("Missing session token")
         return token
 
+    def _client_version(self, payload=None, parsed=None) -> int:
+        """The client app version (integer), from the JSON body's `version` or the
+        `v` query param. Missing/malformed → 0, which is always considered stale."""
+        if payload is not None and payload.get("version") is not None:
+            try:
+                return int(payload.get("version"))
+            except (TypeError, ValueError):
+                return 0
+        if parsed is not None:
+            try:
+                return int(parse_qs(parsed.query).get("v", ["0"])[0])
+            except (TypeError, ValueError):
+                return 0
+        return 0
+
+    def _refuse_if_stale(self, client_version: int) -> bool:
+        """Reject an out-of-date client (HTTP 426) so it can't sync/clobber with a
+        stale local copy. Returns True if it wrote a refusal (caller must return)."""
+        if client_version >= MIN_CLIENT_VERSION:
+            return False
+        self._write_json(HTTPStatus.UPGRADE_REQUIRED, {
+            "message": (f"This app version (v{client_version}) is out of date; "
+                        f"v{MIN_CLIENT_VERSION} or newer is required. Reload to update."),
+            "upgradeRequired": True,
+            "minVersion": MIN_CLIENT_VERSION,
+        })
+        self._log_request(426, f"stale client v{client_version} < required v{MIN_CLIENT_VERSION}")
+        return True
+
     def _handle_login(self):
         try:
             payload = self._read_json()
@@ -2742,6 +2780,10 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         try:
             token = self._extract_token(parsed)
             payload = self._read_json()
+            # Refuse a stale client BEFORE admitting it — a reconnecting old tab must
+            # not re-enter the workspace and push its out-of-date copy.
+            if self._refuse_if_stale(self._client_version(payload=payload)):
+                return
             # Prefer the new (team, path) signature; fall back to a bare name so a
             # migrating client's {team, name} still opens workspaces/<name>.
             path = str(payload.get("path", "")).strip()
@@ -3149,6 +3191,10 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         try:
             token = self._extract_token(parsed)
             payload = self._read_json()
+            # Defence in depth: a client that opened before the minimum was raised
+            # still can't push stale mutations.
+            if self._refuse_if_stale(self._client_version(payload=payload)):
+                return
             operation = payload.get("operation")
             if not isinstance(operation, dict):
                 raise ValueError("Operation payload is required")
@@ -3327,7 +3373,7 @@ def run_selftest():
 
         state_request = Request(
             f"{base_url}/api/operations?token={token}",
-            data=json.dumps({"operation": {"type": "create-file", "parentPath": "", "name": "shared.md", "content": "# Shared"}}).encode("utf-8"),
+            data=json.dumps({"version": 74, "operation": {"type": "create-file", "parentPath": "", "name": "shared.md", "content": "# Shared"}}).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST"
         )
@@ -3341,7 +3387,7 @@ def run_selftest():
 
         patch_request = Request(
             f"{base_url}/api/operations?token={token}",
-            data=json.dumps({"operation": {"type": "patch-file", "path": "shared.md", "start": 8, "end": 8, "removedText": "", "text": " live", "baseRevision": 1}}).encode("utf-8"),
+            data=json.dumps({"version": 74, "operation": {"type": "patch-file", "path": "shared.md", "start": 8, "end": 8, "removedText": "", "text": " live", "baseRevision": 1}}).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST"
         )
@@ -3354,6 +3400,21 @@ def run_selftest():
         persisted = json.loads(state_file.read_text(encoding="utf-8"))
         assert persisted["revision"] == 2
 
+        # --- stale-client gate: an operation with no client version is refused ---
+        stale_req = Request(
+            f"{base_url}/api/operations?token={token}",
+            data=json.dumps({"operation": {"type": "patch-file", "path": "shared.md", "start": 0, "end": 0, "removedText": "", "text": "x", "baseRevision": 2}}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        try:
+            urlopen(stale_req)
+            assert False, "stale client (no version) should be refused with 426"
+        except HTTPError as stale_err:
+            assert stale_err.code == 426, f"expected 426 for stale client, got {stale_err.code}"
+        # State must be untouched by the refused request.
+        assert json.loads(state_file.read_text(encoding="utf-8"))["revision"] == 2
+
         # --- OT convergence test: two concurrent patches on the same file ---
         # At revision 2.  Client A inserts " A" at offset 13 (after "# Shared live").
         # Client B also sends baseRevision=2 and inserts " B" at offset 13 (same spot).
@@ -3361,7 +3422,7 @@ def run_selftest():
         # (or "# Shared live B A" depending on scheduling, but both must succeed).
         patch_a = Request(
             f"{base_url}/api/operations?token={token}",
-            data=json.dumps({"operation": {"type": "patch-file", "path": "shared.md", "start": 13, "end": 13, "removedText": "", "text": " A", "baseRevision": 2}}).encode("utf-8"),
+            data=json.dumps({"version": 74, "operation": {"type": "patch-file", "path": "shared.md", "start": 13, "end": 13, "removedText": "", "text": " A", "baseRevision": 2}}).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST"
         )
@@ -3370,7 +3431,7 @@ def run_selftest():
 
         patch_b = Request(
             f"{base_url}/api/operations?token={token}",
-            data=json.dumps({"operation": {"type": "patch-file", "path": "shared.md", "start": 13, "end": 13, "removedText": "", "text": " B", "baseRevision": 2}}).encode("utf-8"),
+            data=json.dumps({"version": 74, "operation": {"type": "patch-file", "path": "shared.md", "start": 13, "end": 13, "removedText": "", "text": " B", "baseRevision": 2}}).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST"
         )
@@ -3392,16 +3453,16 @@ def run_selftest():
         # "characters ended up shifted while two devices edited" bug). ---
         create_ot = Request(
             f"{base_url}/api/operations?token={token}",
-            data=json.dumps({"operation": {"type": "create-file", "parentPath": "", "name": "ot.md", "content": "0123456789"}}).encode("utf-8"),
+            data=json.dumps({"version": 74, "operation": {"type": "create-file", "parentPath": "", "name": "ot.md", "content": "0123456789"}}).encode("utf-8"),
             headers={"Content-Type": "application/json"}, method="POST")
         rev0 = json.loads(urlopen(create_ot).read().decode("utf-8"))["revision"]
         # Client A (based on rev0): insert "AAA" at offset 2.
         urlopen(Request(f"{base_url}/api/operations?token={token}",
-            data=json.dumps({"operation": {"type": "patch-file", "path": "ot.md", "start": 2, "end": 2, "removedText": "", "text": "AAA", "baseRevision": rev0}}).encode("utf-8"),
+            data=json.dumps({"version": 74, "operation": {"type": "patch-file", "path": "ot.md", "start": 2, "end": 2, "removedText": "", "text": "AAA", "baseRevision": rev0}}).encode("utf-8"),
             headers={"Content-Type": "application/json"}, method="POST"))
         # Client B (ALSO based on rev0 — never saw A): insert "BBB" at offset 8.
         urlopen(Request(f"{base_url}/api/operations?token={token}",
-            data=json.dumps({"operation": {"type": "patch-file", "path": "ot.md", "start": 8, "end": 8, "removedText": "", "text": "BBB", "baseRevision": rev0}}).encode("utf-8"),
+            data=json.dumps({"version": 74, "operation": {"type": "patch-file", "path": "ot.md", "start": 8, "end": 8, "removedText": "", "text": "BBB", "baseRevision": rev0}}).encode("utf-8"),
             headers={"Content-Type": "application/json"}, method="POST"))
         snap = json.loads(urlopen(f"{base_url}/api/session/state?token={token}").read().decode("utf-8"))
         ot_file = next(n for n in snap["project"]["nodes"].values() if n.get("name") == "ot.md")
