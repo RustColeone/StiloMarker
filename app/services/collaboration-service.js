@@ -98,6 +98,26 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     emitStatus("offline", detail);
   }
 
+  // The server refuses stale clients (HTTP 426) so they can't clobber newer
+  // content. Detect that response...
+  function isUpgradeError(error) {
+    return error?.status === 426 || error?.payload?.upgradeRequired === true;
+  }
+
+  // ...and when it happens, STOP everything (no reconnect, no queued pushes). A
+  // stale tab must go quiet until it reloads to the current version; main.js turns
+  // this status into an upgrade prompt / forced refresh.
+  function handleUpgradeRequired(error) {
+    reconnectCtx = null;
+    clearReconnect();
+    clearScheduledSyncs();
+    reconnecting = false;
+    if (connection?.eventSource) {
+      try { connection.eventSource.close(); } catch { /* ignore */ }
+    }
+    emitStatus("upgrade-required", error?.message || "This app is out of date. Reload to update.");
+  }
+
   // SSE stream error. For a cloud workspace we DON'T tear down (which would
   // discard the user's synced edits and revert to their pre-open project). We
   // keep the connection object alive, mark "reconnecting", and retry with backoff.
@@ -152,6 +172,12 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       attachEventStream(reconnectCtx.serverUrl);
       emitStatus("connected", `Reconnected at revision ${connection.revision}.`);
     } catch (error) {
+      // A stale client is refused by the server — stop the loop and prompt an
+      // update instead of hammering reconnect forever.
+      if (isUpgradeError(error)) {
+        handleUpgradeRequired(error);
+        return;
+      }
       // Keep trying while the intent stands; edits remain safe in the local model.
       if (reconnectCtx) {
         emitStatus("reconnecting", `Reconnect failed — retrying… (${error?.message || "offline"})`);
@@ -327,6 +353,10 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     publishOperation(op).catch(async (error) => {
       if (error.status === 409) {
         await reloadFromServer(error.message || "Text patch conflicted with a remote change.");
+        return;
+      }
+      if (isUpgradeError(error)) {
+        handleUpgradeRequired(error);
         return;
       }
       disconnect(error.message || "Sync failed.");
@@ -601,7 +631,14 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     emitStatus("reachable", "Opening workspace…");
 
     const device = options.device || null;
-    const session = await openWorkspaceSession(serverUrl, accountToken, team, path, device);
+    let session;
+    try {
+      session = await openWorkspaceSession(serverUrl, accountToken, team, path, device);
+    } catch (error) {
+      // Stale client refused at the door — prompt an update instead of a raw error.
+      if (isUpgradeError(error)) handleUpgradeRequired(error);
+      throw error;
+    }
     connection = {
       serverUrl,
       token: session.token,

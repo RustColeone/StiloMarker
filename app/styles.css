@@ -1772,6 +1772,397 @@ p {
   border-radius: 2px;
 }
 
+/* ---- Find / Replace ------------------------------------------------------ */
+.editor-search-highlights {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 2;
+}
+
+.search-match {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.search-match.is-current {
+  background: color-mix(in srgb, var(--accent-strong, var(--accent)) 55%, transparent);
+  outline: 1px solid var(--accent-strong, var(--accent));
+}
+
+.editor-find-bar {
+  position: absolute;
+  top: 6px;
+  right: 14px;
+  z-index: 10;
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  max-width: min(94%, 460px);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--menu, var(--surface-0));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.26);
+}
+
+.editor-find-bar[hidden] {
+  display: none;
+}
+
+.find-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.find-row[hidden] {
+  display: none;
+}
+
+.find-input {
+  flex: 1 1 auto;
+  min-width: 120px;
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-0);
+  color: var(--text);
+}
+
+.find-input.is-error {
+  border-color: var(--danger, #d9534f);
+}
+
+.find-count {
+  flex: none;
+  min-width: 68px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.find-toggle,
+.find-nav {
+  flex: none;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 5px;
+  font-size: 11px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.find-toggle:hover,
+.find-nav:hover {
+  background: var(--surface-2);
+}
+
+.find-toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.find-btn {
+  flex: none;
+  height: 26px;
+  padding: 0 10px;
+  font-size: 11px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-0);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.find-btn:hover {
+  background: var(--surface-1);
+}
+
+/* ---- Snapshots + diff ---------------------------------------------------- */
+/* File-Manager-style selectable list: a single bordered box, rows are options
+   you click to highlight; the actions live in the footer action bar. */
+.snapshots-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  height: min(46vh, 340px);
+  overflow-y: auto;
+  background: var(--surface-0);
+  border: 1px solid var(--border);
+}
+
+.snapshot-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.snapshot-item:last-child {
+  border-bottom: 0;
+}
+
+.snapshot-item:hover {
+  background: var(--surface-1);
+}
+
+.snapshot-item.is-selected {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.snapshot-item.is-selected .snapshot-time {
+  font-weight: 700;
+}
+
+.snapshot-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.snapshot-time {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.snapshot-count {
+  font-size: 11px;
+}
+
+/* Footer action bar — mirrors the File Manager: selection label on the left,
+   Compare/Restore/Delete/Close on the right. Wraps so it never overflows the
+   dialog on a narrow (mobile) screen. */
+.snapshots-actionbar {
+  align-items: center;
+  margin-top: 10px;
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+/* Compact actions — smaller text so the buttons don't dominate the dialog. */
+.snapshots-actionbar button {
+  min-height: 26px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+/* Dim disabled actions so the enabled ones clearly read as clickable. */
+.snapshots-actionbar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Bound the dialog to the viewport (border-box includes its padding) so its flex
+   rows wrap instead of pushing the dialog wider than the screen. */
+#snapshots-dialog {
+  width: min(94vw, 460px);
+  box-sizing: border-box;
+}
+
+#snapshots-dialog .app-dialog-form {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Phones: put the selection label on its own line so the compact actions get a
+   row to themselves (right-aligned) and never crowd off the edge. */
+@media (max-width: 560px) {
+  #snapshots-selection-label {
+    flex-basis: 100%;
+    margin-right: 0;
+  }
+}
+
+.snapshots-toolbar {
+  align-items: end;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+/* Compact "Create Snapshot Now" — beat .settings-actions-row button's 30px. */
+.snapshots-toolbar .browser-tool-btn {
+  min-height: 28px;
+  align-self: end;
+}
+
+.snapshots-file-label {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.snapshots-file-label select {
+  width: 100%;
+}
+
+/* Self-contained diff view: occupies the preview pane's content cell (same grid
+   row as #preview-output), toggled with it — so it never disturbs the normal
+   preview DOM. Its own toolbar + scrollable body + change-overview ruler. */
+.preview-diff-view {
+  grid-row: 2;
+  grid-column: 1;
+  min-height: 0;
+  flex: 1 1 auto; /* fill the pane in the mobile flex-column layout (ignored in the desktop grid) */
+  display: flex;
+  flex-direction: column;
+  background: var(--editor);
+}
+
+.preview-diff-view[hidden] {
+  display: none;
+}
+
+/* When the diff is open, hide the normal preview so only the diff shows. */
+.preview-pane:has(.preview-diff-view:not([hidden])) > #preview-output {
+  display: none;
+}
+
+.diff-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+  font-size: 12px;
+}
+
+.preview-diff-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.preview-diff-stats {
+  flex: none;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.diff-scroll-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.diff-body {
+  height: 100%;
+  overflow: auto;
+  padding: 6px 14px 6px 6px; /* right pad clears the ruler */
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Overview ruler — a thin strip on the right with a tick per change block,
+   proportional to its position in the file (VS Code's scrollbar decorations). */
+.diff-ruler {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 10px;
+  background: color-mix(in srgb, var(--text-dim) 8%, transparent);
+  pointer-events: none;
+}
+
+.diff-ruler-tick {
+  position: absolute;
+  right: 1px;
+  width: 8px;
+  min-height: 3px;
+  border-radius: 1px;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.diff-ruler-tick.tick-add { background: #4caf50; }
+.diff-ruler-tick.tick-del { background: #f44336; }
+.diff-ruler-tick.tick-mix { background: #e5a53b; }
+
+/* The preview diff tab's icon: a glyph, not the drawn "page" box of file tabs. */
+.tab-file-icon.tab-diff-icon {
+  width: auto;
+  height: auto;
+  border: 0;
+  background: none;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--accent);
+}
+.tab-file-icon.tab-diff-icon::after {
+  content: none;
+}
+
+.diff-line {
+  display: flex;
+  align-items: baseline;
+}
+
+.diff-line.is-current-change {
+  outline: 2px solid var(--accent-strong, var(--accent));
+  outline-offset: -2px;
+}
+
+.diff-gutter {
+  flex: none;
+  width: 42px;
+  padding-right: 6px;
+  text-align: right;
+  color: var(--text-dim);
+  user-select: none;
+}
+
+.diff-mark {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  user-select: none;
+}
+
+.diff-text {
+  flex: 1 1 auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-line.diff-add {
+  background: color-mix(in srgb, #4caf50 18%, transparent);
+}
+
+.diff-line.diff-add .diff-mark {
+  color: #2e7d32;
+}
+
+.diff-line.diff-del {
+  background: color-mix(in srgb, #f44336 16%, transparent);
+}
+
+.diff-line.diff-del .diff-mark {
+  color: #c62828;
+}
+
 .remote-cursor-label {
   position: absolute;
   top: -1.35em;

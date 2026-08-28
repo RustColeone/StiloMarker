@@ -11,6 +11,7 @@ import { buildModuleMapSection, replaceOrAppendModuleMap } from "./services/mtre
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
 import { applyTheme, loadSettings, saveSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
+import { createFileSnapshot, deleteVersion, diffLines, getVersionContent, listFileVersions, listSnapshotPaths } from "./services/snapshot-service.js";
 import { clearViewStates, loadViewStates, saveViewStates } from "./services/view-state-service.js";
 import { browseServer, createProjectServer, deleteServer, exportProjectServer, getAccess, importProjectServer, loginToServer, mkdirServer, normalizeServerUrl, pingServer, saveUserState, setAccess } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
@@ -49,6 +50,21 @@ const elements = {
   editorDropCaret: query("#editor-drop-caret"),
   editorAgentBar: query("#editor-agent-bar"),
   editorCursors: query("#editor-cursors"),
+  editorSearchHighlights: query("#editor-search-highlights"),
+  editorFindBar: query("#editor-find-bar"),
+  findInput: query("#find-input"),
+  findCount: query("#find-count"),
+  findToggleCase: query("#find-toggle-case"),
+  findToggleWord: query("#find-toggle-word"),
+  findToggleRegex: query("#find-toggle-regex"),
+  findPrev: query("#find-prev"),
+  findNext: query("#find-next"),
+  findToggleReplace: query("#find-toggle-replace"),
+  findClose: query("#find-close"),
+  findReplaceRow: query("#find-replace-row"),
+  replaceInput: query("#replace-input"),
+  replaceOne: query("#replace-one"),
+  replaceAll: query("#replace-all"),
   editorAutocomplete: query("#editor-autocomplete"),
   editorFormatToolbar: query("#editor-format-toolbar"),
   formatToolbarInput: query("#format-toolbar-input"),
@@ -235,6 +251,25 @@ const elements = {
   savePdfButton: query("#save-pdf-button"),
   exportButton: query("#export-button"),
   renameSelectedButton: query("#rename-selected-button"),
+  findReplaceMenuButton: query("#find-replace-menu-button"),
+  createSnapshotButton: query("#create-snapshot-button"),
+  snapshotsButton: query("#snapshots-button"),
+  snapshotsDialog: query("#snapshots-dialog"),
+  snapshotsList: query("#snapshots-list"),
+  snapshotsEmpty: query("#snapshots-empty"),
+  snapshotsCreateButton: query("#snapshots-create-button"),
+  snapshotsFileSelect: query("#snapshots-file-select"),
+  snapshotsSelectionLabel: query("#snapshots-selection-label"),
+  snapshotsCompareBtn: query("#snapshots-compare-btn"),
+  snapshotsRestoreBtn: query("#snapshots-restore-btn"),
+  snapshotsDeleteBtn: query("#snapshots-delete-btn"),
+  previewDiffView: query("#preview-diff-view"),
+  diffBody: query("#diff-body"),
+  diffRuler: query("#diff-ruler"),
+  diffPrevChange: query("#diff-prev-change"),
+  diffNextChange: query("#diff-next-change"),
+  previewDiffLabel: query("#preview-diff-label"),
+  previewDiffStats: query("#preview-diff-stats"),
   deleteSelectedButton: query("#delete-selected-button"),
   newMarkdownButton: query("#new-markdown-button"),
   newMtreeButton: query("#new-mtree-button"),
@@ -1809,6 +1844,32 @@ function notify(message) {
   showNoticeDialog(message);
 }
 
+// The server refused this client as out of date (a stale cached service worker,
+// e.g. a long-lived tab). Sync has already been halted upstream; bring the app up
+// to the current version by unregistering the SW — so the reload fetches fresh
+// files instead of the old cache — then reloading. Guarded to run at most once per
+// tab so a misconfigured minimum can't trap the tab in a reload loop.
+let _appUpgradeInProgress = false;
+async function forceAppUpgrade(detail) {
+  if (_appUpgradeInProgress) return;
+  _appUpgradeInProgress = true;
+  const message = detail || "This app is out of date.";
+  logDebug("response", "Upgrade required", message);
+  if (sessionStorage.getItem("mdnotes.upgradeReloaded")) {
+    // Already auto-refreshed once this tab and still stale — stop and ask the user,
+    // rather than looping reloads.
+    notify(`${message} Please fully close this tab and reopen it to finish updating.`);
+    return;
+  }
+  try { sessionStorage.setItem("mdnotes.upgradeReloaded", "1"); } catch { /* ignore */ }
+  try { showToast("Updating to the latest version…", { duration: 1500 }); } catch { /* ignore */ }
+  try {
+    const regs = (await navigator.serviceWorker?.getRegistrations?.()) ?? [];
+    await Promise.all(regs.map((r) => r.unregister()));
+  } catch { /* ignore */ }
+  setTimeout(() => globalThis.location.reload(), 1200);
+}
+
 // Lightweight, auto-dismissing feedback for successful actions (open/create/
 // rename/…). Unlike notify(), it never blocks — important on mobile where a modal
 // for every tap would be heavy. Errors should still use notify().
@@ -2483,7 +2544,10 @@ function setEditorSelection(start, end) {
   // focus would jump to the editor with the caret on the leading "." of the first
   // ".node{}" — so the next Delete would eat that "." and break the file grammar.
   // Every legitimate caller (typing, IME, toolbar, drag) focuses the editor first.
-  if (document.activeElement !== elements.editorContent) return;
+  if (document.activeElement !== elements.editorContent) {
+    logDebug("response", "caret", `setEditorSelection SKIPPED (editor not focused; active=${document.activeElement?.id || document.activeElement?.tagName || "none"}) → caret left at DOM default`);
+    return;
+  }
   try {
     const startPos = textOffsetToDomPosition(start);
     const endPos = start === end ? startPos : textOffsetToDomPosition(end);
@@ -2519,6 +2583,29 @@ function applyEditorRender(text, selStart, selEnd) {
       elements.editorContent.focus({ preventScroll: true });
     }
     setEditorSelection(selStart, selEnd);
+    // Diagnostic: verify the caret actually landed where we asked. When it
+    // doesn't (the "jump to line 1 / offset 0" bug), capture WHY — the resolved
+    // DOM position, the DOM text length vs the model, and the line count — so we
+    // can tell a textOffsetToDomPosition miscalc from a model/DOM drift.
+    const _after = getEditorSelection();
+    if (_after.start !== selStart || _after.end !== selEnd) {
+      const _pos = textOffsetToDomPosition(selStart);
+      const _domLen = getEditorText().length;
+      logDebug("response", "caret",
+        `IMMEDIATE miss: wanted ${selStart}-${selEnd} landed ${_after.start}-${_after.end}; `
+        + `modelLen=${text.length} domLen=${_domLen} lines=${editorLineEls().length} `
+        + `resolved=${_pos.node?.nodeName || "?"}@${_pos.offset} active=${document.activeElement?.id || document.activeElement?.tagName}`);
+    } else if (selStart > 0) {
+      // Placement was correct — watch briefly for an ASYNC reset to 0 (e.g. a
+      // sync-confirmation render landing a beat later).
+      setTimeout(() => {
+        if (document.activeElement !== elements.editorContent) return;
+        const now = getEditorSelection();
+        if (now.start === 0 && now.end === 0) {
+          logDebug("response", "caret", `ASYNC reset: caret was ${selStart}, now 0 (~60ms after edit); domLen=${getEditorText().length} lines=${editorLineEls().length}`);
+        }
+      }, 60);
+    }
     elements.editorContent.scrollTop = savedScroll;
     syncEditorScroll();
     caretIntoView();
@@ -2653,7 +2740,8 @@ function notifyEditorChanged(text) {
   if (collaboration.isConnected() && workspaceMode === "synced") {
     collaboration.scheduleTextPatch(getPath(controller.getProject(), activeFile.id), activeFile.content, nextContent);
   }
-  // TODO: wire collaboration text-patch here once sync strategy is decided.
+  // Keep find matches/highlights accurate as the text changes underneath them.
+  if (searchState.open) computeSearchMatches();
 }
 
 // Stable palette for coloring remote cursor lines + labels by client index.
@@ -2783,6 +2871,567 @@ function renderRemoteCursors(cursors) {
       logCursorDebug(`caret render error: ${err?.message || err}`);
     }
   }
+}
+
+// ============================ Find / Replace ================================
+const searchState = {
+  open: false,
+  replaceMode: false,
+  caseSensitive: false,
+  wholeWord: false,
+  regex: false,
+  matches: [],      // [{ start, end }] plain-text offsets into the active file
+  currentIndex: -1,
+};
+
+// Build the RegExp for the current query + toggles, or null on empty/invalid.
+function buildSearchRegex() {
+  const raw = elements.findInput?.value ?? "";
+  if (!raw) return null;
+  let source = searchState.regex ? raw : raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (searchState.wholeWord) source = `\\b(?:${source})\\b`;
+  const flags = "g" + (searchState.caseSensitive ? "" : "i");
+  try {
+    return new RegExp(source, flags);
+  } catch {
+    return null; // invalid regex — caller shows the error state
+  }
+}
+
+// Scan the active file's text for all matches. Preserves the current match near
+// the caret when possible so re-computing (e.g. after an edit) doesn't jump.
+function computeSearchMatches({ keepCaret = false } = {}) {
+  const activeFile = controller.getActiveFile();
+  const canSearch = Boolean(activeFile && isTextFileName(activeFile.name));
+  const regex = canSearch ? buildSearchRegex() : null;
+  const invalid = canSearch && searchState.regex && Boolean(elements.findInput?.value) && !regex;
+  elements.findInput?.classList.toggle("is-error", invalid);
+  searchState.matches = [];
+  if (regex) {
+    const text = getEditorText();
+    let m;
+    let guard = 0;
+    while ((m = regex.exec(text)) !== null) {
+      const start = m.index;
+      const end = start + m[0].length;
+      searchState.matches.push({ start, end });
+      if (m[0].length === 0) regex.lastIndex += 1; // avoid an infinite loop on zero-width
+      if (++guard > 20000) break;                  // sanity cap on pathological patterns
+    }
+  }
+  if (searchState.matches.length === 0) {
+    searchState.currentIndex = -1;
+  } else if (keepCaret) {
+    const caret = getEditorSelection().start;
+    const idx = searchState.matches.findIndex((mm) => mm.start >= caret);
+    searchState.currentIndex = idx >= 0 ? idx : 0;
+  } else if (searchState.currentIndex < 0 || searchState.currentIndex >= searchState.matches.length) {
+    searchState.currentIndex = 0;
+  }
+  updateFindCount();
+  renderSearchHighlights();
+}
+
+function updateFindCount() {
+  if (!elements.findCount) return;
+  const total = searchState.matches.length;
+  if (elements.findInput && !elements.findInput.value) {
+    elements.findCount.textContent = "No results";
+  } else if (total === 0) {
+    elements.findCount.textContent = elements.findInput?.classList.contains("is-error") ? "Bad pattern" : "No results";
+  } else {
+    elements.findCount.textContent = `${searchState.currentIndex + 1} of ${total}`;
+  }
+}
+
+// Draw a highlight box (one per visual line) over each match, reusing the remote-
+// cursor rect technique. Positioned relative to #editor-scroll so it tracks the
+// content as #editor-content scrolls.
+function renderSearchHighlights() {
+  const layer = elements.editorSearchHighlights;
+  if (!layer) return;
+  layer.textContent = "";
+  if (!searchState.open || !searchState.matches.length) return;
+  const scrollRect = elements.editorScroll.getBoundingClientRect();
+  const MAX = 500;
+  searchState.matches.slice(0, MAX).forEach((match, index) => {
+    try {
+      const s = textOffsetToDomPosition(match.start);
+      const e = textOffsetToDomPosition(match.end);
+      const range = document.createRange();
+      range.setStart(s.node, s.offset);
+      range.setEnd(e.node, e.offset);
+      const rects = Array.from(range.getClientRects()).filter((r) => r.width > 0 && r.height > 0);
+      const isCurrent = index === searchState.currentIndex;
+      for (const rect of rects) {
+        // Skip rects entirely outside the visible band (cheap virtualization).
+        if (rect.bottom < scrollRect.top - 40 || rect.top > scrollRect.bottom + 40) continue;
+        const box = document.createElement("div");
+        box.className = `search-match${isCurrent ? " is-current" : ""}`;
+        box.style.left = `${rect.left - scrollRect.left}px`;
+        box.style.top = `${rect.top - scrollRect.top}px`;
+        box.style.width = `${rect.width}px`;
+        box.style.height = `${rect.height}px`;
+        layer.append(box);
+      }
+    } catch { /* offset transiently out of range during a re-render */ }
+  });
+}
+
+function gotoMatch(index) {
+  if (!searchState.matches.length) return;
+  const total = searchState.matches.length;
+  searchState.currentIndex = ((index % total) + total) % total;
+  const match = searchState.matches[searchState.currentIndex];
+  // Select the match IN the editor even though the find box has focus, then
+  // scroll it into view. Focusing the editor briefly is what lets the selection
+  // land; we return focus to the find input so the user keeps typing.
+  elements.editorContent.focus({ preventScroll: true });
+  setEditorSelection(match.start, match.end);
+  caretIntoView(getEditorLineHeight() * 2);
+  elements.findInput?.focus();
+  updateFindCount();
+  renderSearchHighlights();
+}
+
+function findNext() {
+  if (!searchState.matches.length) { computeSearchMatches(); }
+  if (searchState.matches.length) gotoMatch(searchState.currentIndex + 1);
+}
+
+function findPrev() {
+  if (!searchState.matches.length) { computeSearchMatches(); }
+  if (searchState.matches.length) gotoMatch(searchState.currentIndex - 1);
+}
+
+// The replacement text for one match (regex mode honors $1, $&, … via a scoped
+// re-run of the pattern on just that match).
+function replacementFor(matchText) {
+  const replaceRaw = elements.replaceInput?.value ?? "";
+  if (!searchState.regex) return replaceRaw;
+  const single = buildSearchRegex();
+  if (!single) return replaceRaw;
+  // matchText is exactly one match, so a single replace applies the templates.
+  return matchText.replace(new RegExp(single.source, single.flags.replace("g", "")), replaceRaw);
+}
+
+function replaceCurrent() {
+  if (searchState.currentIndex < 0 || !searchState.matches.length) { findNext(); return; }
+  const match = searchState.matches[searchState.currentIndex];
+  const text = getEditorText();
+  const matchText = text.slice(match.start, match.end);
+  const replacement = replacementFor(matchText);
+  const newText = text.slice(0, match.start) + replacement + text.slice(match.end);
+  const caret = match.start + replacement.length;
+  applyEditorEdit(newText, caret, caret);
+  computeSearchMatches();
+  // Move to the next match at/after where we just replaced.
+  const nextIdx = searchState.matches.findIndex((mm) => mm.start >= caret);
+  if (searchState.matches.length) gotoMatch(nextIdx >= 0 ? nextIdx : 0);
+  elements.findInput?.focus();
+}
+
+function replaceAllMatches() {
+  const regex = buildSearchRegex();
+  if (!regex || !searchState.matches.length) return;
+  const text = getEditorText();
+  const replaceRaw = elements.replaceInput?.value ?? "";
+  const count = searchState.matches.length;
+  // String.replace with a global regex applies $1/$& templates in regex mode;
+  // in plain mode the pattern is escaped so it's a literal replace.
+  const newText = text.replace(regex, replaceRaw);
+  applyEditorEdit(newText, 0, 0);
+  computeSearchMatches();
+  showToast(`Replaced ${count} occurrence${count === 1 ? "" : "s"}`);
+  elements.findInput?.focus();
+}
+
+function openFindBar(replaceMode = false) {
+  if (!elements.editorFindBar) return;
+  searchState.open = true;
+  searchState.replaceMode = replaceMode;
+  elements.editorFindBar.hidden = false;
+  if (elements.findReplaceRow) elements.findReplaceRow.hidden = !replaceMode;
+  // Seed the find box with the current selection (VS Code behaviour).
+  const sel = getEditorSelection();
+  if (sel.end > sel.start) {
+    const selected = getEditorText().slice(sel.start, sel.end);
+    if (!selected.includes("\n")) elements.findInput.value = selected;
+  }
+  computeSearchMatches({ keepCaret: true });
+  elements.findInput?.focus();
+  elements.findInput?.select();
+}
+
+function closeFindBar() {
+  searchState.open = false;
+  if (elements.editorFindBar) elements.editorFindBar.hidden = true;
+  if (elements.editorSearchHighlights) elements.editorSearchHighlights.textContent = "";
+  elements.editorContent?.focus({ preventScroll: true });
+}
+
+function toggleFindOption(key, buttonEl) {
+  searchState[key] = !searchState[key];
+  buttonEl?.setAttribute("aria-pressed", String(searchState[key]));
+  computeSearchMatches({ keepCaret: true });
+}
+
+// ============================ Snapshots + Diff ==============================
+// Per-file, content-addressed history (see snapshot-service). Diff state caches
+// the fetched old-version text so renderDiff() can run synchronously (in the
+// diff overlay). `path` is the file whose version being compared.
+// The diff lives in the preview pane's tab strip as a single special (non-file)
+// tab, keyed by this sentinel id. When it's the active preview tab the pane shows
+// the diff overlay instead of #preview-output. It compares the CURRENT content of
+// `fileId` against the cached `oldText` snapshot — independent of which file the
+// editor has active, so it behaves like any other preview tab.
+const DIFF_TAB_ID = "__diff__";
+const diffState = { active: false, fileId: null, path: null, versionId: null, oldText: "", createdAt: 0, blocks: [], currentChange: -1 };
+let snapshotsViewPath = null;
+// Snapshots dialog (File-Manager-style select + footer actions): the versions
+// currently listed and which one the user has highlighted.
+let snapshotsVersions = [];
+let snapshotsSelectedId = null;
+
+// A stable-enough key to group snapshots by project: the cloud workspace id when
+// synced, otherwise the local project id.
+function snapshotProjectKey() {
+  return settings.syncedProjectId || controller.getProject()?.id || "local";
+}
+
+// A snapshot is always of the CURRENT file only — the intuitive "save this file's
+// version" action. (The project-wide createFileSnapshots stays in the service for
+// possible future use.)
+async function createSnapshotNow(label = "") {
+  const project = controller.getProject();
+  const activeFile = controller.getActiveFile();
+  if (!activeFile || !isTextFileName(activeFile.name)) {
+    showToast("Open a text file to snapshot it");
+    return;
+  }
+  const path = getPath(project, activeFile.id);
+  try {
+    const result = await createFileSnapshot(snapshotProjectKey(), path, activeFile.content, label);
+    showToast(result.created ? `Snapshot saved: ${path.split("/").pop()}` : "Snapshot — no changes since the last one");
+    logDebug("action", "Snapshot created", `${path} ${result.created ? "saved" : "unchanged"}`);
+  } catch (error) {
+    logDebug("response", "Snapshot failed", error.message);
+    showToast("Couldn't save snapshot (storage unavailable)");
+  }
+}
+
+function formatSnapshotTime(ts) {
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime())
+    ? ""
+    : `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+function formatBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+async function openSnapshotsDialog() {
+  if (!elements.snapshotsDialog) return;
+  const project = controller.getProject();
+  const activeFile = controller.getActiveFile();
+  const activePath = activeFile ? getPath(project, activeFile.id) : null;
+  let paths = [];
+  try {
+    paths = await listSnapshotPaths(snapshotProjectKey());
+  } catch { paths = []; }
+  // Show a set of files that have history, plus the active file even if it has none.
+  const options = Array.from(new Set([...(activePath ? [activePath] : []), ...paths]));
+  if (elements.snapshotsFileSelect) {
+    elements.snapshotsFileSelect.replaceChildren(...options.map((p) => {
+      const opt = document.createElement("option");
+      opt.value = p;
+      opt.textContent = p;
+      return opt;
+    }));
+    snapshotsViewPath = options.includes(activePath) ? activePath : (options[0] ?? null);
+    if (snapshotsViewPath) elements.snapshotsFileSelect.value = snapshotsViewPath;
+    elements.snapshotsFileSelect.disabled = options.length === 0;
+  }
+  snapshotsSelectedId = null; // fresh selection each open
+  await renderFileHistory();
+  if (!elements.snapshotsDialog.open) elements.snapshotsDialog.showModal();
+}
+
+async function renderFileHistory() {
+  const list = elements.snapshotsList;
+  if (!list) return;
+  const path = snapshotsViewPath;
+  try {
+    snapshotsVersions = path ? await listFileVersions(snapshotProjectKey(), path) : [];
+  } catch { snapshotsVersions = []; }
+  // Keep the highlight only if the selected version still exists.
+  if (!snapshotsVersions.some((v) => v.id === snapshotsSelectedId)) snapshotsSelectedId = null;
+  list.replaceChildren();
+  if (elements.snapshotsEmpty) {
+    elements.snapshotsEmpty.hidden = snapshotsVersions.length > 0;
+    elements.snapshotsEmpty.textContent = path
+      ? "No snapshots yet for this file. Press Ctrl+S (or Create Snapshot) to make one."
+      : "No snapshots yet for this project.";
+  }
+  for (const v of snapshotsVersions) {
+    const item = document.createElement("li");
+    item.className = `snapshot-item${v.id === snapshotsSelectedId ? " is-selected" : ""}`;
+    item.setAttribute("role", "option");
+    item.setAttribute("aria-selected", String(v.id === snapshotsSelectedId));
+    item.tabIndex = -1;
+
+    const meta = document.createElement("div");
+    meta.className = "snapshot-meta";
+    const time = document.createElement("span");
+    time.className = "snapshot-time";
+    time.textContent = formatSnapshotTime(v.createdAt);
+    const info = document.createElement("span");
+    info.className = "snapshot-count subtle-label";
+    info.textContent = `${formatBytes(v.byteSize)}${v.label ? ` · ${v.label}` : ""}`;
+    meta.append(time, info);
+
+    item.append(meta);
+    // Single-click toggles selection; double-click compares that version.
+    item.addEventListener("click", () => selectSnapshot(v.id));
+    item.addEventListener("dblclick", () => { compareSnapshotVersion(v.id); });
+    list.append(item);
+  }
+  renderSnapshotsActionbar();
+}
+
+function selectSnapshot(versionId) {
+  // Tapping the highlighted row again clears the selection.
+  snapshotsSelectedId = snapshotsSelectedId === versionId ? null : versionId;
+  // Repaint selection state in place (rows are in snapshotsVersions order).
+  const rows = elements.snapshotsList?.children ?? [];
+  snapshotsVersions.forEach((v, i) => {
+    const li = rows[i];
+    if (!li) return;
+    const on = v.id === snapshotsSelectedId;
+    li.classList.toggle("is-selected", on);
+    li.setAttribute("aria-selected", String(on));
+  });
+  renderSnapshotsActionbar();
+}
+
+// Whether a diff can be shown for the viewed file: it must be the file that's
+// currently open in the editor (the diff compares against live content).
+function snapshotsCanCompare() {
+  const project = controller.getProject();
+  const activeFile = controller.getActiveFile();
+  const activePath = activeFile ? getPath(project, activeFile.id) : null;
+  return activePath != null && activePath === snapshotsViewPath;
+}
+
+function renderSnapshotsActionbar() {
+  const selected = snapshotsVersions.find((v) => v.id === snapshotsSelectedId) || null;
+  const canCompare = !!selected && snapshotsCanCompare();
+  if (elements.snapshotsCompareBtn) {
+    elements.snapshotsCompareBtn.disabled = !canCompare;
+    elements.snapshotsCompareBtn.title = selected && !canCompare
+      ? "Open this file in the editor to compare it"
+      : "Compare the current file with this version";
+  }
+  if (elements.snapshotsRestoreBtn) elements.snapshotsRestoreBtn.disabled = !selected;
+  if (elements.snapshotsDeleteBtn) elements.snapshotsDeleteBtn.disabled = !selected;
+  if (elements.snapshotsSelectionLabel) {
+    elements.snapshotsSelectionLabel.textContent = selected
+      ? `Selected: ${formatSnapshotTime(selected.createdAt)}`
+      : snapshotsVersions.length
+        ? "Select a version"
+        : "";
+  }
+}
+
+// Compare a specific version with the current file (used by double-click, which
+// must ignore the intervening select/deselect toggles). Returns true if it ran.
+function compareSnapshotVersion(versionId) {
+  const v = snapshotsVersions.find((x) => x.id === versionId);
+  if (!v || !snapshotsCanCompare()) return false;
+  elements.snapshotsDialog?.close();
+  void showFileDiff(snapshotsViewPath, v.id, v.createdAt);
+  return true;
+}
+
+// Compare the highlighted snapshot with the current file (the Compare button).
+function compareSelectedSnapshot() {
+  return compareSnapshotVersion(snapshotsSelectedId);
+}
+
+// Compare the ACTIVE file's current content with one of its stored versions,
+// rendering the diff in the preview pane.
+async function showFileDiff(path, versionId, createdAt) {
+  const project = controller.getProject();
+  const activeFile = controller.getActiveFile();
+  const activePath = activeFile ? getPath(project, activeFile.id) : null;
+  if (activePath !== path) { showToast("Open that file to compare it"); return; }
+  const oldText = await getVersionContent(versionId);
+  if (oldText == null) { showToast("That version is no longer available"); return; }
+  diffState.active = true;
+  diffState.fileId = activeFile.id; // diff tracks the file by id (survives the editor switching files)
+  diffState.path = path;
+  diffState.versionId = versionId;
+  diffState.oldText = oldText;
+  diffState.createdAt = createdAt;
+  diffState.currentChange = -1;
+  if (settings.preview === "hidden") togglePreview();
+  previewFileId = DIFF_TAB_ID; // make the diff the active preview tab
+  updateStatus(project); // renders the tab strip + shows the diff pane
+  renderDiff(); // immediate full render so blocks are fresh (updateStatus may have debounced)
+  if (diffState.blocks.length) gotoChange(1); // jump to the first change
+}
+
+async function restoreVersion(path, versionId, createdAt) {
+  const project = controller.getProject();
+  const node = Object.values(project.nodes).find((n) => n.kind === "file" && getPath(project, n.id) === path);
+  if (!node) { showToast("That file no longer exists"); return; }
+  const content = await getVersionContent(versionId);
+  if (content == null) { showToast("That version is no longer available"); return; }
+  if (content === String(node.content ?? "")) { showToast("Already matches this version"); return; }
+  const ok = await confirmAction(`Restore "${path.split("/").pop()}" to its ${formatSnapshotTime(createdAt)} snapshot? Current content is replaced (you can snapshot first to keep it).`);
+  if (!ok) return;
+  if (project.activeFileId === node.id && isTextFileName(node.name)) {
+    // Active file: route through the editor so undo history + caret stay sane.
+    applyEditorEdit(content, 0, 0);
+  } else {
+    controller.updateContent(node.id, content);
+  }
+  publishOperation({ type: "update-file", path, content });
+  showToast(`Restored ${path.split("/").pop()}`);
+}
+
+// Tear down the diff tab's state + hide the overlay WITHOUT re-rendering (safe to
+// call from inside updateStatus, e.g. when the diffed file is gone).
+function resetDiffState() {
+  diffState.active = false;
+  diffState.fileId = null;
+  diffState.path = null;
+  diffState.versionId = null;
+  diffState.oldText = "";
+  diffState.blocks = [];
+  diffState.currentChange = -1;
+  if (elements.previewDiffView) elements.previewDiffView.hidden = true;
+  if (elements.preview) elements.preview.hidden = false;
+}
+
+// Close the diff tab (its × button, or when its file disappears). Falls the
+// preview back to whatever file tab was last open.
+function closeDiff() {
+  resetDiffState();
+  if (previewFileId === DIFF_TAB_ID) {
+    previewFileId = previewOpenTabIds[previewOpenTabIds.length - 1] ?? null;
+  }
+  render(controller.getProject());
+}
+
+// Rebuild the diff into #diff-body, group changes into blocks, and draw the
+// overview ruler. `preserveScroll` keeps the reader's place on a live re-render
+// (e.g. while they edit the file with the diff open).
+function renderDiff({ preserveScroll = false } = {}) {
+  if (!diffState.active || !elements.diffBody) return;
+  const project = controller.getProject();
+  const node = project.nodes[diffState.fileId];
+  // The diffed file was deleted → close the diff tab.
+  if (!node || node.kind !== "file") {
+    closeDiff();
+    return;
+  }
+  const savedScroll = preserveScroll ? elements.diffBody.scrollTop : 0;
+  const ops = diffLines(diffState.oldText, String(node.content ?? ""));
+
+  // Group consecutive changed lines into blocks (for navigation + the ruler).
+  const blocks = [];
+  let cur = null;
+  ops.forEach((op, i) => {
+    if (op.type === "same") { cur = null; return; }
+    if (!cur) { cur = { start: i, end: i, hasAdd: false, hasDel: false }; blocks.push(cur); }
+    cur.end = i;
+    if (op.type === "add") cur.hasAdd = true;
+    if (op.type === "del") cur.hasDel = true;
+  });
+  diffState.blocks = blocks;
+
+  let added = 0;
+  let removed = 0;
+  const rowsHtml = ops.map((op) => {
+    if (op.type === "add") added += 1;
+    if (op.type === "del") removed += 1;
+    const marker = op.type === "add" ? "+" : op.type === "del" ? "−" : " ";
+    // One line-number column: the current-file line for kept/added rows, the old
+    // line for deleted rows (which have no current-file position).
+    const lineNo = op.newLine != null ? String(op.newLine) : (op.oldLine != null ? String(op.oldLine) : "");
+    return `<div class="diff-line diff-${op.type}"><span class="diff-gutter">${lineNo}</span><span class="diff-mark">${marker}</span><span class="diff-text">${escapeHtmlAttribute(op.text)}</span></div>`;
+  }).join("");
+  elements.diffBody.innerHTML = rowsHtml || '<div class="diff-line diff-same"><span class="diff-text">(identical to the current file)</span></div>';
+
+  if (elements.previewDiffLabel) elements.previewDiffLabel.textContent = `Current vs snapshot · ${formatSnapshotTime(diffState.createdAt)}`;
+  if (elements.previewDiffStats) elements.previewDiffStats.textContent = `+${added} −${removed} · ${blocks.length} change${blocks.length === 1 ? "" : "s"}`;
+
+  renderDiffRuler();
+  if (preserveScroll) elements.diffBody.scrollTop = savedScroll;
+  // Re-apply the current-change highlight after the rebuild.
+  if (diffState.currentChange >= 0 && diffState.currentChange < blocks.length) {
+    highlightChange(diffState.currentChange, { scroll: false });
+  }
+}
+
+function renderDiffRuler() {
+  const ruler = elements.diffRuler;
+  const body = elements.diffBody;
+  if (!ruler || !body) return;
+  ruler.replaceChildren();
+  const scrollHeight = body.scrollHeight || 1;
+  const rulerHeight = body.clientHeight || 1;
+  const rows = body.children;
+  diffState.blocks.forEach((block, index) => {
+    const firstRow = rows[block.start];
+    if (!firstRow) return;
+    const lastRow = rows[block.end] ?? firstRow;
+    const topPx = (firstRow.offsetTop / scrollHeight) * rulerHeight;
+    const heightPx = Math.max(3, ((lastRow.offsetTop + lastRow.offsetHeight - firstRow.offsetTop) / scrollHeight) * rulerHeight);
+    const tick = document.createElement("div");
+    tick.className = `diff-ruler-tick ${block.hasAdd && block.hasDel ? "tick-mix" : block.hasAdd ? "tick-add" : "tick-del"}`;
+    tick.style.top = `${topPx}px`;
+    tick.style.height = `${heightPx}px`;
+    tick.title = `Change ${index + 1} of ${diffState.blocks.length}`;
+    tick.addEventListener("click", () => { diffState.currentChange = index; highlightChange(index, { scroll: true }); });
+    ruler.append(tick);
+  });
+}
+
+function highlightChange(index, { scroll = true } = {}) {
+  const body = elements.diffBody;
+  if (!body) return;
+  body.querySelectorAll(".is-current-change").forEach((el) => el.classList.remove("is-current-change"));
+  const block = diffState.blocks[index];
+  if (!block) return;
+  const rows = body.children;
+  for (let i = block.start; i <= block.end; i += 1) rows[i]?.classList.add("is-current-change");
+  if (scroll) rows[block.start]?.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+function gotoChange(delta) {
+  const total = diffState.blocks.length;
+  if (!total) { showToast("No changes"); return; }
+  const next = diffState.currentChange < 0
+    ? (delta > 0 ? 0 : total - 1)
+    : (((diffState.currentChange + delta) % total) + total) % total;
+  diffState.currentChange = next;
+  highlightChange(next, { scroll: true });
+}
+
+// Debounced live refresh so editing the file with the diff open stays smooth and
+// keeps the reader's scroll position.
+let diffRefreshTimer = null;
+function scheduleDiffRefresh() {
+  if (diffRefreshTimer) return;
+  diffRefreshTimer = setTimeout(() => {
+    diffRefreshTimer = null;
+    if (diffState.active) renderDiff({ preserveScroll: true });
+  }, 180);
 }
 
 // Cache of the latest remote cursor events by clientId so we can re-render
@@ -3148,6 +3797,14 @@ const collaboration = createCollaborationRuntime({
   onStatusChange(nextState) {
     const prevStatus = syncState.status;
     const wasConnected = prevStatus === "connected";
+    // Server refused this client as too old (stale cached service worker). Stop
+    // syncing and force the app up to date rather than letting it clobber content.
+    if (nextState.status === "upgrade-required") {
+      syncState.status = nextState.status;
+      syncState.detail = nextState.detail;
+      forceAppUpgrade(nextState.detail);
+      return;
+    }
     // Cloud sync now recovers dropped streams on its own (see collaboration-
     // service). Surface it so the user knows their work is safe, not lost.
     if (nextState.status === "reconnecting" && prevStatus !== "reconnecting") {
@@ -3155,6 +3812,11 @@ const collaboration = createCollaborationRuntime({
     }
     if (nextState.status === "connected" && prevStatus === "reconnecting") {
       showToast("Reconnected — changes synced.");
+    }
+    if (nextState.status === "connected") {
+      // A clean connect means we're on a good version — reset the one-shot upgrade
+      // guard so a future min-version bump can auto-refresh again.
+      try { sessionStorage.removeItem("mdnotes.upgradeReloaded"); } catch { /* ignore */ }
     }
     syncState.status = nextState.status;
     syncState.detail = nextState.detail;
@@ -4609,6 +5271,17 @@ function handleEditorKeydown(event) {
   if (event.key === "Tab") {
     traceEditorEvent("Keydown", { key: "Tab" });
   }
+  // Find / Replace (Ctrl/Cmd+F, Ctrl/Cmd+H).
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "f") {
+    event.preventDefault();
+    openFindBar(false);
+    return;
+  }
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "h") {
+    event.preventDefault();
+    openFindBar(true);
+    return;
+  }
   // Custom undo/redo — must intercept before the browser's native handler,
   // because innerHTML-rerender destroys the browser's native undo stack.
   if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "z") {
@@ -4750,14 +5423,19 @@ function ensureOpenTabs(project) {
     sourceOpenTabIds = [];
   }
 
-  if (previewFileId) {
+  // The diff tab is a valid preview target but not a project file — leave it be.
+  if (previewFileId === DIFF_TAB_ID) {
+    if (!diffState.active) {
+      previewFileId = previewOpenTabIds[previewOpenTabIds.length - 1] ?? null;
+    }
+  } else if (previewFileId) {
     const previewNode = project.nodes[previewFileId];
     if (previewNode?.kind !== "file") {
       previewFileId = null;
     }
   }
 
-  if (previewFileId && !previewOpenTabIds.includes(previewFileId)) {
+  if (previewFileId && previewFileId !== DIFF_TAB_ID && !previewOpenTabIds.includes(previewFileId)) {
     previewOpenTabIds.push(previewFileId);
   }
 
@@ -4856,6 +5534,13 @@ function setActiveSourceUrlDbEntry(fileId, entryId) {
 
 function setPreviewFile(fileId) {
   const project = controller.getProject();
+  if (fileId === DIFF_TAB_ID) {
+    if (!diffState.active) return;
+    captureViewState();
+    previewFileId = DIFF_TAB_ID;
+    updateStatus(project);
+    return;
+  }
   const node = project.nodes[fileId];
   if (!node || node.kind !== "file") {
     return;
@@ -5278,6 +5963,9 @@ async function handleSaveCommand() {
   } catch (error) {
     notify(error.message);
   }
+  // Auto-save handles persistence now, so Ctrl+S doubles as "commit a snapshot":
+  // a manual save point the user can later compare against.
+  await createSnapshotNow();
 }
 
 function bindPaneDropTarget(target, pane) {
@@ -5381,10 +6069,10 @@ function reorderPaneTabs(pane, draggedFileId, targetFileId, placeAfter = false) 
   renderTabs(controller.getProject());
 }
 
-function renderTabStrip({ strip, pane, project, tabIds, activeFileId, emptyText, onActivate, onClose, allowReorder = false }) {
+function renderTabStrip({ strip, pane, project, tabIds, activeFileId, emptyText, onActivate, onClose, allowReorder = false, extraTabs = [] }) {
   strip.replaceChildren();
 
-  if (tabIds.length === 0) {
+  if (tabIds.length === 0 && extraTabs.length === 0) {
     const empty = document.createElement("div");
     empty.className = "editor-tab is-empty";
     empty.textContent = emptyText;
@@ -5465,6 +6153,38 @@ function renderTabStrip({ strip, pane, project, tabIds, activeFileId, emptyText,
     });
     strip.append(tab);
   });
+
+  // Special (non-file) tabs — e.g. the preview diff view. Rendered after the file
+  // tabs; not draggable/reorderable, but activate + close like any other tab.
+  extraTabs.forEach((spec) => {
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = `editor-tab${activeFileId === spec.id ? " is-active" : ""}`;
+    tab.dataset.tabId = spec.id;
+    tab.title = spec.title || spec.label;
+
+    const icon = document.createElement("span");
+    icon.className = `tab-file-icon ${spec.iconClass || ""}`.trim();
+    icon.setAttribute("aria-hidden", "true");
+    if (spec.iconText) icon.textContent = spec.iconText;
+
+    const title = document.createElement("span");
+    title.className = "tab-title";
+    title.textContent = spec.label;
+
+    const close = document.createElement("span");
+    close.className = "tab-close";
+    close.textContent = "×";
+    close.setAttribute("aria-hidden", "true");
+
+    tab.append(icon, title, close);
+    tab.addEventListener("click", () => spec.onActivate());
+    close.addEventListener("click", (event) => {
+      event.stopPropagation();
+      spec.onClose();
+    });
+    strip.append(tab);
+  });
 }
 
 function renderTabs(project) {
@@ -5480,6 +6200,17 @@ function renderTabs(project) {
     allowReorder: true
   });
 
+  const previewExtraTabs = diffState.active
+    ? [{
+        id: DIFF_TAB_ID,
+        label: diffState.path.split("/").pop(),
+        title: `Diff: ${diffState.path} — current vs ${formatSnapshotTime(diffState.createdAt)}`,
+        iconText: "±",
+        iconClass: "tab-diff-icon",
+        onActivate: () => setPreviewFile(DIFF_TAB_ID),
+        onClose: closeDiff
+      }]
+    : [];
   renderTabStrip({
     strip: elements.previewTabStrip,
     pane: "preview",
@@ -5489,7 +6220,8 @@ function renderTabs(project) {
     emptyText: "No preview file selected",
     onActivate: setPreviewFile,
     onClose: closePreviewTab,
-    allowReorder: true
+    allowReorder: true,
+    extraTabs: previewExtraTabs
   });
 }
 
@@ -5847,9 +6579,30 @@ function applyWorkspaceSettings() {
   renderDebugPanel();
 }
 
+// Re-render on resize ONLY when the WIDTH changes (that's what affects soft-wrap
+// and gutter alignment). A height-only change — e.g. the document growing as you
+// press Enter — must NOT trigger renderEditorContent(): it rebuilds innerHTML,
+// which invalidates the current selection and drops the caret to offset 0 (the
+// "Enter/DEL then the caret jumps to line 1" bug, which fired ~16-60ms later via
+// this observer). And when a real width change does re-render, preserve the caret.
+let _lastEditorObservedWidth = 0;
 const editorResizeObserver = typeof ResizeObserver === "function"
   ? new ResizeObserver(() => {
+    const width = Math.round(elements.editorScroll.getBoundingClientRect().width);
+    if (width === _lastEditorObservedWidth) {
+      syncEditorScroll();
+      return;
+    }
+    _lastEditorObservedWidth = width;
+    const sel = getEditorSelection();
+    const hadFocus = document.activeElement === elements.editorContent;
+    const savedScroll = elements.editorContent.scrollTop;
     renderEditorContent(getEditorText());
+    if (hadFocus) {
+      elements.editorContent.focus({ preventScroll: true });
+      setEditorSelection(sel.start, sel.end);
+    }
+    elements.editorContent.scrollTop = savedScroll;
     syncEditorScroll();
   })
   : null;
@@ -6905,10 +7658,7 @@ function updateStatus(project) {
       loadEditorContent("");
     }
     syncEditorScroll();
-    const previewState = renderPreviewContent(elements.preview, project, previewFile);
-    if (previewState.shouldTypeset) {
-      void typesetPreview(previewState.content);
-    }
+    renderPreviewOrDiff(project, previewFile); // diff tab still shows if it's the active preview tab
     renderLinksPanel(project, null);
     renderChatPanel(project);
     return;
@@ -6933,6 +7683,7 @@ function updateStatus(project) {
     renderRemoteCursors([]);
   }
   if (!_editorUpdating && fileChanged) {
+    logDebug("response", "caret", `render→loadEditorContent (fileChanged: last=${lastRenderedFileId} new=${activeFile.id}) → caret to 0`);
     lastRenderedFileId = activeFile.id;
     loadEditorContent(nextText);
     // Resume the reader's previous scroll position in this document. The real
@@ -6957,10 +7708,12 @@ function updateStatus(project) {
         // the new synchronized content so Ctrl+Z cannot replay stale text.
         const { start, end } = getEditorSelection();
         const nextSelection = consumeExternalEditorSelection(activeFile.id, nextText, start, end);
+        logDebug("response", "caret", `render resync (same file, focused): read sel=${start}-${end} → applyEditorRender at ${nextSelection.start}`);
         hideEditorAutocomplete();
         applyEditorRender(nextText, nextSelection.start, nextSelection.end);
         resetEditorHistory(nextText, nextSelection.start, nextSelection.end);
       } else {
+        logDebug("response", "caret", "render→loadEditorContent (same file, NOT focused) → caret to 0");
         loadEditorContent(nextText);
       }
       // Reposition remote cursor overlays after the DOM re-render.
@@ -6970,14 +7723,47 @@ function updateStatus(project) {
   }
   // Skip the redundant preview rebuild when the change came from the preview
   // itself — re-rendering would reset the diagram's scroll position/selection.
-  if (!_previewUpdating) {
+  // Also skip while the user is actively editing INSIDE the preview (e.g. a bmap
+  // node's Name/Text inspector field): renderPreviewContent() does a full
+  // replaceChildren(), so rebuilding here would yank focus out of the field. This
+  // fires on routine async renders too (a status/patch-confirm callback lands a
+  // beat after you moved to the next field), which is exactly the "kicked out of
+  // the text field" case. The preview refreshes on the next render once focus
+  // leaves it.
+  renderPreviewOrDiff(project, previewFile);
+  renderLinksPanel(project, activeFile);
+  renderChatPanel(project);
+}
+
+// Paint the preview pane: either the diff overlay (when the diff tab is the active
+// preview tab) or the normal preview for `previewFile`. The two are mutually
+// exclusive and each hides the other's DOM.
+function renderPreviewOrDiff(project, previewFile) {
+  const showingDiff = diffState.active && previewFileId === DIFF_TAB_ID;
+  if (showingDiff) {
+    const wasHidden = elements.previewDiffView ? elements.previewDiffView.hidden : true;
+    if (elements.previewDiffView) elements.previewDiffView.hidden = false;
+    if (elements.preview) elements.preview.hidden = true;
+    // Full immediate render when the tab is (re)activated; debounce the routine
+    // live refreshes while the file is being edited underneath.
+    if (wasHidden) renderDiff();
+    else scheduleDiffRefresh();
+    return;
+  }
+  if (elements.previewDiffView) elements.previewDiffView.hidden = true;
+  if (elements.preview) elements.preview.hidden = false;
+  // Skip the redundant preview rebuild when the change came from the preview
+  // itself, or while the user is editing INSIDE the preview (e.g. a bmap node's
+  // Name/Text inspector field): renderPreviewContent() does a full
+  // replaceChildren(), so rebuilding here would yank focus out of the field.
+  const editingInPreview = elements.preview.contains(document.activeElement)
+    && document.activeElement !== elements.preview;
+  if (!_previewUpdating && !editingInPreview) {
     const previewState = renderPreviewContent(elements.preview, project, previewFile);
     if (previewState.shouldTypeset) {
       void typesetPreview(previewState.content);
     }
   }
-  renderLinksPanel(project, activeFile);
-  renderChatPanel(project);
 }
 
 // Local (OPFS) projects mirror every change back to their OPFS directory. Writes
@@ -7032,16 +7818,20 @@ function render(project) {
   scheduleAutoSave(project);
 }
 
-controller.subscribe(render);
-
 // ---- Auto-save: idle + periodic durable flush for non-real-disk workspaces.
 // Clears the dirty flag (and thus the ● tab dot + beforeunload nag) once content
 // is durably stored: localStorage for memory/import, OPFS for local workspaces,
 // the server for synced cloud workspaces. A real OS folder (sourceMode
 // "filesystem") still requires an explicit Ctrl+S, so it is left untouched.
+// These MUST be declared BEFORE controller.subscribe(render): subscribe() calls
+// the listener immediately, and render() calls scheduleAutoSave(), so the timer
+// state must already exist — otherwise a temporal-dead-zone ReferenceError at
+// startup (the initial project has an active file, so render reaches this).
 const AUTOSAVE_IDLE_MS = 1500;
 const AUTOSAVE_PERIODIC_MS = 15000;
 let autoSaveIdleTimer = null;
+
+controller.subscribe(render);
 
 function dirtyFileIds(project) {
   return Object.values(project.nodes)
@@ -7321,7 +8111,7 @@ async function renameFileById(fileId) {
 // preview view, otherwise the active source file. Null in chat view.
 function currentMobileFileId() {
   if (mobileView === "chat") return null;
-  if (mobileView === "preview") return previewFileId;
+  if (mobileView === "preview") return previewFileId === DIFF_TAB_ID ? null : previewFileId;
   return controller.getActiveFile()?.id ?? null;
 }
 
@@ -7751,6 +8541,9 @@ elements.editorContent.addEventListener("beforeinput", (event) => {
 
   const { start, end } = getEditorSelection();
   const hasSelection = start !== end;
+  if (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak" || event.inputType.startsWith("delete")) {
+    logDebug("response", "caret", `beforeinput ${event.inputType} reads sel=${start}-${end}`);
+  }
 
   // Paste: always intercept — browser creates non-.editor-line divs for
   // multi-line content which causes \n to be silently dropped.
@@ -7854,7 +8647,11 @@ elements.editorContent.addEventListener("input", (event) => {
   pushEditorHistoryState(currentText, start, end);
   notifyEditorChanged(currentText);
   // Re-render syntax highlighting; must restore selection afterward because
-  // innerHTML replacement destroys the native caret.
+  // innerHTML replacement destroys the native caret. Rebuilding innerHTML also
+  // resets scrollTop to 0, so save/restore it — otherwise caretIntoView() below
+  // re-scrolls from the top and a mid-document edit (e.g. backspace) jumps the
+  // view. This is the native-edit path; applyEditorRender has the same guard.
+  const savedScroll = elements.editorContent.scrollTop;
   renderEditorContent(currentText);
   // Restore focus if innerHTML replacement caused the contenteditable to lose
   // focus (observed in some browsers); this keeps the caret in place for the
@@ -7863,6 +8660,8 @@ elements.editorContent.addEventListener("input", (event) => {
     elements.editorContent.focus({ preventScroll: true });
   }
   setEditorSelection(start, end);
+  elements.editorContent.scrollTop = savedScroll;
+  syncEditorScroll();
   caretIntoView();
   if (
     inputType === "insertParagraph" ||
@@ -7882,8 +8681,50 @@ elements.editorContent.addEventListener("input", (event) => {
 elements.editorContent.addEventListener("scroll", () => {
   syncEditorScroll();
   scheduleRemoteCursorRender(); // keep peer carets/highlights pinned to the text while scrolling
+  if (searchState.open) renderSearchHighlights();
 });
 elements.editorContent.addEventListener("keydown", handleEditorKeydown);
+
+// ── Find / Replace controls ─────────────────────────────────────────────────
+let findRecomputeTimer = null;
+elements.findInput?.addEventListener("input", () => {
+  if (findRecomputeTimer) clearTimeout(findRecomputeTimer);
+  findRecomputeTimer = setTimeout(() => {
+    findRecomputeTimer = null;
+    computeSearchMatches({ keepCaret: true });
+    // Jump to the first match as the user refines the query.
+    if (searchState.matches.length) gotoMatch(searchState.currentIndex);
+  }, 100);
+});
+elements.findInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    if (event.shiftKey) findPrev(); else findNext();
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    closeFindBar();
+  } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+    event.preventDefault();
+    elements.findInput.select();
+  }
+});
+elements.replaceInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") { event.preventDefault(); replaceCurrent(); }
+  else if (event.key === "Escape") { event.preventDefault(); closeFindBar(); }
+});
+elements.findNext?.addEventListener("click", findNext);
+elements.findPrev?.addEventListener("click", findPrev);
+elements.findClose?.addEventListener("click", closeFindBar);
+elements.findToggleCase?.addEventListener("click", () => toggleFindOption("caseSensitive", elements.findToggleCase));
+elements.findToggleWord?.addEventListener("click", () => toggleFindOption("wholeWord", elements.findToggleWord));
+elements.findToggleRegex?.addEventListener("click", () => toggleFindOption("regex", elements.findToggleRegex));
+elements.findToggleReplace?.addEventListener("click", () => {
+  searchState.replaceMode = !searchState.replaceMode;
+  if (elements.findReplaceRow) elements.findReplaceRow.hidden = !searchState.replaceMode;
+  (searchState.replaceMode ? elements.replaceInput : elements.findInput)?.focus();
+});
+elements.replaceOne?.addEventListener("click", replaceCurrent);
+elements.replaceAll?.addEventListener("click", replaceAllMatches);
 elements.editorContent.addEventListener("mousedown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.button === 0) {
     const linkEl = event.target?.closest?.(".token-link[data-href]");
@@ -8093,6 +8934,37 @@ elements.explorerFilterButton.addEventListener("click", (event) => {
   logDebug("action", opened ? "Explorer filter menu opened" : "Explorer filter menu closed", settings.explorerFilter);
 });
 
+elements.findReplaceMenuButton?.addEventListener("click", () => openFindBar(true));
+elements.createSnapshotButton?.addEventListener("click", () => void createSnapshotNow());
+elements.snapshotsButton?.addEventListener("click", () => void openSnapshotsDialog());
+elements.snapshotsCreateButton?.addEventListener("click", async () => {
+  await createSnapshotNow();
+  // Rebuild the dialog so a newly-tracked file appears and the active file (the
+  // one we just snapshotted) is reselected in the dropdown.
+  await openSnapshotsDialog();
+});
+elements.snapshotsFileSelect?.addEventListener("change", (event) => {
+  snapshotsViewPath = event.target.value || null;
+  snapshotsSelectedId = null; // switching files clears the highlight
+  void renderFileHistory();
+});
+elements.snapshotsCompareBtn?.addEventListener("click", () => { compareSelectedSnapshot(); });
+elements.snapshotsRestoreBtn?.addEventListener("click", async () => {
+  const selected = snapshotsVersions.find((v) => v.id === snapshotsSelectedId);
+  if (!selected) return;
+  await restoreVersion(snapshotsViewPath, selected.id, selected.createdAt);
+});
+elements.snapshotsDeleteBtn?.addEventListener("click", async () => {
+  const selected = snapshotsVersions.find((v) => v.id === snapshotsSelectedId);
+  if (!selected) return;
+  const ok = await confirmAction(`Delete the ${formatSnapshotTime(selected.createdAt)} snapshot of "${(snapshotsViewPath || "").split("/").pop()}"? This can't be undone.`);
+  if (!ok) return;
+  await deleteVersion(selected.id);
+  snapshotsSelectedId = null;
+  await renderFileHistory();
+});
+elements.diffNextChange?.addEventListener("click", () => gotoChange(1));
+elements.diffPrevChange?.addEventListener("click", () => gotoChange(-1));
 elements.renameSelectedButton.addEventListener("click", () => {
   void renameSelected();
 });
