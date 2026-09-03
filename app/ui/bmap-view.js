@@ -330,34 +330,116 @@ function parseInlineSegments(text) {
   return segments;
 }
 
-/** Word-wrap inline-markdown text into lines of styled word-tokens for SVG. */
-function wrapStyledText(text, maxChars) {
+/** CJK / Kana / Hangul / fullwidth char — roughly one em wide and breakable on
+ *  either side (unlike Latin words). Used so SVG export wraps unspaced CJK runs,
+ *  which otherwise form one giant "word" that never wraps. */
+function isWideChar(ch) {
+  const c = ch.codePointAt(0);
+  return (
+    (c >= 0x1100 && c <= 0x115f) ||   // Hangul Jamo
+    (c >= 0x2e80 && c <= 0x303e) ||   // CJK radicals, Kangxi, CJK punctuation
+    (c >= 0x3041 && c <= 0x33ff) ||   // Hiragana, Katakana, CJK symbols
+    (c >= 0x3400 && c <= 0x4dbf) ||   // CJK Ext A
+    (c >= 0x4e00 && c <= 0x9fff) ||   // CJK Unified Ideographs
+    (c >= 0xa000 && c <= 0xa4cf) ||   // Yi
+    (c >= 0xac00 && c <= 0xd7a3) ||   // Hangul Syllables
+    (c >= 0xf900 && c <= 0xfaff) ||   // CJK Compatibility Ideographs
+    (c >= 0xfe30 && c <= 0xfe4f) ||   // CJK Compatibility Forms
+    (c >= 0xff00 && c <= 0xff60) ||   // Fullwidth Forms
+    (c >= 0xffe0 && c <= 0xffe6) ||   // Fullwidth signs
+    (c >= 0x20000 && c <= 0x3fffd)    // CJK Ext B+
+  );
+}
+
+/** Approximate glyph advance (px) for wrapping — there's no measuring context in
+ *  the export path, so this mirrors the font metrics closely enough to wrap. */
+function approxCharWidth(ch, fontSize, { bold = false, code = false } = {}) {
+  if (isWideChar(ch)) return fontSize;                 // full-width
+  if (ch === " " || ch === "\t") return fontSize * 0.3;
+  if (/[.,;:!|'iIl]/.test(ch)) return fontSize * 0.32; // narrow glyphs
+  if (/[mwMW@]/.test(ch)) return fontSize * 0.85;      // wide glyphs
+  return fontSize * (code ? 0.6 : bold ? 0.58 : 0.55);
+}
+
+/**
+ * Wrap inline-markdown text into lines of styled tokens, breaking to fit within
+ * `availPx`. Breaks at spaces, between wide (CJK) chars, and — as a last resort —
+ * inside an over-long word. Shared by the name and body SVG wrappers.
+ * @returns {Array<Array<{text, bold, italic, code}>>}
+ */
+function wrapStyledLines(text, availPx, fontSize) {
+  const maxW = Math.max(1, availPx);
   const lines = [];
+  const widthOf = (str, style) => [...str].reduce((s, c) => s + approxCharWidth(c, fontSize, style), 0);
+
   for (const paragraph of String(text ?? "").split("\n")) {
-    const words = [];
+    // Break the paragraph into minimal units: a collapsed space, a single wide
+    // char, or a run of narrow non-space chars (a "word"). Each carries its style.
+    const units = [];
     for (const seg of parseInlineSegments(paragraph)) {
-      for (const piece of seg.text.split(/(\s+)/)) {
-        if (piece === "") continue;
-        words.push({ text: piece, bold: seg.bold, italic: seg.italic, code: seg.code, space: /^\s+$/.test(piece) });
+      const t = seg.text;
+      let i = 0;
+      while (i < t.length) {
+        const ch = t[i];
+        if (/\s/.test(ch)) {
+          let j = i; while (j < t.length && /\s/.test(t[j])) j++;
+          units.push({ text: " ", bold: seg.bold, italic: seg.italic, code: seg.code, space: true });
+          i = j;
+        } else if (isWideChar(ch)) {
+          units.push({ text: ch, bold: seg.bold, italic: seg.italic, code: seg.code, space: false });
+          i += 1;
+        } else {
+          let j = i; while (j < t.length && !/\s/.test(t[j]) && !isWideChar(t[j])) j++;
+          units.push({ text: t.slice(i, j), bold: seg.bold, italic: seg.italic, code: seg.code, space: false });
+          i = j;
+        }
       }
     }
+
     let line = [];
-    let len = 0;
-    for (const word of words) {
-      if (word.space && len === 0) continue; // drop leading space
-      if (!word.space && len + word.text.length > maxChars && len > 0) {
-        while (line.length && line[line.length - 1].space) len -= line.pop().text.length;
-        lines.push(line);
-        line = [];
-        len = 0;
+    let lineW = 0;
+    const flush = () => {
+      while (line.length && line[line.length - 1].space) line.pop();
+      if (!line.length) { line = []; lineW = 0; return; }
+      // Coalesce adjacent same-style tokens so the SVG stays compact.
+      const merged = [];
+      for (const tok of line) {
+        const prev = merged[merged.length - 1];
+        if (prev && prev.bold === tok.bold && prev.italic === tok.italic && prev.code === tok.code) prev.text += tok.text;
+        else merged.push({ text: tok.text, bold: tok.bold, italic: tok.italic, code: tok.code });
       }
-      line.push(word);
-      len += word.text.length;
+      lines.push(merged);
+      line = []; lineW = 0;
+    };
+
+    for (const u of units) {
+      if (u.space) {
+        if (lineW === 0) continue; // no leading space
+        line.push(u); lineW += widthOf(u.text, u);
+        continue;
+      }
+      const w = widthOf(u.text, u);
+      if (w > maxW && u.text.length > 1) {
+        // A single word wider than the line: hard-split it character by character.
+        for (const ch of u.text) {
+          const cw = approxCharWidth(ch, fontSize, u);
+          if (lineW > 0 && lineW + cw > maxW) flush();
+          line.push({ text: ch, bold: u.bold, italic: u.italic, code: u.code, space: false });
+          lineW += cw;
+        }
+        continue;
+      }
+      if (lineW > 0 && lineW + w > maxW) flush();
+      line.push(u); lineW += w;
     }
-    while (line.length && line[line.length - 1].space) line.pop();
-    if (line.length) lines.push(line);
+    flush();
   }
   return lines;
+}
+
+/** Word-wrap inline-markdown text into lines of styled tokens for SVG. */
+function wrapStyledText(text, availPx, fontSize) {
+  return wrapStyledLines(text, availPx, fontSize);
 }
 
 /** Serialize one wrapped line (array of styled word-tokens) to SVG <tspan>s. */
@@ -374,31 +456,10 @@ function styledLineToTspans(line) {
     .join("");
 }
 
-/** Naive word-wrap for SVG <text> (no native wrapping). Honors explicit
- *  newlines, then greedily wraps each paragraph to maxChars per line. */
-function wrapSvgText(text, maxChars) {
-  const lines = [];
-  for (const paragraph of String(text ?? "").split("\n")) {
-    const words = paragraph.split(/\s+/).filter(Boolean);
-    if (words.length === 0) {
-      continue;
-    }
-    let line = "";
-    for (const word of words) {
-      if (!line) {
-        line = word;
-      } else if ((line + " " + word).length <= maxChars) {
-        line += " " + word;
-      } else {
-        lines.push(line);
-        line = word;
-      }
-    }
-    if (line) {
-      lines.push(line);
-    }
-  }
-  return lines;
+/** Word-wrap plain text (the node name) for SVG <text>, width-aware and
+ *  CJK-capable. Returns an array of plain strings. */
+function wrapSvgText(text, availPx, fontSize) {
+  return wrapStyledLines(text, availPx, fontSize).map((line) => line.map((t) => t.text).join(""));
 }
 
 /**
@@ -532,8 +593,8 @@ function renderBmapToSvg(ast, { padding = 60 } = {}) {
       textX = rect.width - padX;
       anchorAttr = ` text-anchor="end"`;
     }
-    const nameChars = Math.max(6, Math.floor((rect.width - padX * 2) / (nameSize * 0.55)));
-    for (const line of wrapSvgText(node.name || node.id, nameChars)) {
+    const innerW = Math.max(1, rect.width - padX * 2);
+    for (const line of wrapSvgText(node.name || node.id, innerW, nameSize)) {
       out.push(`<text x="${textX}" y="${cursorY}"${anchorAttr} font-family="${FONT_FAMILY}" font-size="${nameSize}" font-weight="600" fill="${nameColor}">${escapeHtml(line)}</text>`);
       cursorY += nameSize + 4;
     }
@@ -543,8 +604,7 @@ function renderBmapToSvg(ast, { padding = 60 } = {}) {
     }
     if (node.text) {
       cursorY += 4;
-      const bodyChars = Math.max(6, Math.floor((rect.width - padX * 2) / (bodySize * 0.55)));
-      for (const line of wrapStyledText(node.text, bodyChars)) {
+      for (const line of wrapStyledText(node.text, innerW, bodySize)) {
         if (cursorY > rect.height - 6) {
           break;
         }
