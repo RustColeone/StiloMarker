@@ -140,15 +140,38 @@ function normalizeBmapAst(ast) {
 function parseNestedObject(text) {
   const normalized = text.trim();
   const result = {};
-  // Use line-split for multi-line, comma-split for single-line without newlines
-  const segments = normalized.includes("\n")
-    ? normalized.split("\n")
-    : normalized.split(",");
+  // Split into "key: value" segments. Values may contain spaces (e.g. a CSS
+  // "border: 1px solid #hex"), which is why a bare space is NOT a delimiter.
+  let segments;
+  if (normalized.includes("\n")) {
+    // Canonical multi-line form: one entry per line.
+    segments = normalized.split("\n");
+  } else if (normalized.includes(";")) {
+    // HTML/CSS-style delimiter (preferred for single-line): unambiguous — values
+    // keep their spaces and commas (rgba(…), font stacks).
+    segments = normalized.split(";");
+  } else {
+    // Bare single line, no explicit delimiter ("a: 1 b: 2 3 c: 4" or the pos
+    // form "x: 1, y: 2"): split at each "<key>:" boundary so space- or
+    // comma-separated entries with spaced values still parse. The `(?!\/\/)`
+    // spares "http://…" style values from being treated as a key boundary.
+    segments = [];
+    const boundary = /[A-Za-z_][\w-]*\s*:(?!\/\/)/g;
+    const starts = [];
+    let m;
+    while ((m = boundary.exec(normalized)) !== null) starts.push(m.index);
+    for (let k = 0; k < starts.length; k++) {
+      const end = k + 1 < starts.length ? starts[k + 1] : normalized.length;
+      segments.push(normalized.slice(starts[k], end));
+    }
+  }
   for (const seg of segments) {
-    const colonIdx = seg.indexOf(":");
+    const s = seg.trim();
+    const colonIdx = s.indexOf(":");
     if (colonIdx < 0) continue;
-    const key = seg.slice(0, colonIdx).trim();
-    const val = seg.slice(colonIdx + 1).trim();
+    const key = s.slice(0, colonIdx).trim();
+    // Strip any trailing entry delimiter the split left behind (", " / "; ").
+    const val = s.slice(colonIdx + 1).trim().replace(/[;,]+\s*$/, "").trim();
     if (key) result[key] = val;
   }
   return result;
