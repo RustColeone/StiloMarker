@@ -164,10 +164,23 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       connection.clientId = session.clientId ?? connection.clientId;
       connection.sessionId = session.sessionId ?? session.workspace ?? connection.sessionId;
       connection.role = session.role ?? connection.role;
+      // Compare BEFORE adopting the server's revision. If the server advanced
+      // while we were away, another device has newer work and this one must not
+      // push its copy over it — blind local-wins here is what reverted a whole
+      // workspace to an old version.
+      const baseBeforeReconnect = Number(localRevision);
+      const serverRevisionNow = Number(session.revision ?? 0);
       connection.revision = session.revision ?? connection.revision;
       localRevision = connection.revision;
-      // Push everything we changed while offline so the server matches local.
-      await reconcileLocalIntoServer();
+      if (Number.isFinite(baseBeforeReconnect) && baseBeforeReconnect >= serverRevisionNow) {
+        // We are current: push everything we changed while offline.
+        await reconcileLocalIntoServer();
+      } else {
+        // Server moved on. Pull instead; reloadFromServer keeps files we edited.
+        await reloadFromServer(
+          `Server advanced to revision ${serverRevisionNow} while this device was offline — pulled instead of overwriting.`
+        );
+      }
       clearReconnect();
       attachEventStream(reconnectCtx.serverUrl);
       emitStatus("connected", `Reconnected at revision ${connection.revision}.`);
@@ -275,11 +288,70 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     }
   }
 
+  // Files the user has edited locally that the server has not confirmed. A pull
+  // must never silently discard these: a dropped stream followed by a server
+  // pull is exactly what turned "connection blipped" into "everything reverted
+  // to a previous version and my edits are gone".
+  function collectUnsyncedLocalFiles() {
+    const project = getProject();
+    const out = new Map();
+    if (!project?.nodes) return out;
+    const walk = (nodeId, parentPath) => {
+      const node = project.nodes[nodeId];
+      for (const childId of node?.children ?? []) {
+        const child = project.nodes[childId];
+        if (!child) continue;
+        const path = parentPath ? `${parentPath}/${child.name}` : child.name;
+        if (child.kind === "folder") {
+          walk(childId, path);
+        } else if (child.kind === "file" && child.dirty && !isImageName(child.name)) {
+          out.set(path, child.content ?? "");
+        }
+      }
+    };
+    walk(project.rootId, "");
+    return out;
+  }
+
+  // Re-apply (and push) local edits that a just-adopted server snapshot would
+  // otherwise have thrown away. Local wins for files the user was editing; every
+  // other file keeps the server's version.
+  async function restoreUnsyncedFiles(unsynced) {
+    if (!unsynced?.size || !connection) return 0;
+    const serverFiles = new Map(flattenProjectPaths(getProject()).files.map((f) => [f.path, f.content]));
+    let restored = 0;
+    for (const [path, content] of unsynced) {
+      if (!serverFiles.has(path)) continue;            // deleted upstream — don't resurrect
+      if (serverFiles.get(path) === content) continue; // already identical
+      isApplyingRemote = true;
+      try {
+        applyOperation(connection.clientId, { type: "update-file", path, content });
+      } catch {
+        isApplyingRemote = false;
+        continue;
+      }
+      isApplyingRemote = false;
+      try {
+        const result = await pushOperation(connection.serverUrl, connection.token, { type: "update-file", path, content });
+        localRevision = result.revision ?? localRevision;
+        connection.revision = localRevision;
+        restored += 1;
+      } catch {
+        // Keep the local content on screen; the next reconcile/patch retries it.
+        restored += 1;
+      }
+    }
+    if (restored) lastFingerprint = fingerprintProject(getProject());
+    return restored;
+  }
+
   async function reloadFromServer(detail) {
     if (!connection) {
       return;
     }
 
+    // Capture unsaved local work BEFORE the snapshot overwrites the model.
+    const unsynced = collectUnsyncedLocalFiles();
     const snapshot = await fetchSessionState(connection.serverUrl, connection.token);
     presence = snapshot.presence ?? [];
     // Only adopt a well-formed project — never blank the editor on a malformed or
@@ -291,7 +363,13 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       lastFingerprint = fingerprintProject(snapshot.project);
     }
     connection.revision = snapshot.revision ?? connection.revision;
-    emitStatus("connected", detail || `Connected. Reloaded revision ${connection.revision}.`);
+    const restored = await restoreUnsyncedFiles(unsynced);
+    emitStatus(
+      "connected",
+      restored
+        ? `${detail || "Reloaded from server"} — kept ${restored} unsaved file(s).`
+        : (detail || `Connected. Reloaded revision ${connection.revision}.`)
+    );
   }
 
   /**
@@ -335,6 +413,21 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     pendingTextPatches.set(path, entry);
   }
 
+  // A rejected OPERATION is not a broken CONNECTION. A 400/404/422 means the
+  // server refused this one op (e.g. a stale path after a rename, or a file it
+  // doesn't have). Tearing down the whole session for that is what silently
+  // stopped ALL syncing: once disconnected, notifyEditorChanged stops queueing
+  // patches, so the workspace goes quiet while the user keeps typing and the
+  // server revision never moves again. Only transport/auth/server failures are
+  // genuinely fatal to the session.
+  function isFatalSyncError(error) {
+    const status = Number(error?.status);
+    if (!Number.isFinite(status)) return true;          // network/parse failure — really offline
+    if (status === 401 || status === 403) return true;  // auth gone — must re-authenticate
+    if (status >= 500) return true;                     // server side is broken
+    return false;                                       // other 4xx: this op failed, session is fine
+  }
+
   // Send the pending patch for a file, SERIALIZED: at most one patch per file may
   // be in flight at a time. If the previous one hasn't confirmed yet, wait — so
   // the next patch's offsets (and its send-time baseRevision) are always computed
@@ -357,6 +450,12 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       }
       if (isUpgradeError(error)) {
         handleUpgradeRequired(error);
+        return;
+      }
+      if (!isFatalSyncError(error)) {
+        // Drop just this operation and stay connected, so every other file keeps
+        // syncing instead of the whole workspace going silently offline.
+        emitStatus("connected", `Server rejected a change to "${path}" (${error.message || error.status}). Still connected.`);
         return;
       }
       disconnect(error.message || "Sync failed.");
@@ -462,6 +561,10 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     pendingSnapshotTimer = window.setTimeout(() => {
       pendingSnapshotTimer = null;
       publishSnapshot(project).catch((error) => {
+        if (!isFatalSyncError(error)) {
+          emitStatus("connected", `Server rejected a project snapshot (${error.message || error.status}). Still connected.`);
+          return;
+        }
         disconnect(error.message || "Sync failed.");
       });
     }, 120);
@@ -588,12 +691,23 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
             emitStatus("connected", `Connected. Revision ${connection.revision}.`);
             return;
           }
+          // A peer pushed a whole-project snapshot. Keep our unsaved edits: adopting
+          // it blindly is how another tab/device's stale snapshot used to wipe work
+          // in progress here.
+          const unsyncedOnState = collectUnsyncedLocalFiles();
           isApplyingRemote = true;
           replaceProject(event.project);
           isApplyingRemote = false;
           lastFingerprint = fingerprintProject(event.project);
           connection.revision = event.revision ?? connection.revision;
-          emitStatus("connected", `Connected. Synced remote revision ${connection.revision}.`);
+          void restoreUnsyncedFiles(unsyncedOnState).then((restored) => {
+            emitStatus(
+              "connected",
+              restored
+                ? `Synced remote revision ${connection.revision} — kept ${restored} unsaved file(s).`
+                : `Connected. Synced remote revision ${connection.revision}.`
+            );
+          });
           return;
         }
 
@@ -658,7 +772,24 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     reconnectCtx = { serverUrl, accountToken, team, path, device };
     clearReconnect();
 
-    if (options.reconcileLocal) {
+    // Pull-vs-push, REVISION GATED. Pushing this device's copy over the server is
+    // only safe when we are based on the server's current revision (we were in
+    // sync, then edited offline). If the server moved on since we last synced,
+    // our copy is stale and pushing it would overwrite newer work from another
+    // device — that is exactly how a whole workspace got reverted to an old
+    // version. When the base is unknown or behind, PULL.
+    const serverRevision = Number(session.revision ?? 0);
+    const localBase = Number(options.localBaseRevision);
+    const localIsCurrent = Number.isFinite(localBase) && localBase >= serverRevision;
+    const shouldReconcile = Boolean(options.reconcileLocal) && localIsCurrent;
+    if (options.reconcileLocal && !localIsCurrent) {
+      emitStatus(
+        "connected",
+        `Server is at revision ${serverRevision}, ahead of this device (${Number.isFinite(localBase) ? localBase : "unknown"}) — pulling instead of overwriting it.`
+      );
+    }
+
+    if (shouldReconcile) {
       await reconcileLocalIntoServer(); // keep local view, push it to the server
       emitStatus("connected", `Opened ${session.workspace} — restored unsynced changes.`);
     } else {

@@ -13,6 +13,11 @@ function createDefaultSettings() {
     source: "shown",
     wordWrap: true,
     indentStyle: "tab",
+    // Source (editor + gutter) typography. sourceFontFamily is a bare family
+    // name the user picked or typed; "" means the default monospace stack. A
+    // font that isn't installed simply falls back to that stack.
+    sourceFontSize: 13,
+    sourceFontFamily: "",
     explorerFilter: "all",
     debugPanel: false,
     sidebarWidth: 280,
@@ -46,7 +51,11 @@ function createDefaultSettings() {
     agentModel: "",
     // "team/path" when the locally-stored project is a cloud workspace's content,
     // so a reload with unsaved edits can push local instead of pulling over it.
-    syncedProjectId: null
+    syncedProjectId: null,
+    // Server revision this browser's copy of syncedProjectId was last in sync
+    // with. Used to decide push-vs-pull on reopen; null means "unknown, treat as
+    // stale and pull" so an out-of-date device can never overwrite newer work.
+    syncedRevision: null
   };
 }
 
@@ -92,4 +101,29 @@ function applyTheme(settings) {
   document.documentElement.dataset.theme = theme;
 }
 
-export { applyTheme, loadSettings, saveSettings };
+const SOURCE_FONT_SIZE_MIN = 10;
+const SOURCE_FONT_SIZE_MAX = 28;
+
+function clampSourceFontSize(value) {
+  const n = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(n)) return 13;
+  return Math.min(SOURCE_FONT_SIZE_MAX, Math.max(SOURCE_FONT_SIZE_MIN, n));
+}
+
+/** A user-supplied family name as a safe CSS font-family value. Strips the
+ *  characters that could break out of the declaration, then quotes it and keeps
+ *  the default mono stack as the fallback for a font that isn't installed. */
+function cssFontFamily(name) {
+  const clean = String(name ?? "").replace(/["';{}<>\\]/g, "").trim();
+  return clean ? `"${clean}", var(--font-mono)` : "var(--font-mono)";
+}
+
+/** Push the source-pane typography settings onto the :root CSS variables that
+ *  the editor and its gutter read. */
+function applyEditorFont(settings) {
+  const root = document.documentElement;
+  root.style.setProperty("--editor-font-size", `${clampSourceFontSize(settings?.sourceFontSize)}px`);
+  root.style.setProperty("--editor-font-family", cssFontFamily(settings?.sourceFontFamily));
+}
+
+export { applyEditorFont, applyTheme, clampSourceFontSize, cssFontFamily, loadSettings, saveSettings };

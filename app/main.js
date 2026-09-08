@@ -9,7 +9,7 @@ import { dataUrlToBlob, getExportBytes, getMimeTypeForFileName, readFileAsProjec
 import { extractMarkdownLinks, renderMarkdown } from "./services/markdown-service.js";
 import { buildModuleMapSection, replaceOrAppendModuleMap } from "./services/mtree-module-map-service.js";
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
-import { applyTheme, loadSettings, saveSettings } from "./services/settings-service.js";
+import { applyEditorFont, applyTheme, clampSourceFontSize, loadSettings, saveSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
 import { createFileSnapshot, deleteVersion, diffLines, getVersionContent, listFileVersions, listSnapshotPaths } from "./services/snapshot-service.js";
 import { clearViewStates, loadViewStates, saveViewStates } from "./services/view-state-service.js";
@@ -164,6 +164,10 @@ const elements = {
   previewSelect: query("#preview-select"),
   wordWrapSelect: query("#word-wrap-select"),
   indentStyleSelect: query("#indent-style-select"),
+  sourceFontSizeSelect: query("#source-font-size-select"),
+  sourceFontFamilySelect: query("#source-font-family-select"),
+  sourceFontCustomRow: query("#source-font-custom-row"),
+  sourceFontCustomInput: query("#source-font-custom-input"),
   bmapGenerateScopeSelect: query("#bmap-generate-scope-select"),
   bmapAutoPanInput: query("#bmap-auto-pan-input"),
   serverUrlInput: query("#server-url-input"),
@@ -294,6 +298,8 @@ const elements = {
   statusBrowserItem: query("#status-browser-item"),
   statusServerItem: query("#status-server-item"),
   statusPresenceItem: query("#status-presence-item"),
+  statusCharCountItem: query("#status-charcount-item"),
+  statusCharCountText: query("#status-charcount-text"),
   previewToggleActivityButton: query("#preview-toggle-activity-button"),
   chatToggleActivityButton: query("#chat-toggle-activity-button"),
   debugPanel: query("#debug-panel"),
@@ -326,6 +332,10 @@ const controller = createProjectController(storedProject ?? seedDefaultProject()
 let sourceOpenTabIds = controller.getProject().activeFileId ? [controller.getProject().activeFileId] : [];
 let previewOpenTabIds = controller.getProject().activeFileId ? [controller.getProject().activeFileId] : [];
 let previewFileId = controller.getProject().activeFileId ?? null;
+// Total source characters of the active file, cached for the footer counter by
+// updateStatus. null → no text file open (the counter hides). Declared up here so
+// the hoisted updateStatus can never touch it inside its temporal dead zone.
+let statusCharTotal = null;
 let previewUrlDbEntry = null;
 let sourceUrlDbEntry = null;
 // Per-document view state (bmap pan/zoom, editor scroll), cached so users resume
@@ -3120,6 +3130,24 @@ async function createSnapshotNow(label = "") {
   }
 }
 
+// Snapshot every file with unsaved local changes, so a pull that adopts newer
+// server content can never make those edits unrecoverable. Best-effort: snapshot
+// storage problems must not block opening a workspace.
+async function snapshotDirtyFiles(label) {
+  const project = controller.getProject();
+  const key = snapshotProjectKey();
+  let saved = 0;
+  for (const node of Object.values(project?.nodes ?? {})) {
+    if (node?.kind !== "file" || !node.dirty || !isTextFileName(node.name)) continue;
+    try {
+      const result = await createFileSnapshot(key, getPath(project, node.id), node.content ?? "", label);
+      if (result?.created) saved += 1;
+    } catch { /* storage unavailable — never block the open */ }
+  }
+  if (saved) logDebug("action", "Snapshotted unsaved files", `${saved} file(s) — ${label}`);
+  return saved;
+}
+
 function formatSnapshotTime(ts) {
   const d = new Date(ts);
   return Number.isNaN(d.getTime())
@@ -3714,6 +3742,8 @@ function createMarkdownReference(activeFile, targetFile) {
 }
 
 applyTheme(settings);
+applyEditorFont(settings);
+syncSourceFontControls();
 elements.themeSelect.value = settings.theme;
 elements.serverUrlInput.value = settings.serverUrl;
 elements.serverPinInput.value = settings.serverPin;
@@ -3826,6 +3856,13 @@ const collaboration = createCollaborationRuntime({
     pruneRemoteCursors(syncState.presence);
     syncState.sessionId = nextState.sessionId;
     syncState.revision = nextState.revision ?? 0;
+    // Keep the "what revision is this browser's copy based on" marker current
+    // while we're genuinely in sync. It decides, on the next open, whether this
+    // device may push its copy over the server or must pull. Persisted on unload;
+    // if it's ever missing we treat this device as stale and pull (fail-safe).
+    if (nextState.status === "connected" && workspaceMode === "synced" && settings.syncedProjectId) {
+      settings.syncedRevision = syncState.revision;
+    }
     syncState.displayName = nextState.displayName ?? null;
     syncState.clientId = nextState.clientId ?? null;
     syncState.role = nextState.role ?? null;
@@ -3875,8 +3912,15 @@ const collaboration = createCollaborationRuntime({
       // should restore the user's own private project.
       const wasCloud = Boolean(settings.syncedProjectId) || Boolean(settings.lastWorkspace?.team);
       if (wasCloud) {
-        workspaceMode = "private";
+        // STAY in synced mode. Flipping to "private" here is what silently killed
+        // syncing for good: notifyEditorChanged only schedules a patch while
+        // workspaceMode === "synced", so after one dropped stream every later
+        // keystroke lived only in this tab (server revision never moved) — and the
+        // next server pull replaced hours of work with the stale snapshot. Staying
+        // synced means patches resume as soon as the stream is back, and
+        // reconcileLocalIntoServer() pushes everything changed while offline.
         privateProjectSnapshot = null; // don't later clobber the on-screen content
+        syncState.detail = "Offline — edits are saved locally and will sync when the connection returns.";
         render(controller.getProject());
         return;
       }
@@ -7569,6 +7613,43 @@ function renderPresence(presence) {
   });
 }
 
+// ---- Footer character count ----------------------------------------------
+// The active file's source length, switching to "selected / total" while text is
+// highlighted in the editor. It counts SOURCE characters (what the editor holds),
+// so highlighting rendered text in the preview doesn't apply. updateStatus caches
+// the total so a drag-select only recomputes the cheap selection part.
+// (`statusCharTotal` is declared with the other module state near the top, so the
+// hoisted updateStatus can never read it inside its temporal dead zone.)
+function renderCharCount() {
+  const item = elements.statusCharCountItem;
+  const label = elements.statusCharCountText;
+  if (!item || !label) return;
+  if (statusCharTotal == null) {
+    item.hidden = true;
+    return;
+  }
+  const { start, end } = getEditorSelection(); // {0,0} unless the editor holds the selection
+  const selected = Math.max(0, end - start);
+  const total = statusCharTotal.toLocaleString();
+  label.textContent = selected > 0 ? `${selected.toLocaleString()} / ${total} chars` : `${total} chars`;
+  item.title = selected > 0
+    ? `${selected.toLocaleString()} characters selected of ${total}`
+    : `${total} characters in this file`;
+  item.hidden = false;
+}
+
+// selectionchange fires continuously while dragging; coalesce to one update per
+// frame so the count stays cheap on large files.
+let _charCountFrame = 0;
+function scheduleCharCount() {
+  if (_charCountFrame) return;
+  _charCountFrame = requestAnimationFrame(() => {
+    _charCountFrame = 0;
+    renderCharCount();
+  });
+}
+document.addEventListener("selectionchange", scheduleCharCount);
+
 function updateStatus(project) {
   const liveDirectory = project.sourceMode === "filesystem";
   const localWorkspace = project.sourceMode === "opfs";
@@ -7642,6 +7723,7 @@ function updateStatus(project) {
   setStatusDot(elements.serverIndicator, syncState.status === "connected" ? "is-success" : (syncState.status === "reachable" || syncState.status === "reconnecting") ? "is-warning" : "is-danger");
 
   renderPresence(syncState.presence);
+  renderMobilePaneCaption(); // tracks the active/preview file, not just the view
 
   const activeFile = project.activeFileId ? project.nodes[project.activeFileId] : null;
   const previewFile = previewFileId ? project.nodes[previewFileId] : null;
@@ -7661,6 +7743,8 @@ function updateStatus(project) {
     renderPreviewOrDiff(project, previewFile); // diff tab still shows if it's the active preview tab
     renderLinksPanel(project, null);
     renderChatPanel(project);
+    statusCharTotal = null; // nothing open → hide the character count
+    renderCharCount();
     return;
   }
 
@@ -7676,6 +7760,10 @@ function updateStatus(project) {
       ? formatUrlDbEntryBody(selectedEntry.entry)
       : activeFile.content
     : `[${activeFile.name}]\n\nThis image asset is preview-only in the source pane.\nUse the preview pane to inspect it or Explorer > Add File to replace it.`;
+  // Cache the total for the footer counter — the source text the editor holds
+  // (an image placeholder isn't file content, so the counter hides for those).
+  // Painted at the end of this pass, once the editor DOM/selection is in sync.
+  statusCharTotal = isTextFile ? nextText.length : null;
   const fileChanged = activeFile.id !== lastRenderedFileId;
   const editorHasFocus = elements.editorContent === document.activeElement;
   if (fileChanged) {
@@ -7733,6 +7821,7 @@ function updateStatus(project) {
   renderPreviewOrDiff(project, previewFile);
   renderLinksPanel(project, activeFile);
   renderChatPanel(project);
+  renderCharCount(); // after the editor DOM/selection settled above
 }
 
 // Paint the preview pane: either the diff overlay (when the diff tab is the active
@@ -7862,11 +7951,17 @@ async function runAutoSave(reason) {
       await flushOpfsProject(); // durable: mirror to the OPFS directory
     }
     // memory/import already mirror to localStorage on every render.
-    const synced = workspaceMode === "synced" && collaboration.isConnected?.();
-    const savable = synced
-      // Only clear dirty once the server has confirmed the text (nothing pending
-      // / in-flight / mid-reconnect) so the ● never lies about being saved.
-      ? dirty.filter((id) => !collaboration.hasUnsyncedText?.(getPath(project, id)))
+    // A cloud workspace's durable home is the SERVER, so only clear dirty once the
+    // server confirmed the text (nothing pending / in-flight / mid-reconnect) —
+    // the ● must never lie about being saved. While OFFLINE nothing is confirmed,
+    // so every edit stays dirty: that flag is exactly what tells a later reconnect
+    // (and the pull guards in collaboration-service) which files still need
+    // pushing. Clearing it offline is what let a reconnect drop hours of work.
+    const cloud = workspaceMode === "synced";
+    const savable = cloud
+      ? (collaboration.isConnected?.()
+          ? dirty.filter((id) => !collaboration.hasUnsyncedText?.(getPath(project, id)))
+          : [])
       : dirty;
     if (savable.length) {
       controller.markManySaved(savable);
@@ -9177,14 +9272,22 @@ function applyMobileViewState() {
   }
   elements.mobileChatToggle?.classList.toggle("is-active", mobileView === "chat");
   elements.mobileChatToggle?.setAttribute("aria-pressed", String(mobileView === "chat"));
-  // Topbar caption (replaces the per-pane header on mobile): SOURCE/PREVIEW plus
-  // the active file name, truncated by CSS to the available width.
+  renderMobilePaneCaption();
+}
+
+// Topbar caption (replaces the per-pane header on mobile): SOURCE/PREVIEW plus
+// the file name, truncated by CSS. This depends on which FILE is showing, not
+// just which view, so updateStatus refreshes it on every render — otherwise
+// switching files left a stale name in the mobile topbar.
+function renderMobilePaneCaption() {
   if (elements.mobilePaneCaption) {
     let caption = "";
     if (mobileView === "chat") {
       caption = "CHAT";
     } else if (mobileView === "preview") {
-      const name = controller.getProject()?.nodes?.[previewFileId]?.name;
+      const name = previewFileId === DIFF_TAB_ID
+        ? (diffState.active ? `${diffState.path.split("/").pop()} (diff)` : null)
+        : controller.getProject()?.nodes?.[previewFileId]?.name;
       caption = name ? `PREVIEW — ${name}` : "PREVIEW";
     } else {
       const name = controller.getActiveFile()?.name;
@@ -9670,6 +9773,67 @@ elements.wordWrapSelect.addEventListener("change", (event) => {
   persistSettings();
   render(controller.getProject());
   logDebug("action", "Word wrap changed", settings.wordWrap ? "on" : "off");
+});
+
+// ---- Source typography (Appearance) --------------------------------------
+// Reflect the stored settings into the controls. A family that isn't one of the
+// curated options is shown as "Custom…" with the name in the text field.
+function syncSourceFontControls() {
+  if (elements.sourceFontSizeSelect) {
+    const size = clampSourceFontSize(settings.sourceFontSize);
+    const listed = [...elements.sourceFontSizeSelect.options].some((o) => Number(o.value) === size);
+    elements.sourceFontSizeSelect.value = String(listed ? size : 13);
+  }
+  const select = elements.sourceFontFamilySelect;
+  if (!select) return;
+  const family = String(settings.sourceFontFamily ?? "").trim();
+  const isCurated = [...select.options].some((o) => o.value === family && o.value !== "__custom__");
+  if (family && !isCurated) {
+    select.value = "__custom__";
+    if (elements.sourceFontCustomInput) elements.sourceFontCustomInput.value = family;
+  } else {
+    select.value = family;
+    if (elements.sourceFontCustomInput) elements.sourceFontCustomInput.value = "";
+  }
+  if (elements.sourceFontCustomRow) elements.sourceFontCustomRow.hidden = select.value !== "__custom__";
+}
+
+// Persist + repaint after a typography change. Glyph metrics just changed, so
+// every measured overlay (caret, remote cursors, search highlights) and the
+// gutter's scroll sync must be recomputed.
+function applySourceFontChange(label) {
+  persistSettings();
+  applyEditorFont(settings);
+  render(controller.getProject());
+  renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
+  if (searchState.open) computeSearchMatches({ keepCaret: true });
+  syncEditorScroll();
+  logDebug("action", "Source typography changed", label);
+}
+
+elements.sourceFontSizeSelect?.addEventListener("change", (event) => {
+  settings.sourceFontSize = clampSourceFontSize(event.target.value);
+  applySourceFontChange(`${settings.sourceFontSize}px`);
+});
+
+elements.sourceFontFamilySelect?.addEventListener("change", (event) => {
+  if (event.target.value === "__custom__") {
+    // Reveal the field and wait for a name — don't clear the current font yet.
+    if (elements.sourceFontCustomRow) elements.sourceFontCustomRow.hidden = false;
+    elements.sourceFontCustomInput?.focus();
+    return;
+  }
+  if (elements.sourceFontCustomRow) elements.sourceFontCustomRow.hidden = true;
+  if (elements.sourceFontCustomInput) elements.sourceFontCustomInput.value = "";
+  settings.sourceFontFamily = event.target.value;
+  applySourceFontChange(settings.sourceFontFamily || "default");
+});
+
+// Commit on blur/Enter rather than each keystroke, so a half-typed name doesn't
+// repaint the editor on every character.
+elements.sourceFontCustomInput?.addEventListener("change", (event) => {
+  settings.sourceFontFamily = String(event.target.value ?? "").trim();
+  applySourceFontChange(settings.sourceFontFamily || "default");
 });
 
 elements.indentStyleSelect.addEventListener("change", (event) => {
@@ -10641,15 +10805,40 @@ async function handleOpenWorkspace(team, path, options = {}) {
       privateProjectSnapshot = controller.getProject();
     }
     workspaceMode = "synced";
+    // Reopening the workspace the local project ALREADY is (boot auto-restore, a
+    // second tab, a manual reopen): if this browser still holds unsaved edits for
+    // it, ASK to push them instead of pulling. Whether that push actually happens
+    // is decided inside openWorkspace by comparing revisions — a device whose copy
+    // is older than the server must never overwrite it (that is what reverted the
+    // whole workspace to an old version). A first open of a *different* workspace
+    // always pulls, so one project's files can never leak into another.
+    const reopeningSameWorkspace = settings.syncedProjectId === `${team}/${path}`;
+    const hasUnsavedLocalEdits = Object.values(controller.getProject()?.nodes ?? {})
+      .some((node) => node?.kind === "file" && node.dirty);
+    const reconcileLocal = Boolean(options.reconcileLocal)
+      || (reopeningSameWorkspace && hasUnsavedLocalEdits);
+    // Safety net: snapshot unsaved work before opening. If the server turns out to
+    // be ahead and we pull, those edits stay recoverable from Snapshots instead of
+    // vanishing.
+    if (reopeningSameWorkspace && hasUnsavedLocalEdits) {
+      await snapshotDirtyFiles("auto: before reopening workspace");
+    }
     const session = await collaboration.openWorkspace(
       settings.serverUrl, syncState.account.token, team, path,
-      { reconcileLocal: Boolean(options.reconcileLocal), device: getDeviceId() }
+      {
+        reconcileLocal,
+        device: getDeviceId(),
+        // The server revision this browser's copy was last in sync with. Unknown
+        // (null) is treated as stale, so we pull rather than risk overwriting.
+        localBaseRevision: reopeningSameWorkspace ? settings.syncedRevision : null
+      }
     );
     settings.wasConnected = false; // cloud opens are account-driven, not PIN auto-reconnect
     settings.lastWorkspace = { team, path }; // reopened on next boot
     settings.syncedProjectId = `${team}/${path}`; // the local project IS this cloud workspace now
+    settings.syncedRevision = collaboration.getRevision?.() ?? null; // base for the next open
     saveSettings(settings);
-    logDebug("action", options.reconcileLocal ? "Reopened cloud workspace (restored local)" : "Opened cloud workspace", `${team}/${path}`);
+    logDebug("action", reconcileLocal ? "Reopened cloud workspace (restored local)" : "Opened cloud workspace", `${team}/${path}`);
     if (elements.openServerDialog?.open) elements.openServerDialog.close();
     render(controller.getProject());
     // Restore the files this user had open here last time (server-side resume).
@@ -10859,6 +11048,7 @@ elements.connectServerButton.addEventListener("click", async () => {
 
 window.addEventListener("beforeunload", (event) => {
   captureViewState(); // remember where the user was before they leave
+  saveSettings(settings); // persist syncedRevision so the next open can compare
   const activeFile = controller.getActiveFile();
   if (activeFile?.dirty) {
     event.preventDefault();

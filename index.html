@@ -321,6 +321,9 @@
           <span id="presence-dots" class="peer-badge-dots" aria-hidden="true"></span>
           <span id="presence-summary-text">0 collaborators</span>
         </button>
+        <div id="status-charcount-item" class="status-item status-item-charcount" hidden>
+          <span id="status-charcount-text"></span>
+        </div>
       </footer>
     </div>
 
@@ -383,6 +386,49 @@
                 <option value="hidden">Hidden</option>
               </select>
             </label>
+
+            <label>
+              Source Font Size
+              <select id="source-font-size-select">
+                <option value="10">10 px</option>
+                <option value="11">11 px</option>
+                <option value="12">12 px</option>
+                <option value="13">13 px (default)</option>
+                <option value="14">14 px</option>
+                <option value="15">15 px</option>
+                <option value="16">16 px</option>
+                <option value="18">18 px</option>
+                <option value="20">20 px</option>
+                <option value="24">24 px</option>
+                <option value="28">28 px</option>
+              </select>
+            </label>
+
+            <label>
+              Source Font
+              <select id="source-font-family-select">
+                <option value="">Default (system monospace)</option>
+                <option value="Cascadia Code">Cascadia Code</option>
+                <option value="JetBrains Mono">JetBrains Mono</option>
+                <option value="Fira Code">Fira Code</option>
+                <option value="Source Code Pro">Source Code Pro</option>
+                <option value="IBM Plex Mono">IBM Plex Mono</option>
+                <option value="Roboto Mono">Roboto Mono</option>
+                <option value="Consolas">Consolas</option>
+                <option value="Menlo">Menlo</option>
+                <option value="Monaco">Monaco</option>
+                <option value="SF Mono">SF Mono</option>
+                <option value="Ubuntu Mono">Ubuntu Mono</option>
+                <option value="Courier New">Courier New</option>
+                <option value="__custom__">Custom&hellip;</option>
+              </select>
+            </label>
+
+            <label id="source-font-custom-row" hidden>
+              Custom Font Name
+              <input id="source-font-custom-input" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. Operator Mono">
+            </label>
+            <p class="subtle-label">Uses a font already installed on this device. If it isn&rsquo;t installed, the source pane falls back to the default monospace stack.</p>
 
             <label>
               Word Wrap

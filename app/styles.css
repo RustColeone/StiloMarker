@@ -26,6 +26,11 @@
   --focus-ring: 0 0 0 1px var(--accent);
   --font-ui: "Segoe UI", Tahoma, sans-serif;
   --font-mono: "Cascadia Code", Consolas, "Courier New", monospace;
+  /* Source-pane typography (Settings > Appearance). applyEditorFont() overrides
+     these on :root; the editor, its gutter and line metrics all derive from them
+     so changing one value resizes the whole source pane consistently. */
+  --editor-font-family: var(--font-mono);
+  --editor-font-size: 13px;
   --topbar-height: 42px;
   --status-height: 24px;
   --activity-width: 48px;
@@ -1434,8 +1439,8 @@ p {
   border-right: 1px solid var(--border);
   background: var(--surface-1);
   color: var(--text-dim);
-  font-family: var(--font-mono);
-  font-size: 13px;
+  font-family: var(--editor-font-family);
+  font-size: var(--editor-font-size);
   line-height: 1.6;
   text-align: right;
   user-select: none;
@@ -1453,7 +1458,7 @@ p {
 
 .editor-gutter-line,
 .editor-line {
-  min-height: calc(13px * 1.6);
+  min-height: calc(var(--editor-font-size) * 1.6);
 }
 
 .editor-gutter-line {
@@ -1570,8 +1575,8 @@ p {
   overflow: auto;
   color: var(--text);
   caret-color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 13px;
+  font-family: var(--editor-font-family);
+  font-size: var(--editor-font-size);
   line-height: 1.6;
   tab-size: var(--indent-tab-size, 4);
   cursor: text;
@@ -2388,6 +2393,17 @@ p {
 .status-item-grow {
   justify-content: flex-end;
   margin-left: auto;
+}
+
+/* .status-item sets display:flex, which would otherwise defeat [hidden]. */
+.status-item[hidden] {
+  display: none;
+}
+
+/* Tabular figures so the count doesn't jitter the bar as digits change. */
+.status-item-charcount {
+  padding: 2px 6px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Status-bar items that act as shortcuts to related menus/panels. */
@@ -3345,7 +3361,7 @@ menu {
 }
 
 .editor-line.is-empty {
-  min-height: calc(13px * 1.6);
+  min-height: calc(var(--editor-font-size) * 1.6);
 }
 
 .editor-line.is-empty::before {
