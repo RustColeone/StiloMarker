@@ -5,7 +5,14 @@ import { dataUrlToBytes } from "./file-content-service.js";
 // content. MUST be bumped together with the service-worker CACHE_NAME
 // (mdnotes-shell-vN) on every deploy; the server's MIN_CLIENT_VERSION gate uses it.
 // Pre-gate clients (≤ v73) send no version and are read as 0 → always refused.
-const CLIENT_VERSION = 79;
+const CLIENT_VERSION = 98;
+
+// Identifies THIS page load. Sent with every workspace open so the server log can
+// tell apart the two very different causes of repeated opens: many distinct
+// pageIds means the page itself keeps reloading, while one pageId opening over and
+// over means a single tab is reconnecting (a network / stream problem).
+const PAGE_ID = `pg-${Math.random().toString(36).slice(2, 10)}`;
+const PAGE_LOADED_AT = Date.now();
 
 function normalizeServerUrl(serverUrl) {
   const value = (serverUrl ?? "").trim();
@@ -162,12 +169,17 @@ async function hostSession(serverUrl, displayName) {
   return parseResponse(response);
 }
 
-async function openWorkspaceSession(serverUrl, accountToken, team, path, device) {
+async function openWorkspaceSession(serverUrl, accountToken, team, path, device, reason = "unspecified") {
   const baseUrl = normalizeServerUrl(serverUrl);
   const response = await fetch(`${baseUrl}/api/workspaces/open?token=${encodeURIComponent(accountToken)}`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({ team, path, device, version: CLIENT_VERSION })
+    body: JSON.stringify({
+      team, path, device, version: CLIENT_VERSION,
+      // Diagnostics: which code path asked, from which page load, how long that
+      // page has been alive. Enough to explain any repeated-open pattern.
+      reason, pageId: PAGE_ID, uptimeMs: Date.now() - PAGE_LOADED_AT
+    })
   });
   if (!response.ok) {
     await throwForResponse("Could not open workspace.", response);
@@ -242,6 +254,93 @@ async function setAccess(serverUrl, accountToken, team, path, whitelist, blackli
     await throwForResponse("Could not update access list.", response);
   }
   return parseResponse(response);
+}
+
+// ---- Line comments (notes anchored to a line, stored beside the project) -----
+function listComments(serverUrl, accountToken, team, path) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const query = new URLSearchParams({ token: accountToken, team, path });
+  return fetch(`${baseUrl}/api/comments?${query.toString()}`, { method: "GET", headers: { accept: "application/json" } })
+    .then(async (response) => {
+      if (!response.ok) await throwForResponse("Could not load comments.", response);
+      return parseResponse(response);
+    });
+}
+
+function commentPost(serverUrl, accountToken, route, body, failure) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  return fetch(`${baseUrl}/api/comments${route}?token=${encodeURIComponent(accountToken)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify(body)
+  }).then(async (response) => {
+    if (!response.ok) await throwForResponse(failure, response);
+    return parseResponse(response);
+  });
+}
+
+function saveComment(serverUrl, accountToken, team, path, comment) {
+  return commentPost(serverUrl, accountToken, "", { team, path, ...comment }, "Could not save the comment.");
+}
+
+function deleteComment(serverUrl, accountToken, team, path, id) {
+  return commentPost(serverUrl, accountToken, "/delete", { team, path, id }, "Could not delete the comment.");
+}
+
+// Tell the server where comments ended up after edits moved their lines.
+function reanchorComments(serverUrl, accountToken, team, path, file, moves) {
+  return commentPost(serverUrl, accountToken, "/reanchor", { team, path, file, moves }, "Could not update comment anchors.");
+}
+
+// ---- Server-side snapshots (per-file version history for a cloud workspace) --
+// Stored on the server so history follows the user across devices, instead of
+// living in one browser's IndexedDB.
+async function snapshotGet(serverUrl, accountToken, route, params, failure) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const query = new URLSearchParams({ token: accountToken, ...params });
+  const response = await fetch(`${baseUrl}/api/snapshots${route}?${query.toString()}`, {
+    method: "GET",
+    headers: { accept: "application/json" }
+  });
+  if (!response.ok) {
+    await throwForResponse(failure, response);
+  }
+  return parseResponse(response);
+}
+
+async function snapshotPost(serverUrl, accountToken, route, body, failure) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const response = await fetch(`${baseUrl}/api/snapshots${route}?token=${encodeURIComponent(accountToken)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    await throwForResponse(failure, response);
+  }
+  return parseResponse(response);
+}
+
+function listServerSnapshotPaths(serverUrl, accountToken, team, path) {
+  return snapshotGet(serverUrl, accountToken, "", { team, path }, "Could not list snapshots.");
+}
+
+function listServerSnapshotVersions(serverUrl, accountToken, team, path, file) {
+  return snapshotGet(serverUrl, accountToken, "/versions", { team, path, file }, "Could not list snapshot versions.");
+}
+
+function getServerSnapshotContent(serverUrl, accountToken, team, path, id) {
+  return snapshotGet(serverUrl, accountToken, "/content", { team, path, id }, "Could not read snapshot.");
+}
+
+// `createdAt` is only sent when migrating a historical local snapshot, so the
+// server keeps its original time and treats a re-upload as a no-op.
+function createServerSnapshot(serverUrl, accountToken, team, path, file, content, label = "", createdAt = undefined) {
+  return snapshotPost(serverUrl, accountToken, "", { team, path, file, content, label, createdAt }, "Could not save snapshot.");
+}
+
+function deleteServerSnapshot(serverUrl, accountToken, team, path, id) {
+  return snapshotPost(serverUrl, accountToken, "/delete", { team, path, id }, "Could not delete snapshot.");
 }
 
 // Persist which files the user has open in a cloud workspace, so they can be
@@ -324,7 +423,7 @@ async function fetchSessionState(serverUrl, token) {
   return parseResponse(response);
 }
 
-async function pushSessionState(serverUrl, token, project) {
+async function pushSessionState(serverUrl, token, project, baseRevision) {
   const baseUrl = normalizeServerUrl(serverUrl);
   const response = await fetch(`${baseUrl}/api/session/state?token=${encodeURIComponent(token)}`, {
     method: "POST",
@@ -332,7 +431,7 @@ async function pushSessionState(serverUrl, token, project) {
       "content-type": "application/json",
       accept: "application/json"
     },
-    body: JSON.stringify({ project: sanitizeProjectForSync(project) })
+    body: JSON.stringify({ project: sanitizeProjectForSync(project), baseRevision })
   });
 
   if (!response.ok) {
@@ -398,13 +497,20 @@ export {
   browseServer,
   connectToServer,
   createProjectServer,
+  createServerSnapshot,
   createWorkspace,
   deleteServer,
+  deleteComment,
+  deleteServerSnapshot,
   exportProjectServer,
   fetchSessionState,
   getAccess,
+  getServerSnapshotContent,
   hostSession,
   importProjectServer,
+  listComments,
+  listServerSnapshotPaths,
+  listServerSnapshotVersions,
   listWorkspaces,
   loginToServer,
   mkdirServer,
@@ -415,6 +521,8 @@ export {
   pushCursor,
   pushOperation,
   pushSessionState,
+  reanchorComments,
+  saveComment,
   sanitizeProjectForSync,
   saveUserState,
   setAccess,

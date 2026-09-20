@@ -89,6 +89,20 @@ function saveSettings(settings) {
   globalThis.localStorage?.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
 
+// Merge a patch into whatever is stored RIGHT NOW, instead of writing this tab's
+// whole in-memory settings object. `patchFor(stored)` returns the fields to write,
+// or null to write nothing. Used where a tab saves without the user acting (page
+// unload), so it can't clobber changes another tab saved since this one loaded.
+function patchStoredSettings(patchFor) {
+  try {
+    const raw = globalThis.localStorage?.getItem(SETTINGS_KEY);
+    const stored = raw ? JSON.parse(raw) : {};
+    const patch = patchFor(stored);
+    if (!patch) return;
+    globalThis.localStorage?.setItem(SETTINGS_KEY, JSON.stringify({ ...stored, ...patch }));
+  } catch { /* storage unavailable or corrupt — nothing safe to do */ }
+}
+
 function resolveTheme(theme) {
   if (theme === "system") {
     return globalThis.matchMedia?.("(prefers-color-scheme: dark)")?.matches ? "dark" : "light";
@@ -126,4 +140,4 @@ function applyEditorFont(settings) {
   root.style.setProperty("--editor-font-family", cssFontFamily(settings?.sourceFontFamily));
 }
 
-export { applyEditorFont, applyTheme, clampSourceFontSize, cssFontFamily, loadSettings, saveSettings };
+export { applyEditorFont, applyTheme, clampSourceFontSize, cssFontFamily, loadSettings, patchStoredSettings, saveSettings };
