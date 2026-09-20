@@ -2418,6 +2418,8 @@ class WorkspaceRegistry:
             raise ValueError("File is too large to snapshot")
         blob = hashlib.sha256(raw).hexdigest()
         directory = self._snapshot_dir(team, relpath)
+        # Before _snapshot_lock, deliberately — see _snapshot_counter_baseline.
+        counter_baseline = self._snapshot_counter_baseline(team, relpath, file_path)
         with self._snapshot_lock:
             index = self._snapshot_load(directory)
             versions = index["files"].setdefault(key, [])
@@ -2456,7 +2458,7 @@ class WorkspaceRegistry:
                 # taking a snapshot must never bump a revision or mark the path
                 # changed, or snapshotting a file you are editing would make
                 # your own next write conflict.
-                **self._snapshot_counter_baseline(team, relpath, file_path),
+                **counter_baseline,
             }
             versions.append(version)
             versions.sort(key=lambda v: v.get("createdAt", 0), reverse=True)  # newest first
@@ -2467,22 +2469,33 @@ class WorkspaceRegistry:
         return {"created": True, "version": version}
 
     def _snapshot_counter_baseline(self, team, relpath, file_path):
-        """The file's edit counters right now, or {} if the workspace isn't live."""
+        """The file's edit counters right now, or {} if the workspace isn't live.
+
+        Taken under the broker's own lock: apply_operation bumps these three
+        fields together, and reading them unlocked could catch a rollover
+        half-applied (a sitting number from before it, an edit count from
+        after) — a baseline that never existed.
+
+        Call this BEFORE acquiring _snapshot_lock, never inside it. Holding the
+        two at once would invent a lock order that other snapshot paths do not
+        share, and the one deadlock this codebase can afford is none.
+        """
         broker = self.get_broker(f"{team}/{relpath}")
         if broker is None:
             return {}
-        try:
-            node_id = broker._get_node_id_by_path(str(file_path))
-            node = broker.project["nodes"][node_id] if node_id else None
-        except (KeyError, TypeError):
-            node = None
-        if not node:
-            return {}
-        return {
-            "editSessions": int(node.get("editSessions", 0) or 0),
-            "sessionEdits": int(node.get("sessionEdits", 0) or 0),
-            "sourceVersion": int(node.get("sourceVersion", 0) or 0),
-        }
+        with broker.lock:
+            try:
+                node_id = broker._get_node_id_by_path(str(file_path))
+                node = broker.project["nodes"][node_id] if node_id else None
+            except (KeyError, TypeError):
+                node = None
+            if not node:
+                return {}
+            return {
+                "editSessions": int(node.get("editSessions", 0) or 0),
+                "sessionEdits": int(node.get("sessionEdits", 0) or 0),
+                "sourceVersion": int(node.get("sourceVersion", 0) or 0),
+            }
 
     def list_snapshot_paths(self, token, team, path):
         _, team, relpath = self._project_authorize(token, team, path)
@@ -4555,6 +4568,53 @@ def run_selftest():
         _E = _now["editSessions"] - _base["editSessions"]
         _N = _now["sessionEdits"] if _E > 0 else _now["sessionEdits"] - _base["sessionEdits"]
         assert (_base["count"], _E, _N) == (1, 0, 1), (_base["count"], _E, _N)
+
+        # Snapshotting while another thread edits the same file: the baseline is
+        # read under the broker's lock and BEFORE _snapshot_lock, so this must
+        # neither deadlock nor record a half-applied counter rollover. Re-nesting
+        # those two locks would hang this loop.
+        import threading as _th
+        _stop = _th.Event()
+        _errors = []
+
+        def _hammer():
+            try:
+                while not _stop.is_set():
+                    _wb.apply_operation(_ws["token"], {"type": "update-file", "path": "sen.md",
+                                                       "content": "y" * 8, "baseRevision": _wb.revision})
+            except Exception as _e:  # noqa: BLE001 - surfaced on the main thread
+                _errors.append(_e)
+
+        _t = _th.Thread(target=_hammer, daemon=True)
+        _t.start()
+        try:
+            for _i in range(25):
+                _v = _reg.create_snapshot(_alice, "qa", _RP, "sen.md", f"concurrent {_i}")
+                _ver = _v.get("version") or {}
+                if "sessionEdits" in _ver:
+                    assert _ver["sessionEdits"] <= _ver["sourceVersion"], _ver
+                    assert _ver["editSessions"] >= 1, _ver
+        finally:
+            _stop.set()
+            _t.join(timeout=10)
+        assert not _t.is_alive(), "snapshot/edit contention deadlocked"
+        assert not _errors, _errors
+
+        # Directly prove the baseline read takes the broker's lock: while another
+        # thread holds it, the read must block rather than observe a node that is
+        # mid-bump. (The contention loop above only shows it does not crash.)
+        _done = _th.Event()
+
+        def _read_baseline():
+            _reg._snapshot_counter_baseline("qa", _RP, "sen.md")
+            _done.set()
+
+        with _wb.lock:
+            _reader = _th.Thread(target=_read_baseline, daemon=True)
+            _reader.start()
+            assert not _done.wait(timeout=0.5), "baseline read did NOT take the broker lock"
+        _reader.join(timeout=5)
+        assert _done.is_set(), "baseline read never completed after the lock was released"
 
         _sh.rmtree(_data, ignore_errors=True)
 
