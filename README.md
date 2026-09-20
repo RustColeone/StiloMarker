@@ -237,3 +237,6 @@ The log panel is useful for checking drag/drop actions, file operations, and int
 ## Reference
 
 For a full technical reference including all file format specifications and detailed usage, see [server/MANUAL.md](server/MANUAL.md).
+
+- [docs/ISSUES.md](docs/ISSUES.md) — known issues, open and fixed, with severity and confidence.
+- [docs/HISTORY.md](docs/HISTORY.md) — project history, architecture rules, and superseded decisions.

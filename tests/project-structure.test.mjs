@@ -19,7 +19,10 @@ test("required workspace files exist", () => {
     "app/services/sync-service.js",
     "server/mdnotes_server.py",
     "service-worker.js",
-    "implementation-log.md"
+    // Docs: the planning files were consolidated into docs/ (see docs/HISTORY.md).
+    "README.md",
+    "docs/ISSUES.md",
+    "docs/HISTORY.md"
   ];
   requiredFiles.forEach((relativePath) => {
     assert.equal(existsSync(resolveFromRoot(relativePath)), true, `Missing required file: ${relativePath}`);
