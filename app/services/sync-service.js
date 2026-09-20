@@ -5,7 +5,7 @@ import { dataUrlToBytes } from "./file-content-service.js";
 // content. MUST be bumped together with the service-worker CACHE_NAME
 // (mdnotes-shell-vN) on every deploy; the server's MIN_CLIENT_VERSION gate uses it.
 // Pre-gate clients (≤ v73) send no version and are read as 0 → always refused.
-const CLIENT_VERSION = 98;
+const CLIENT_VERSION = 99;
 
 // Identifies THIS page load. Sent with every workspace open so the server log can
 // tell apart the two very different causes of repeated opens: many distinct

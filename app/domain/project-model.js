@@ -56,7 +56,10 @@ function createFile(name, parentId = ROOT_ID, content = "") {
     content,
     expanded: false,
     dirty: false,
-    sourceVersion: 0
+    sourceVersion: 0,
+    editSessions: 0,
+    sessionEdits: 0,
+    lastEditAt: 0
   };
 }
 
@@ -195,7 +198,32 @@ function updateFileContent(project, fileId, content) {
   return next;
 }
 
-function markFileSaved(project, fileId) {
+// A writing "sitting": edits to one file less than this apart are the same
+// session. It is the E of the S.E.N version label. Whoever hosts the document
+// owns it — this runs only when there is no host but us (no-server mode); in a
+// synced workspace the server counts, so everyone in the room shares one E.
+const EDIT_SESSION_GAP_MS = 600 * 1000;
+
+function bumpEditCounters(file, now = Date.now()) {
+  if (now - (Number(file.lastEditAt) || 0) > EDIT_SESSION_GAP_MS) {
+    file.editSessions = (Number(file.editSessions) || 0) + 1;
+    file.sessionEdits = 0;
+  }
+  file.lastEditAt = now;
+  file.sourceVersion = (Number(file.sourceVersion) || 0) + 1;
+  file.sessionEdits = (Number(file.sessionEdits) || 0) + 1;
+}
+
+function applyHostCounters(project, fileId, counters) {
+  const file = project.nodes[fileId];
+  if (!file || file.kind !== "file" || !counters) return project;
+  if (counters.editSessions !== undefined) file.editSessions = Number(counters.editSessions) || 0;
+  if (counters.sessionEdits !== undefined) file.sessionEdits = Number(counters.sessionEdits) || 0;
+  if (counters.sourceVersion !== undefined) file.sourceVersion = Number(counters.sourceVersion) || 0;
+  return project;
+}
+
+function markFileSaved(project, fileId, countEdits = true) {
   const next = cloneProject(project);
   const file = getNode(next, fileId);
   if (file.kind !== "file") {
@@ -203,19 +231,20 @@ function markFileSaved(project, fileId) {
   }
 
   file.dirty = false;
-  file.sourceVersion += 1;
+  if (countEdits) bumpEditCounters(file);
   return next;
 }
 
 // Clear the dirty flag on several files in one pass (auto-save). Unknown or
 // non-file ids are skipped so a stale id can't throw mid-flush.
-function markFilesSaved(project, fileIds) {
+function markFilesSaved(project, fileIds, countEdits = true) {
   const next = cloneProject(project);
+  const now = Date.now();  // one timestamp for the batch: it is a single flush
   for (const fileId of fileIds ?? []) {
     const file = next.nodes[fileId];
     if (file?.kind === "file" && file.dirty) {
       file.dirty = false;
-      file.sourceVersion += 1;
+      if (countEdits) bumpEditCounters(file, now);
     }
   }
   return next;
@@ -417,7 +446,7 @@ function applySyncOperation(project, operation) {
       throw new Error(`File path not found: ${operation.path}`);
     }
     const next = updateFileContent(project, nodeId, operation.content ?? "");
-    return markFileSaved(next, nodeId);
+    return applyHostCounters(markFileSaved(next, nodeId, false), nodeId, operation.counters);
   }
 
   if (operation.type === "patch-file") {
@@ -433,7 +462,7 @@ function applySyncOperation(project, operation) {
 
     const patchedContent = applyTextPatch(file.content, operation, { skipConflictCheck: true });
     const next = updateFileContent(project, nodeId, patchedContent);
-    return markFileSaved(next, nodeId);
+    return applyHostCounters(markFileSaved(next, nodeId, false), nodeId, operation.counters);
   }
 
   throw new Error(`Unsupported sync operation: ${operation.type}`);
@@ -446,6 +475,7 @@ export {
   TEXT_FILE_EXTENSIONS,
   applyTextPatch,
   applySyncOperation,
+  applyHostCounters,
   addFile,
   addFolder,
   createProject,

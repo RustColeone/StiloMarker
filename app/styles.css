@@ -2401,7 +2401,8 @@ p {
 }
 
 /* Tabular figures so the count doesn't jitter the bar as digits change. */
-.status-item-charcount {
+.status-item-charcount,
+.status-item-version {
   padding: 2px 6px;
   font-variant-numeric: tabular-nums;
 }

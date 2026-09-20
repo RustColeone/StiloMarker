@@ -4,7 +4,7 @@ function fingerprintProject(project) {
   return JSON.stringify(sanitizeProjectForSync(project));
 }
 
-function createCollaborationRuntime({ getProject, replaceProject, applyOperation, onStatusChange, onRemoteCursor, onPatchConfirmed, onChatWorkspaceUpdate, onCommentsUpdate, reauthenticate }) {
+function createCollaborationRuntime({ getProject, replaceProject, applyOperation, onStatusChange, onRemoteCursor, onPatchConfirmed, onHostCounters, onChatWorkspaceUpdate, onCommentsUpdate, reauthenticate }) {
   let connection = null;
   let isApplyingRemote = false;
   let pendingTextPatches = new Map();
@@ -257,6 +257,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       const result = await pushOperation(reconnectCtx.serverUrl, connection.token, operation);
       localRevision = result.revision ?? localRevision;
       connection.revision = localRevision;
+      adoptHostCounters(result);
     };
 
     // Folders shallow → deep so a parent always exists before its child.
@@ -299,6 +300,12 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     emitStatus("connected", `Connected. Revision ${connection.revision}.`);
   }
 
+  function adoptHostCounters(result) {
+    if (result?.counters && result?.path && typeof onHostCounters === "function") {
+      onHostCounters(result.path, result.counters);
+    }
+  }
+
   async function publishOperation(operation) {
     if (!connection || isApplyingRemote) {
       return;
@@ -313,6 +320,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     const result = await pushOperation(connection.serverUrl, connection.token, operation);
     localRevision = result.revision ?? localRevision;
     connection.revision = localRevision;
+    adoptHostCounters(result);
     // Once the server confirms this op, it's no longer in-flight.
     if (operation.path) {
       inFlightPatches.delete(operation.path);
@@ -374,6 +382,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
           { type: "update-file", path, content, baseRevision: localRevision });
         localRevision = result.revision ?? localRevision;
         connection.revision = localRevision;
+        adoptHostCounters(result);
         restored += 1;
       } catch {
         // Keep the local content on screen; the next reconcile/patch retries it.

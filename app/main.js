@@ -1,4 +1,4 @@
-import { ROOT_ID, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isAllowedFileName, isBmapFileName, isImageFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
+import { ROOT_ID, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isAllowedFileName, isBmapFileName, isImageFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
 import { createProjectController, seedDefaultProject } from "./domain/project-service.js";
 import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
 import { supportsOpfs, listOpfsDir, mkdirOpfs, createProjectOpfs, openProjectOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs, deleteOpfsEntry, exportProjectModelOpfs, importProjectModelOpfs } from "./services/opfs-service.js";
@@ -311,6 +311,8 @@ const elements = {
   statusPresenceItem: query("#status-presence-item"),
   statusCharCountItem: query("#status-charcount-item"),
   statusCharCountText: query("#status-charcount-text"),
+  statusVersionItem: query("#status-version-item"),
+  statusVersionText: query("#status-version-text"),
   previewToggleActivityButton: query("#preview-toggle-activity-button"),
   chatToggleActivityButton: query("#chat-toggle-activity-button"),
   debugPanel: query("#debug-panel"),
@@ -347,6 +349,11 @@ let previewFileId = controller.getProject().activeFileId ?? null;
 // updateStatus. null → no text file open (the counter hides). Declared up here so
 // the hoisted updateStatus can never touch it inside its temporal dead zone.
 let statusCharTotal = null;
+// Newest snapshot per file path: { count, editSessions, sessionEdits }. The
+// baseline the S.E.N version label counts from. Refreshed on workspace open and
+// whenever snapshots change — never per keystroke.
+let snapshotBaselines = new Map();
+let snapshotBaselinesInFlight = null;
 // Installed-font detection state for the source-font picker (see isFontInstalled).
 const fontInstalledCache = new Map();
 let fontProbeContext = null;
@@ -3511,13 +3518,97 @@ function cloudWorkspaceTarget() {
   return { serverUrl: settings.serverUrl, token, team: ws.team, path: ws.path };
 }
 
+// ---- Version label (S.E.N) --------------------------------------------------
+// S — snapshots you have deliberately cut of this file
+// E — writing sittings since that snapshot
+// N — edits in the current sitting
+//
+// None of these is the `revision`. Revision is a Lamport clock: one integer per
+// workspace, monotonic forever, compared in ~170 places to order writes and
+// refuse stale ones. It must never reset, and it is plumbing — users should not
+// be reading a five-digit counter they cannot influence. These three they can:
+// snapshotting bumps S, walking away bumps E. Nothing compares them, which is
+// exactly why they are free to reset.
+
+function setSnapshotBaselines(baselines) {
+  snapshotBaselines = new Map(Object.entries(baselines ?? {}));
+  scheduleVersionLabel();
+}
+
+function refreshSnapshotBaselines() {
+  if (snapshotBaselinesInFlight) return snapshotBaselinesInFlight;
+  snapshotBaselinesInFlight = (async () => {
+    try {
+      const listing = await snapshotStore().paths();
+      setSnapshotBaselines(listing?.baselines);
+    } catch {
+      /* history is unavailable — the label just falls back to "no snapshots". */
+    } finally {
+      snapshotBaselinesInFlight = null;
+    }
+  })();
+  return snapshotBaselinesInFlight;
+}
+
+// Snapshots taken before this feature carry no baseline, so E/N count from 0
+// and read high once. That self-heals the next time the file is snapshotted.
+function fileVersionLabel(file, path) {
+  if (!file || file.kind !== "file") return null;
+  const base = (path && snapshotBaselines.get(path)) || null;
+  const sessions = Number(file.editSessions) || 0;
+  const edits = Number(file.sessionEdits) || 0;
+  const s = base ? Number(base.count) || 0 : 0;
+  // clamp: a workspace restored from a backup can sit behind its own snapshots.
+  const e = Math.max(0, sessions - (base ? Number(base.editSessions) || 0 : 0));
+  // Within the sitting the snapshot was taken in, subtract so a fresh snapshot
+  // reads x.0.0; once a new sitting starts, N is simply that sitting's count.
+  const n = e > 0 ? edits : Math.max(0, edits - (base ? Number(base.sessionEdits) || 0 : 0));
+  return `${s}.${e}.${n}`;
+}
+
+let versionLabelHandle = null;
+function scheduleVersionLabel() {
+  if (versionLabelHandle) return;
+  versionLabelHandle = requestAnimationFrame(() => {
+    versionLabelHandle = null;
+    renderVersionLabel();
+  });
+}
+
+function renderVersionLabel() {
+  const item = elements.statusVersionItem;
+  const label = elements.statusVersionText;
+  if (!item || !label) return;
+  const project = controller.getProject();
+  const file = controller.getActiveFile();
+  if (!file || file.kind !== "file" || !isTextFileName(file.name)) {
+    item.hidden = true;
+    return;
+  }
+  const path = getPath(project, file.id);
+  const text = fileVersionLabel(file, path);
+  if (!text) {
+    item.hidden = true;
+    return;
+  }
+  const [s, e, n] = text.split(".");
+  const total = Number(file.sourceVersion) || 0;
+  item.hidden = false;
+  label.textContent = `v${text}`;
+  item.title = `${file.name}\n`
+    + `${s} snapshot${s === "1" ? "" : "s"} · ${e} sitting${e === "1" ? "" : "s"} since the last one · ${n} edit${n === "1" ? "" : "s"} this sitting\n`
+    + `${total} edit${total === 1 ? "" : "s"} in total`;
+}
+
 function snapshotStore() {
   const target = cloudWorkspaceTarget();
   if (!target) {
     const key = snapshotProjectKey();
     return {
       remote: false,
-      create: (file, content, label) => createFileSnapshot(key, file, content, label),
+      // No server here, so this browser is the host: it owns the counters and
+      // stamps them onto the snapshot itself.
+      create: (file, content, label, counters) => createFileSnapshot(key, file, content, label, counters),
       paths: () => listSnapshotPaths(key),
       versions: (file) => listFileVersions(key, file),
       content: (id) => getVersionContent(id),
@@ -3527,8 +3618,13 @@ function snapshotStore() {
   const { serverUrl, token, team, path } = target;
   return {
     remote: true,
+    // The server reads the file's counters itself — it is the host, so its
+    // numbers are the ones every peer must agree on.
     create: (file, content, label) => createServerSnapshot(serverUrl, token, team, path, file, content, label),
-    paths: async () => (await listServerSnapshotPaths(serverUrl, token, team, path)).paths ?? [],
+    paths: async () => {
+      const result = await listServerSnapshotPaths(serverUrl, token, team, path);
+      return { paths: result.paths ?? [], baselines: result.baselines ?? {} };
+    },
     versions: async (file) => (await listServerSnapshotVersions(serverUrl, token, team, path, file)).versions ?? [],
     content: async (id) => {
       try {
@@ -3613,7 +3709,8 @@ async function createSnapshotNow(label = "") {
   }
   const path = getPath(project, activeFile.id);
   try {
-    const result = await snapshotStore().create(path, activeFile.content, label);
+    const result = await snapshotStore().create(path, activeFile.content, label, activeFile);
+    void refreshSnapshotBaselines();
     showToast(result.created ? `Snapshot saved: ${path.split("/").pop()}` : "Snapshot — no changes since the last one");
     logDebug("action", "Snapshot created", `${path} ${result.created ? "saved" : "unchanged"}`);
   } catch (error) {
@@ -3662,7 +3759,9 @@ async function openSnapshotsDialog() {
   try {
     const migrated = await ensureSnapshotsMigrated();
     if (migrated) showToast(`Uploaded ${migrated} earlier snapshot${migrated === 1 ? "" : "s"} to the server`);
-    paths = await snapshotStore().paths();
+    const listing = await snapshotStore().paths();
+    paths = listing.paths ?? [];
+    setSnapshotBaselines(listing.baselines);
   } catch { paths = []; }
   // Show a set of files that have history, plus the active file even if it has none.
   const options = Array.from(new Set([...(activePath ? [activePath] : []), ...paths]));
@@ -4429,6 +4528,16 @@ const collaboration = createCollaborationRuntime({
   },
   onRemoteCursor(event) {
     onRemoteCursor(event);
+  },
+  // The host stamped this file's S.E.N counters on the operation it just
+  // accepted. Adopt them verbatim — we never count locally while synced, so
+  // everyone in the room shows the same sitting number.
+  onHostCounters(path, counters) {
+    const project = controller.getProject();
+    const nodeId = getNodeIdByPath(project, path);
+    if (!nodeId) return;
+    applyHostCounters(project, nodeId, counters);
+    scheduleVersionLabel();
   },
   onPatchConfirmed() {
     // Text confirmed by server — now safe to send the definitive cursor position.
@@ -6525,11 +6634,11 @@ async function saveActiveWorkspaceFile() {
     // Local workspace: flush through the shared guarded writer so an explicit
     // save never races the debounced background flush.
     await flushOpfsProject();
-    controller.markSaved(activeFile.id);
+    controller.markSaved(activeFile.id, workspaceMode !== "synced");
     return;
   }
   const wroteToDisk = await saveProjectToHandles(project);
-  controller.markSaved(activeFile.id);
+  controller.markSaved(activeFile.id, workspaceMode !== "synced");
   if (!wroteToDisk) {
     // No live directory (e.g. Firefox / no File System Access) — the workspace
     // lives in localStorage. Persist there silently rather than nagging on every
@@ -8344,10 +8453,10 @@ function updateStatus(project) {
   elements.browserStatusText.textContent = browserSupported ? "Chromium directory access available" : "Fallback import/export mode";
   elements.serverStatusBarText.textContent = syncState.account
     ? (syncState.status === "connected"
-        ? `${syncState.account.username} · r${syncState.revision}`
+        ? syncState.account.username
         : `Logged in as ${syncState.account.username}`)
     : syncState.status === "connected"
-      ? `Connected r${syncState.revision}`
+      ? "Connected"
       : syncState.status === "reachable"
         ? "Server reachable"
         : "Server offline";
@@ -8363,10 +8472,10 @@ function updateStatus(project) {
         : syncState.sessionId.split("/").filter(Boolean).pop() || syncState.sessionId)
     : null;
   if (sessionConnected) {
-    elements.sessionIdLabel.textContent = `${sessionName ?? "Connected"} · r${syncState.revision}`;
-    elements.sessionIdLabel.title = syncState.sessionId ?? "Connected";
+    elements.sessionIdLabel.textContent = sessionName ?? "Connected";
+    elements.sessionIdLabel.title = `${syncState.sessionId ?? "Connected"} (internal revision ${syncState.revision})`;
     elements.sessionDetailText.textContent = sessionName
-      ? `${sessionName} at revision ${syncState.revision}${syncState.displayName ? ` as ${syncState.displayName}` : ""}${syncState.role ? ` (${syncState.role})` : ""}.`
+      ? `${sessionName}${syncState.displayName ? ` as ${syncState.displayName}` : ""}${syncState.role ? ` (${syncState.role})` : ""}.`
       : (syncState.detail || "Connected to the server.");
   } else if (sessionReachable) {
     elements.sessionIdLabel.textContent = "Reachable";
@@ -8422,6 +8531,7 @@ function updateStatus(project) {
     renderChatPanel(project);
     statusCharTotal = null; // nothing open → hide the character count
     renderCharCount();
+    renderVersionLabel();
     return;
   }
 
@@ -8513,6 +8623,7 @@ function updateStatus(project) {
   renderLinksPanel(project, activeFile);
   renderChatPanel(project);
   renderCharCount(); // after the editor DOM/selection settled above
+  renderVersionLabel();
 }
 
 // Paint the preview pane: either the diff overlay (when the diff tab is the active
@@ -8655,7 +8766,7 @@ async function runAutoSave(reason) {
           : [])
       : dirty;
     if (savable.length) {
-      controller.markManySaved(savable);
+      controller.markManySaved(savable, !cloud);  // host owns the counters when synced
       logDebug("response", `Auto-saved ${savable.length} file(s) (${reason})`);
     }
   } catch (error) {
@@ -9762,6 +9873,7 @@ elements.snapshotsDeleteBtn?.addEventListener("click", async () => {
   if (!ok) return;
   await snapshotStore().remove(selected.id);
   snapshotsSelectedId = null;
+  void refreshSnapshotBaselines();  // S dropped by one
   await renderFileHistory();
 });
 // Click a gutter line number to add/edit that line's comment (breakpoint-style).
@@ -11664,6 +11776,8 @@ async function handleOpenWorkspace(team, path, options = {}) {
     void loadLineComments({ force: true });
     void ensureSnapshotsMigrated().then((count) => {
       if (count) showToast(`Uploaded ${count} earlier snapshot${count === 1 ? "" : "s"} to the server`);
+      // Migration can add snapshots, so read the S.E.N baselines after it.
+      void refreshSnapshotBaselines();
     });
     // Reveal the freshly-loaded tree — on mobile the explorer is a closed flyout,
     // so without this the just-opened project looks "empty" until the user taps ≡.
@@ -11971,3 +12085,6 @@ async function restoreSessionOnBoot() {
 }
 
 void restoreSessionOnBoot();
+// Local/no-server workspaces never fire the cloud open path, so seed the S.E.N
+// baselines here too. Harmless for cloud: the open path refreshes them again.
+void refreshSnapshotBaselines();
