@@ -9,11 +9,11 @@ import { dataUrlToBlob, getExportBytes, getMimeTypeForFileName, readFileAsProjec
 import { extractMarkdownLinks, renderMarkdown } from "./services/markdown-service.js";
 import { buildModuleMapSection, replaceOrAppendModuleMap } from "./services/mtree-module-map-service.js";
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
-import { applyEditorFont, applyTheme, clampSourceFontSize, loadSettings, saveSettings } from "./services/settings-service.js";
+import { applyEditorFont, applyTheme, clampSourceFontSize, loadSettings, patchStoredSettings, saveSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
 import { createFileSnapshot, deleteVersion, diffLines, getVersionContent, listFileVersions, listSnapshotPaths } from "./services/snapshot-service.js";
 import { clearViewStates, loadViewStates, saveViewStates } from "./services/view-state-service.js";
-import { browseServer, createProjectServer, deleteServer, exportProjectServer, getAccess, importProjectServer, loginToServer, mkdirServer, normalizeServerUrl, pingServer, saveUserState, setAccess } from "./services/sync-service.js";
+import { browseServer, createProjectServer, createServerSnapshot, deleteComment, deleteServer, deleteServerSnapshot, exportProjectServer, getAccess, getServerSnapshotContent, importProjectServer, listComments, listServerSnapshotPaths, listServerSnapshotVersions, loginToServer, mkdirServer, normalizeServerUrl, pingServer, reanchorComments, saveComment, saveUserState, setAccess } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { appendUrlDbEntry, formatUrlDbEntryBody, moveUrlDbEntry, moveUrlDbEntryBetweenFiles, parseUrlDb, parseUrlDbEntryBody, removeUrlDbEntry, serializeUrlDb, updateUrlDbEntry } from "./services/urldb-service.js";
 import { createZip, downloadBlob } from "./services/zip-service.js";
@@ -38,6 +38,16 @@ const elements = {
   previewPane: query("#preview-pane"),
   sourceTabStrip: query("#source-tab-strip"),
   previewTabStrip: query("#preview-tab-strip"),
+  sourceTabOverflow: query("#source-tab-overflow"),
+  previewTabOverflow: query("#preview-tab-overflow"),
+  tabOverflowMenu: query("#tab-overflow-menu"),
+  editorOverviewRuler: query("#editor-overview-ruler"),
+  lineCommentPopover: query("#line-comment-popover"),
+  lineCommentInput: query("#line-comment-input"),
+  lineCommentMeta: query("#line-comment-meta"),
+  lineCommentDelete: query("#line-comment-delete"),
+  lineCommentCancel: query("#line-comment-cancel"),
+  lineCommentSave: query("#line-comment-save"),
   explorerTree: query("#explorer-tree"),
   explorerContextMenu: query("#explorer-context-menu"),
   explorerFilterButton: query("#explorer-filter-button"),
@@ -168,6 +178,7 @@ const elements = {
   sourceFontFamilySelect: query("#source-font-family-select"),
   sourceFontCustomRow: query("#source-font-custom-row"),
   sourceFontCustomInput: query("#source-font-custom-input"),
+  sourceFontStatus: query("#source-font-status"),
   bmapGenerateScopeSelect: query("#bmap-generate-scope-select"),
   bmapAutoPanInput: query("#bmap-auto-pan-input"),
   serverUrlInput: query("#server-url-input"),
@@ -336,6 +347,10 @@ let previewFileId = controller.getProject().activeFileId ?? null;
 // updateStatus. null → no text file open (the counter hides). Declared up here so
 // the hoisted updateStatus can never touch it inside its temporal dead zone.
 let statusCharTotal = null;
+// Installed-font detection state for the source-font picker (see isFontInstalled).
+const fontInstalledCache = new Map();
+let fontProbeContext = null;
+const fontProbeBase = {};
 let previewUrlDbEntry = null;
 let sourceUrlDbEntry = null;
 // Per-document view state (bmap pan/zoom, editor scroll), cached so users resume
@@ -442,6 +457,10 @@ const chatState = {
 const autocompleteState = {
   items: [],
   activeIndex: 0,
+  // True once the user has deliberately chosen an entry (arrow keys or the
+  // mouse). Enter only accepts a suggestion when this is set — otherwise Enter
+  // means "new line", which is what it means everywhere else in the editor.
+  userChose: false,
   range: null,
   kind: ""
 };
@@ -1050,7 +1069,7 @@ function renderChatPanel(project) {
         ? `<button type="button" class="chat-message-retry" data-chat-retry>↻ Retry</button>`
         : "";
       return `
-        <article class="chat-message${message.error ? " is-error" : ""}" data-role="${escapeHtmlAttribute(message.role)}" data-msg-id="${escapeHtmlAttribute(message.id)}">
+        <article class="chat-message${message.error ? " is-error" : ""}${message.interrupted ? " is-interrupted" : ""}" data-role="${escapeHtmlAttribute(message.role)}" data-msg-id="${escapeHtmlAttribute(message.id)}">
           <div class="chat-message-meta">
             <span class="chat-message-role">${escapeHtmlAttribute(roleLabel)}</span>
             <span class="chat-message-time">${escapeHtmlAttribute(formatChatTimestamp(message.createdAt))}</span>
@@ -1065,10 +1084,16 @@ function renderChatPanel(project) {
     }).join("") + thinkingHtml
     : '<div class="chat-empty-state">No messages yet.<br>Attach context files below, then send a prompt.</div>';
 
-  const canSend = !chatState.sending && Boolean(elements.chatInput.value.trim());
-  elements.chatSendButton.disabled = !canSend;
+  // While a turn is in flight the send button becomes a Stop control — before
+  // this there was no way to interrupt the agent once it started.
+  const sending = chatState.sending;
+  elements.chatSendButton.disabled = sending ? false : !elements.chatInput.value.trim();
+  elements.chatSendButton.classList.toggle("is-stop", sending);
+  elements.chatSendButton.textContent = sending ? "\u25a0" : "\u2191";
+  elements.chatSendButton.title = sending ? "Stop the agent" : "Send (Enter)";
+  elements.chatSendButton.setAttribute("aria-label", sending ? "Stop the agent" : "Send");
   elements.chatAddActiveFileButton.disabled = !project.activeFileId;
-  elements.chatInput.disabled = chatState.sending;
+  elements.chatInput.disabled = sending;
 
   if (chatState.shouldScrollToBottom) {
     elements.chatMessageList.scrollTop = elements.chatMessageList.scrollHeight;
@@ -1294,9 +1319,22 @@ async function retryLastChatTurn() {
 
 /** Send the thread's current messages to the agent and fold the reply (or
  *  error) back in. Shared by the compose box and the retry affordance. */
+// Interrupt an in-flight agent turn. Aborting the request rejects the fetch and
+// its stream reader; runAgentTurn's catch keeps any text streamed so far.
+function stopAgentTurn() {
+  if (!chatState.sending || !chatState.abortController) return;
+  chatState.stopped = true;
+  try {
+    chatState.abortController.abort();
+  } catch { /* already settled */ }
+  logDebug("action", "Agent turn stopped by user");
+}
+
 async function runAgentTurn(thread, project) {
   const contextFiles = resolveChatContextFiles(project, thread);
   chatState.sending = true;
+  chatState.stopped = false;
+  chatState.abortController = new AbortController();
   chatState.activity = [];
   chatState.activityExpanded = false;
   chatState.streamingText = "";
@@ -1361,7 +1399,7 @@ async function runAgentTurn(thread, project) {
         chatState.shouldScrollToBottom = true;
         renderChatPanel(project);
       }
-    });
+    }, chatState.abortController.signal);
 
     chatState.provider = response.provider ?? chatState.provider;
     chatState.model = response.model ?? chatState.model;
@@ -1392,12 +1430,28 @@ async function runAgentTurn(thread, project) {
       autoApplyProposals(assistantMessage);
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    thread.messages.push(createChatMessage("system", message, { error: true }));
-    thread.updatedAt = Date.now();
-    sortChatThreads();
-    persistChatWorkspaceState(project);
+    if (error?.name === "AbortError" || chatState.stopped) {
+      // User interrupted the turn. Keep whatever the model produced rather than
+      // throwing the partial answer away.
+      const partial = String(chatState.streamingText || "").trim();
+      if (partial) {
+        thread.messages.push(createChatMessage("assistant", partial, { interrupted: true }));
+      } else {
+        thread.messages.push(createChatMessage("system", "Stopped before the agent replied.", {}));
+      }
+      thread.updatedAt = Date.now();
+      sortChatThreads();
+      persistChatWorkspaceState(project);
+    } else {
+      const message = error instanceof Error ? error.message : String(error);
+      thread.messages.push(createChatMessage("system", message, { error: true }));
+      thread.updatedAt = Date.now();
+      sortChatThreads();
+      persistChatWorkspaceState(project);
+    }
   } finally {
+    chatState.abortController = null;
+    chatState.stopped = false;
     chatState.sending = false;
     chatState.activity = [];
     chatState.streamingText = "";
@@ -2297,6 +2351,7 @@ function findAutocompleteContext(force = false) {
 function hideEditorAutocomplete() {
   autocompleteState.items = [];
   autocompleteState.activeIndex = 0;
+  autocompleteState.userChose = false;
   autocompleteState.range = null;
   autocompleteState.kind = "";
   elements.editorAutocomplete.hidden = true;
@@ -2401,6 +2456,7 @@ function showEditorAutocomplete(force = false) {
 
   autocompleteState.items = items.slice(0, 12);
   autocompleteState.activeIndex = 0;
+  autocompleteState.userChose = false;
   autocompleteState.range = { start: context.start, end: context.end };
   autocompleteState.kind = context.kind;
   elements.editorAutocompleteLabel.textContent = context.kind.startsWith("bmap-")
@@ -2752,6 +2808,8 @@ function notifyEditorChanged(text) {
   }
   // Keep find matches/highlights accurate as the text changes underneath them.
   if (searchState.open) computeSearchMatches();
+  // Line comments follow the text: re-find any whose line moved.
+  scheduleCommentReanchor();
 }
 
 // Stable palette for coloring remote cursor lines + labels by client index.
@@ -2771,6 +2829,7 @@ function clientColor(clientId) {
  *  When selEnd > selStart a per-line selection highlight is drawn in addition
  *  to the caret so peers can see highlighted text. */
 function renderRemoteCursors(cursors) {
+  scheduleOverviewRuler(); // peer markers live on the ruler too
   const activeFile = controller.getActiveFile();
   const container = elements.editorCursors;
   container.textContent = "";
@@ -2986,10 +3045,20 @@ function renderSearchHighlights() {
       }
     } catch { /* offset transiently out of range during a re-render */ }
   });
+  scheduleOverviewRuler(); // search hits are ruler markers too
 }
 
 function gotoMatch(index) {
   if (!searchState.matches.length) return;
+  // A match that runs past the end of the current text is a leftover from a
+  // document we are no longer showing; re-search before moving the caret rather
+  // than selecting a phantom range.
+  const textLength = getEditorText().length;
+  if (searchState.matches.some((m) => m.end > textLength)) {
+    searchState.currentIndex = -1;
+    computeSearchMatches();
+    if (!searchState.matches.length) return;
+  }
   const total = searchState.matches.length;
   searchState.currentIndex = ((index % total) + total) % total;
   const match = searchState.matches[searchState.currentIndex];
@@ -3105,9 +3174,432 @@ let snapshotsSelectedId = null;
 
 // A stable-enough key to group snapshots by project: the cloud workspace id when
 // synced, otherwise the local project id.
+// True when this session only has read access to the open cloud workspace.
+function isReadOnlyWorkspace() {
+  return workspaceMode === "synced" && syncState.role === "reader";
+}
+
 function snapshotProjectKey() {
   return settings.syncedProjectId || controller.getProject()?.id || "local";
 }
+
+
+// ---- Editor overview ruler ---------------------------------------------------
+// Markers down the right edge showing every point of interest in the document,
+// the way VS Code decorates its scrollbar: your own caret, line comments,
+// collaborators' carets and the ranges they have selected (in each peer's own
+// colour, matching their cursor), and current search hits. Clicking a marker
+// jumps there, so finding "where is my stuff" never means scrolling blindly.
+
+/** Which line a text offset falls on (0-based). */
+function lineIndexForOffset(text, offset) {
+  const capped = Math.max(0, Math.min(Number(offset) || 0, text.length));
+  let line = 0;
+  for (let i = 0; i < capped; i += 1) {
+    if (text[i] === "\n") line += 1;
+  }
+  return line;
+}
+
+/** Vertical position of a line inside the scrollable content, in px. */
+function editorLineTop(lineIndex) {
+  const lines = editorLineEls();
+  if (!lines.length) return 0;
+  const el = lines[Math.max(0, Math.min(lineIndex, lines.length - 1))];
+  return el ? el.offsetTop : 0;
+}
+
+let overviewRulerFrame = 0;
+function scheduleOverviewRuler() {
+  if (overviewRulerFrame) return;
+  overviewRulerFrame = requestAnimationFrame(() => {
+    overviewRulerFrame = 0;
+    renderOverviewRuler();
+  });
+}
+
+function renderOverviewRuler() {
+  const ruler = elements.editorOverviewRuler;
+  const content = elements.editorContent;
+  if (!ruler || !content) return;
+  const activeFile = controller.getActiveFile();
+  if (!activeFile || !isTextFileName(activeFile.name)) {
+    ruler.replaceChildren();
+    ruler.hidden = true;
+    return;
+  }
+  ruler.hidden = false;
+
+  const contentHeight = content.scrollHeight || 1;
+  const rulerHeight = ruler.clientHeight || content.clientHeight || 1;
+  const text = getEditorText();
+  const ticks = [];
+
+  const add = ({ line, endLine = null, color = null, className, title }) => {
+    const top = (editorLineTop(line) / contentHeight) * rulerHeight;
+    let height = 3;
+    if (endLine != null && endLine > line) {
+      const bottom = (editorLineTop(endLine) / contentHeight) * rulerHeight;
+      height = Math.max(3, bottom - top);
+    }
+    ticks.push({ top, height, color, className, title, line });
+  };
+
+  // Collaborators' selections first, so their caret marks sit on top of them.
+  const activePath = getPath(controller.getProject(), activeFile.id);
+  for (const cursor of remoteCursorsByClient.values()) {
+    if (cursor.fileId !== activePath) continue;
+    const color = clientColor(cursor.clientId);
+    const who = cursor.displayName || "A collaborator";
+    const startLine = lineIndexForOffset(text, cursor.selStart);
+    const endLine = lineIndexForOffset(text, cursor.selEnd);
+    if (Number(cursor.selEnd) > Number(cursor.selStart)) {
+      add({ line: startLine, endLine, color, className: "editor-overview-tick is-peer-selection",
+            title: `${who} — selection` });
+    }
+    add({ line: startLine, color, className: "editor-overview-tick is-peer",
+          title: `${who} — line ${startLine + 1}` });
+  }
+
+  // Search hits.
+  if (searchState.open) {
+    for (const match of searchState.matches) {
+      add({ line: lineIndexForOffset(text, match.start), className: "editor-overview-tick is-search",
+            title: "Search match" });
+    }
+  }
+
+  // Line comments.
+  for (const comment of commentsForActiveFile()) {
+    add({ line: comment.line, className: "editor-overview-tick is-comment",
+          title: `${comment.author ?? "Comment"}: ${comment.text}` });
+  }
+
+  // My own caret last so it is never hidden behind another marker.
+  if (elements.editorContent === document.activeElement) {
+    const { start } = getEditorSelection();
+    add({ line: lineIndexForOffset(text, start), className: "editor-overview-tick is-caret",
+          title: "Your cursor" });
+  }
+
+  ruler.replaceChildren(...ticks.map((tick) => {
+    const el = document.createElement("div");
+    el.className = tick.className;
+    el.style.top = `${Math.max(0, tick.top)}px`;
+    el.style.height = `${tick.height}px`;
+    if (tick.color) el.style.background = tick.color;
+    el.title = tick.title;
+    el.addEventListener("click", (event) => {
+      event.stopPropagation();
+      // Centre that line in the viewport.
+      const target = editorLineTop(tick.line) - (content.clientHeight / 2);
+      content.scrollTop = Math.max(0, target);
+      syncEditorScroll();
+      scheduleOverviewRuler();
+    });
+    return el;
+  }));
+}
+
+// ---- Line comments -----------------------------------------------------------
+// A note attached to a LINE, like a breakpoint: it lives in metadata beside the
+// project on the server (comments.json), never in the document text. Shared with
+// everyone who can open the workspace. Comments follow the text: each one stores
+// the line's own content, so after edits shift it we re-find it rather than
+// leaving the note stranded on a line number that now means something else.
+const lineComments = { byFile: new Map(), loadedFor: null };
+
+function commentsAvailable() {
+  // settings alone aren't enough: during boot (before the workspace has actually
+  // opened) they still name the cloud workspace while a LOCAL project is on
+  // screen — commenting then would file that project's lines under the cloud
+  // workspace. Require that we are genuinely in the synced session.
+  return Boolean(cloudWorkspaceTarget()) && workspaceMode === "synced" && Boolean(collaboration.isConnected?.());
+}
+
+function commentsForPath(path) {
+  return lineComments.byFile.get(path) ?? [];
+}
+
+function commentsForActiveFile() {
+  const project = controller.getProject();
+  const activeFile = controller.getActiveFile();
+  if (!activeFile) return [];
+  return commentsForPath(getPath(project, activeFile.id));
+}
+
+async function loadLineComments({ force = false } = {}) {
+  const target = commentsAvailable() ? cloudWorkspaceTarget() : null;
+  if (!target) {
+    lineComments.byFile.clear();
+    lineComments.loadedFor = null;
+    return;
+  }
+  const workspaceId = `${target.team}/${target.path}`;
+  if (!force && lineComments.loadedFor === workspaceId) return;
+  try {
+    const data = await listComments(target.serverUrl, target.token, target.team, target.path);
+    lineComments.byFile = new Map(Object.entries(data?.files ?? {}));
+    lineComments.loadedFor = workspaceId;
+    renderEditorFromModel();
+  } catch (error) {
+    logDebug("response", "Could not load line comments", error.message);
+  }
+}
+
+// Re-render the editor (and therefore the gutter markers) from the current model
+// without disturbing the caret.
+function renderEditorFromModel() {
+  const activeFile = controller.getActiveFile();
+  if (!activeFile || !isTextFileName(activeFile.name)) return;
+  if (elements.editorContent !== document.activeElement) {
+    renderEditorContent(getEditorText());
+    return;
+  }
+  const { start, end } = getEditorSelection();
+  renderEditorContent(getEditorText());
+  setEditorSelection(start, end);
+}
+
+// Follow the text: if a commented line moved, find it again by its own content.
+// Searching OUTWARD from the old position lands on the nearest match, which is
+// what you want when lines were inserted or removed above it.
+let reanchorTimer = null;
+function scheduleCommentReanchor() {
+  if (!commentsAvailable() || reanchorTimer) return;
+  reanchorTimer = setTimeout(() => {
+    reanchorTimer = null;
+    void reanchorActiveFileComments();
+  }, 400);
+}
+
+async function reanchorActiveFileComments() {
+  const target = commentsAvailable() ? cloudWorkspaceTarget() : null;
+  const project = controller.getProject();
+  const activeFile = controller.getActiveFile();
+  if (!target || !activeFile || !isTextFileName(activeFile.name)) return;
+  const path = getPath(project, activeFile.id);
+  const list = commentsForPath(path);
+  if (!list.length) return;
+
+  const lines = String(activeFile.content ?? "").split("\n");
+  const moves = [];
+  for (const comment of list) {
+    const anchor = String(comment.anchorText ?? "");
+    // A blank anchor can't be matched (every empty line looks alike), so leave it.
+    if (!anchor.trim()) continue;
+    if (lines[comment.line] === anchor) continue; // still where we left it
+    let found = -1;
+    for (let distance = 1; distance <= lines.length; distance += 1) {
+      const above = comment.line - distance;
+      const below = comment.line + distance;
+      if (above >= 0 && lines[above] === anchor) { found = above; break; }
+      if (below < lines.length && lines[below] === anchor) { found = below; break; }
+      if (above < 0 && below >= lines.length) break;
+    }
+    if (found >= 0 && found !== comment.line) {
+      comment.line = found;
+      moves.push({ id: comment.id, line: found, anchorText: anchor });
+    }
+  }
+  if (!moves.length) return;
+  renderEditorFromModel();
+  try {
+    await reanchorComments(target.serverUrl, target.token, target.team, target.path, path, moves);
+  } catch (error) {
+    logDebug("response", "Could not persist comment anchors", error.message);
+  }
+}
+
+// ---- Comment editor popover --------------------------------------------------
+let commentPopoverLine = null;
+
+function closeCommentPopover() {
+  commentPopoverLine = null;
+  if (elements.lineCommentPopover) elements.lineCommentPopover.hidden = true;
+}
+
+function openCommentPopover(lineIndex) {
+  const popover = elements.lineCommentPopover;
+  if (!popover) return;
+  if (!commentsAvailable()) {
+    showToast("Line comments need a cloud workspace");
+    return;
+  }
+  const project = controller.getProject();
+  const activeFile = controller.getActiveFile();
+  if (!activeFile || !isTextFileName(activeFile.name)) return;
+  const path = getPath(project, activeFile.id);
+  const existing = commentsForPath(path).find((c) => c.line === lineIndex) ?? null;
+
+  commentPopoverLine = lineIndex;
+  elements.lineCommentInput.value = existing?.text ?? "";
+  elements.lineCommentMeta.textContent = existing
+    ? `Line ${lineIndex + 1} · ${existing.author ?? "unknown"}`
+    : `Line ${lineIndex + 1}`;
+  elements.lineCommentDelete.hidden = !existing;
+  popover.dataset.commentId = existing?.id ?? "";
+  popover.hidden = false;
+
+  // Sit beside the line being commented, clamped to the viewport.
+  const row = elements.editorGutter?.querySelectorAll(".editor-gutter-line")[lineIndex];
+  const rect = (row ?? elements.editorGutter).getBoundingClientRect();
+  popover.style.top = `${Math.min(rect.top, window.innerHeight - popover.offsetHeight - 12)}px`;
+  popover.style.left = `${rect.right + 8}px`;
+  elements.lineCommentInput.focus();
+}
+
+async function submitLineComment() {
+  const target = commentsAvailable() ? cloudWorkspaceTarget() : null;
+  const popover = elements.lineCommentPopover;
+  if (!target || !popover || commentPopoverLine == null) return;
+  const project = controller.getProject();
+  const activeFile = controller.getActiveFile();
+  if (!activeFile) return;
+  const path = getPath(project, activeFile.id);
+  const text = elements.lineCommentInput.value.trim();
+  const id = popover.dataset.commentId || undefined;
+  if (!text) {
+    if (id) await removeLineComment(id);
+    else closeCommentPopover();
+    return;
+  }
+  const lines = String(activeFile.content ?? "").split("\n");
+  try {
+    const result = await saveComment(target.serverUrl, target.token, target.team, target.path, {
+      file: path, id, line: commentPopoverLine, anchorText: lines[commentPopoverLine] ?? "", text
+    });
+    const list = commentsForPath(path).filter((c) => c.id !== result.comment.id);
+    list.push(result.comment);
+    list.sort((a, b) => a.line - b.line);
+    lineComments.byFile.set(path, list);
+    closeCommentPopover();
+    renderEditorFromModel();
+    showToast(id ? "Comment updated" : "Comment added");
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function removeLineComment(id) {
+  const target = commentsAvailable() ? cloudWorkspaceTarget() : null;
+  const project = controller.getProject();
+  const activeFile = controller.getActiveFile();
+  if (!target || !activeFile) return;
+  const path = getPath(project, activeFile.id);
+  try {
+    await deleteComment(target.serverUrl, target.token, target.team, target.path, id);
+    lineComments.byFile.set(path, commentsForPath(path).filter((c) => c.id !== id));
+    closeCommentPopover();
+    renderEditorFromModel();
+    showToast("Comment removed");
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+// ---- Where snapshots live ----------------------------------------------------
+// A cloud workspace keeps snapshots ON THE SERVER, so they follow you to any
+// device. A local/private project (no account, or not a cloud workspace) keeps
+// them in this browser's IndexedDB as before. Everything goes through this one
+// adapter so the dialog and diff code never care which backend they talk to.
+function cloudWorkspaceTarget() {
+  const token = syncState.account?.token;
+  const ws = settings.lastWorkspace;
+  if (!token || !ws?.team || !ws?.path) return null;
+  if (settings.syncedProjectId !== `${ws.team}/${ws.path}`) return null; // on-screen project IS that workspace
+  return { serverUrl: settings.serverUrl, token, team: ws.team, path: ws.path };
+}
+
+function snapshotStore() {
+  const target = cloudWorkspaceTarget();
+  if (!target) {
+    const key = snapshotProjectKey();
+    return {
+      remote: false,
+      create: (file, content, label) => createFileSnapshot(key, file, content, label),
+      paths: () => listSnapshotPaths(key),
+      versions: (file) => listFileVersions(key, file),
+      content: (id) => getVersionContent(id),
+      remove: (id) => deleteVersion(id)
+    };
+  }
+  const { serverUrl, token, team, path } = target;
+  return {
+    remote: true,
+    create: (file, content, label) => createServerSnapshot(serverUrl, token, team, path, file, content, label),
+    paths: async () => (await listServerSnapshotPaths(serverUrl, token, team, path)).paths ?? [],
+    versions: async (file) => (await listServerSnapshotVersions(serverUrl, token, team, path, file)).versions ?? [],
+    content: async (id) => {
+      try {
+        return (await getServerSnapshotContent(serverUrl, token, team, path, id)).content;
+      } catch {
+        return null; // gone or unreadable — callers already handle null
+      }
+    },
+    remove: (id) => deleteServerSnapshot(serverUrl, token, team, path, id)
+  };
+}
+
+// Snapshots made before they moved to the server still sit in this browser's
+// IndexedDB — under this workspace's id, or under "server-project", the project
+// id most server workspaces share (which is why they seemed to vanish). Upload
+// them once so no history is lost. From that shared key only files that exist in
+// THIS workspace are taken, so another workspace's history can't leak in. Safe
+// to repeat: the server skips anything already recorded (same time + content).
+let snapshotMigrationPromise = null;
+
+function ensureSnapshotsMigrated() {
+  const target = cloudWorkspaceTarget();
+  if (!target) return Promise.resolve(0);
+  if (!snapshotMigrationPromise) {
+    snapshotMigrationPromise = migrateLocalSnapshotsToServer(target)
+      .catch((error) => {
+        logDebug("response", "Snapshot migration failed", error?.message ?? String(error));
+        return 0;
+      })
+      .finally(() => { snapshotMigrationPromise = null; });
+  }
+  return snapshotMigrationPromise;
+}
+
+async function migrateLocalSnapshotsToServer(target) {
+  const workspaceId = `${target.team}/${target.path}`;
+  const flag = `mdnotes.snapshots.migrated.${workspaceId}`;
+  try {
+    if (localStorage.getItem(flag)) return 0;
+  } catch { /* storage blocked — just try */ }
+
+  const project = controller.getProject();
+  const workspaceFiles = new Set(Object.values(project?.nodes ?? {})
+    .filter((node) => node?.kind === "file")
+    .map((node) => getPath(project, node.id)));
+  let uploaded = 0;
+  for (const key of new Set([workspaceId, project?.id].filter(Boolean))) {
+    let files = [];
+    try { files = await listSnapshotPaths(key); } catch { continue; }
+    for (const file of files) {
+      if (key !== workspaceId && !workspaceFiles.has(file)) continue; // shared key: this workspace's files only
+      let versions = [];
+      try { versions = await listFileVersions(key, file); } catch { continue; }
+      for (const version of [...versions].reverse()) { // oldest first
+        const content = await getVersionContent(version.id).catch(() => null);
+        if (content == null) continue;
+        // A network failure throws out of here: the flag stays unset, so the next
+        // open retries and the server de-duplicates whatever already arrived.
+        const result = await createServerSnapshot(
+          target.serverUrl, target.token, target.team, target.path,
+          file, content, version.label || "", version.createdAt
+        );
+        if (result?.created) uploaded += 1;
+      }
+    }
+  }
+  try { localStorage.setItem(flag, String(Date.now())); } catch { /* ignore */ }
+  if (uploaded) logDebug("action", "Migrated local snapshots to server", `${uploaded} version(s) -> ${workspaceId}`);
+  return uploaded;
+}
+
 
 // A snapshot is always of the CURRENT file only — the intuitive "save this file's
 // version" action. (The project-wide createFileSnapshots stays in the service for
@@ -3121,7 +3613,7 @@ async function createSnapshotNow(label = "") {
   }
   const path = getPath(project, activeFile.id);
   try {
-    const result = await createFileSnapshot(snapshotProjectKey(), path, activeFile.content, label);
+    const result = await snapshotStore().create(path, activeFile.content, label);
     showToast(result.created ? `Snapshot saved: ${path.split("/").pop()}` : "Snapshot — no changes since the last one");
     logDebug("action", "Snapshot created", `${path} ${result.created ? "saved" : "unchanged"}`);
   } catch (error) {
@@ -3135,12 +3627,12 @@ async function createSnapshotNow(label = "") {
 // storage problems must not block opening a workspace.
 async function snapshotDirtyFiles(label) {
   const project = controller.getProject();
-  const key = snapshotProjectKey();
+  const store = snapshotStore();
   let saved = 0;
   for (const node of Object.values(project?.nodes ?? {})) {
     if (node?.kind !== "file" || !node.dirty || !isTextFileName(node.name)) continue;
     try {
-      const result = await createFileSnapshot(key, getPath(project, node.id), node.content ?? "", label);
+      const result = await store.create(getPath(project, node.id), node.content ?? "", label);
       if (result?.created) saved += 1;
     } catch { /* storage unavailable — never block the open */ }
   }
@@ -3168,7 +3660,9 @@ async function openSnapshotsDialog() {
   const activePath = activeFile ? getPath(project, activeFile.id) : null;
   let paths = [];
   try {
-    paths = await listSnapshotPaths(snapshotProjectKey());
+    const migrated = await ensureSnapshotsMigrated();
+    if (migrated) showToast(`Uploaded ${migrated} earlier snapshot${migrated === 1 ? "" : "s"} to the server`);
+    paths = await snapshotStore().paths();
   } catch { paths = []; }
   // Show a set of files that have history, plus the active file even if it has none.
   const options = Array.from(new Set([...(activePath ? [activePath] : []), ...paths]));
@@ -3193,7 +3687,7 @@ async function renderFileHistory() {
   if (!list) return;
   const path = snapshotsViewPath;
   try {
-    snapshotsVersions = path ? await listFileVersions(snapshotProjectKey(), path) : [];
+    snapshotsVersions = path ? await snapshotStore().versions(path) : [];
   } catch { snapshotsVersions = []; }
   // Keep the highlight only if the selected version still exists.
   if (!snapshotsVersions.some((v) => v.id === snapshotsSelectedId)) snapshotsSelectedId = null;
@@ -3296,7 +3790,7 @@ async function showFileDiff(path, versionId, createdAt) {
   const activeFile = controller.getActiveFile();
   const activePath = activeFile ? getPath(project, activeFile.id) : null;
   if (activePath !== path) { showToast("Open that file to compare it"); return; }
-  const oldText = await getVersionContent(versionId);
+  const oldText = await snapshotStore().content(versionId);
   if (oldText == null) { showToast("That version is no longer available"); return; }
   diffState.active = true;
   diffState.fileId = activeFile.id; // diff tracks the file by id (survives the editor switching files)
@@ -3316,7 +3810,7 @@ async function restoreVersion(path, versionId, createdAt) {
   const project = controller.getProject();
   const node = Object.values(project.nodes).find((n) => n.kind === "file" && getPath(project, n.id) === path);
   if (!node) { showToast("That file no longer exists"); return; }
-  const content = await getVersionContent(versionId);
+  const content = await snapshotStore().content(versionId);
   if (content == null) { showToast("That version is no longer available"); return; }
   if (content === String(node.content ?? "")) { showToast("Already matches this version"); return; }
   const ok = await confirmAction(`Restore "${path.split("/").pop()}" to its ${formatSnapshotTime(createdAt)} snapshot? Current content is replaced (you can snapshot first to keep it).`);
@@ -3793,6 +4287,10 @@ const collaboration = createCollaborationRuntime({
         checkpoint.soleAuthored = false;
       }
     }
+    // Comments are shared, so a COLLABORATOR's edit can move my commented lines
+    // just as my own typing does. Re-anchor after remote ops too, or a teammate
+    // inserting a paragraph above would strand every comment below it.
+    scheduleCommentReanchor();
     try {
       const activeFile = controller.getActiveFile();
       const activePath = activeFile ? getPath(controller.getProject(), activeFile.id) : null;
@@ -3941,6 +4439,29 @@ const collaboration = createCollaborationRuntime({
       const path = getPath(controller.getProject(), activeFile.id);
       collaboration.scheduleAwareness(path, sel.start, sel.end);
     }
+  },
+  // A collaborator added/edited/moved a comment: adopt the server's list and
+  // repaint the gutter + overview ruler without waiting for a reopen.
+  // The account token died (server restart). Sign in again with the stored,
+  // previously-proven credentials so reconnect can continue; return null to let
+  // the runtime stop retrying instead of looping on a dead token.
+  async reauthenticate() {
+    const serverKey = normalizeServerUrl(settings.serverUrl);
+    const proven = settings.accountSuccess?.[serverKey];
+    if (!proven || proven !== settings.accountUsername || !settings.accountPassword) return null;
+    try {
+      await performLogin(settings.accountUsername, settings.accountPassword, { silent: true });
+      logDebug("action", "Re-authenticated after token expiry", settings.accountUsername);
+      return syncState.account?.token ?? null;
+    } catch (error) {
+      logDebug("response", "Re-authentication failed", error.message);
+      return null;
+    }
+  },
+  onCommentsUpdate(files) {
+    if (!commentsAvailable()) return;
+    lineComments.byFile = new Map(Object.entries(files ?? {}));
+    renderEditorFromModel();
   },
   onChatWorkspaceUpdate(workspace) {
     // A peer pushed a chat workspace update — apply it locally and re-render.
@@ -4792,13 +5313,21 @@ function renderEditorContent(text) {
   }
 
   // Rebuild the gutter.
+  // Line comments show a breakpoint-style dot in the gutter; the whole gutter row
+  // is the click target for adding/editing one.
+  const commentByLine = new Map(commentsForActiveFile().map((comment) => [comment.line, comment]));
   const gutterMarkup = renderedLines.map((line, index) => {
     const height = Math.max(minimumLineHeight, line.getBoundingClientRect().height);
     const isDecorated = activeDecoration && index >= activeDecoration.lineStart && index <= activeDecoration.lineEnd;
     const marker = isDecorated ? `<span class="editor-gutter-agent-mark" aria-hidden="true">◦</span>` : "";
-    return `<div class="editor-gutter-line${isDecorated ? " is-agent-pending" : ""}" style="height:${height.toFixed(3)}px">${marker}${index + 1}</div>`;
+    const comment = commentByLine.get(index);
+    const commentMark = comment
+      ? `<span class="editor-gutter-comment-mark" title="${escapeHtmlAttribute(`${comment.author ?? ""}: ${comment.text}`.trim())}" aria-hidden="true">●</span>`
+      : "";
+    return `<div class="editor-gutter-line${isDecorated ? " is-agent-pending" : ""}${comment ? " has-comment" : ""}" data-line="${index}" style="height:${height.toFixed(3)}px">${marker}${commentMark}${index + 1}</div>`;
   }).join("");
   elements.editorGutter.innerHTML = `<div class="editor-gutter-content">${gutterMarkup}</div>`;
+  scheduleOverviewRuler(); // line geometry just changed
 
   // Sync gutter scroll position.
   syncEditorScroll();
@@ -5371,20 +5900,36 @@ function handleEditorKeydown(event) {
     if (event.key === "ArrowDown") {
       event.preventDefault();
       autocompleteState.activeIndex = (autocompleteState.activeIndex + 1) % autocompleteState.items.length;
+      autocompleteState.userChose = true;
       renderEditorAutocomplete();
       return;
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
       autocompleteState.activeIndex = (autocompleteState.activeIndex - 1 + autocompleteState.items.length) % autocompleteState.items.length;
+      autocompleteState.userChose = true;
       renderEditorAutocomplete();
       return;
     }
-    if (event.key === "Enter" || (event.key === "Tab" && !event.shiftKey)) {
+    // Tab always accepts. Enter only accepts a suggestion the user actually
+    // picked; otherwise it inserts a newline and just dismisses the popup.
+    // Enter-accepts-by-default silently replaced typed text with a word already
+    // in the document (type "zero", press Enter, get "zeroalpha") — it read as
+    // the editor corrupting your text.
+    if (event.key === "Tab" && !event.shiftKey) {
       event.preventDefault();
       traceEditorEvent("Autocomplete accepted from keydown", { key: event.key });
       acceptEditorAutocomplete();
       return;
+    }
+    if (event.key === "Enter") {
+      if (autocompleteState.userChose) {
+        event.preventDefault();
+        traceEditorEvent("Autocomplete accepted from keydown", { key: event.key });
+        acceptEditorAutocomplete();
+        return;
+      }
+      hideEditorAutocomplete(); // fall through: the newline is inserted normally
     }
     if (event.key === "Escape") {
       event.preventDefault();
@@ -6113,8 +6658,126 @@ function reorderPaneTabs(pane, draggedFileId, targetFileId, placeAfter = false) 
   renderTabs(controller.getProject());
 }
 
+// The tab strips scroll instead of squeezing tabs down to unreadable slivers, so
+// a "⋯" button at the end lists EVERY open tab (activate or close from there).
+// renderTabStrip records what it drew here so the menu can rebuild the same list.
+const tabStripState = { source: null, preview: null };
+
+function tabOverflowButton(pane) {
+  return pane === "source" ? elements.sourceTabOverflow : elements.previewTabOverflow;
+}
+
+function closeTabOverflowMenu() {
+  const menu = elements.tabOverflowMenu;
+  if (menu) menu.hidden = true;
+  for (const pane of ["source", "preview"]) {
+    const btn = tabOverflowButton(pane);
+    btn?.classList.remove("is-open");
+    btn?.setAttribute("aria-expanded", "false");
+  }
+}
+
+// Build the "all open tabs" list for one pane from the last render's descriptor.
+function openTabOverflowMenu(pane) {
+  const menu = elements.tabOverflowMenu;
+  const button = tabOverflowButton(pane);
+  const state = tabStripState[pane];
+  if (!menu || !button || !state) return;
+
+  const rows = [];
+  for (const fileId of state.tabIds) {
+    const node = state.project?.nodes?.[fileId];
+    if (!node || node.kind !== "file") continue;
+    rows.push({
+      label: node.name,
+      title: getPath(state.project, fileId),
+      active: state.activeFileId === fileId,
+      activate: () => state.onActivate(fileId),
+      close: () => state.onClose(fileId)
+    });
+  }
+  for (const spec of state.extraTabs ?? []) {
+    rows.push({
+      label: spec.label,
+      title: spec.title || spec.label,
+      active: state.activeFileId === spec.id,
+      activate: () => spec.onActivate(),
+      close: () => spec.onClose()
+    });
+  }
+  if (!rows.length) {
+    closeTabOverflowMenu();
+    return;
+  }
+
+  menu.replaceChildren(...rows.map((row) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.setAttribute("role", "menuitem");
+    item.className = `tab-overflow-row${row.active ? " is-active" : ""}`;
+    item.title = row.title;
+
+    const name = document.createElement("span");
+    name.className = "tab-overflow-name";
+    name.textContent = row.label;
+
+    const close = document.createElement("span");
+    close.className = "tab-overflow-close";
+    close.textContent = "\u00d7";
+    close.setAttribute("aria-hidden", "true");
+
+    item.append(name, close);
+    item.addEventListener("click", (event) => {
+      if (event.target === close) {
+        event.stopPropagation();
+        row.close();
+        renderTabs(controller.getProject());
+        openTabOverflowMenu(pane); // keep the list open so several can be closed
+        return;
+      }
+      row.activate();
+      closeTabOverflowMenu();
+    });
+    return item;
+  }));
+
+  // Anchor under the button, right-aligned, clamped to the viewport.
+  menu.hidden = false;
+  const rect = button.getBoundingClientRect();
+  const width = menu.offsetWidth || 240;
+  const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+  menu.style.left = `${left}px`;
+  menu.style.top = `${rect.bottom + 4}px`;
+  button.classList.add("is-open");
+  button.setAttribute("aria-expanded", "true");
+}
+
+for (const pane of ["source", "preview"]) {
+  tabOverflowButton(pane)?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const isOpen = tabOverflowButton(pane)?.classList.contains("is-open");
+    closeTabOverflowMenu();
+    if (!isOpen) openTabOverflowMenu(pane);
+  });
+}
+
+document.addEventListener("click", (event) => {
+  if (elements.tabOverflowMenu?.hidden) return;
+  if (event.target.closest?.("#tab-overflow-menu, .tab-overflow-btn")) return;
+  closeTabOverflowMenu();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !elements.tabOverflowMenu?.hidden) closeTabOverflowMenu();
+});
+
 function renderTabStrip({ strip, pane, project, tabIds, activeFileId, emptyText, onActivate, onClose, allowReorder = false, extraTabs = [] }) {
   strip.replaceChildren();
+
+  // Record what we're drawing so the "⋯" overflow menu can list the same tabs,
+  // and show that button only when this pane actually has tabs.
+  tabStripState[pane] = { project, tabIds, activeFileId, onActivate, onClose, extraTabs };
+  const overflowBtn = tabOverflowButton(pane);
+  if (overflowBtn) overflowBtn.hidden = (tabIds.length + extraTabs.length) === 0;
 
   if (tabIds.length === 0 && extraTabs.length === 0) {
     const empty = document.createElement("div");
@@ -6229,6 +6892,19 @@ function renderTabStrip({ strip, pane, project, tabIds, activeFileId, emptyText,
     });
     strip.append(tab);
   });
+
+  // The strip scrolls now, so the active tab can sit off-screen after a switch.
+  // Nudge it into view without disturbing any other scroll container.
+  const activeTab = strip.querySelector(".editor-tab.is-active");
+  if (activeTab) {
+    const left = activeTab.offsetLeft;
+    const right = left + activeTab.offsetWidth;
+    if (left < strip.scrollLeft) {
+      strip.scrollLeft = left;
+    } else if (right > strip.scrollLeft + strip.clientWidth) {
+      strip.scrollLeft = right - strip.clientWidth;
+    }
+  }
 }
 
 function renderTabs(project) {
@@ -7646,6 +8322,7 @@ function scheduleCharCount() {
   _charCountFrame = requestAnimationFrame(() => {
     _charCountFrame = 0;
     renderCharCount();
+    scheduleOverviewRuler(); // the caret marker follows the selection
   });
 }
 document.addEventListener("selectionchange", scheduleCharCount);
@@ -7751,7 +8428,12 @@ function updateStatus(project) {
   elements.editorContent.dataset.noFile = "false";
   if (elements.editorEmptyState) elements.editorEmptyState.hidden = true;
   const isTextFile = isTextFileName(activeFile.name);
-  elements.editorContent.contentEditable = isTextFile ? "true" : "false";
+  // A reader may open and read the project but never write to it (the server
+  // refuses their operations regardless; this stops the UI inviting edits that
+  // would only bounce back).
+  const readOnly = isReadOnlyWorkspace();
+  elements.editorContent.contentEditable = isTextFile && !readOnly ? "true" : "false";
+  elements.editorContent.dataset.readonly = readOnly ? "true" : "false";
   elements.editorContent.dataset.placeholder = isTextFile
     ? "Select or create a .md, .mtree, .urldb, or image file"
     : "Image assets are preview-only in the source pane.";
@@ -7780,6 +8462,15 @@ function updateStatus(project) {
     if (savedScroll && elements.editorContent) {
       elements.editorContent.scrollTop = savedScroll;
       syncEditorScroll();
+    }
+    // The find bar's matches are offsets into the file it searched. Switching
+    // files must re-run the search against the NEW document — otherwise the
+    // highlights (and next/prev) point at phantom positions carried over from
+    // the old one. Done here, after loadEditorContent, so the DOM we measure is
+    // the new file's.
+    if (searchState.open) {
+      searchState.currentIndex = -1;
+      computeSearchMatches();
     }
   } else {
     const domText = getEditorText();
@@ -8006,6 +8697,13 @@ async function publishOperation(operation) {
     return;
   }
   let op = operation;
+  // A whole-file write must declare the revision it is based on, so the server
+  // can refuse one that would overwrite newer content. Stamped centrally here so
+  // every caller is covered — a missed call site would be exactly the hole that
+  // let an old tab clobber the server.
+  if (op.type === "update-file" && op.baseRevision === undefined) {
+    op = { ...op, baseRevision: collaboration.getRevision?.() ?? 0 };
+  }
   // In a directory-backed cloud workspace, an image's bytes upload out-of-band
   // (chunked binary) so a large image can't blow the op-stream body limit (413)
   // or bloat sync as base64; the op then carries empty content and peers fetch
@@ -8028,6 +8726,14 @@ async function publishOperation(operation) {
     }
   }
   collaboration.publishOperation(op).catch((error) => {
+    if (error?.status === 409) {
+      // The server has a newer version of this file. Take it rather than
+      // overwrite it, and say so — silently dropping the write would leave the
+      // two sides diverged with no sign anything happened.
+      notify("That file changed on the server — loading the newer version instead of overwriting it.");
+      collaboration.reloadFromServer?.("Stale write refused — pulled the newer copy.").catch(() => {});
+      return;
+    }
     notify(error.message);
   });
 }
@@ -9054,9 +9760,35 @@ elements.snapshotsDeleteBtn?.addEventListener("click", async () => {
   if (!selected) return;
   const ok = await confirmAction(`Delete the ${formatSnapshotTime(selected.createdAt)} snapshot of "${(snapshotsViewPath || "").split("/").pop()}"? This can't be undone.`);
   if (!ok) return;
-  await deleteVersion(selected.id);
+  await snapshotStore().remove(selected.id);
   snapshotsSelectedId = null;
   await renderFileHistory();
+});
+// Click a gutter line number to add/edit that line's comment (breakpoint-style).
+elements.editorGutter?.addEventListener("click", (event) => {
+  const row = event.target.closest?.(".editor-gutter-line");
+  if (!row || row.dataset.line === undefined) return;
+  openCommentPopover(Number(row.dataset.line));
+});
+window.addEventListener("resize", scheduleOverviewRuler);
+elements.lineCommentSave?.addEventListener("click", () => { void submitLineComment(); });
+elements.lineCommentCancel?.addEventListener("click", closeCommentPopover);
+elements.lineCommentDelete?.addEventListener("click", () => {
+  const id = elements.lineCommentPopover?.dataset.commentId;
+  if (id) void removeLineComment(id);
+});
+elements.lineCommentInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") { event.preventDefault(); closeCommentPopover(); return; }
+  // Ctrl/Cmd+Enter saves; plain Enter stays a newline inside the note.
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    void submitLineComment();
+  }
+});
+document.addEventListener("click", (event) => {
+  if (elements.lineCommentPopover?.hidden) return;
+  if (event.target.closest?.("#line-comment-popover, .editor-gutter-line")) return;
+  closeCommentPopover();
 });
 elements.diffNextChange?.addEventListener("click", () => gotoChange(1));
 elements.diffPrevChange?.addEventListener("click", () => gotoChange(-1));
@@ -9501,7 +10233,7 @@ elements.welcomeResume?.addEventListener("click", () => {
   const last = settings.lastWorkspace;
   if (!last?.team) return;
   const path = last.path ?? (last.name ? `workspaces/${last.name}` : "");
-  if (path) void handleOpenWorkspace(last.team, path);
+  if (path) void handleOpenWorkspace(last.team, path, { reason: "welcome-resume" });
 });
 elements.newFileDialog?.querySelector("form")?.addEventListener("submit", handleNewFileSubmit);
 elements.newFileCancelButton?.addEventListener("click", () => elements.newFileDialog.close("cancel"));
@@ -9592,6 +10324,10 @@ elements.chatContextList.addEventListener("click", (event) => {
 });
 elements.chatComposeForm.addEventListener("submit", (event) => {
   event.preventDefault();
+  if (chatState.sending) {
+    stopAgentTurn(); // the send button is a Stop button mid-turn
+    return;
+  }
   void handleChatSubmit();
 });
 elements.chatInput.addEventListener("keydown", (event) => {
@@ -9776,6 +10512,62 @@ elements.wordWrapSelect.addEventListener("change", (event) => {
 });
 
 // ---- Source typography (Appearance) --------------------------------------
+// A font the browser can't find is silently replaced by the fallback, so choosing
+// it looked like "the setting does nothing". Detect availability the way font
+// detection libraries do: draw a sample with the candidate falling back to each
+// generic family; if its width never differs from the bare generic, the browser
+// substituted it — it isn't installed on this device. Results are cached.
+// (fontInstalledCache / fontProbeContext / fontProbeBase live with the other
+// module state near the top: syncSourceFontControls() runs at boot, long before
+// this line, and would otherwise hit them inside their temporal dead zone.)
+function isFontInstalled(name) {
+  const clean = String(name ?? "").replace(/["'\\]/g, "").trim();
+  if (!clean) return true;
+  if (fontInstalledCache.has(clean)) return fontInstalledCache.get(clean);
+  if (!fontProbeContext) fontProbeContext = document.createElement("canvas").getContext("2d");
+  const ctx = fontProbeContext;
+  if (!ctx) return true; // no canvas — don't claim it's missing
+  const sample = "mmmmmmmmmmlli10OoWW@#";
+  const measure = (font) => {
+    ctx.font = `72px ${font}`;
+    return ctx.measureText(sample).width;
+  };
+  const installed = ["monospace", "serif", "sans-serif"].some((generic) => {
+    if (fontProbeBase[generic] == null) fontProbeBase[generic] = measure(generic);
+    return measure(`"${clean}", ${generic}`) !== fontProbeBase[generic];
+  });
+  fontInstalledCache.set(clean, installed);
+  return installed;
+}
+
+// Mark curated fonts that aren't on this device, so the list reflects what will
+// actually render. A missing font stays selectable only if it's the saved choice.
+function annotateSourceFontOptions() {
+  const select = elements.sourceFontFamilySelect;
+  if (!select) return;
+  for (const option of select.options) {
+    if (!option.value || option.value === "__custom__") continue;
+    if (!option.dataset.label) option.dataset.label = option.textContent;
+    const installed = isFontInstalled(option.value);
+    option.textContent = installed ? option.dataset.label : `${option.dataset.label} (not installed)`;
+    option.disabled = !installed && select.value !== option.value;
+  }
+}
+
+// Tell the user which font is really on screen, and warn plainly when the chosen
+// one is missing instead of letting it silently fall back.
+function renderSourceFontStatus() {
+  const el = elements.sourceFontStatus;
+  if (!el) return;
+  const family = String(settings.sourceFontFamily ?? "").trim();
+  const missing = family && !isFontInstalled(family);
+  el.classList.toggle("is-warning", Boolean(missing));
+  el.textContent = !family
+    ? "Using the default monospace font."
+    : missing
+      ? `\u201c${family}\u201d isn\u2019t installed on this device, so the default monospace font is shown instead.`
+      : `Using ${family}.`;
+}
 // Reflect the stored settings into the controls. A family that isn't one of the
 // curated options is shown as "Custom…" with the name in the text field.
 function syncSourceFontControls() {
@@ -9796,6 +10588,8 @@ function syncSourceFontControls() {
     if (elements.sourceFontCustomInput) elements.sourceFontCustomInput.value = "";
   }
   if (elements.sourceFontCustomRow) elements.sourceFontCustomRow.hidden = select.value !== "__custom__";
+  annotateSourceFontOptions();
+  renderSourceFontStatus();
 }
 
 // Persist + repaint after a typography change. Glyph metrics just changed, so
@@ -9808,6 +10602,7 @@ function applySourceFontChange(label) {
   renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
   if (searchState.open) computeSearchMatches({ keepCaret: true });
   syncEditorScroll();
+  syncSourceFontControls(); // refresh availability labels + the status line
   logDebug("action", "Source typography changed", label);
 }
 
@@ -10017,7 +10812,7 @@ async function handleHost() {
       // then open and push into it — same path the file browser's Publish uses.
       const created = await createProjectServer(settings.serverUrl, syncState.account.token, team, "workspaces", name);
       workspaceMode = "synced";
-      await collaboration.openWorkspace(settings.serverUrl, syncState.account.token, team, created.path);
+      await collaboration.openWorkspace(settings.serverUrl, syncState.account.token, team, created.path, { reason: "create-project" });
       // The freshly-opened workspace is empty; push our local project into it.
       controller.replaceProject(localProject);
       await collaboration.publishSnapshot(localProject);
@@ -10088,7 +10883,7 @@ const serverProvider = {
   },
   async openProject(entry) {
     const { team, rel } = splitServerPath(entry.path);
-    await handleOpenWorkspace(team, rel);
+    await handleOpenWorkspace(team, rel, { reason: "file-manager-open" });
   },
   async delete(entry) {
     const { team, rel } = splitServerPath(entry.path);
@@ -10706,7 +11501,7 @@ async function handlePublishHere() {
     const localProject = controller.getProject();
     const created = await createProjectServer(settings.serverUrl, syncState.account.token, team, path, name);
     workspaceMode = "synced";
-    await collaboration.openWorkspace(settings.serverUrl, syncState.account.token, team, created.path);
+    await collaboration.openWorkspace(settings.serverUrl, syncState.account.token, team, created.path, { reason: "create-project" });
     controller.replaceProject(localProject);
     await collaboration.publishSnapshot(localProject);
     settings.wasConnected = false;
@@ -10795,8 +11590,28 @@ function getDeviceId() {
   }
 }
 
+// In-flight guard: a second request for the same workspace while one is still
+// running would churn sessions (new token + clientId, evicting the first).
+let openWorkspaceInFlight = null;
+
 async function handleOpenWorkspace(team, path, options = {}) {
   if (!syncState.account) return;
+  const workspaceId = `${team}/${path}`;
+  const reason = options.reason || "unspecified";
+  // Already connected to exactly this workspace? Re-opening buys nothing and
+  // costs a session swap, so skip it unless the caller insists.
+  if (!options.force
+      && collaboration.isConnected?.()
+      && workspaceMode === "synced"
+      && settings.syncedProjectId === workspaceId) {
+    logDebug("action", "Skipped redundant workspace open", `${workspaceId} (${reason})`);
+    return;
+  }
+  if (openWorkspaceInFlight === workspaceId) {
+    logDebug("action", "Workspace open already in flight", `${workspaceId} (${reason})`);
+    return;
+  }
+  openWorkspaceInFlight = workspaceId;
   try {
     // Preserve the user's local project once, so leaving the cloud workspace
     // restores it. Setting synced mode up-front stops onStatusChange's master
@@ -10827,6 +11642,7 @@ async function handleOpenWorkspace(team, path, options = {}) {
       settings.serverUrl, syncState.account.token, team, path,
       {
         reconcileLocal,
+        reason,
         device: getDeviceId(),
         // The server revision this browser's copy was last in sync with. Unknown
         // (null) is treated as stale, so we pull rather than risk overwriting.
@@ -10843,6 +11659,12 @@ async function handleOpenWorkspace(team, path, options = {}) {
     render(controller.getProject());
     // Restore the files this user had open here last time (server-side resume).
     restoreResumeState(session?.resume);
+    // Upload any snapshots this browser made before they lived on the server
+    // (background; the Snapshots dialog awaits the same run if still going).
+    void loadLineComments({ force: true });
+    void ensureSnapshotsMigrated().then((count) => {
+      if (count) showToast(`Uploaded ${count} earlier snapshot${count === 1 ? "" : "s"} to the server`);
+    });
     // Reveal the freshly-loaded tree — on mobile the explorer is a closed flyout,
     // so without this the just-opened project looks "empty" until the user taps ≡.
     setMobileExplorerOpen(true);
@@ -10856,6 +11678,8 @@ async function handleOpenWorkspace(team, path, options = {}) {
     notify(error.message || "Could not open workspace.");
     logDebug("response", "Open workspace failed", error.message);
     render(controller.getProject());
+  } finally {
+    openWorkspaceInFlight = null;
   }
 }
 
@@ -11048,7 +11872,16 @@ elements.connectServerButton.addEventListener("click", async () => {
 
 window.addEventListener("beforeunload", (event) => {
   captureViewState(); // remember where the user was before they leave
-  saveSettings(settings); // persist syncedRevision so the next open can compare
+  // Persist ONLY the in-sync revision, merged into what's stored now — and only
+  // for the same workspace. Writing this tab's whole settings object on unload
+  // clobbered anything another tab had saved since (font, login, workspace); and
+  // pairing our revision with another tab's workspace id would fool the
+  // push-vs-pull revision gate into overwriting newer work.
+  if (settings.syncedProjectId) {
+    patchStoredSettings((stored) => (stored.syncedProjectId === settings.syncedProjectId
+      ? { syncedRevision: settings.syncedRevision }
+      : null));
+  }
   const activeFile = controller.getActiveFile();
   if (activeFile?.dirty) {
     event.preventDefault();
@@ -11112,6 +11945,7 @@ async function restoreSessionOnBoot() {
           const storedIsThisWorkspace = settings.syncedProjectId === `${last.team}/${lastPath}`;
           const hasUnsavedLocal = dirtyFileIds(controller.getProject()).length > 0;
           await handleOpenWorkspace(last.team, lastPath, {
+            reason: "boot-restore",
             reconcileLocal: storedIsThisWorkspace && hasUnsavedLocal
           });
         }

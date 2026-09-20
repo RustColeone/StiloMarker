@@ -1,6 +1,8 @@
 import argparse
 import base64
 import copy
+import gzip
+import hashlib
 import json
 import mimetypes
 import os
@@ -47,7 +49,7 @@ def _read_int_env(name: str, default: int, minimum: int, maximum: int) -> int:
 # force-updates. Bump this (or set MDNOTES_MIN_CLIENT_VERSION) when a client-side
 # fix MUST be adopted before a client is allowed to sync again. Keep it in step
 # with the client's CLIENT_VERSION / the service-worker CACHE_NAME (mdnotes-shell-vN).
-MIN_CLIENT_VERSION = _read_int_env("MDNOTES_MIN_CLIENT_VERSION", 73, 0, 1_000_000)
+MIN_CLIENT_VERSION = _read_int_env("MDNOTES_MIN_CLIENT_VERSION", 98, 0, 1_000_000)
 
 
 class ChatProxy:
@@ -64,7 +66,7 @@ class ChatProxy:
         self.model = (
             os.environ.get("MDNOTES_CHAT_MODEL", "").strip()
             or os.environ.get("DEEPSEEK_MODEL", "").strip()
-            or "deepseek-v4-flash"
+            or "deepseek-flash"
         )
         # Optional list of models the client may pick from (comma-separated).
         # Defaults to just the configured model. The default model is always
@@ -75,7 +77,13 @@ class ChatProxy:
             for name in os.environ.get("MDNOTES_CHAT_MODELS", "").split(",")
             if name.strip()
         ]
-        self.models = [self.model] + [m for m in extra_models if m != self.model]
+        # The provider's currently-supported model ids, so the UI can switch
+        # without a server change. Verified against the API: it rejects anything
+        # else (e.g. the old "deepseek-v4-flash", which was silently failing).
+        fallback_models = ["deepseek-flash", "deepseek-v4-pro"]
+        ordered = [self.model] + extra_models + fallback_models
+        seen = set()
+        self.models = [m for m in ordered if m and not (m in seen or seen.add(m))]
         self.organization = os.environ.get("MDNOTES_CHAT_ORGANIZATION", "").strip()
         self.provider_label = os.environ.get("MDNOTES_CHAT_PROVIDER", "DeepSeek").strip() or "DeepSeek"
         self.allow_remote = _truthy(os.environ.get("MDNOTES_CHAT_ALLOW_REMOTE"))
@@ -922,9 +930,18 @@ class CollaborationBroker:
         self.subscribers = {}
         self.presence = {}
         self.master_tokens: set[str] = set()  # tokens that authenticated with master_pin
+        self.reader_tokens: set[str] = set()  # read-only sessions (access.readers)
         # Ring buffer of applied operations for OT rebase, keyed by revision number.
         # Stores (revision, path, start, end, inserted_length) tuples.
         self.operation_log = []
+        # revision at which each file path last changed. A whole-file write that
+        # is based on an older revision than this would be overwriting someone
+        # else's newer content, so it is refused. Unknown paths fall back to
+        # _path_change_floor (the revision this broker was loaded at), so after a
+        # restart — when this map is empty — an out-of-date client still can't
+        # clobber: it is treated as behind and made to pull.
+        self.path_changed_at: dict[str, int] = {}
+        self._path_change_floor = 0
         self.operation_log_max = 2000
         # Per-revision author tracking for sole-author revert (Phase 2 / subtask 2.1).
         self.revision_authors: dict[int, str] = {}
@@ -1071,6 +1088,7 @@ class CollaborationBroker:
         data = json.loads(self.state_file.read_text(encoding="utf-8"))
         self.project = data.get("project") or self._default_project()
         self.revision = int(data.get("revision", 0))
+        self._path_change_floor = self.revision  # in-memory map is empty after a load
 
     def _load_state_dir(self):
         manifest = self.workspace_dir / "manifest.json"
@@ -1081,6 +1099,7 @@ class CollaborationBroker:
         data = json.loads(manifest.read_text(encoding="utf-8"))
         self.project = data.get("project") or self._default_project()
         self.revision = int(data.get("revision", 0))
+        self._path_change_floor = self.revision  # in-memory map is empty after a load
         # Re-hydrate text content from real files; leave images empty (served by URL).
         for node_id, node in self.project.get("nodes", {}).items():
             if node.get("kind") != "file" or is_image_name(node.get("name", "")):
@@ -1190,6 +1209,26 @@ class CollaborationBroker:
             end = self._transform_offset(end, a_start, a_end, a_inserted)
         return start, end
 
+    def _note_path_changed(self, operation: dict):
+        """Record the revision at which a file path last changed (see path_changed_at)."""
+        op_type = operation.get("type")
+        touched = []
+        if op_type in ("patch-file", "update-file", "delete-node"):
+            touched.append(str(operation.get("path", "")))
+        elif op_type in ("create-file", "create-folder"):
+            parent = str(operation.get("parentPath", ""))
+            name = str(operation.get("name", ""))
+            touched.append(f"{parent}/{name}" if parent else name)
+        elif op_type == "rename-node":
+            touched.append(str(operation.get("path", "")))
+            parent = str(operation.get("path", "")).rsplit("/", 1)[0] if "/" in str(operation.get("path", "")) else ""
+            new_name = str(operation.get("name", ""))
+            if new_name:
+                touched.append(f"{parent}/{new_name}" if parent else new_name)
+        for path in touched:
+            if path:
+                self.path_changed_at[path] = self.revision
+
     def _record_operation(self, path: str, start: int, end: int, inserted_length: int):
         # revision is incremented in apply_operation after _apply_operation returns,
         # so the entry for this op will carry revision + 1.
@@ -1264,7 +1303,7 @@ class CollaborationBroker:
         if self.workspace_dir is None or not self.workspace_dir.exists():
             return
         for child in self.workspace_dir.iterdir():
-            if child.name in ("access.json", "user-state.json"):
+            if child.name in ("access.json", "user-state.json", "comments.json"):
                 continue
             self._remove_path(child)
 
@@ -1272,6 +1311,14 @@ class CollaborationBroker:
         operation_type = operation.get("type")
         dir_mode = self.workspace_dir is not None
         if operation_type == "replace-project":
+            # Wholesale tree replacement is the most destructive operation there
+            # is; it must be based on what the server currently has.
+            base_revision = operation.get("baseRevision")
+            if base_revision is None or int(base_revision) != int(self.revision):
+                raise ValueError(
+                    f"replace-project conflict: based on revision {base_revision} but the server is at "
+                    f"{self.revision} — reload before publishing over it"
+                )
             if dir_mode:
                 # Adopting a whole new tree (e.g. publish): reset the file tree,
                 # then externalize its images to real files (content stripped).
@@ -1351,6 +1398,27 @@ class CollaborationBroker:
             if not node_id:
                 raise ValueError(f"File path not found: {operation['path']}")
             node = self.project["nodes"][node_id]
+            # OPTIMISTIC CONCURRENCY. baseRevision was only ever used to REBASE
+            # typing offsets (patch-file); it gated nothing. So a whole-file write
+            # from a device stuck at an old revision was applied verbatim and
+            # silently replaced newer work — an old tab left open could overwrite
+            # documents nobody was even looking at.
+            # The precondition is the REVISION, not the file's sourceVersion: the
+            # client bumps sourceVersion on its own auto-save, so client and server
+            # counters drift apart and could never be compared.
+            base_revision = operation.get("baseRevision")
+            if base_revision is None:
+                raise ValueError(
+                    "update-file conflict: the client did not say which revision it is based on "
+                    "(reload to update this tab)"
+                )
+            changed_at = self.path_changed_at.get(operation["path"], self._path_change_floor)
+            if int(base_revision) < changed_at:
+                raise ValueError(
+                    f"update-file conflict on {operation['path']!r}: this client is based on revision "
+                    f"{int(base_revision)} but that file changed at revision {changed_at} — "
+                    "reload to get the newer copy"
+                )
             node["content"] = operation.get("content", "")
             node["dirty"] = False
             node["sourceVersion"] = int(node.get("sourceVersion", 0)) + 1
@@ -1370,6 +1438,19 @@ class CollaborationBroker:
             base_revision = operation.get("baseRevision")
             if base_revision is not None:
                 base_revision = int(base_revision)
+                # The rebase log is in-memory and capped, so it can no longer
+                # cover a very old base (a long-open tab, or any base at all after
+                # a server restart). Rebasing against a partial log silently lands
+                # the edit at the WRONG offsets and corrupts the file, so refuse
+                # and make the client reload instead.
+                if base_revision < self.revision:
+                    oldest = self.operation_log[0]["revision"] if self.operation_log else None
+                    if oldest is None or base_revision < oldest - 1:
+                        raise ValueError(
+                            f"patch conflict on {operation['path']!r}: base revision {base_revision} is too far "
+                            f"behind revision {self.revision} to rebase safely (the server restarted) — "
+                            "reload to continue"
+                        )
             new_content, rebased_start, rebased_end = self._apply_text_patch(
                 node.get("content", ""), operation, base_revision
             )
@@ -1453,6 +1534,8 @@ class CollaborationBroker:
             self.presence[token] = {"clientId": client_id, "displayName": display_name, "connectedAt": time.time(), "user": identity, "device": device}
             if role == "master":
                 self.master_tokens.add(token)
+            elif role == "reader":
+                self.reader_tokens.add(token)
         _log("CONNECT", f"{display_name} joined as {role}", clientId=client_id, revision=self.revision)
         self._broadcast_presence(f"{display_name} joined the session.")
         return {"token": token, "clientId": client_id, "displayName": display_name, "revision": self.revision, "sessionId": "default", "role": role}
@@ -1475,6 +1558,7 @@ class CollaborationBroker:
                 self.presence.pop(tok, None)
                 self.tokens.pop(tok, None)
                 self.master_tokens.discard(tok)
+                self.reader_tokens.discard(tok)
                 self.subscribers.pop(tok, None)
         if stale:
             self._broadcast_presence("Replaced a duplicate session.")
@@ -1505,13 +1589,25 @@ class CollaborationBroker:
         with self.lock:
             return list(self.presence.values())
 
-    def set_state(self, token: str, project):
+    def set_state(self, token: str, project, base_revision=None):
         client_id = self.authorize(token)
         with self.lock:
             if token not in self.master_tokens:
                 raise PermissionError("Only the session master can replace the project state")
         event = None
         with self.lock:
+            # This is the most destructive path in the server: it WIPES the
+            # workspace directory and swaps the whole tree. It had no revision
+            # check at all, and every logged-in account is admitted as master, so
+            # any tab — including one left open for days on a stale copy — could
+            # replace everything. The check lives inside the mutation lock so it
+            # cannot race. Checked here rather than in _apply_operation because
+            # this path bypasses it entirely.
+            if base_revision is None or int(base_revision) != int(self.revision):
+                raise ValueError(
+                    f"replace conflict: this client is based on revision {base_revision} but the server is at "
+                    f"{self.revision} — reload to get the newer copy before replacing it"
+                )
             if self.workspace_dir is not None:
                 # Replacing the whole tree (publish): reset the file tree and
                 # externalize inline images to real files (content stripped, so the
@@ -1520,6 +1616,10 @@ class CollaborationBroker:
                 self._externalize_images(project)
             self.project = project
             self.revision += 1
+            # The whole tree just changed: every path is "changed as of now", so
+            # anything based on an older revision must pull before writing.
+            self.path_changed_at.clear()
+            self._path_change_floor = self.revision
             self._persist_state()
             event = {
                 "type": "state",
@@ -1607,6 +1707,8 @@ class CollaborationBroker:
             op_type = operation.get("type")
             op_path = operation.get("path", "")
 
+            if token in self.reader_tokens:
+                raise PermissionError("You have read-only access to this project")
             if op_type == "replace-project" and token not in self.master_tokens:
                 raise PermissionError("Only the session master can replace the project")
 
@@ -1651,6 +1753,9 @@ class CollaborationBroker:
             orig_end = operation.get("end")
             self._apply_operation(operation)
             self.revision += 1
+            # Remember when this file last changed, so a later whole-file write
+            # based on an older revision can be refused instead of overwriting it.
+            self._note_path_changed(operation)
             self._persist_state()
             self.revision_authors[self.revision] = client_id  # subtask 2.1
             # Snapshot after apply (subtask 2.2); trim per retention rule (Decision Q4).
@@ -1731,6 +1836,7 @@ class CollaborationBroker:
         with self.lock:
             self.subscribers.pop(token, None)
             self.master_tokens.discard(token)
+            self.reader_tokens.discard(token)
             presence = self.presence.pop(token, None)
             if presence:
                 client_id = presence["clientId"]
@@ -1810,6 +1916,7 @@ class WorkspaceRegistry:
     def __init__(self, pin: str, legacy_state_file: Path, master_pin: str | None = None,
                  accounts: "AccountStore | None" = None, data_dir: Path | None = None):
         self.lock = threading.RLock()
+        self._snapshot_lock = threading.Lock()  # guards data/_snapshots index writes
         self.pin = pin
         self.master_pin = master_pin or pin
         self.accounts = accounts or AccountStore(None)
@@ -1880,6 +1987,7 @@ class WorkspaceRegistry:
                 data = json.loads(legacy.read_text(encoding="utf-8"))
                 broker.project = data.get("project") or broker._default_project()
                 broker.revision = int(data.get("revision", 0))
+                broker._path_change_floor = broker.revision
                 # Externalize inline images, write the real file tree + manifest.
                 broker._externalize_images(broker.project)
                 broker._persist_state()
@@ -1924,7 +2032,7 @@ class WorkspaceRegistry:
 
     # ---- File-browser navigation (nested folders + per-project access) ---------
     # Files that are storage bookkeeping, never shown as browseable entries.
-    _RESERVED_NAMES = {"index.json", "access.json", "manifest.json", "user-state.json"}
+    _RESERVED_NAMES = {"index.json", "access.json", "manifest.json", "user-state.json", "comments.json"}
 
     def _safe_relpath(self, path: str) -> str:
         """Sanitize a '/'-separated path relative to a team dir. Each segment is
@@ -1984,6 +2092,7 @@ class WorkspaceRegistry:
                 data = {
                     "whitelist": list(meta.get("members", [])),
                     "blacklist": [],
+                    "readers": [],
                     "createdBy": meta.get("createdBy"),
                 }
                 if proj.is_dir():
@@ -1993,7 +2102,23 @@ class WorkspaceRegistry:
                         pass
         wl = [str(u).strip() for u in data.get("whitelist", []) if str(u).strip()]
         bl = [str(u).strip() for u in data.get("blacklist", []) if str(u).strip()]
-        return {"whitelist": wl, "blacklist": bl, "createdBy": data.get("createdBy")}
+        rd = [str(u).strip() for u in data.get("readers", []) if str(u).strip()]
+        return {"whitelist": wl, "blacklist": bl, "readers": rd, "createdBy": data.get("createdBy")}
+
+    def role_for(self, identity: dict, team: str, relpath: str) -> str:
+        """Capability tier for this user on this project:
+          master — the project's creator; may REPLACE the whole tree (publish).
+          reader — listed in access.readers; may open and read, never write.
+          editor — anyone else with access; may edit, but not replace the tree.
+        Defaults keep today's behaviour for existing projects: no readers listed,
+        so every member is an editor, and only the creator is master."""
+        access = self.read_access(team, relpath)
+        user = identity["username"]
+        if access.get("createdBy") and user == access["createdBy"]:
+            return "master"
+        if user in (access.get("readers") or []):
+            return "reader"
+        return "editor"
 
     def can_access(self, identity: dict, team: str, relpath: str) -> bool:
         """teamMember AND (whitelist empty OR user in whitelist) AND (user not in
@@ -2007,6 +2132,343 @@ class WorkspaceRegistry:
         if access["whitelist"] and user not in access["whitelist"]:
             return False
         return True
+
+    # ---- Line comments (breakpoint-style notes anchored to a line) -------------
+    # Kept in a comments.json sidecar INSIDE the project (like access.json), so
+    # they travel with the project and are shared by everyone who can open it.
+    # Preserved across a publish and hidden from the file browser (see
+    # _wipe_workspace_dir / _RESERVED_NAMES). The comment text never touches the
+    # document itself — this is metadata about a line, not content in it.
+    COMMENT_MAX_LEN = 4000
+    COMMENT_MAX_PER_FILE = 500
+
+    def _comments_path(self, team: str, relpath: str) -> Path:
+        return self._abs_under_team(team, relpath) / "comments.json"
+
+    def _read_comments(self, team: str, relpath: str) -> dict:
+        path = self._comments_path(team, relpath)
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and isinstance(data.get("files"), dict):
+                    return data
+            except (OSError, json.JSONDecodeError):
+                pass
+        return {"files": {}}
+
+    def _write_comments(self, team: str, relpath: str, data: dict):
+        path = self._comments_path(team, relpath)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+
+    def _broadcast_comments(self, team: str, relpath: str, data: dict):
+        """Push the project's comment list to everyone connected to it, so a
+        teammate's note appears immediately instead of only after a reopen."""
+        broker = self.brokers.get(f"{team}/{relpath}")
+        if broker is None:
+            return
+        try:
+            broker._broadcast({
+                "type": "comments",
+                "files": data.get("files", {}),
+                "serverTime": time.time(),
+            })
+        except Exception:  # a broadcast must never fail the write that caused it
+            pass
+
+    def list_comments(self, token: str, team: str, path: str) -> dict:
+        _, team, relpath = self._project_authorize(token, team, path)
+        return self._read_comments(team, relpath)
+
+    def save_comment(self, token: str, team: str, path: str, payload: dict) -> dict:
+        identity, team, relpath = self._project_authorize(token, team, path)
+        file_key = self._snapshot_file_key(payload.get("file"))  # same rules: a key, not a filesystem path
+        text = str(payload.get("text", "")).strip()
+        if not text:
+            raise ValueError("A comment needs some text")
+        if len(text) > self.COMMENT_MAX_LEN:
+            raise ValueError("That comment is too long")
+        with self._snapshot_lock:  # reuse the sidecar write lock
+            data = self._read_comments(team, relpath)
+            entries = data["files"].setdefault(file_key, [])
+            comment_id = str(payload.get("id") or "")
+            now = int(time.time() * 1000)
+            existing = next((c for c in entries if c.get("id") == comment_id), None) if comment_id else None
+            if existing is not None:
+                existing["text"] = text
+                existing["updatedAt"] = now
+                # Re-anchoring may also move it.
+                if payload.get("line") is not None:
+                    existing["line"] = max(0, int(payload.get("line", 0)))
+                if payload.get("anchorText") is not None:
+                    existing["anchorText"] = str(payload.get("anchorText", ""))[:400]
+                result = existing
+            else:
+                if len(entries) >= self.COMMENT_MAX_PER_FILE:
+                    raise ValueError("Too many comments on that file")
+                result = {
+                    "id": f"{now}-{secrets.token_hex(4)}",
+                    "line": max(0, int(payload.get("line", 0))),
+                    # The line's own text, so the comment can be re-anchored after
+                    # edits shift it up or down (and across sessions/devices).
+                    "anchorText": str(payload.get("anchorText", ""))[:400],
+                    "text": text,
+                    "author": identity["username"],
+                    "createdAt": now,
+                    "updatedAt": now,
+                }
+                entries.append(result)
+            entries.sort(key=lambda c: int(c.get("line", 0)))
+            self._write_comments(team, relpath, data)
+        self._broadcast_comments(team, relpath, data)
+        return {"comment": result}
+
+    def delete_comment(self, token: str, team: str, path: str, comment_id: str) -> dict:
+        _, team, relpath = self._project_authorize(token, team, path)
+        with self._snapshot_lock:
+            data = self._read_comments(team, relpath)
+            removed = False
+            for key, entries in list(data["files"].items()):
+                kept = [c for c in entries if c.get("id") != comment_id]
+                if len(kept) != len(entries):
+                    removed = True
+                if kept:
+                    data["files"][key] = kept
+                else:
+                    data["files"].pop(key, None)
+            if removed:
+                self._write_comments(team, relpath, data)
+        if removed:
+            self._broadcast_comments(team, relpath, data)
+        return {"deleted": removed}
+
+    # Re-anchoring lives on the CLIENT (it has the live text); the server only
+    # stores the line + anchorText the client last resolved.
+    def reanchor_comments(self, token: str, team: str, path: str, file_key: str, moves: list) -> dict:
+        _, team, relpath = self._project_authorize(token, team, path)
+        key = self._snapshot_file_key(file_key)
+        with self._snapshot_lock:
+            data = self._read_comments(team, relpath)
+            entries = data["files"].get(key, [])
+            by_id = {c.get("id"): c for c in entries}
+            changed = False
+            for move in moves or []:
+                target = by_id.get(str(move.get("id", "")))
+                if target is None:
+                    continue
+                line = max(0, int(move.get("line", target.get("line", 0))))
+                if target.get("line") != line:
+                    target["line"] = line
+                    changed = True
+                if move.get("anchorText") is not None:
+                    anchor = str(move.get("anchorText", ""))[:400]
+                    if target.get("anchorText") != anchor:
+                        target["anchorText"] = anchor
+                        changed = True
+            if changed:
+                entries.sort(key=lambda c: int(c.get("line", 0)))
+                self._write_comments(team, relpath, data)
+        if changed:
+            self._broadcast_comments(team, relpath, data)
+        return {"updated": changed}
+
+    # ---- Server-side snapshots (per-file version history) ----------------------
+    # Snapshots used to live only in one browser's IndexedDB: they never followed
+    # the user to another device, and were keyed by a project id most server
+    # workspaces share ("server-project"). They now live on the server using the
+    # same git-like model: content-addressed, gzip-compressed blobs deduplicated by
+    # SHA-256 and refcounted, plus a per-file version list. Storage sits OUTSIDE the
+    # project directory (data/_snapshots/<team>/<project>) because a publish /
+    # replace-project wipes the project directory.
+    SNAPSHOT_MAX_PER_FILE = 30
+    SNAPSHOT_MAX_CONTENT_BYTES = 5 * 1024 * 1024
+    SNAPSHOT_BUDGET_BYTES = 50 * 1024 * 1024  # compressed, per project
+
+    def _project_authorize(self, token, team, path):
+        identity = self._require_account(token)
+        team = self._require_team(identity, team)
+        relpath = self._safe_relpath(path)
+        if not relpath:
+            raise ValueError("A project path is required")
+        if not self.is_project_dir(self._abs_under_team(team, relpath)):
+            raise ValueError("Not a project")
+        if not self.can_access(identity, team, relpath):
+            raise PermissionError("You do not have access to that project")
+        return identity, team, relpath
+
+    def _snapshot_dir(self, team, relpath):
+        base = (self.data_dir / "_snapshots" / self.safe_component(team)).resolve()
+        target = (base / relpath).resolve()
+        if base not in target.parents:
+            raise PermissionError("Path escapes snapshot directory")
+        return target
+
+    @staticmethod
+    def _snapshot_file_key(file_path):
+        """A file path is only ever a key inside index.json — blobs are stored by
+        content hash — so it never touches the filesystem and must NOT go through
+        safe_component (which rejects CJK names like 第一卷/第一回试写.md).
+        Normalized and bounded all the same."""
+        raw = str(file_path or "").replace("\\", "/").strip().strip("/")
+        key = "/".join(seg for seg in raw.split("/") if seg and seg not in (".", ".."))
+        if not key or len(key) > 512 or "\x00" in key:
+            raise ValueError("A valid file path is required")
+        return key
+
+    @staticmethod
+    def _snapshot_load(directory):
+        index_path = directory / "index.json"
+        if index_path.exists():
+            try:
+                data = json.loads(index_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    data.setdefault("files", {})
+                    data.setdefault("refs", {})
+                    data.setdefault("bytes", 0)
+                    return data
+            except (OSError, json.JSONDecodeError):
+                pass
+        return {"files": {}, "refs": {}, "bytes": 0}
+
+    @staticmethod
+    def _snapshot_save(directory, index):
+        directory.mkdir(parents=True, exist_ok=True)
+        tmp = directory / "index.json.tmp"
+        tmp.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, directory / "index.json")
+
+    @staticmethod
+    def _snapshot_release(directory, index, blob):
+        """Drop one reference to a blob; delete the blob file when none remain."""
+        refs = index["refs"]
+        refs[blob] = refs.get(blob, 1) - 1
+        if refs[blob] > 0:
+            return
+        refs.pop(blob, None)
+        blob_path = directory / "blobs" / f"{blob}.gz"
+        try:
+            index["bytes"] = max(0, index["bytes"] - blob_path.stat().st_size)
+            blob_path.unlink()
+        except OSError:
+            pass
+
+    def _snapshot_enforce_budget(self, directory, index, keep_id=None):
+        if index["bytes"] <= self.SNAPSHOT_BUDGET_BYTES:
+            return
+        pool = sorted(
+            ((v.get("createdAt", 0), key, v) for key, vs in index["files"].items() for v in vs),
+            key=lambda item: item[0],
+        )
+        for _, key, version in pool:  # oldest first, across every file
+            if index["bytes"] <= self.SNAPSHOT_BUDGET_BYTES:
+                break
+            if version["id"] == keep_id:
+                continue
+            index["files"][key] = [v for v in index["files"].get(key, []) if v["id"] != version["id"]]
+            if not index["files"][key]:
+                index["files"].pop(key, None)
+            self._snapshot_release(directory, index, version["blob"])
+
+    @staticmethod
+    def _snapshot_find(index, version_id):
+        for key, versions in index["files"].items():
+            for version in versions:
+                if version.get("id") == version_id:
+                    return key, version
+        return None, None
+
+    def create_snapshot(self, token, team, path, file_path, content, label="", created_at=None):
+        identity, team, relpath = self._project_authorize(token, team, path)
+        key = self._snapshot_file_key(file_path)
+        raw = (content if isinstance(content, str) else "").encode("utf-8")
+        if len(raw) > self.SNAPSHOT_MAX_CONTENT_BYTES:
+            raise ValueError("File is too large to snapshot")
+        blob = hashlib.sha256(raw).hexdigest()
+        directory = self._snapshot_dir(team, relpath)
+        with self._snapshot_lock:
+            index = self._snapshot_load(directory)
+            versions = index["files"].setdefault(key, [])
+            importing = isinstance(created_at, (int, float)) and not isinstance(created_at, bool) and created_at > 0
+            if importing:
+                # Migrating a historical snapshot (from a browser's local store):
+                # keep its original time, and make re-uploads a no-op by matching
+                # on (timestamp, content) — NOT on "same as newest", which would
+                # silently drop real history that happens to match the latest.
+                stamp = int(created_at)
+                duplicate = next((v for v in versions if v.get("createdAt") == stamp and v.get("blob") == blob), None)
+                if duplicate:
+                    return {"created": False, "version": duplicate}
+            else:
+                if versions and versions[0].get("blob") == blob:
+                    return {"created": False, "version": versions[0]}
+                stamp = int(time.time() * 1000)
+            blob_path = directory / "blobs" / f"{blob}.gz"
+            if not blob_path.exists():
+                blob_path.parent.mkdir(parents=True, exist_ok=True)
+                packed = gzip.compress(raw)
+                tmp = blob_path.parent / f"{blob}.tmp"
+                tmp.write_bytes(packed)
+                os.replace(tmp, blob_path)
+                index["bytes"] += len(packed)
+            index["refs"][blob] = index["refs"].get(blob, 0) + 1
+            version = {
+                "id": f"{stamp}-{secrets.token_hex(4)}",
+                "blob": blob,
+                "createdAt": stamp,
+                "byteSize": len(raw),
+                "label": str(label or "")[:200],
+                "author": identity["username"],
+            }
+            versions.append(version)
+            versions.sort(key=lambda v: v.get("createdAt", 0), reverse=True)  # newest first
+            while len(versions) > self.SNAPSHOT_MAX_PER_FILE:
+                self._snapshot_release(directory, index, versions.pop()["blob"])
+            self._snapshot_enforce_budget(directory, index, keep_id=version["id"])
+            self._snapshot_save(directory, index)
+        return {"created": True, "version": version}
+
+    def list_snapshot_paths(self, token, team, path):
+        _, team, relpath = self._project_authorize(token, team, path)
+        with self._snapshot_lock:
+            index = self._snapshot_load(self._snapshot_dir(team, relpath))
+        return {"paths": sorted(k for k, v in index["files"].items() if v), "bytes": index["bytes"]}
+
+    def list_snapshot_versions(self, token, team, path, file_path):
+        _, team, relpath = self._project_authorize(token, team, path)
+        key = self._snapshot_file_key(file_path)
+        with self._snapshot_lock:
+            index = self._snapshot_load(self._snapshot_dir(team, relpath))
+        return {"versions": index["files"].get(key, [])}
+
+    def get_snapshot_content(self, token, team, path, version_id):
+        _, team, relpath = self._project_authorize(token, team, path)
+        directory = self._snapshot_dir(team, relpath)
+        with self._snapshot_lock:
+            index = self._snapshot_load(directory)
+            key, version = self._snapshot_find(index, str(version_id))
+            if version is None:
+                raise ValueError("That snapshot no longer exists")
+            try:
+                text = gzip.decompress((directory / "blobs" / f"{version['blob']}.gz").read_bytes()).decode("utf-8")
+            except (OSError, EOFError, UnicodeDecodeError):
+                raise ValueError("Snapshot data is missing or damaged")
+        return {"content": text, "file": key, "version": version}
+
+    def delete_snapshot(self, token, team, path, version_id):
+        _, team, relpath = self._project_authorize(token, team, path)
+        directory = self._snapshot_dir(team, relpath)
+        with self._snapshot_lock:
+            index = self._snapshot_load(directory)
+            key, version = self._snapshot_find(index, str(version_id))
+            if version is None:
+                return {"deleted": False}
+            index["files"][key] = [v for v in index["files"][key] if v.get("id") != version["id"]]
+            if not index["files"][key]:
+                index["files"].pop(key, None)
+            self._snapshot_release(directory, index, version["blob"])
+            self._snapshot_save(directory, index)
+        return {"deleted": True}
 
     # ---- Per-user resume state (which files a user had open) -------------------
     def read_user_state(self, team: str, relpath: str, username: str) -> dict:
@@ -2170,9 +2632,10 @@ class WorkspaceRegistry:
         }
 
     def set_access(self, token: str, team: str, path: str,
-                   whitelist: list, blacklist: list) -> dict:
-        """Replace a project's whitelist/blacklist. Only the recorded owner may
-        edit; if none is recorded, any member with access may set it first."""
+                   whitelist: list, blacklist: list, readers: list | None = None) -> dict:
+        """Replace a project's whitelist/blacklist/readers. Only the recorded owner
+        may edit; if none is recorded, any member with access may set it first.
+        `readers` names members who get read-only access (see role_for)."""
         identity = self._require_account(token)
         team = self._require_team(identity, team)
         relpath = self._safe_relpath(path)
@@ -2188,6 +2651,9 @@ class WorkspaceRegistry:
         data = {
             "whitelist": [str(u).strip() for u in (whitelist or []) if str(u).strip()],
             "blacklist": [str(u).strip() for u in (blacklist or []) if str(u).strip()],
+            # Omitted (None) keeps the existing readers list rather than clearing it.
+            "readers": ([str(u).strip() for u in readers if str(u).strip()]
+                        if readers is not None else current.get("readers", [])),
             "createdBy": owner or identity["username"],
         }
         self._write_access_raw(proj, data)
@@ -2379,7 +2845,8 @@ class WorkspaceRegistry:
         # device replaces its old session, but the same account on another device
         # stays connected (self-collaboration across devices; no reconnect war).
         broker.evict_user(identity["username"], device)
-        session = broker._admit(identity["username"], "master", identity=identity["username"], device=device)
+        role = self.role_for(identity, team, relpath)
+        session = broker._admit(identity["username"], role, identity=identity["username"], device=device)
         self.set_last_workspace(identity["username"], team, relpath)  # cross-device resume
         with self.lock:
             self.token_workspace[session["token"]] = workspace_id
@@ -2588,6 +3055,14 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_browse(parsed)
         if parsed.path == "/api/workspaces/access":
             return self._handle_get_access(parsed)
+        if parsed.path == "/api/comments":
+            return self._handle_comments_get(parsed)
+        if parsed.path == "/api/snapshots":
+            return self._handle_snapshots_get(parsed, "paths")
+        if parsed.path == "/api/snapshots/versions":
+            return self._handle_snapshots_get(parsed, "versions")
+        if parsed.path == "/api/snapshots/content":
+            return self._handle_snapshots_get(parsed, "content")
         if parsed.path == "/api/workspaces/export":
             return self._handle_export_project(parsed)
         if parsed.path == "/api/workspaces/asset":
@@ -2618,6 +3093,16 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_import_project(parsed)
         if parsed.path == "/api/workspaces/access":
             return self._handle_set_access(parsed)
+        if parsed.path == "/api/comments":
+            return self._handle_comments_post(parsed, "save")
+        if parsed.path == "/api/comments/delete":
+            return self._handle_comments_post(parsed, "delete")
+        if parsed.path == "/api/comments/reanchor":
+            return self._handle_comments_post(parsed, "reanchor")
+        if parsed.path == "/api/snapshots":
+            return self._handle_snapshots_post(parsed, "create")
+        if parsed.path == "/api/snapshots/delete":
+            return self._handle_snapshots_post(parsed, "delete")
         if parsed.path == "/api/workspaces/user-state":
             return self._handle_set_user_state(parsed)
         if parsed.path == "/api/workspaces/open":
@@ -2792,7 +3277,20 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             device = str(payload.get("device") or "").strip()[:64] or None
             session = self.registry.open_workspace(token, str(payload.get("team", "")), path, device)
             self._write_json(HTTPStatus.OK, session)
-            self._log_request(200, f"opened {session['workspace']} as {session['displayName']!r}")
+            # Diagnostics for repeated-open churn: `pageId` distinguishes "the page
+            # keeps reloading" (many ids) from "one tab keeps reconnecting" (one id),
+            # and `reason` names the exact code path that asked.
+            reason = str(payload.get("reason") or "unspecified")[:40]
+            page_id = str(payload.get("pageId") or "?")[:24]
+            try:
+                uptime = f"{int(payload.get('uptimeMs', 0)) / 1000:.0f}s"
+            except (TypeError, ValueError):
+                uptime = "?"
+            self._log_request(
+                200,
+                f"opened {session['workspace']} as {session['displayName']!r}  "
+                f"why={reason} page={page_id} up={uptime} dev={device or '-'}"
+            )
         except PermissionError as error:
             self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
             self._log_request(403, str(error))
@@ -2850,6 +3348,82 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
             self._log_request(400, str(error))
 
+    def _handle_comments_get(self, parsed):
+        try:
+            token = self._extract_token(parsed)
+            query = parse_qs(parsed.query)
+            result = self.registry.list_comments(token, query.get("team", [""])[0], query.get("path", [""])[0])
+            self._write_json(HTTPStatus.OK, result)
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+        except ValueError as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+
+    def _handle_comments_post(self, parsed, kind):
+        try:
+            token = self._extract_token(parsed)
+            payload = self._read_json()
+            team = str(payload.get("team", ""))
+            path = str(payload.get("path", ""))
+            if kind == "save":
+                result = self.registry.save_comment(token, team, path, payload)
+                self._log_request(200, "comment saved")
+            elif kind == "delete":
+                result = self.registry.delete_comment(token, team, path, str(payload.get("id", "")))
+                self._log_request(200, "comment deleted")
+            else:
+                result = self.registry.reanchor_comments(
+                    token, team, path, str(payload.get("file", "")), payload.get("moves") or [])
+            self._write_json(HTTPStatus.OK, result)
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+            self._log_request(403, str(error))
+        except ValueError as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            self._log_request(400, str(error))
+
+    def _handle_snapshots_get(self, parsed, kind):
+        try:
+            token = self._extract_token(parsed)
+            query = parse_qs(parsed.query)
+            team = query.get("team", [""])[0]
+            path = query.get("path", [""])[0]
+            if kind == "paths":
+                result = self.registry.list_snapshot_paths(token, team, path)
+            elif kind == "versions":
+                result = self.registry.list_snapshot_versions(token, team, path, query.get("file", [""])[0])
+            else:
+                result = self.registry.get_snapshot_content(token, team, path, query.get("id", [""])[0])
+            self._write_json(HTTPStatus.OK, result)
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+        except ValueError as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+
+    def _handle_snapshots_post(self, parsed, kind):
+        try:
+            token = self._extract_token(parsed)
+            payload = self._read_json()
+            team = str(payload.get("team", ""))
+            path = str(payload.get("path", ""))
+            if kind == "create":
+                result = self.registry.create_snapshot(
+                    token, team, path, str(payload.get("file", "")),
+                    payload.get("content", ""), payload.get("label", ""),
+                    created_at=payload.get("createdAt"),
+                )
+                self._log_request(200, f"snapshot {'saved' if result['created'] else 'unchanged'}")
+            else:
+                result = self.registry.delete_snapshot(token, team, path, str(payload.get("id", "")))
+                self._log_request(200, "snapshot deleted")
+            self._write_json(HTTPStatus.OK, result)
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+            self._log_request(403, str(error))
+        except ValueError as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            self._log_request(400, str(error))
+
     def _handle_get_access(self, parsed):
         try:
             token = self._extract_token(parsed)
@@ -2873,6 +3447,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
                 str(payload.get("path", "")),
                 payload.get("whitelist", []),
                 payload.get("blacklist", []),
+                payload.get("readers"),
             )
             self._write_json(HTTPStatus.OK, result)
             self._log_request(200, "set access")
@@ -3162,7 +3737,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             project = payload.get("project")
             if not isinstance(project, dict):
                 raise ValueError("Project payload is required")
-            event = self.registry.broker_for_token(token).set_state(token, project)
+            event = self.registry.broker_for_token(token).set_state(token, project, payload.get("baseRevision"))
             self._write_json(HTTPStatus.OK, {"message": "state stored", "revision": event["revision"]})
             self._log_request(200, f"revision={event['revision']}")
         except PermissionError as error:
@@ -3204,7 +3779,11 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
             self._log_request(403, str(error))
         except ValueError as error:
-            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            # A stale-write conflict must surface as 409 so the client PULLS the
+            # newer copy; a plain 400 would just drop the op and leave the two
+            # sides silently diverged.
+            status = HTTPStatus.CONFLICT if "conflict" in str(error).lower() else HTTPStatus.BAD_REQUEST
+            self._write_json(status, {"message": str(error)})
             self._log_request(400, str(error))
 
     def _handle_event_stream(self, parsed):
@@ -3232,6 +3811,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
         _log("SSE", f"Stream opened  {self.client_address[0]}  ({sub_count} subscriber(s))", client=display_name)
+        stream_started = time.time()
 
         try:
             while True:
@@ -3258,7 +3838,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
                     self.wfile.write(b": keepalive\n\n")
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
-            _log("SSE", f"Stream closed  {self.client_address[0]}", client=display_name)
+            _log("SSE", f"Stream closed after {time.time() - stream_started:.0f}s  {self.client_address[0]}",
+                 client=display_name)
         finally:
             broker.unsubscribe(token)
             # Evict an ephemeral guest-hosted session once its master disconnects.
@@ -3373,7 +3954,7 @@ def run_selftest():
 
         state_request = Request(
             f"{base_url}/api/operations?token={token}",
-            data=json.dumps({"version": 74, "operation": {"type": "create-file", "parentPath": "", "name": "shared.md", "content": "# Shared"}}).encode("utf-8"),
+            data=json.dumps({"version": MIN_CLIENT_VERSION, "operation": {"type": "create-file", "parentPath": "", "name": "shared.md", "content": "# Shared"}}).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST"
         )
@@ -3387,7 +3968,7 @@ def run_selftest():
 
         patch_request = Request(
             f"{base_url}/api/operations?token={token}",
-            data=json.dumps({"version": 74, "operation": {"type": "patch-file", "path": "shared.md", "start": 8, "end": 8, "removedText": "", "text": " live", "baseRevision": 1}}).encode("utf-8"),
+            data=json.dumps({"version": MIN_CLIENT_VERSION, "operation": {"type": "patch-file", "path": "shared.md", "start": 8, "end": 8, "removedText": "", "text": " live", "baseRevision": 1}}).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST"
         )
@@ -3399,6 +3980,24 @@ def run_selftest():
         assert shared_file["content"] == "# Shared live"
         persisted = json.loads(state_file.read_text(encoding="utf-8"))
         assert persisted["revision"] == 2
+
+        # --- stale-write gate over HTTP: a conflict must be 409, so the client
+        # PULLS the newer copy instead of silently diverging. ---
+        for _bad in ({"type": "update-file", "path": "shared.md", "content": "CLOBBER"},                  # no base version
+                     {"type": "update-file", "path": "shared.md", "content": "CLOBBER", "baseRevision": 0}):  # stale base
+            _req = Request(
+                f"{base_url}/api/operations?token={token}",
+                data=json.dumps({"version": MIN_CLIENT_VERSION, "operation": _bad}).encode("utf-8"),
+                headers={"Content-Type": "application/json"}, method="POST")
+            try:
+                urlopen(_req)
+                assert False, "stale/unguarded whole-file write should be refused"
+            except HTTPError as _e:
+                _body = _e.read().decode("utf-8", "replace")
+                assert _e.code == 409, f"expected 409 so the client pulls, got {_e.code}: {_body}"
+        _after = json.loads(urlopen(f"{base_url}/api/session/state?token={token}").read().decode("utf-8"))
+        _shared = next(n for n in _after["project"]["nodes"].values() if n.get("name") == "shared.md")
+        assert "CLOBBER" not in _shared["content"], "refused write must not reach the document"
 
         # --- stale-client gate: an operation with no client version is refused ---
         stale_req = Request(
@@ -3422,7 +4021,7 @@ def run_selftest():
         # (or "# Shared live B A" depending on scheduling, but both must succeed).
         patch_a = Request(
             f"{base_url}/api/operations?token={token}",
-            data=json.dumps({"version": 74, "operation": {"type": "patch-file", "path": "shared.md", "start": 13, "end": 13, "removedText": "", "text": " A", "baseRevision": 2}}).encode("utf-8"),
+            data=json.dumps({"version": MIN_CLIENT_VERSION, "operation": {"type": "patch-file", "path": "shared.md", "start": 13, "end": 13, "removedText": "", "text": " A", "baseRevision": 2}}).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST"
         )
@@ -3431,7 +4030,7 @@ def run_selftest():
 
         patch_b = Request(
             f"{base_url}/api/operations?token={token}",
-            data=json.dumps({"version": 74, "operation": {"type": "patch-file", "path": "shared.md", "start": 13, "end": 13, "removedText": "", "text": " B", "baseRevision": 2}}).encode("utf-8"),
+            data=json.dumps({"version": MIN_CLIENT_VERSION, "operation": {"type": "patch-file", "path": "shared.md", "start": 13, "end": 13, "removedText": "", "text": " B", "baseRevision": 2}}).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST"
         )
@@ -3453,16 +4052,16 @@ def run_selftest():
         # "characters ended up shifted while two devices edited" bug). ---
         create_ot = Request(
             f"{base_url}/api/operations?token={token}",
-            data=json.dumps({"version": 74, "operation": {"type": "create-file", "parentPath": "", "name": "ot.md", "content": "0123456789"}}).encode("utf-8"),
+            data=json.dumps({"version": MIN_CLIENT_VERSION, "operation": {"type": "create-file", "parentPath": "", "name": "ot.md", "content": "0123456789"}}).encode("utf-8"),
             headers={"Content-Type": "application/json"}, method="POST")
         rev0 = json.loads(urlopen(create_ot).read().decode("utf-8"))["revision"]
         # Client A (based on rev0): insert "AAA" at offset 2.
         urlopen(Request(f"{base_url}/api/operations?token={token}",
-            data=json.dumps({"version": 74, "operation": {"type": "patch-file", "path": "ot.md", "start": 2, "end": 2, "removedText": "", "text": "AAA", "baseRevision": rev0}}).encode("utf-8"),
+            data=json.dumps({"version": MIN_CLIENT_VERSION, "operation": {"type": "patch-file", "path": "ot.md", "start": 2, "end": 2, "removedText": "", "text": "AAA", "baseRevision": rev0}}).encode("utf-8"),
             headers={"Content-Type": "application/json"}, method="POST"))
         # Client B (ALSO based on rev0 — never saw A): insert "BBB" at offset 8.
         urlopen(Request(f"{base_url}/api/operations?token={token}",
-            data=json.dumps({"version": 74, "operation": {"type": "patch-file", "path": "ot.md", "start": 8, "end": 8, "removedText": "", "text": "BBB", "baseRevision": rev0}}).encode("utf-8"),
+            data=json.dumps({"version": MIN_CLIENT_VERSION, "operation": {"type": "patch-file", "path": "ot.md", "start": 8, "end": 8, "removedText": "", "text": "BBB", "baseRevision": rev0}}).encode("utf-8"),
             headers={"Content-Type": "application/json"}, method="POST"))
         snap = json.loads(urlopen(f"{base_url}/api/session/state?token={token}").read().decode("utf-8"))
         ot_file = next(n for n in snap["project"]["nodes"].values() if n.get("name") == "ot.md")
@@ -3558,7 +4157,7 @@ def run_selftest():
         # access.json survives a publish/replace-project wipe.
         _reg.set_access(_alice, "qa", "workspaces/Alpha", ["alice"], [])
         _broker = _reg.brokers["qa/workspaces/Alpha"]
-        _broker._apply_operation({"type": "replace-project", "project": _broker._default_project()})
+        _broker._apply_operation({"type": "replace-project", "baseRevision": _broker.revision, "project": _broker._default_project()})
         assert (_alpha_dir / "access.json").is_file(), "access.json must survive replace-project"
         assert _reg.read_access("qa", "workspaces/Alpha")["whitelist"] == ["alice"], "whitelist lost on publish"
 
@@ -3590,7 +4189,7 @@ def run_selftest():
         assert _reg.read_user_state("qa", "workspaces/Alpha", "bob")["openFiles"] == [], "resume must be per-user"
         assert (_alpha_dir / "user-state.json").is_file(), "resume sidecar not written"
         # A publish (replace-project + persist) must preserve the resume sidecar.
-        _alpha_broker._apply_operation({"type": "replace-project", "project": _alpha_broker._default_project()})
+        _alpha_broker._apply_operation({"type": "replace-project", "baseRevision": _alpha_broker.revision, "project": _alpha_broker._default_project()})
         _alpha_broker._persist_state()
         assert (_alpha_dir / "user-state.json").is_file(), "user-state.json must survive replace-project"
         assert _reg.read_user_state("qa", "workspaces/Alpha", "alice")["activeFile"] == "welcome.md", "resume lost on publish"
@@ -3603,6 +4202,215 @@ def run_selftest():
         _login = _reg.login("alice", "pw")
         assert _login.get("lastWorkspace", {}).get("path") == "workspaces/Alpha", "login should return last workspace"
         assert _login["lastWorkspace"]["team"] == "qa", "last workspace team"
+
+        # --- Line comments (metadata about a line, never in the document) --------
+        _CP = "workspaces/Alpha"
+        _cf = "第一卷/第一回试写.md"  # CJK path must work here too
+        _c1 = _reg.save_comment(_alice, "qa", _CP, {"file": _cf, "line": 41,
+                                                    "anchorText": "原文这一行", "text": "check this pacing"})["comment"]
+        assert _c1["author"] == "alice" and _c1["line"] == 41
+        _all = _reg.list_comments(_alice, "qa", _CP)["files"]
+        assert [c["text"] for c in _all[_cf]] == ["check this pacing"]
+        # comments.json lives beside the project but is never a browseable file.
+        assert (_alpha_dir / "comments.json").is_file(), "sidecar not written"
+        assert "comments.json" not in {e["name"] for e in _reg.browse(_alice, "qa", "workspaces")["entries"]}
+
+        # Editing by id updates in place rather than adding a duplicate.
+        _reg.save_comment(_alice, "qa", _CP, {"file": _cf, "id": _c1["id"], "text": "revised note"})
+        assert len(_reg.list_comments(_alice, "qa", _CP)["files"][_cf]) == 1
+        assert _reg.list_comments(_alice, "qa", _CP)["files"][_cf][0]["text"] == "revised note"
+
+        # Re-anchoring moves a comment when edits above shift its line.
+        _reg.reanchor_comments(_alice, "qa", _CP, _cf, [{"id": _c1["id"], "line": 57, "anchorText": "原文这一行"}])
+        assert _reg.list_comments(_alice, "qa", _CP)["files"][_cf][0]["line"] == 57, "re-anchor did not move the comment"
+
+        # Comments survive a publish (replace-project wipes the project dir).
+        _alpha_broker._apply_operation({"type": "replace-project", "baseRevision": _alpha_broker.revision,
+                                        "project": _alpha_broker._default_project()})
+        _alpha_broker._persist_state()
+        assert (_alpha_dir / "comments.json").is_file(), "comments.json must survive replace-project"
+        assert _reg.list_comments(_alice, "qa", _CP)["files"][_cf][0]["text"] == "revised note", "comments lost on publish"
+
+        # Empty text is rejected; access follows the project (bob is blacklisted/off-list).
+        try:
+            _reg.save_comment(_alice, "qa", _CP, {"file": _cf, "text": "   "})
+            assert False, "empty comment should be rejected"
+        except ValueError:
+            pass
+        for _call in (lambda: _reg.list_comments(_bob, "qa", _CP),
+                      lambda: _reg.save_comment(_bob, "qa", _CP, {"file": _cf, "text": "nope"})):
+            try:
+                _call()
+                assert False, "non-whitelisted user must not reach comments"
+            except PermissionError:
+                pass
+
+        assert _reg.delete_comment(_alice, "qa", _CP, _c1["id"])["deleted"], "delete failed"
+        assert _reg.list_comments(_alice, "qa", _CP)["files"] == {}, "comment not removed"
+
+        # --- Stale-write protection (an old tab must not overwrite newer work) ---
+        _ss = _reg.open_workspace(_alice, "qa", "workspaces/Alpha")
+        _stok = _ss["token"]
+        _sb = _reg.brokers["qa/workspaces/Alpha"]
+        _sb.apply_operation(_stok, {"type": "create-file", "parentPath": "", "name": "race.md", "content": "v1"})
+        _nid = _sb._get_node_id_by_path("race.md")
+        _created_at = _sb.revision  # race.md last changed here
+
+        # A whole-file write that doesn't say what it is based on is refused.
+        try:
+            _sb.apply_operation(_stok, {"type": "update-file", "path": "race.md", "content": "CLOBBER"})
+            assert False, "unguarded update-file must be refused"
+        except ValueError as e:
+            assert "conflict" in str(e).lower()
+        # A write from a client that hadn't seen the latest change is refused...
+        try:
+            _sb.apply_operation(_stok, {"type": "update-file", "path": "race.md",
+                                        "content": "STALE", "baseRevision": _created_at - 1})
+            assert False, "stale update-file must be refused"
+        except ValueError as e:
+            assert "conflict" in str(e).lower()
+        assert _sb.project["nodes"][_nid]["content"] == "v1", "refused write must not change content"
+        # ...an up-to-date one still applies (normal saving must keep working).
+        _sb.apply_operation(_stok, {"type": "update-file", "path": "race.md",
+                                    "content": "v2", "baseRevision": _sb.revision})
+        assert _sb.project["nodes"][_nid]["content"] == "v2", "matching update-file must apply"
+        # Editing a DIFFERENT file doesn't make this one stale (per-path, not global).
+        _sb.apply_operation(_stok, {"type": "create-file", "parentPath": "", "name": "other.md", "content": "o"})
+        _sb.apply_operation(_stok, {"type": "update-file", "path": "race.md",
+                                    "content": "v3", "baseRevision": _sb.path_changed_at["race.md"]})
+        assert _sb.project["nodes"][_nid]["content"] == "v3", "unrelated edits must not block a write"
+
+        # A patch whose base predates what we can rebase from is refused rather
+        # than silently landing at the wrong offsets (corrupting the file).
+        _sb.operation_log = []  # e.g. after a server restart, or trimmed away
+        try:
+            _sb.apply_operation(_stok, {"type": "patch-file", "path": "race.md", "start": 0, "end": 0,
+                                        "removedText": "", "text": "X", "baseRevision": max(0, _sb.revision - 5)})
+            assert False, "un-rebasable patch must be refused"
+        except ValueError as e:
+            assert "conflict" in str(e).lower()
+
+        # set_state (publish) WIPES the tree: it must be based on the current revision.
+        try:
+            _sb.set_state(_stok, _sb._default_project(), base_revision=_sb.revision - 1)
+            assert False, "stale replace must be refused"
+        except ValueError as e:
+            assert "conflict" in str(e).lower()
+        try:
+            _sb.set_state(_stok, _sb._default_project(), base_revision=None)
+            assert False, "unguarded replace must be refused"
+        except ValueError as e:
+            assert "conflict" in str(e).lower()
+        assert _sb._get_node_id_by_path("race.md"), "refused replace must not wipe the tree"
+        _sb.set_state(_stok, _sb._default_project(), base_revision=_sb.revision)  # current base is accepted
+
+        # --- Server-side snapshots ---------------------------------------------
+        _P = "workspaces/Alpha"
+        _f = "第一卷/第一回试写.md"  # CJK path: must NOT go through safe_component
+        _r1 = _reg.create_snapshot(_alice, "qa", _P, _f, "第一版 content", "first")
+        assert _r1["created"] and _r1["version"]["author"] == "alice", "snapshot not created"
+        assert not _reg.create_snapshot(_alice, "qa", _P, _f, "第一版 content")["created"], "identical content must dedup"
+        _r2 = _reg.create_snapshot(_alice, "qa", _P, _f, "第二版 content")
+        _vers = _reg.list_snapshot_versions(_alice, "qa", _P, _f)["versions"]
+        assert [v["id"] for v in _vers] == [_r2["version"]["id"], _r1["version"]["id"]], "versions must be newest first"
+        assert _reg.get_snapshot_content(_alice, "qa", _P, _r1["version"]["id"])["content"] == "第一版 content", "CJK content round-trip"
+        assert _reg.list_snapshot_paths(_alice, "qa", _P)["paths"] == [_f], "path listing"
+
+        # Identical content in another file shares one blob (content-addressed).
+        _reg.create_snapshot(_alice, "qa", _P, "大纲.md", "第二版 content")
+        _snapdir = _reg._snapshot_dir("qa", _P)
+        _idx = _reg._snapshot_load(_snapdir)
+        assert _idx["refs"][_r2["version"]["blob"]] == 2, "shared blob should be refcounted twice"
+        assert len(list((_snapdir / "blobs").glob("*.gz"))) == 2, "dedup: two distinct contents -> two blobs"
+
+        # Stored OUTSIDE the project dir, so a publish (which wipes it) keeps them.
+        assert not any("_snapshots" in str(x) for x in _alpha_dir.rglob("*")), "snapshots must not live in the project dir"
+        _alpha_broker._apply_operation({"type": "replace-project", "baseRevision": _alpha_broker.revision, "project": _alpha_broker._default_project()})
+        _alpha_broker._persist_state()
+        assert _reg.list_snapshot_paths(_alice, "qa", _P)["paths"] == ["大纲.md", _f], "snapshots lost on publish"
+
+        # Per-file cap of 30; pruned blobs are actually deleted from disk.
+        for _i in range(35):
+            _reg.create_snapshot(_alice, "qa", _P, "churn.md", f"rev {_i}")
+        _churn = _reg.list_snapshot_versions(_alice, "qa", _P, "churn.md")["versions"]
+        assert len(_churn) == 30, f"expected 30 versions, got {len(_churn)}"
+        assert _churn[0]["byteSize"] == len("rev 34"), "newest version kept"
+        _live_blobs = {v["blob"] for vs in _reg._snapshot_load(_snapdir)["files"].values() for v in vs}
+        assert {b.stem for b in (_snapdir / "blobs").glob("*.gz")} == _live_blobs, "orphan blobs left behind"
+
+        # Delete drops the version; its unshared blob goes with it.
+        _reg.delete_snapshot(_alice, "qa", _P, _r1["version"]["id"])
+        assert _r1["version"]["blob"] not in _reg._snapshot_load(_snapdir)["refs"], "released blob still referenced"
+        assert not (_snapdir / "blobs" / f"{_r1['version']['blob']}.gz").exists(), "unreferenced blob not deleted"
+
+        # Import (migration) keeps the original timestamp and is idempotent.
+        _t = 1700000000000
+        _imp = _reg.create_snapshot(_alice, "qa", _P, "migrated.md", "old text", created_at=_t)
+        assert _imp["created"] and _imp["version"]["createdAt"] == _t, "import must keep its timestamp"
+        assert not _reg.create_snapshot(_alice, "qa", _P, "migrated.md", "old text", created_at=_t)["created"], "re-import must be a no-op"
+        _reg.create_snapshot(_alice, "qa", _P, "migrated.md", "newer text")
+        # An older import whose content equals the newest is still real history.
+        assert _reg.create_snapshot(_alice, "qa", _P, "migrated.md", "newer text", created_at=_t - 1000)["created"], "historical import dropped"
+        assert len(_reg.list_snapshot_versions(_alice, "qa", _P, "migrated.md")["versions"]) == 3
+
+        # Access control follows the project: bob is not on Alpha's whitelist.
+        for _call in (lambda: _reg.list_snapshot_paths(_bob, "qa", _P),
+                      lambda: _reg.create_snapshot(_bob, "qa", _P, "x.md", "nope")):
+            try:
+                _call()
+                assert False, "non-whitelisted user must not reach snapshots"
+            except PermissionError:
+                pass
+        # Traversal / bad keys are rejected.
+        for _bad in ("../../etc", ""):
+            try:
+                _reg.list_snapshot_paths(_alice, "qa", _bad)
+                assert False, f"bad project path accepted: {_bad!r}"
+            except (ValueError, PermissionError):
+                pass
+        try:
+            _reg.create_snapshot(_alice, "qa", _P, "/../", "x")
+            assert False, "empty file key accepted"
+        except ValueError:
+            pass
+
+        # --- Capability tiers: master / editor / reader -------------------------
+        _RP = "workspaces/Alpha"
+        _reg.set_access(_alice, "qa", _RP, [], [], [])          # open to the team, no readers
+        assert _reg.role_for(_alice_id, "qa", _RP) == "master", "creator should be master"
+        assert _reg.role_for(_bob_id, "qa", _RP) == "editor", "a plain member should be an editor"
+        _reg.set_access(_alice, "qa", _RP, [], [], ["bob"])
+        assert _reg.role_for(_bob_id, "qa", _RP) == "reader", "listed reader should be read-only"
+        # readers survive a whitelist edit that omits them
+        _reg.set_access(_alice, "qa", _RP, [], [])
+        assert _reg.read_access("qa", _RP)["readers"] == ["bob"], "omitted readers must not be cleared"
+
+        _rb = _reg.brokers["qa/" + _RP]
+        _rs = _reg.open_workspace(_bob, "qa", _RP)
+        assert _rs["role"] == "reader", f"expected reader session, got {_rs['role']}"
+        for _op in ({"type": "create-file", "parentPath": "", "name": "nope.md", "content": "x"},
+                    {"type": "update-file", "path": "race.md", "content": "x", "baseRevision": _rb.revision}):
+            try:
+                _rb.apply_operation(_rs["token"], _op)
+                assert False, "a reader must not be able to write"
+            except PermissionError:
+                pass
+
+        # An editor may write, but may NOT replace the whole tree.
+        _reg.set_access(_alice, "qa", _RP, [], [], [])
+        _es = _reg.open_workspace(_bob, "qa", _RP)
+        assert _es["role"] == "editor"
+        _rb.apply_operation(_es["token"], {"type": "create-file", "parentPath": "", "name": "editor-ok.md", "content": "x"})
+        assert _rb._get_node_id_by_path("editor-ok.md"), "editor write should apply"
+        try:
+            _rb.set_state(_es["token"], _rb._default_project(), base_revision=_rb.revision)
+            assert False, "an editor must not replace the whole tree"
+        except PermissionError:
+            pass
+        # ...but the owner still can.
+        _ms = _reg.open_workspace(_alice, "qa", _RP)
+        assert _ms["role"] == "master", "owner should still be master"
+        _rb.set_state(_ms["token"], _rb._default_project(), base_revision=_rb.revision)
 
         _sh.rmtree(_data, ignore_errors=True)
 

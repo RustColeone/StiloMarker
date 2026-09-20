@@ -61,12 +61,15 @@ async function pushServerChatWorkspace(serverUrl, token, workspace) {
   return parseResponse(response);
 }
 
-async function sendChatRequest(serverUrl, payload, onProgress) {
+// `signal` lets the caller interrupt a turn: aborting rejects the fetch and the
+// stream reader, so a long generation can be stopped instead of run to completion.
+async function sendChatRequest(serverUrl, payload, onProgress, signal) {
   const baseUrl = normalizeServerUrl(serverUrl);
   const response = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/x-ndjson, application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal
   });
   if (!response.ok) {
     await throwForResponse("Chat request failed.", response);

@@ -154,7 +154,10 @@
             <div id="source-pane" class="editor-pane">
                 <div class="pane-header">
                   <div class="pane-label" id="source-pane-label">Source</div>
-                  <div id="source-tab-strip" class="tab-strip pane-tab-strip" aria-label="Open source tabs"></div>
+                  <div class="tab-strip-wrap">
+                    <div id="source-tab-strip" class="tab-strip pane-tab-strip" aria-label="Open source tabs"></div>
+                    <button id="source-tab-overflow" class="tab-overflow-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="All open source tabs" title="All open tabs" hidden>&#8943;</button>
+                  </div>
                   <button id="preview-toggle-activity-button" class="pane-action source-preview-toggle" type="button" aria-label="Show preview" title="Show preview">◫</button>
                   <button id="source-collapse-button" class="pane-action" type="button" aria-label="Collapse source" title="Collapse source (reading mode)">×</button>
                 </div>
@@ -188,6 +191,7 @@
                   <div id="editor-drop-caret" class="editor-drop-caret" aria-hidden="true" hidden></div>
                   <div id="editor-cursors" class="editor-cursors" aria-hidden="true"></div>
                   <div id="editor-search-highlights" class="editor-search-highlights" aria-hidden="true"></div>
+                  <div id="editor-overview-ruler" class="editor-overview-ruler" aria-hidden="true"></div>
                   <div id="editor-agent-bar" class="editor-agent-bar" hidden aria-live="polite"></div>
                   <div id="editor-empty-state" class="editor-empty-state" hidden>
                     <div class="welcome-card">
@@ -214,7 +218,10 @@
             <div id="preview-pane" class="preview-pane">
                 <div class="pane-header">
                   <div class="pane-label">Preview</div>
-                  <div id="preview-tab-strip" class="tab-strip pane-tab-strip" aria-label="Open preview tabs"></div>
+                  <div class="tab-strip-wrap">
+                    <div id="preview-tab-strip" class="tab-strip pane-tab-strip" aria-label="Open preview tabs"></div>
+                    <button id="preview-tab-overflow" class="tab-overflow-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="All open preview tabs" title="All open tabs" hidden>&#8943;</button>
+                  </div>
                   <button id="source-toggle-activity-button" class="pane-action preview-source-toggle" type="button" aria-label="Show source" title="Show source">◫</button>
                   <button id="preview-collapse-button" class="pane-action" type="button" aria-label="Collapse preview" title="Collapse preview">×</button>
                 </div>
@@ -328,6 +335,17 @@
     </div>
 
     <div id="explorer-context-menu" class="explorer-context-menu" hidden></div>
+    <div id="tab-overflow-menu" class="explorer-context-menu tab-overflow-menu" role="menu" hidden></div>
+    <div id="line-comment-popover" class="line-comment-popover" hidden>
+      <div id="line-comment-meta" class="line-comment-meta subtle-label"></div>
+      <textarea id="line-comment-input" class="line-comment-input" rows="3" spellcheck="true"
+        placeholder="Note about this line…"></textarea>
+      <div class="line-comment-actions">
+        <button id="line-comment-delete" type="button" class="browser-danger-btn" hidden>Delete</button>
+        <button id="line-comment-cancel" type="button">Cancel</button>
+        <button id="line-comment-save" type="button" class="browser-primary-btn">Save</button>
+      </div>
+    </div>
 
     <!-- Transient, non-blocking feedback (file opened/created/renamed, etc.). -->
     <div id="toast-host" class="toast-host" aria-live="polite" aria-atomic="false"></div>
@@ -428,7 +446,7 @@
               Custom Font Name
               <input id="source-font-custom-input" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. Operator Mono">
             </label>
-            <p class="subtle-label">Uses a font already installed on this device. If it isn&rsquo;t installed, the source pane falls back to the default monospace stack.</p>
+            <p id="source-font-status" class="subtle-label source-font-status" aria-live="polite">Uses fonts installed on this device.</p>
 
             <label>
               Word Wrap

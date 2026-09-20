@@ -4,7 +4,7 @@ function fingerprintProject(project) {
   return JSON.stringify(sanitizeProjectForSync(project));
 }
 
-function createCollaborationRuntime({ getProject, replaceProject, applyOperation, onStatusChange, onRemoteCursor, onPatchConfirmed, onChatWorkspaceUpdate }) {
+function createCollaborationRuntime({ getProject, replaceProject, applyOperation, onStatusChange, onRemoteCursor, onPatchConfirmed, onChatWorkspaceUpdate, onCommentsUpdate, reauthenticate }) {
   let connection = null;
   let isApplyingRemote = false;
   let pendingTextPatches = new Map();
@@ -104,6 +104,15 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     return error?.status === 426 || error?.payload?.upgradeRequired === true;
   }
 
+  // The ACCOUNT token is dead (typically because the server restarted — tokens
+  // live in memory). Refreshing the session token cannot help; only logging in
+  // again can. Without this a tab retries the same dead token forever: one was
+  // observed making 504 failed attempts over four hours.
+  function isAuthExpiredError(error) {
+    return error?.status === 403 || /not logged in|invalid or expired/i.test(error?.message ?? "");
+  }
+  let reauthInFlight = false;
+
   // ...and when it happens, STOP everything (no reconnect, no queued pushes). A
   // stale tab must go quiet until it reloads to the current version; main.js turns
   // this status into an upgrade prompt / forced refresh.
@@ -158,7 +167,8 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     try {
       // Fresh session token — the server may have restarted, invalidating ours.
       const session = await openWorkspaceSession(
-        reconnectCtx.serverUrl, reconnectCtx.accountToken, reconnectCtx.team, reconnectCtx.path, reconnectCtx.device
+        reconnectCtx.serverUrl, reconnectCtx.accountToken, reconnectCtx.team, reconnectCtx.path, reconnectCtx.device,
+        `reconnect#${reconnectAttempts}`
       );
       connection.token = session.token;
       connection.clientId = session.clientId ?? connection.clientId;
@@ -190,6 +200,32 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       if (isUpgradeError(error)) {
         handleUpgradeRequired(error);
         return;
+      }
+      // Account token expired: log in again and retry with a fresh one, instead
+      // of re-sending the dead token on every future attempt.
+      if (isAuthExpiredError(error) && typeof reauthenticate === "function" && !reauthInFlight) {
+        reauthInFlight = true;
+        try {
+          const freshToken = await reauthenticate();
+          if (freshToken) {
+            reconnectCtx.accountToken = freshToken;
+            emitStatus("reconnecting", "Signed in again — reconnecting…");
+            reauthInFlight = false;
+            void attemptReconnect(); // retry straight away with the new token
+            return;
+          }
+          // Could not sign in (no stored credentials, or they were rejected):
+          // stop the loop rather than hammer a dead session.
+          clearReconnect();
+          disconnect("Session expired — sign in again to reconnect.");
+          return;
+        } catch {
+          clearReconnect();
+          disconnect("Session expired — sign in again to reconnect.");
+          return;
+        } finally {
+          reauthInFlight = false;
+        }
       }
       // Keep trying while the intent stands; edits remain safe in the local model.
       if (reconnectCtx) {
@@ -239,7 +275,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       if (serverContent === undefined) {
         await pushOp({ type: "create-file", parentPath: file.parentPath, name: file.name, content: file.content });
       } else if (serverContent !== file.content) {
-        await pushOp({ type: "update-file", path: file.path, content: file.content });
+        await pushOp({ type: "update-file", path: file.path, content: file.content, baseRevision: localRevision });
       }
     }
     lastFingerprint = fingerprintProject(getProject());
@@ -255,7 +291,9 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       return;
     }
 
-    const result = await pushSessionState(connection.serverUrl, connection.token, project);
+    // Declare the revision this copy is based on: the server refuses the replace
+    // if it has moved on, so a stale tab can no longer wipe newer work.
+    const result = await pushSessionState(connection.serverUrl, connection.token, project, connection.revision);
     lastFingerprint = fingerprint;
     connection.revision = result.revision ?? connection.revision;
     emitStatus("connected", `Connected. Revision ${connection.revision}.`);
@@ -332,7 +370,8 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       }
       isApplyingRemote = false;
       try {
-        const result = await pushOperation(connection.serverUrl, connection.token, { type: "update-file", path, content });
+        const result = await pushOperation(connection.serverUrl, connection.token,
+          { type: "update-file", path, content, baseRevision: localRevision });
         localRevision = result.revision ?? localRevision;
         connection.revision = localRevision;
         restored += 1;
@@ -445,7 +484,13 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     if (!op) return;
     publishOperation(op).catch(async (error) => {
       if (error.status === 409) {
-        await reloadFromServer(error.message || "Text patch conflicted with a remote change.");
+        // Distinguish "the server restarted" (its in-memory rebase log is gone,
+        // so our edit can no longer be placed) from an ordinary edit conflict —
+        // the generic wording read like an error the user had caused.
+        const restarted = /too far behind|server restarted/i.test(error.message ?? "");
+        await reloadFromServer(restarted
+          ? "The server restarted — reloading the latest version of this file."
+          : (error.message || "Text patch conflicted with a remote change."));
         return;
       }
       if (isUpgradeError(error)) {
@@ -561,6 +606,11 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     pendingSnapshotTimer = window.setTimeout(() => {
       pendingSnapshotTimer = null;
       publishSnapshot(project).catch((error) => {
+        if (error?.status === 409) {
+          // Server moved on: adopt its copy instead of replacing it with ours.
+          reloadFromServer("Server has newer content — pulled it instead of replacing.").catch(() => {});
+          return;
+        }
         if (!isFatalSyncError(error)) {
           emitStatus("connected", `Server rejected a project snapshot (${error.message || error.status}). Still connected.`);
           return;
@@ -723,6 +773,15 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
           }
         }
 
+        // Line comments are shared, so a teammate's change arrives here and the
+        // list is replaced wholesale (it is small and the server is authoritative).
+        // Not filtered by clientId: the author's own echo is harmless and keeps
+        // every tab of theirs in step too.
+        if (event.type === "comments") {
+          if (typeof onCommentsUpdate === "function") onCommentsUpdate(event.files ?? {});
+          return;
+        }
+
         if (event.type === "chat-workspace-update") {
           if (event.clientId !== connection.clientId && typeof onChatWorkspaceUpdate === "function") {
             onChatWorkspaceUpdate(event.workspace);
@@ -747,7 +806,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     const device = options.device || null;
     let session;
     try {
-      session = await openWorkspaceSession(serverUrl, accountToken, team, path, device);
+      session = await openWorkspaceSession(serverUrl, accountToken, team, path, device, options.reason || "open");
     } catch (error) {
       // Stale client refused at the door — prompt an update instead of a raw error.
       if (isUpgradeError(error)) handleUpgradeRequired(error);

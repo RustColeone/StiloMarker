@@ -6106,3 +6106,272 @@ pre.proposal-diff-block {
 .chat-send-button:not(:disabled):hover {
   background: color-mix(in srgb, var(--accent) 80%, #000);
 }
+
+/* ---- Scrollable tab strips + overflow menu -------------------------------
+   Tabs used to shrink (min-width:0 + ellipsis) until nothing was readable.
+   Instead they now keep their natural width and the strip scrolls, with a "⋯"
+   button pinned at the end that lists every open tab. */
+.tab-strip-wrap {
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.tab-strip-wrap > .tab-strip {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+  scrollbar-width: thin;
+  overscroll-behavior-x: contain;
+}
+
+/* A slim scrollbar so it never eats into the 35px strip height. */
+.tab-strip-wrap > .tab-strip::-webkit-scrollbar {
+  height: 4px;
+}
+.tab-strip-wrap > .tab-strip::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 2px;
+}
+.tab-strip-wrap > .tab-strip::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Natural width — never squeeze a tab down to an unreadable sliver. */
+.tab-strip-wrap > .tab-strip > .editor-tab {
+  flex: 0 0 auto;
+}
+
+.tab-overflow-btn {
+  flex: none;
+  align-self: center;
+  width: 26px;
+  height: 26px;
+  margin: 0 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.tab-overflow-btn:hover,
+.tab-overflow-btn.is-open {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.tab-overflow-btn[hidden] {
+  display: none;
+}
+
+/* The "all open tabs" popover: reuses the context-menu shell. */
+.tab-overflow-menu {
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  min-width: 240px;
+}
+.tab-overflow-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.tab-overflow-row .tab-overflow-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.tab-overflow-row.is-active .tab-overflow-name {
+  font-weight: 700;
+  color: var(--accent);
+}
+.tab-overflow-close {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.tab-overflow-close:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+/* Mid-turn the send button becomes a Stop control (danger-coloured so it reads
+   as "interrupt", not "send"). */
+.chat-send-button.is-stop {
+  background: var(--danger);
+  font-size: 13px;
+}
+.chat-send-button.is-stop:not(:disabled):hover {
+  background: color-mix(in srgb, var(--danger) 80%, #000);
+}
+
+/* An answer the user interrupted — marked so a partial reply isn't mistaken for
+   a complete one. */
+.chat-message.is-interrupted .chat-message-content::after {
+  content: " ⏹ stopped";
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* Honest feedback when the chosen source font isn't installed on this device. */
+.source-font-status.is-warning {
+  color: var(--warning);
+}
+
+/* ---- Line comments (breakpoint-style notes in the gutter) ----------------- */
+.editor-gutter-line[data-line] {
+  cursor: pointer;
+}
+.editor-gutter-line[data-line]:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.editor-gutter-comment-mark {
+  margin-right: 3px;
+  color: var(--accent);
+  font-size: 9px;
+  line-height: 1;
+}
+.editor-gutter-line.has-comment {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.line-comment-popover {
+  position: fixed;
+  z-index: 60;
+  width: min(320px, 90vw);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--menu);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.26);
+}
+.line-comment-popover[hidden] {
+  display: none;
+}
+.line-comment-input {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+.line-comment-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.line-comment-actions button {
+  min-height: 26px;
+  padding: 0 10px;
+  font-size: 11px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-1);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.line-comment-actions .browser-primary-btn {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.line-comment-meta {
+  font-size: 11px;
+}
+
+/* ---- Editor overview ruler (VS Code-style scrollbar markers) --------------
+   A thin strip down the right edge of the editor showing where the things you
+   care about are: your caret, line comments, collaborators' carets and their
+   selections, and search hits. The native scrollbar is slimmed so the two read
+   as one control; only the ticks take pointer events, so dragging the scrollbar
+   still works everywhere between them. */
+.editor-overview-ruler {
+  position: absolute;
+  top: 0;
+  /* Sits just LEFT of the scrollbar (10px, fixed below) rather than over it, so
+     the scrollbar stays fully draggable and a tick can never swallow a drag. */
+  right: 12px;
+  bottom: 0;
+  width: 6px;
+  z-index: 4;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--text-dim) 7%, transparent);
+}
+
+.editor-overview-tick {
+  position: absolute;
+  right: 0;
+  width: 6px;
+  min-height: 3px;
+  border-radius: 1px;
+  pointer-events: auto;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.editor-overview-tick:hover {
+  opacity: 1;
+  outline: 1px solid var(--text);
+}
+/* My caret spans the full width so it reads as "you are here". */
+.editor-overview-tick.is-caret {
+  right: 0;
+  width: 6px;
+  height: 2px;
+  min-height: 2px;
+  background: var(--accent-strong, var(--accent));
+  opacity: 1;
+}
+.editor-overview-tick.is-comment {
+  background: var(--accent);
+}
+.editor-overview-tick.is-search {
+  right: 1px;
+  width: 4px;
+  background: var(--warning);
+}
+/* A peer's selection is drawn as a softer band behind their caret tick. */
+.editor-overview-tick.is-peer-selection {
+  right: 0;
+  width: 6px;
+  opacity: 0.3;
+}
+
+/* The ruler's `right` offset assumes this width, so pin it on both engines. */
+#editor-content {
+  scrollbar-width: thin;
+}
+#editor-content::-webkit-scrollbar {
+  width: 10px;
+}
+#editor-content::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-dim) 45%, transparent);
+  border-radius: 5px;
+}
+#editor-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Read-only session (access.readers): make it visible that edits aren't possible. */
+#editor-content[data-readonly="true"] {
+  background: color-mix(in srgb, var(--text-dim) 4%, var(--editor));
+  cursor: default;
+}

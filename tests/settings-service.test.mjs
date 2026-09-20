@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { clampSourceFontSize, cssFontFamily, loadSettings } from "../app/services/settings-service.js";
+import { clampSourceFontSize, cssFontFamily, loadSettings, patchStoredSettings } from "../app/services/settings-service.js";
 
 test("settings: source font size clamps to a sane range", () => {
   assert.equal(clampSourceFontSize(13), 13);
@@ -32,4 +32,33 @@ test("settings: defaults include source typography", () => {
   const defaults = loadSettings();
   assert.equal(defaults.sourceFontSize, 13);
   assert.equal(defaults.sourceFontFamily, "");
+});
+
+test("settings: patchStoredSettings merges into what is stored, never clobbers", () => {
+  const store = new Map();
+  const previous = globalThis.localStorage;
+  globalThis.localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v))
+  };
+  try {
+    const KEY = "mdnotes.settings.v1";
+    // Another tab already saved a font change this tab never saw.
+    store.set(KEY, JSON.stringify({ sourceFontSize: 20, syncedProjectId: "red/Novel", syncedRevision: 3 }));
+    patchStoredSettings((stored) => (stored.syncedProjectId === "red/Novel" ? { syncedRevision: 9 } : null));
+    const merged = JSON.parse(store.get(KEY));
+    assert.equal(merged.sourceFontSize, 20, "unrelated field survives");
+    assert.equal(merged.syncedRevision, 9, "patched field written");
+
+    // Different workspace stored: returning null must write nothing at all.
+    store.set(KEY, JSON.stringify({ syncedProjectId: "red/Other", syncedRevision: 5 }));
+    patchStoredSettings((stored) => (stored.syncedProjectId === "red/Novel" ? { syncedRevision: 99 } : null));
+    assert.deepEqual(JSON.parse(store.get(KEY)), { syncedProjectId: "red/Other", syncedRevision: 5 });
+
+    // Corrupt storage is ignored rather than throwing out of an unload handler.
+    store.set(KEY, "{not json");
+    assert.doesNotThrow(() => patchStoredSettings(() => ({ syncedRevision: 1 })));
+  } finally {
+    globalThis.localStorage = previous;
+  }
 });
