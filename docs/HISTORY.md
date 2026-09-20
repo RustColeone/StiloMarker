@@ -97,3 +97,23 @@ makes concurrent editing of the same file converge.
   tried and proved incomplete: any missed path, or any old cached build, bypassed it.
   Preconditions now live inside the server's mutation lock, and conflicts return 409
   so clients pull rather than diverge.
+- **`revision` is plumbing; the version users read is `S.E.N`.** The workspace
+  revision is a Lamport clock — one integer, monotonic forever, compared in ~170
+  places to order writes and refuse stale ones. Showing it as `r50760` gave
+  long-form writers a five-digit number they could neither count nor influence,
+  but making it reset would have broken ordering (an in-flight client at
+  `baseRevision=50000` would look *newer* than a reset server) and reintroduced
+  the clobber class the CAS work had just closed. So the counter was left alone
+  and hidden, and a **display-only** per-file version was derived instead:
+  **S** snapshots cut, **E** writing sittings since that snapshot, **N** edits in
+  the current sitting. E and N ride on the file node next to the long-unused
+  `sourceVersion`, which nothing reads or compares — which is precisely why they
+  are free to reset. Taking a snapshot deliberately does *not* touch the project
+  tree: no revision bump, no `path_changed_at`, or snapshotting a file you are
+  editing would make your own next write conflict.
+- **The host owns the sitting counter.** People joining a room join its sitting,
+  so `E` is stamped by whoever hosts the document (the server, or the sharer)
+  and rides back on the operation's ack and broadcast. Peers never count
+  locally while synced — `markFileSaved(…, countEdits=false)` — or each would
+  drift into its own idea of which sitting the room is in. In no-server mode the
+  browser is the host and runs the identical rule.

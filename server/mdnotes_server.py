@@ -51,6 +51,13 @@ def _read_int_env(name: str, default: int, minimum: int, maximum: int) -> int:
 # with the client's CLIENT_VERSION / the service-worker CACHE_NAME (mdnotes-shell-vN).
 MIN_CLIENT_VERSION = _read_int_env("MDNOTES_MIN_CLIENT_VERSION", 98, 0, 1_000_000)
 
+# A writing "sitting": edits to one file separated by less than this gap belong
+# to the same session. It is the E in the S.E.N version label — snapshots you
+# cut, sittings since then, edits in this sitting. Owned by whoever hosts the
+# document (this server, or the sharer in a guest-hosted session) so everyone in
+# the room shares one session number instead of each peer counting its own.
+EDIT_SESSION_GAP_SECONDS = _read_int_env("MDNOTES_EDIT_SESSION_GAP", 600, 30, 86_400)
+
 
 class ChatProxy:
     def __init__(self):
@@ -1209,6 +1216,28 @@ class CollaborationBroker:
             end = self._transform_offset(end, a_start, a_end, a_inserted)
         return start, end
 
+    @staticmethod
+    def _bump_edit_counters(node, now=None):
+        """Advance a file's display counters (the E and N of its S.E.N label).
+
+        Purely cosmetic bookkeeping: nothing in the concurrency machinery reads
+        these. `revision` stays the one true ordering token, monotonic forever;
+        these are safe to reset precisely because no correctness property
+        depends on them.
+        """
+        stamp = time.time() if now is None else float(now)
+        if stamp - float(node.get("lastEditAt") or 0) > EDIT_SESSION_GAP_SECONDS:
+            node["editSessions"] = int(node.get("editSessions", 0) or 0) + 1
+            node["sessionEdits"] = 0
+        node["lastEditAt"] = stamp
+        node["sourceVersion"] = int(node.get("sourceVersion", 0) or 0) + 1
+        node["sessionEdits"] = int(node.get("sessionEdits", 0) or 0) + 1
+        return {
+            "editSessions": node["editSessions"],
+            "sessionEdits": node["sessionEdits"],
+            "sourceVersion": node["sourceVersion"],
+        }
+
     def _note_path_changed(self, operation: dict):
         """Record the revision at which a file path last changed (see path_changed_at)."""
         op_type = operation.get("type")
@@ -1358,6 +1387,9 @@ class CollaborationBroker:
                 "content": operation.get("content", ""),
                 "dirty": False,
                 "sourceVersion": 0,
+                "editSessions": 0,
+                "sessionEdits": 0,
+                "lastEditAt": 0,
             }
             self._append_node(parent_id, node)
             if dir_mode:
@@ -1421,7 +1453,7 @@ class CollaborationBroker:
                 )
             node["content"] = operation.get("content", "")
             node["dirty"] = False
-            node["sourceVersion"] = int(node.get("sourceVersion", 0)) + 1
+            operation["counters"] = self._bump_edit_counters(node)
             if dir_mode:
                 self._write_node_file(node_id)  # externalizes images, writes text
                 if is_image_name(node["name"]):
@@ -1456,7 +1488,7 @@ class CollaborationBroker:
             )
             node["content"] = new_content
             node["dirty"] = False
-            node["sourceVersion"] = int(node.get("sourceVersion", 0)) + 1
+            operation["counters"] = self._bump_edit_counters(node)
             # Store rebased positions back into the operation dict so that
             # when broadcast to peers they receive the positions actually applied,
             # not the original (pre-OT) positions the sender submitted.
@@ -2419,6 +2451,12 @@ class WorkspaceRegistry:
                 "byteSize": len(raw),
                 "label": str(label or "")[:200],
                 "author": identity["username"],
+                # Counter baseline for the S.E.N label: E is the file's
+                # editSessions minus this. Read-only w.r.t. the project tree —
+                # taking a snapshot must never bump a revision or mark the path
+                # changed, or snapshotting a file you are editing would make
+                # your own next write conflict.
+                **self._snapshot_counter_baseline(team, relpath, file_path),
             }
             versions.append(version)
             versions.sort(key=lambda v: v.get("createdAt", 0), reverse=True)  # newest first
@@ -2428,11 +2466,43 @@ class WorkspaceRegistry:
             self._snapshot_save(directory, index)
         return {"created": True, "version": version}
 
+    def _snapshot_counter_baseline(self, team, relpath, file_path):
+        """The file's edit counters right now, or {} if the workspace isn't live."""
+        broker = self.get_broker(f"{team}/{relpath}")
+        if broker is None:
+            return {}
+        try:
+            node_id = broker._get_node_id_by_path(str(file_path))
+            node = broker.project["nodes"][node_id] if node_id else None
+        except (KeyError, TypeError):
+            node = None
+        if not node:
+            return {}
+        return {
+            "editSessions": int(node.get("editSessions", 0) or 0),
+            "sessionEdits": int(node.get("sessionEdits", 0) or 0),
+            "sourceVersion": int(node.get("sourceVersion", 0) or 0),
+        }
+
     def list_snapshot_paths(self, token, team, path):
         _, team, relpath = self._project_authorize(token, team, path)
         with self._snapshot_lock:
             index = self._snapshot_load(self._snapshot_dir(team, relpath))
-        return {"paths": sorted(k for k, v in index["files"].items() if v), "bytes": index["bytes"]}
+        # versions are kept newest-first, so [0] is the most recent snapshot.
+        baselines = {
+            key: {
+                "count": len(versions),
+                "editSessions": int(versions[0].get("editSessions", 0) or 0),
+                "sessionEdits": int(versions[0].get("sessionEdits", 0) or 0),
+            }
+            for key, versions in index["files"].items()
+            if versions
+        }
+        return {
+            "paths": sorted(baselines),
+            "bytes": index["bytes"],
+            "baselines": baselines,
+        }
 
     def list_snapshot_versions(self, token, team, path, file_path):
         _, team, relpath = self._project_authorize(token, team, path)
@@ -3774,7 +3844,12 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             if not isinstance(operation, dict):
                 raise ValueError("Operation payload is required")
             event = self.registry.broker_for_token(token).apply_operation(token, operation)
-            self._write_json(HTTPStatus.OK, {"message": "operation stored", "revision": event["revision"]})
+            ack = {"message": "operation stored", "revision": event["revision"]}
+            counters = (event.get("operation") or {}).get("counters")
+            if counters:
+                ack["counters"] = counters
+                ack["path"] = (event.get("operation") or {}).get("path")
+            self._write_json(HTTPStatus.OK, ack)
         except PermissionError as error:
             self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
             self._log_request(403, str(error))
@@ -4411,6 +4486,75 @@ def run_selftest():
         _ms = _reg.open_workspace(_alice, "qa", _RP)
         assert _ms["role"] == "master", "owner should still be master"
         _rb.set_state(_ms["token"], _rb._default_project(), base_revision=_rb.revision)
+
+        # --- S.E.N display counters -------------------------------------
+        # E counts writing sittings, N edits within one. Both are cosmetic:
+        # nothing orders on them, which is why they may reset.
+        _node = {"sourceVersion": 0, "editSessions": 0, "sessionEdits": 0, "lastEditAt": 0}
+        _t0 = 1_000_000.0
+        CollaborationBroker._bump_edit_counters(_node, _t0)
+        assert (_node["editSessions"], _node["sessionEdits"]) == (1, 1), _node
+        # Two more edits moments later stay in the same sitting.
+        CollaborationBroker._bump_edit_counters(_node, _t0 + 5)
+        CollaborationBroker._bump_edit_counters(_node, _t0 + 30)
+        assert (_node["editSessions"], _node["sessionEdits"]) == (1, 3), _node
+        # A gap longer than the threshold opens a new sitting and resets N.
+        CollaborationBroker._bump_edit_counters(_node, _t0 + 30 + EDIT_SESSION_GAP_SECONDS + 1)
+        assert (_node["editSessions"], _node["sessionEdits"]) == (2, 1), _node
+        # A gap of exactly the threshold is still the same sitting (strict >):
+        # the previous edit landed at _t0+631, so this one is 600s later.
+        CollaborationBroker._bump_edit_counters(_node, _t0 + 30 + 2 * EDIT_SESSION_GAP_SECONDS + 1)
+        assert (_node["editSessions"], _node["sessionEdits"]) == (2, 2), _node
+        # The lifetime counter never resets, and nothing here touched revision.
+        assert _node["sourceVersion"] == 5, _node
+        # Counters survive a real edit path, and a second author in the same
+        # room joins the SAME sitting rather than starting their own.
+        _cb = CollaborationBroker("1234", None)
+        _m = _cb.connect("1234")
+        _cb.apply_operation(_m["token"], {"type": "create-file", "parentPath": "", "name": "sen.md", "content": ""})
+        _rev_before = _cb.revision
+        _cb.apply_operation(_m["token"], {"type": "update-file", "path": "sen.md", "content": "a",
+                                          "baseRevision": _cb.revision})
+        _cb.apply_operation(_m["token"], {"type": "update-file", "path": "sen.md", "content": "ab",
+                                          "baseRevision": _cb.revision})
+        _sen = _cb.project["nodes"][_cb._get_node_id_by_path("sen.md")]
+        assert (_sen["editSessions"], _sen["sessionEdits"]) == (1, 2), _sen
+        assert _cb.revision == _rev_before + 2, "revision must still advance once per operation"
+
+        # A snapshot records the file's counters as the baseline the label
+        # counts from, and must do so WITHOUT touching the project tree: no
+        # revision bump and no path_changed_at, or snapshotting a file you are
+        # editing would make your own next write conflict.
+        _ws = _reg.open_workspace(_alice, "qa", _RP)
+        _wb = _reg.brokers["qa/" + _RP]
+        _wb.apply_operation(_ws["token"], {"type": "create-file", "parentPath": "", "name": "sen.md", "content": ""})
+        for _i in range(4):
+            _wb.apply_operation(_ws["token"], {"type": "update-file", "path": "sen.md",
+                                               "content": "x" * (_i + 1), "baseRevision": _wb.revision})
+        _snap_node = _wb.project["nodes"][_wb._get_node_id_by_path("sen.md")]
+        assert (_snap_node["editSessions"], _snap_node["sessionEdits"]) == (1, 4), _snap_node
+        _rev_at_snapshot = _wb.revision
+        _changed_at = dict(_wb.path_changed_at)
+        _made = _reg.create_snapshot(_alice, "qa", _RP, "sen.md", "xxxx", "first cut")
+        assert _made["created"], "snapshot should be created"
+        assert _made["version"]["editSessions"] == 1 and _made["version"]["sessionEdits"] == 4, _made["version"]
+        assert _wb.revision == _rev_at_snapshot, "a snapshot must not bump the revision"
+        assert _wb.path_changed_at == _changed_at, "a snapshot must not mark the path changed"
+        # ...so the very next write from a client based on the pre-snapshot
+        # revision still applies rather than 409ing.
+        _wb.apply_operation(_ws["token"], {"type": "update-file", "path": "sen.md",
+                                           "content": "xxxxy", "baseRevision": _rev_at_snapshot})
+        # The listing hands the client S and the baseline in one call.
+        _listing = _reg.list_snapshot_paths(_alice, "qa", _RP)
+        _base = _listing["baselines"]["sen.md"]
+        assert _base == {"count": 1, "editSessions": 1, "sessionEdits": 4}, _base
+        assert "sen.md" in _listing["paths"], _listing["paths"]
+        # Label maths (mirrors fileVersionLabel in main.js): same sitting, so N
+        # subtracts the baseline — one edit since the snapshot reads v1.0.1.
+        _now = _wb.project["nodes"][_wb._get_node_id_by_path("sen.md")]
+        _E = _now["editSessions"] - _base["editSessions"]
+        _N = _now["sessionEdits"] if _E > 0 else _now["sessionEdits"] - _base["sessionEdits"]
+        assert (_base["count"], _E, _N) == (1, 0, 1), (_base["count"], _E, _N)
 
         _sh.rmtree(_data, ignore_errors=True)
 

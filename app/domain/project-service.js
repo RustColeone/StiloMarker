@@ -78,11 +78,14 @@ function createProjectController(initialProject = seedDefaultProject()) {
     updateContent(fileId, content) {
       return apply((current) => updateFileContent(current, fileId, content));
     },
-    markSaved(fileId) {
-      return apply((current) => markFileSaved(current, fileId));
+    // countEdits=false when a server hosts this workspace: the host owns the
+    // session counters so every peer shows the same S.E.N, and a local bump
+    // would only drift until the next state push overwrote it.
+    markSaved(fileId, countEdits = true) {
+      return apply((current) => markFileSaved(current, fileId, countEdits));
     },
-    markManySaved(fileIds) {
-      return apply((current) => markFilesSaved(current, fileIds));
+    markManySaved(fileIds, countEdits = true) {
+      return apply((current) => markFilesSaved(current, fileIds, countEdits));
     },
     getActiveFile() {
       return project.activeFileId ? getNode(project, project.activeFileId) : null;

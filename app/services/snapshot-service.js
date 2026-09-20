@@ -127,7 +127,7 @@ async function getFileVersionsRaw(db, projectKey, path) {
 }
 
 // Store one version + its blob (deduped, refcounted) in a single transaction.
-async function storeVersion(db, { projectKey, path, hash, data, gz, label }) {
+async function storeVersion(db, { projectKey, path, hash, data, gz, label, counters }) {
   const t = db.transaction(["blobs", "versions", "meta"], "readwrite");
   const blobs = t.objectStore("blobs");
   const existing = await reqP(blobs.get(hash));
@@ -141,6 +141,10 @@ async function storeVersion(db, { projectKey, path, hash, data, gz, label }) {
   const version = {
     id: newId(), projectKey, path, blobHash: hash,
     createdAt: Date.now(), label: String(label || "").slice(0, 80), byteSize: data.byteLength,
+    // Baseline for the S.E.N label: E counts sittings since this snapshot.
+    editSessions: Number(counters?.editSessions) || 0,
+    sessionEdits: Number(counters?.sessionEdits) || 0,
+    sourceVersion: Number(counters?.sourceVersion) || 0,
   };
   t.objectStore("versions").put(version);
   await txDone(t);
@@ -203,7 +207,7 @@ async function createFileSnapshots(projectKey, project, pathOf, label = "") {
     const latest = (await getFileVersionsRaw(db, projectKey, path))[0];
     if (latest && latest.blobHash === hash) { skipped += 1; continue; }
     const { data, gz } = await gzipString(content);
-    await storeVersion(db, { projectKey, path, hash, data, gz, label });
+    await storeVersion(db, { projectKey, path, hash, data, gz, label, counters: node });
     await pruneFile(db, projectKey, path);
     created += 1;
   }
@@ -213,14 +217,14 @@ async function createFileSnapshots(projectKey, project, pathOf, label = "") {
 
 /** Snapshot a SINGLE file (the current-file "commit"). Unchanged content since
  *  the file's latest version costs nothing (same hash ⇒ skipped). */
-async function createFileSnapshot(projectKey, path, content, label = "") {
+async function createFileSnapshot(projectKey, path, content, label = "", counters = null) {
   const db = await openDB();
   const str = String(content ?? "");
   const hash = await contentHash(str);
   const latest = (await getFileVersionsRaw(db, projectKey, path))[0];
   if (latest && latest.blobHash === hash) return { created: false };
   const { data, gz } = await gzipString(str);
-  await storeVersion(db, { projectKey, path, hash, data, gz, label });
+  await storeVersion(db, { projectKey, path, hash, data, gz, label, counters });
   await pruneFile(db, projectKey, path);
   await enforceBudget(db);
   return { created: true };
@@ -230,7 +234,10 @@ async function createFileSnapshot(projectKey, path, content, label = "") {
 async function listFileVersions(projectKey, path) {
   const db = await openDB();
   const all = await getFileVersionsRaw(db, projectKey, path);
-  return all.map((v) => ({ id: v.id, createdAt: v.createdAt, label: v.label, byteSize: v.byteSize }));
+  return all.map((v) => ({
+    id: v.id, createdAt: v.createdAt, label: v.label, byteSize: v.byteSize,
+    editSessions: v.editSessions ?? 0, sessionEdits: v.sessionEdits ?? 0
+  }));
 }
 
 /** Distinct file paths that have any snapshot history in this project. */
@@ -238,7 +245,21 @@ async function listSnapshotPaths(projectKey) {
   const db = await openDB();
   const t = db.transaction("versions", "readonly");
   const all = await reqP(t.objectStore("versions").index("by_project").getAll(projectKey));
-  return Array.from(new Set(all.map((v) => v.path))).sort((a, b) => a.localeCompare(b));
+  const baselines = {};
+  for (const v of all) {
+    const seen = baselines[v.path];
+    if (!seen) {
+      baselines[v.path] = { count: 1, createdAt: v.createdAt, editSessions: v.editSessions ?? 0, sessionEdits: v.sessionEdits ?? 0 };
+      continue;
+    }
+    seen.count += 1;
+    if (v.createdAt > seen.createdAt) {  // keep the newest snapshot's baseline
+      seen.createdAt = v.createdAt;
+      seen.editSessions = v.editSessions ?? 0;
+      seen.sessionEdits = v.sessionEdits ?? 0;
+    }
+  }
+  return { paths: Object.keys(baselines).sort((a, b) => a.localeCompare(b)), baselines };
 }
 
 /** Decompressed content of a specific version, or null. */
