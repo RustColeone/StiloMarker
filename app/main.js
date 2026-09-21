@@ -241,9 +241,6 @@ const elements = {
   sessionIdLabel: query("#session-id-label"),
   explorerToggleButton: query("#explorer-toggle-button"),
   mobileExplorerButton: query("#mobile-explorer-button"),
-  mobilePaneTabs: query("#mobile-pane-tabs"),
-  mobilePaneIndicator: query("#mobile-pane-indicator"),
-  mobileScrim: query("#mobile-scrim"),
   mobilePaneToggle: query("#mobile-pane-toggle"),
   mobilePaneCaption: query("#mobile-pane-caption"),
   mobileRenameButton: query("#mobile-rename-button"),
@@ -10132,7 +10129,6 @@ function applyMobileViewState() {
   }
   elements.mobileChatToggle?.classList.toggle("is-active", mobileView === "chat");
   elements.mobileChatToggle?.setAttribute("aria-pressed", String(mobileView === "chat"));
-  renderMobilePaneTabs();
   renderMobilePaneCaption();
 }
 
@@ -10140,18 +10136,6 @@ function applyMobileViewState() {
 // the file name, truncated by CSS. This depends on which FILE is showing, not
 // just which view, so updateStatus refreshes it on every render — otherwise
 // switching files left a stale name in the mobile topbar.
-// Bottom switcher: selection state plus the indicator's resting position. A
-// drag overrides --pane-index directly, so this only runs between gestures.
-function renderMobilePaneTabs() {
-  if (!elements.mobilePaneTabs) return;
-  for (const tab of elements.mobilePaneTabs.querySelectorAll(".mobile-pane-tab")) {
-    tab.setAttribute("aria-selected", String(tab.dataset.pane === mobileView));
-  }
-  if (elements.app.dataset.paneDrag !== "1") {
-    elements.app.style.setProperty("--pane-index", String(Math.max(0, PANE_ORDER.indexOf(mobileView))));
-  }
-}
-
 function renderMobilePaneCaption() {
   if (elements.mobilePaneCaption) {
     let caption = "";
@@ -10231,7 +10215,6 @@ function isMobileLayout() {
 function setDrawerProgress(progress) {
   const clamped = Math.min(1, Math.max(0, progress));
   elements.app.style.setProperty("--drawer-progress", String(clamped));
-  if (elements.mobileScrim) elements.mobileScrim.style.setProperty("--drawer-progress", String(clamped));
 }
 
 function paneElement(view) {
@@ -10326,7 +10309,6 @@ function beginDrawerDrag() {
   const sidebar = elements.explorerPanel ?? document.querySelector(".workspace-shell > .sidebar");
   drawerWidth = Math.max(1, sidebar?.offsetWidth ?? 1);
   elements.app.dataset.drawerDrag = "1";
-  if (elements.mobileScrim) elements.mobileScrim.hidden = false;
 }
 
 function updateDrawerDrag(dx) {
@@ -10379,9 +10361,6 @@ function updatePaneDrag(dx) {
   const offset = limited < 0 ? paneDrag.width : -paneDrag.width;
   paneDrag.current.style.transform = `translateX(${limited}px)`;
   paneDrag.incoming.style.transform = `translateX(${offset + limited}px)`;
-  // Park the tab indicator mid-travel so the bar shows where the pane is going.
-  const progress = paneDrag.index + (-limited / paneDrag.width);
-  elements.app.style.setProperty("--pane-index", String(progress));
 }
 
 function endPaneDrag(g) {
@@ -10396,7 +10375,6 @@ function endPaneDrag(g) {
   elements.app.dataset.paneSettling = "1";
   drag.current.style.transform = `translateX(${settleTo}px)`;
   drag.incoming.style.transform = `translateX(${settleTo + (dx < 0 ? drag.width : -drag.width)}px)`;
-  elements.app.style.setProperty("--pane-index", String(commit ? drag.nextIndex : drag.index));
 
   const finish = () => {
     for (const el of [drag.current, drag.incoming]) {
@@ -10405,7 +10383,6 @@ function endPaneDrag(g) {
     }
     delete elements.app.dataset.paneDrag;
     delete elements.app.dataset.paneSettling;
-    elements.app.style.removeProperty("--pane-index");
     if (commit) {
       setMobileView(PANE_ORDER[drag.nextIndex]);
       if (PANE_ORDER[drag.nextIndex] === "chat") openMobileChatView();
@@ -10428,9 +10405,6 @@ function setMobileExplorerOpen(open) {
   elements.app.dataset.mobileExplorer = open ? "open" : "closed";
   elements.mobileExplorerButton?.classList.toggle("is-active", open);
   elements.mobileExplorerButton?.setAttribute("aria-expanded", String(open));
-  // The scrim only exists on mobile (CSS keeps it display:none elsewhere), but
-  // hidden must track state everywhere so it can never swallow desktop clicks.
-  if (elements.mobileScrim) elements.mobileScrim.hidden = !open;
   setDrawerProgress(open ? 1 : 0);
 }
 
@@ -10557,15 +10531,6 @@ document.addEventListener("touchstart", onGestureStart, { passive: true });
 document.addEventListener("touchmove", onGestureMove, { passive: false });
 document.addEventListener("touchend", onGestureEnd, { passive: true });
 document.addEventListener("touchcancel", onGestureEnd, { passive: true });
-
-elements.mobileScrim?.addEventListener("click", () => setMobileExplorerOpen(false));
-
-elements.mobilePaneTabs?.addEventListener("click", (event) => {
-  const tab = event.target.closest?.(".mobile-pane-tab");
-  if (!tab?.dataset.pane || tab.dataset.pane === mobileView) return;
-  setMobileView(tab.dataset.pane);
-  if (tab.dataset.pane === "chat") openMobileChatView();
-});
 
 elements.explorerAnchorButton?.addEventListener("click", toggleExplorerAnchor);
 elements.explorerAnchorSelect?.addEventListener("change", (event) => { setExplorerAnchor(event.target.value); });

@@ -31,13 +31,17 @@
      so changing one value resizes the whole source pane consistently. */
   --editor-font-family: var(--font-mono);
   --editor-font-size: 13px;
-  /* Base size for chrome that doesn't declare its own. The mobile breakpoint
-     raises this (and the control sizes below) rather than each rule doing so. */
+  /* Base size for chrome that doesn't declare its own. Everything below is a
+     multiple of it, so the mobile breakpoint only has to raise this one value
+     and the boxes grow with the text instead of being re-stated per rule. */
   --ui-font-size: 12px;
-  --control-height: 26px;
-  --touch-target: 24px;
-  --mobile-tabbar-height: 0px;
-  --topbar-height: 42px;
+  --control-height: calc(2.17 * var(--ui-font-size));   /* 26px at 12px */
+  --control-square: calc(2.33 * var(--ui-font-size));   /* 28px — icon buttons */
+  /* 26px at 12px — under the ~28px the row's own content already forces, so
+     desktop is unchanged; at 14px it binds and the row grows with the text. */
+  --row-height: calc(2.2 * var(--ui-font-size));
+  --tab-height: calc(2.92 * var(--ui-font-size));       /* 35px — tabs */
+  --topbar-height: calc(3.5 * var(--ui-font-size));     /* 42px */
   --status-height: 24px;
   --activity-width: 48px;
   --sidebar-width: 280px;
@@ -114,17 +118,9 @@ body {
   display: none !important;
 }
 
-/* Mobile-only furniture: inert until the phone breakpoint turns it on. */
-.mobile-pane-tabs,
-.mobile-scrim {
-  display: none;
-}
-
 /* Honour the OS setting: the gesture still works, it just arrives instantly. */
 @media (prefers-reduced-motion: reduce) {
   .workspace-shell > .sidebar,
-  .mobile-scrim,
-  .mobile-pane-indicator,
   .pane-swipe-layer {
     transition-duration: 0.01ms !important;
   }
@@ -473,9 +469,9 @@ p {
 
 .sidebar-icon-button,
 .sidebar-add-button {
-  width: 28px;
-  height: 28px;
-  min-height: 28px;
+  width: var(--control-square);
+  height: var(--control-square);
+  min-height: var(--control-square);
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -689,7 +685,7 @@ p {
   display: flex;
   align-items: center;
   gap: 5px;
-  min-height: 22px;
+  min-height: var(--row-height);
   padding: 0 10px 0 6px;
   user-select: none;
   -webkit-touch-callout: none;
@@ -727,7 +723,7 @@ p {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: inherit;
   letter-spacing: 0.01em;
 }
 
@@ -1064,7 +1060,7 @@ p {
 .tab-strip {
   display: flex;
   align-items: flex-end;
-  min-height: 35px;
+  min-height: var(--tab-height);
   padding: 0 12px;
   border-bottom: 1px solid var(--border);
   background: var(--surface-0);
@@ -1083,7 +1079,7 @@ p {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: 35px;
+  height: var(--tab-height);
   padding: 0 12px;
   border-right: 1px solid var(--border);
   background: var(--surface-1);
@@ -2551,7 +2547,7 @@ p {
 
 .settings-tab {
   width: 100%;
-  min-height: 32px;
+  min-height: var(--control-height);
   padding: 0 12px;
   text-align: left;
   border: 0;
@@ -2559,7 +2555,7 @@ p {
   border-radius: 4px;
   background: transparent;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: inherit;
   cursor: pointer;
 }
 
@@ -3563,55 +3559,28 @@ menu {
 
 @media (max-width: 900px) {
   /* ── Touch sizing ────────────────────────────────────────────────────────
-     The desktop chrome is deliberately compact (VSCode-like). On a phone that
-     compactness costs accuracy, so raise the shared knobs once here instead of
-     re-stating a size in every rule. Only the chrome grows: the editor keeps
-     --editor-font-size and the preview its own 14px, so the writing itself
-     looks the same as it did. */
+     One value. Every control dimension is a multiple of --ui-font-size, so
+     raising it here grows the boxes with the text — no per-rule overrides, and
+     the proportions stay exactly as they are on desktop.
+     Chrome only: the editor keeps --editor-font-size and the preview its own
+     14px, so the writing itself looks the same. */
   :root {
     --ui-font-size: 14px;
-    --control-height: 36px;
-    --touch-target: 40px;
-    --mobile-tabbar-height: calc(54px + env(safe-area-inset-bottom, 0px));
-    --topbar-height: 48px;
   }
 
-  /* Explorer rows: the single most-tapped target in the app. */
-  .tree-row {
-    min-height: var(--touch-target);
-    gap: 8px;
-    padding: 0 12px 0 8px;
-  }
-
-  /* File tabs, pane tabs and settings sections. */
-  .tab-strip {
-    min-height: 42px;
-  }
-
-  .editor-tab {
-    height: 42px;
-    padding: 0 14px;
-  }
-
-  .settings-tab {
-    min-height: var(--touch-target);
-  }
-
-  /* Anything that is a tap target gets a thumb-sized box. */
-  .icon-button,
-  .browser-tool-btn,
-  .sidebar-icon-button {
-    min-height: var(--control-height);
-  }
-
-  /* Form controls: 16px on inputs also stops iOS zooming the page on focus. */
+  /* Inputs at 16px stop iOS zooming the page when a field takes focus. This is
+     the one place a fixed size is the point, so it stays out of the scale. */
   input,
   select,
-  textarea,
-  .settings-actions-row button,
-  .dialog-actions button {
-    min-height: var(--control-height);
+  textarea {
     font-size: max(16px, var(--ui-font-size));
+  }
+
+  /* Dock/float is meaningless here — the explorer is always an overlay flyout
+     on mobile (the rules below neutralise data-explorer-anchor), so the button
+     would silently change a setting that only shows up back on desktop. */
+  #explorer-anchor-button {
+    display: none;
   }
 
   /* Reveal the mobile topbar controls. */
@@ -3800,78 +3769,6 @@ menu {
     transition: transform 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
   }
 
-  /* ── Bottom pane switcher ── */
-  .mobile-pane-tabs {
-    display: flex;
-    position: relative;
-    /* No height: the grid track is the source of truth and `align-self:stretch`
-       fills it. A percentage height here resolved against the wrong box. */
-    box-sizing: border-box;
-    border-top: 1px solid var(--border);
-    background: var(--surface-0);
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-  }
-
-  .mobile-pane-tab {
-    flex: 1 1 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 2px;
-    min-width: 0;
-    border: 0;
-    background: transparent;
-    color: var(--text-dim);
-    font-size: 11px;
-    line-height: 1.1;
-    cursor: pointer;
-    transition: color 0.18s ease;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  .mobile-pane-tab-icon {
-    font-size: 17px;
-    line-height: 1;
-  }
-
-  .mobile-pane-tab[aria-selected="true"] {
-    color: var(--accent);
-  }
-
-  /* One indicator that slides between thirds, rather than a border per tab —
-     so a drag can park it mid-travel and show which way the pane is going. */
-  .mobile-pane-indicator {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: calc(100% / 3);
-    height: 2px;
-    background: var(--accent);
-    transform: translateX(calc(var(--pane-index, 0) * 100%));
-    transition: transform 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
-  }
-
-  .app-shell[data-pane-drag="1"] .mobile-pane-indicator {
-    transition: none;
-  }
-
-  /* ── Scrim behind the drawer ── */
-  .mobile-scrim {
-    display: block;
-    position: fixed;
-    inset: 0;
-    z-index: 35;
-    background: rgba(0, 0, 0, 0.44);
-    opacity: var(--drawer-progress, 0);
-    transition: opacity 0.26s ease;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  .app-shell[data-drawer-drag="1"] ~ .mobile-scrim {
-    transition: none;
-  }
-
   /* ── Editor grid: one pane at a time, chosen by data-mobile-view ── */
   /* The main workspace keeps grid-column:4 from the desktop 6-column shell; on
      the collapsed single-column shell that lands it in an implicit, content-
@@ -4026,10 +3923,7 @@ menu {
 
   /* ── Status bar removed on mobile; session panel carries the info ── */
   .app-shell {
-    /* .status-bar is display:none here, so it is NOT a grid item and the pane
-       switcher auto-places into the third track — which is why this sizes the
-       third, not a fourth. The safe-area inset is folded into the token. */
-    grid-template-rows: var(--topbar-height) minmax(0, 1fr) var(--mobile-tabbar-height);
+    grid-template-rows: var(--topbar-height) minmax(0, 1fr) 0;
   }
 
   .status-bar {
