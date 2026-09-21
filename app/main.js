@@ -7372,6 +7372,43 @@ function printPreviewAsPdf() {
   printWindow.setTimeout(finalizePrint, 80);
 }
 
+// ── Collapsible sidebar sections (Linked Notes / Session) ───────────────────
+// Collapsed state is per-panel and persisted. Until the user has touched one,
+// the phone layout starts them collapsed — on a 390px screen those two blocks
+// pushed the file tree, which is the reason the sidebar exists, off-screen.
+
+const SIDEBAR_PANEL_IDS = ["links", "session"];
+
+function sidebarPanelCollapsed(id) {
+  const stored = settings.sidebarPanels;
+  if (stored && typeof stored === "object" && id in stored) return Boolean(stored[id]);
+  return isMobileLayout();  // never chosen → collapsed on a phone, open on desktop
+}
+
+function renderSidebarPanels() {
+  for (const toggle of document.querySelectorAll(".sidebar-panel-toggle")) {
+    const id = toggle.dataset.panel;
+    if (!id) continue;
+    const collapsed = sidebarPanelCollapsed(id);
+    toggle.closest(".sidebar-panel")?.setAttribute("data-collapsed", String(collapsed));
+    toggle.setAttribute("aria-expanded", String(!collapsed));
+  }
+}
+
+function toggleSidebarPanel(id) {
+  if (!SIDEBAR_PANEL_IDS.includes(id)) return;
+  const next = { ...(settings.sidebarPanels ?? {}) };
+  // Write BOTH panels on first use, so flipping one doesn't leave the other
+  // silently following the viewport and re-collapsing on the next resize.
+  for (const key of SIDEBAR_PANEL_IDS) {
+    if (!(key in next)) next[key] = sidebarPanelCollapsed(key);
+  }
+  next[id] = !next[id];
+  settings.sidebarPanels = next;
+  persistSettings();  // -> applyWorkspaceSettings -> renderSidebarPanels
+  logDebug("action", "Sidebar section toggled", `${id} ${next[id] ? "collapsed" : "expanded"}`);
+}
+
 function applyWorkspaceSettings() {
   const computedStyles = globalThis.getComputedStyle?.(elements.app);
   const splitterSize = Number.parseFloat(computedStyles?.getPropertyValue("--splitter-size") ?? "4") || 4;
@@ -7385,7 +7422,16 @@ function applyWorkspaceSettings() {
     : defaultSplitPreviewWidth;
 
   elements.app.dataset.explorer = settings.explorer;
-  elements.app.dataset.explorerAnchor = settings.explorerAnchor;
+  // The explorer is always an overlay flyout on the phone layout, so "floating"
+  // must never reach the DOM there. The desktop rule
+  //   [data-explorer-anchor="floating"][data-chat="hidden"] .workspace-shell
+  // carries more specificity than the mobile single-column override (media
+  // queries add none), so it won for anyone who had toggled dock/float: the
+  // workspace was pinned to grid-column 1, which under that rule is the 48px
+  // activity-bar track — a 32px-wide editor. settings.explorerAnchor is left
+  // alone so the desktop preference survives the trip through a phone.
+  elements.app.dataset.explorerAnchor = isMobileLayout() ? "docked" : settings.explorerAnchor;
+  renderSidebarPanels();
   elements.app.dataset.preview = settings.preview;
   elements.app.dataset.source = settings.source;
   elements.app.dataset.chat = settings.chatPanel;
@@ -10532,6 +10578,11 @@ document.addEventListener("touchmove", onGestureMove, { passive: false });
 document.addEventListener("touchend", onGestureEnd, { passive: true });
 document.addEventListener("touchcancel", onGestureEnd, { passive: true });
 
+document.addEventListener("click", (event) => {
+  const toggle = event.target.closest?.(".sidebar-panel-toggle");
+  if (toggle?.dataset.panel) toggleSidebarPanel(toggle.dataset.panel);
+});
+
 elements.explorerAnchorButton?.addEventListener("click", toggleExplorerAnchor);
 elements.explorerAnchorSelect?.addEventListener("change", (event) => { setExplorerAnchor(event.target.value); });
 // Capture phase so the outside-press check runs before in-tree click handlers.
@@ -10797,6 +10848,8 @@ elements.statusPresenceItem.addEventListener("click", () => {
     if (elements.explorerSelect) elements.explorerSelect.value = settings.explorer;
     persistSettings();
   }
+  // Revealing a collapsed section would show only its header, so open it.
+  if (sidebarPanelCollapsed("session")) toggleSidebarPanel("session");
   document.querySelector(".collaboration-sidebar-panel")?.scrollIntoView({ block: "nearest" });
   logDebug("action", "Status bar: reveal session panel");
 });
@@ -11009,6 +11062,11 @@ window.addEventListener("resize", () => {
   renderEditorContent(getEditorText());
   syncEditorScroll();
 });
+
+// Crossing the phone breakpoint (rotation, or a resized desktop window) has to
+// re-decide the explorer anchor — see applyWorkspaceSettings.
+window.matchMedia(`(max-width: ${MOBILE_MAX_WIDTH}px)`)
+  .addEventListener("change", () => { applyWorkspaceSettings(); });
 
 elements.serverUrlInput.addEventListener("change", (event) => {
   settings.serverUrl = event.target.value.trim();

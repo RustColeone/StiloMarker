@@ -8,6 +8,10 @@ function createDefaultSettings() {
     displayName: "",
     explorer: "expanded",
     explorerAnchor: "docked",
+    // Collapsed state of the sidebar's Linked Notes / Session sections. null
+    // means "never chosen": the phone layout then starts them collapsed so the
+    // file tree keeps the screen, while desktop starts them open.
+    sidebarPanels: null,
     autoSave: true,
     preview: "shown",
     source: "shown",
