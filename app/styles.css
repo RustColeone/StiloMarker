@@ -169,6 +169,11 @@ p {
 
 .app-shell {
   display: grid;
+  /* Explicit, so the implicit `auto` column can't size itself to the topbar's
+     min-content and stretch .workspace-shell past the viewport — the shell's
+     own overflow:hidden then clips the editor rather than showing a scrollbar,
+     so the symptom is silently missing content on the right. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: var(--topbar-height) minmax(0, 1fr) var(--status-height);
   height: 100vh;
   min-height: 100vh;
@@ -3528,9 +3533,11 @@ menu {
 /* Mobile topbar controls: hidden on desktop, revealed inside the mobile media
    query. Kept out of the media block so their base look is shared. */
 .topbar-mobile-btn {
-  width: 32px;
-  height: 30px;
-  min-height: 30px;
+  /* Square, and on the same scale as the rest of the chrome — these were the
+     last hard-coded control size left after the move to font-derived sizing. */
+  width: var(--control-square);
+  height: var(--control-square);
+  min-height: var(--control-square);
   padding: 0;
   display: none;
   align-items: center;
@@ -3674,7 +3681,19 @@ menu {
     display: flex;
     align-items: center;
     gap: 8px;
+    min-width: 0;
     grid-template-columns: none;
+  }
+
+  /* The caption is the only elastic thing up here: let it shrink to nothing
+     before the buttons are squeezed or pushed off the edge. */
+  .mobile-pane-caption {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .topbar-mobile-actions {
+    flex: 0 0 auto;
   }
 
   .topbar .menu-bar,

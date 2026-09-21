@@ -241,7 +241,8 @@ const elements = {
   sessionIdLabel: query("#session-id-label"),
   explorerToggleButton: query("#explorer-toggle-button"),
   mobileExplorerButton: query("#mobile-explorer-button"),
-  mobilePaneToggle: query("#mobile-pane-toggle"),
+  mobileSourceToggle: query("#mobile-source-toggle"),
+  mobilePreviewToggle: query("#mobile-preview-toggle"),
   mobilePaneCaption: query("#mobile-pane-caption"),
   mobileRenameButton: query("#mobile-rename-button"),
   mobileChatToggle: query("#mobile-chat-toggle"),
@@ -431,7 +432,6 @@ let workspaceMode = "private";
 // Mobile pane state (drives #app[data-mobile-view]). Declared here so the layout
 // pass that runs during module load can read it before its helpers execute.
 let mobileView = "source";         // source | preview | chat
-let lastMobilePaneView = "source"; // last non-chat view, restored when leaving chat
 let privateProjectSnapshot = null;
 // Forward declaration — assigned after `collaboration` is created.
 let switchWorkspaceMode;
@@ -10167,14 +10167,7 @@ function applyMobileViewState() {
   if (elements.chatPanel) {
     elements.chatPanel.hidden = settings.chatPanel === "hidden" && mobileView !== "chat";
   }
-  if (elements.mobilePaneToggle) {
-    const target = mobileView === "source" ? "preview" : "source";
-    const label = target === "preview" ? "Switch to preview" : "Switch to source";
-    elements.mobilePaneToggle.setAttribute("aria-label", label);
-    elements.mobilePaneToggle.title = label;
-  }
-  elements.mobileChatToggle?.classList.toggle("is-active", mobileView === "chat");
-  elements.mobileChatToggle?.setAttribute("aria-pressed", String(mobileView === "chat"));
+  renderMobilePaneButtons(mobileView);
   renderMobilePaneCaption();
 }
 
@@ -10182,6 +10175,18 @@ function applyMobileViewState() {
 // the file name, truncated by CSS. This depends on which FILE is showing, not
 // just which view, so updateStatus refreshes it on every render — otherwise
 // switching files left a stale name in the mobile topbar.
+// Highlight = "this is the pane you are looking at". Takes the view explicitly
+// so a committed swipe can light the target up as it slides in, instead of the
+// button catching up only after the settle animation ends.
+function renderMobilePaneButtons(view) {
+  for (const button of [elements.mobileSourceToggle, elements.mobilePreviewToggle, elements.mobileChatToggle]) {
+    if (!button) continue;
+    const active = button.dataset.pane === view;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+}
+
 function renderMobilePaneCaption() {
   if (elements.mobilePaneCaption) {
     let caption = "";
@@ -10206,7 +10211,6 @@ function renderMobilePaneCaption() {
 
 function setMobileView(view) {
   mobileView = view;
-  if (view === "source" || view === "preview") lastMobilePaneView = view;
   if (view === "preview") {
     // Mobile has a single pane toggle, so the preview should mirror the file
     // you're editing rather than a stale/independent preview target.
@@ -10218,28 +10222,19 @@ function setMobileView(view) {
   applyMobileViewState();
 }
 
-function toggleMobilePane() {
-  // From chat, this returns to the previous pane; otherwise swaps source/preview.
-  if (mobileView === "chat") {
-    setMobileView(lastMobilePaneView);
-    return;
-  }
-  setMobileView(mobileView === "source" ? "preview" : "source");
+// Each topbar button selects its own pane. Tapping the one already showing is
+// a no-op rather than a toggle: with three dedicated buttons the highlight has
+// to mean "this is what you are looking at", and toggling would contradict it.
+function selectMobilePane(view) {
+  if (!PANE_ORDER.includes(view) || view === mobileView) return;
+  setMobileView(view);
+  if (view === "chat") openMobileChatView();
 }
 
 function openMobileChatView() {
   void refreshChatStatus({ silent: true });
   chatState.shouldScrollToBottom = true;
   renderChatPanel(controller.getProject());
-}
-
-function toggleMobileChat() {
-  if (mobileView === "chat") {
-    setMobileView(lastMobilePaneView);
-    return;
-  }
-  setMobileView("chat");
-  openMobileChatView();
 }
 
 // ── Touch gestures: explorer drawer + pane carousel ─────────────────────────
@@ -10418,6 +10413,7 @@ function endPaneDrag(g) {
   const commit = flicked || Math.abs(dx) > drag.width * SNAP_FRACTION;
   const settleTo = commit ? (dx < 0 ? -drag.width : drag.width) : 0;
 
+  if (commit) renderMobilePaneButtons(PANE_ORDER[drag.nextIndex]);
   elements.app.dataset.paneSettling = "1";
   drag.current.style.transform = `translateX(${settleTo}px)`;
   drag.incoming.style.transform = `translateX(${settleTo + (dx < 0 ? drag.width : -drag.width)}px)`;
@@ -10597,7 +10593,9 @@ elements.logCollapseButton.addEventListener("click", toggleLogPanel);
 
 // Mobile topbar controls (inert on desktop where the buttons are hidden).
 elements.mobileExplorerButton?.addEventListener("click", toggleMobileExplorer);
-elements.mobilePaneToggle?.addEventListener("click", toggleMobilePane);
+for (const button of [elements.mobileSourceToggle, elements.mobilePreviewToggle, elements.mobileChatToggle]) {
+  button?.addEventListener("click", () => selectMobilePane(button.dataset.pane));
+}
 elements.mobileRenameButton?.addEventListener("click", () => {
   const id = currentMobileFileId();
   if (!id) { showToast("No file to rename"); return; }
@@ -10631,7 +10629,6 @@ elements.welcomeResume?.addEventListener("click", () => {
 });
 elements.newFileDialog?.querySelector("form")?.addEventListener("submit", handleNewFileSubmit);
 elements.newFileCancelButton?.addEventListener("click", () => elements.newFileDialog.close("cancel"));
-elements.mobileChatToggle?.addEventListener("click", toggleMobileChat);
 elements.mobileMenuButton?.addEventListener("click", (event) => {
   event.stopPropagation();
   toggleMobileMenu();
