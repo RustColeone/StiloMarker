@@ -241,6 +241,9 @@ const elements = {
   sessionIdLabel: query("#session-id-label"),
   explorerToggleButton: query("#explorer-toggle-button"),
   mobileExplorerButton: query("#mobile-explorer-button"),
+  mobilePaneTabs: query("#mobile-pane-tabs"),
+  mobilePaneIndicator: query("#mobile-pane-indicator"),
+  mobileScrim: query("#mobile-scrim"),
   mobilePaneToggle: query("#mobile-pane-toggle"),
   mobilePaneCaption: query("#mobile-pane-caption"),
   mobileRenameButton: query("#mobile-rename-button"),
@@ -349,6 +352,19 @@ let previewFileId = controller.getProject().activeFileId ?? null;
 // updateStatus. null → no text file open (the counter hides). Declared up here so
 // the hoisted updateStatus can never touch it inside its temporal dead zone.
 let statusCharTotal = null;
+// Touch-gesture tuning and state. Declared up here because the hoisted mobile
+// render helpers reach them during the first render, which would otherwise be
+// inside their temporal dead zone.
+const MOBILE_MAX_WIDTH = 900;    // must match the CSS breakpoint
+const EDGE_ZONE = 24;            // px from the left edge that opens the drawer
+const SLOP = 10;                 // px before a gesture is claimed at all
+const DIRECTION_BIAS = 1.3;      // |dx| must exceed |dy| by this much
+const SNAP_FRACTION = 0.35;      // past this share of travel, snap onward
+const FLICK_VELOCITY = 0.45;     // px/ms that snaps regardless of distance
+const PANE_ORDER = ["source", "preview", "chat"];
+let gesture = null;
+let drawerWidth = 1;
+let paneDrag = null;
 // Newest snapshot per file path: { count, editSessions, sessionEdits }. The
 // baseline the S.E.N version label counts from. Refreshed on workspace open and
 // whenever snapshots change — never per keystroke.
@@ -10116,6 +10132,7 @@ function applyMobileViewState() {
   }
   elements.mobileChatToggle?.classList.toggle("is-active", mobileView === "chat");
   elements.mobileChatToggle?.setAttribute("aria-pressed", String(mobileView === "chat"));
+  renderMobilePaneTabs();
   renderMobilePaneCaption();
 }
 
@@ -10123,6 +10140,18 @@ function applyMobileViewState() {
 // the file name, truncated by CSS. This depends on which FILE is showing, not
 // just which view, so updateStatus refreshes it on every render — otherwise
 // switching files left a stale name in the mobile topbar.
+// Bottom switcher: selection state plus the indicator's resting position. A
+// drag overrides --pane-index directly, so this only runs between gestures.
+function renderMobilePaneTabs() {
+  if (!elements.mobilePaneTabs) return;
+  for (const tab of elements.mobilePaneTabs.querySelectorAll(".mobile-pane-tab")) {
+    tab.setAttribute("aria-selected", String(tab.dataset.pane === mobileView));
+  }
+  if (elements.app.dataset.paneDrag !== "1") {
+    elements.app.style.setProperty("--pane-index", String(Math.max(0, PANE_ORDER.indexOf(mobileView))));
+  }
+}
+
 function renderMobilePaneCaption() {
   if (elements.mobilePaneCaption) {
     let caption = "";
@@ -10168,21 +10197,241 @@ function toggleMobilePane() {
   setMobileView(mobileView === "source" ? "preview" : "source");
 }
 
+function openMobileChatView() {
+  void refreshChatStatus({ silent: true });
+  chatState.shouldScrollToBottom = true;
+  renderChatPanel(controller.getProject());
+}
+
 function toggleMobileChat() {
   if (mobileView === "chat") {
     setMobileView(lastMobilePaneView);
     return;
   }
   setMobileView("chat");
-  void refreshChatStatus({ silent: true });
-  chatState.shouldScrollToBottom = true;
-  renderChatPanel(controller.getProject());
+  openMobileChatView();
+}
+
+// ── Touch gestures: explorer drawer + pane carousel ─────────────────────────
+// One dispatcher owns every horizontal drag so the two gestures can never fight
+// over the same finger. At gesture start it decides who gets it:
+//
+//   drawer open                  → drag to close (anywhere)
+//   touch within EDGE_ZONE left  → drag to open the drawer
+//   otherwise                    → drag to switch panes
+//
+// Nothing is claimed until the finger has moved SLOP px and is clearly more
+// horizontal than vertical, so vertical scrolling, caret placement and
+// long-press text selection in the editor all behave as before.
+
+function isMobileLayout() {
+  return window.matchMedia(`(max-width: ${MOBILE_MAX_WIDTH}px)`).matches;
+}
+
+function setDrawerProgress(progress) {
+  const clamped = Math.min(1, Math.max(0, progress));
+  elements.app.style.setProperty("--drawer-progress", String(clamped));
+  if (elements.mobileScrim) elements.mobileScrim.style.setProperty("--drawer-progress", String(clamped));
+}
+
+function paneElement(view) {
+  if (view === "source") return elements.sourcePane;
+  if (view === "preview") return document.querySelector(".preview-pane");
+  return elements.chatPanel;
+}
+
+// A drag must not steal a scroll that belongs to content — a wide table or a
+// code block in the preview, the horizontal tab strip, a range input.
+function claimsHorizontalScroll(target) {
+  let node = target;
+  while (node && node !== document.body) {
+    if (node.nodeType === 1) {
+      if (node.closest?.(".tab-strip, input[type='range'], .cm-editor")) return true;
+      const style = window.getComputedStyle(node);
+      const scrolls = /(auto|scroll)/.test(style.overflowX);
+      if (scrolls && node.scrollWidth > node.clientWidth + 1) return true;
+    }
+    node = node.parentNode;
+  }
+  return false;
+}
+
+function onGestureStart(event) {
+  gesture = null;
+  if (!isMobileLayout() || event.touches.length !== 1) return;
+  // Never hijack a drag that starts on a dialog, menu or the drawer's own
+  // scrollable list content.
+  if (event.target.closest?.("dialog, .explorer-context-menu, .tab-overflow-menu")) return;
+
+  const touch = event.touches[0];
+  const drawerOpen = elements.app.dataset.mobileExplorer === "open";
+  gesture = {
+    startX: touch.clientX,
+    startY: touch.clientY,
+    lastX: touch.clientX,
+    lastT: event.timeStamp,
+    velocity: 0,
+    kind: null,           // "drawer" | "pane", decided on first qualifying move
+    claimed: false,
+    drawerOpen,
+    fromEdge: touch.clientX <= EDGE_ZONE,
+    allowPane: !drawerOpen && !claimsHorizontalScroll(event.target)
+  };
+}
+
+function onGestureMove(event) {
+  if (!gesture || event.touches.length !== 1) return;
+  const touch = event.touches[0];
+  const dx = touch.clientX - gesture.startX;
+  const dy = touch.clientY - gesture.startY;
+
+  if (!gesture.claimed) {
+    if (Math.abs(dx) < SLOP || Math.abs(dx) < Math.abs(dy) * DIRECTION_BIAS) {
+      // Vertical or not yet decisive — let the page have it, and stop looking
+      // once it is clearly a scroll so we don't fight it later in the gesture.
+      if (Math.abs(dy) > SLOP * 2) gesture = null;
+      return;
+    }
+    if (gesture.drawerOpen && dx < 0) gesture.kind = "drawer";
+    else if (!gesture.drawerOpen && gesture.fromEdge && dx > 0) gesture.kind = "drawer";
+    else if (gesture.allowPane) gesture.kind = "pane";
+    if (!gesture.kind) { gesture = null; return; }
+    gesture.claimed = true;
+    if (gesture.kind === "drawer") beginDrawerDrag();
+    else if (!beginPaneDrag(dx)) { gesture = null; return; }
+  }
+
+  const dt = Math.max(1, event.timeStamp - gesture.lastT);
+  gesture.velocity = (touch.clientX - gesture.lastX) / dt;
+  gesture.lastX = touch.clientX;
+  gesture.lastT = event.timeStamp;
+
+  event.preventDefault();  // we own it now — suppress scroll/selection
+  if (gesture.kind === "drawer") updateDrawerDrag(dx);
+  else updatePaneDrag(dx);
+}
+
+function onGestureEnd() {
+  if (!gesture) return;
+  const g = gesture;
+  gesture = null;
+  if (!g.claimed) return;
+  if (g.kind === "drawer") endDrawerDrag(g);
+  else endPaneDrag(g);
+}
+
+// ---- Drawer ----------------------------------------------------------------
+
+function beginDrawerDrag() {
+  const sidebar = elements.explorerPanel ?? document.querySelector(".workspace-shell > .sidebar");
+  drawerWidth = Math.max(1, sidebar?.offsetWidth ?? 1);
+  elements.app.dataset.drawerDrag = "1";
+  if (elements.mobileScrim) elements.mobileScrim.hidden = false;
+}
+
+function updateDrawerDrag(dx) {
+  const base = gesture.drawerOpen ? drawerWidth : 0;
+  setDrawerProgress((base + dx) / drawerWidth);
+}
+
+function endDrawerDrag(g) {
+  delete elements.app.dataset.drawerDrag;
+  const dx = g.lastX - g.startX;
+  const progress = ((g.drawerOpen ? drawerWidth : 0) + dx) / drawerWidth;
+  const flicked = Math.abs(g.velocity) > FLICK_VELOCITY;
+  const open = flicked
+    ? g.velocity > 0
+    : progress > (g.drawerOpen ? 1 - SNAP_FRACTION : SNAP_FRACTION);
+  setMobileExplorerOpen(open);
+}
+
+// ---- Pane carousel ---------------------------------------------------------
+
+function beginPaneDrag(dx) {
+  const index = PANE_ORDER.indexOf(mobileView);
+  const nextIndex = index + (dx < 0 ? 1 : -1);
+  if (nextIndex < 0 || nextIndex >= PANE_ORDER.length) return false;  // at an end
+  const current = paneElement(mobileView);
+  const incoming = paneElement(PANE_ORDER[nextIndex]);
+  if (!current || !incoming) return false;
+
+  // The incoming pane is normally display:none and, for chat, also [hidden].
+  // Lift both into the grid cell as layers the drag can translate.
+  paneDrag = {
+    index,
+    nextIndex,
+    current,
+    incoming,
+    incomingWasHidden: incoming.hidden,
+    width: Math.max(1, current.offsetWidth || window.innerWidth)
+  };
+  incoming.hidden = false;
+  current.classList.add("pane-swipe-layer");
+  incoming.classList.add("pane-swipe-layer");
+  elements.app.dataset.paneDrag = "1";
+  updatePaneDrag(dx);
+  return true;
+}
+
+function updatePaneDrag(dx) {
+  if (!paneDrag) return;
+  const limited = Math.max(-paneDrag.width, Math.min(paneDrag.width, dx));
+  const offset = limited < 0 ? paneDrag.width : -paneDrag.width;
+  paneDrag.current.style.transform = `translateX(${limited}px)`;
+  paneDrag.incoming.style.transform = `translateX(${offset + limited}px)`;
+  // Park the tab indicator mid-travel so the bar shows where the pane is going.
+  const progress = paneDrag.index + (-limited / paneDrag.width);
+  elements.app.style.setProperty("--pane-index", String(progress));
+}
+
+function endPaneDrag(g) {
+  if (!paneDrag) return;
+  const drag = paneDrag;
+  const dx = g.lastX - g.startX;
+  const flicked = Math.abs(g.velocity) > FLICK_VELOCITY
+    && Math.sign(g.velocity) === Math.sign(dx);
+  const commit = flicked || Math.abs(dx) > drag.width * SNAP_FRACTION;
+  const settleTo = commit ? (dx < 0 ? -drag.width : drag.width) : 0;
+
+  elements.app.dataset.paneSettling = "1";
+  drag.current.style.transform = `translateX(${settleTo}px)`;
+  drag.incoming.style.transform = `translateX(${settleTo + (dx < 0 ? drag.width : -drag.width)}px)`;
+  elements.app.style.setProperty("--pane-index", String(commit ? drag.nextIndex : drag.index));
+
+  const finish = () => {
+    for (const el of [drag.current, drag.incoming]) {
+      el.classList.remove("pane-swipe-layer");
+      el.style.transform = "";
+    }
+    delete elements.app.dataset.paneDrag;
+    delete elements.app.dataset.paneSettling;
+    elements.app.style.removeProperty("--pane-index");
+    if (commit) {
+      setMobileView(PANE_ORDER[drag.nextIndex]);
+      if (PANE_ORDER[drag.nextIndex] === "chat") openMobileChatView();
+    } else {
+      // Restore whatever [hidden] state the incoming pane had before the drag.
+      drag.incoming.hidden = drag.incomingWasHidden;
+      applyMobileViewState();
+    }
+    paneDrag = null;
+  };
+  // Settle on transitionend, with a timer as the backstop for a cancelled or
+  // zero-duration transition (reduced motion), so panes can never stay stuck.
+  let done = false;
+  const once = () => { if (done) return; done = true; drag.current.removeEventListener("transitionend", once); finish(); };
+  drag.current.addEventListener("transitionend", once);
+  setTimeout(once, 320);
 }
 
 function setMobileExplorerOpen(open) {
   elements.app.dataset.mobileExplorer = open ? "open" : "closed";
   elements.mobileExplorerButton?.classList.toggle("is-active", open);
   elements.mobileExplorerButton?.setAttribute("aria-expanded", String(open));
+  // The scrim only exists on mobile (CSS keeps it display:none elsewhere), but
+  // hidden must track state everywhere so it can never swallow desktop clicks.
+  if (elements.mobileScrim) elements.mobileScrim.hidden = !open;
+  setDrawerProgress(open ? 1 : 0);
 }
 
 function toggleMobileExplorer() {
@@ -10301,6 +10550,23 @@ elements.toggleSourceButton?.addEventListener("click", toggleSource);
 elements.toggleChatButton.addEventListener("click", toggleChat);
 elements.toggleLogButton.addEventListener("click", toggleLogPanel);
 elements.explorerToggleButton.addEventListener("click", toggleExplorer);
+// Touch gestures. touchmove must be non-passive: once a drag is claimed we
+// preventDefault it to suppress the scroll/selection the browser would
+// otherwise run alongside. touchstart stays passive — it never blocks.
+document.addEventListener("touchstart", onGestureStart, { passive: true });
+document.addEventListener("touchmove", onGestureMove, { passive: false });
+document.addEventListener("touchend", onGestureEnd, { passive: true });
+document.addEventListener("touchcancel", onGestureEnd, { passive: true });
+
+elements.mobileScrim?.addEventListener("click", () => setMobileExplorerOpen(false));
+
+elements.mobilePaneTabs?.addEventListener("click", (event) => {
+  const tab = event.target.closest?.(".mobile-pane-tab");
+  if (!tab?.dataset.pane || tab.dataset.pane === mobileView) return;
+  setMobileView(tab.dataset.pane);
+  if (tab.dataset.pane === "chat") openMobileChatView();
+});
+
 elements.explorerAnchorButton?.addEventListener("click", toggleExplorerAnchor);
 elements.explorerAnchorSelect?.addEventListener("change", (event) => { setExplorerAnchor(event.target.value); });
 // Capture phase so the outside-press check runs before in-tree click handlers.

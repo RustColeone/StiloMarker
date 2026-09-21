@@ -31,6 +31,12 @@
      so changing one value resizes the whole source pane consistently. */
   --editor-font-family: var(--font-mono);
   --editor-font-size: 13px;
+  /* Base size for chrome that doesn't declare its own. The mobile breakpoint
+     raises this (and the control sizes below) rather than each rule doing so. */
+  --ui-font-size: 12px;
+  --control-height: 26px;
+  --touch-target: 24px;
+  --mobile-tabbar-height: 0px;
   --topbar-height: 42px;
   --status-height: 24px;
   --activity-width: 48px;
@@ -80,7 +86,24 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-ui);
+  /* Without this the UA default (16px) leaks into everything that doesn't set
+     its own size — dialogs above all — and they tower over the 11-12px chrome.
+     --ui-font-size is the single knob the mobile breakpoint turns up. */
+  font-size: var(--ui-font-size);
+  /* Stop mobile Safari/Chrome inflating text in "narrow" blocks, which made the
+     mismatch worse on exactly the screens where it was most visible. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
   overflow: hidden;
+}
+
+/* Dialogs are their own stacking/inheritance island in some engines; state the
+   size explicitly so Settings can never drift back to the UA default. */
+dialog,
+.dialog-body,
+.settings-form,
+.settings-section {
+  font-size: var(--ui-font-size);
 }
 
 body {
@@ -89,6 +112,22 @@ body {
 
 [hidden] {
   display: none !important;
+}
+
+/* Mobile-only furniture: inert until the phone breakpoint turns it on. */
+.mobile-pane-tabs,
+.mobile-scrim {
+  display: none;
+}
+
+/* Honour the OS setting: the gesture still works, it just arrives instantly. */
+@media (prefers-reduced-motion: reduce) {
+  .workspace-shell > .sidebar,
+  .mobile-scrim,
+  .mobile-pane-indicator,
+  .pane-swipe-layer {
+    transition-duration: 0.01ms !important;
+  }
 }
 
 button,
@@ -3523,6 +3562,58 @@ menu {
 }
 
 @media (max-width: 900px) {
+  /* ── Touch sizing ────────────────────────────────────────────────────────
+     The desktop chrome is deliberately compact (VSCode-like). On a phone that
+     compactness costs accuracy, so raise the shared knobs once here instead of
+     re-stating a size in every rule. Only the chrome grows: the editor keeps
+     --editor-font-size and the preview its own 14px, so the writing itself
+     looks the same as it did. */
+  :root {
+    --ui-font-size: 14px;
+    --control-height: 36px;
+    --touch-target: 40px;
+    --mobile-tabbar-height: calc(54px + env(safe-area-inset-bottom, 0px));
+    --topbar-height: 48px;
+  }
+
+  /* Explorer rows: the single most-tapped target in the app. */
+  .tree-row {
+    min-height: var(--touch-target);
+    gap: 8px;
+    padding: 0 12px 0 8px;
+  }
+
+  /* File tabs, pane tabs and settings sections. */
+  .tab-strip {
+    min-height: 42px;
+  }
+
+  .editor-tab {
+    height: 42px;
+    padding: 0 14px;
+  }
+
+  .settings-tab {
+    min-height: var(--touch-target);
+  }
+
+  /* Anything that is a tap target gets a thumb-sized box. */
+  .icon-button,
+  .browser-tool-btn,
+  .sidebar-icon-button {
+    min-height: var(--control-height);
+  }
+
+  /* Form controls: 16px on inputs also stops iOS zooming the page on focus. */
+  input,
+  select,
+  textarea,
+  .settings-actions-row button,
+  .dialog-actions button {
+    min-height: var(--control-height);
+    font-size: max(16px, var(--ui-font-size));
+  }
+
   /* Reveal the mobile topbar controls. */
   .topbar-mobile-btn {
     display: inline-flex;
@@ -3664,6 +3755,121 @@ menu {
     transform: translateX(0);
     opacity: 1;
     pointer-events: auto;
+  }
+
+  /* ── Drag state: the drawer follows the finger ──
+     --drawer-progress is 0 (closed) → 1 (open), written by the gesture handler
+     on every move. While dragging the transition is off, so the panel tracks
+     the finger 1:1; on release the class is dropped and the snap animates. */
+  .app-shell[data-drawer-drag="1"] .workspace-shell > .sidebar,
+  .app-shell[data-drawer-drag="1"][data-mobile-explorer="open"] .workspace-shell > .sidebar,
+  .app-shell[data-drawer-drag="1"][data-explorer-anchor="floating"][data-explorer="expanded"] .workspace-shell > .sidebar {
+    transition: none;
+    transform: translateX(calc((var(--drawer-progress, 0) - 1) * 100%));
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Snap animation after release — a touch longer and eased out so it reads as
+     a physical settle rather than the old 0.16s linear-ish flick. */
+  .workspace-shell > .sidebar {
+    transition: transform 0.26s cubic-bezier(0.22, 0.61, 0.36, 1),
+                opacity 0.2s ease;
+  }
+
+  /* ── Pane carousel ──
+     The three panes normally swap with display:none. During a swipe both the
+     outgoing and incoming pane must be on screen at once, so they are lifted
+     into the grid cell as absolutely-positioned layers the handler translates. */
+  .editor-grid {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .app-shell[data-pane-drag="1"] .pane-swipe-layer {
+    display: flex !important;
+    flex-direction: column;
+    position: absolute;
+    inset: 0;
+    z-index: 24;
+    transition: none;
+    will-change: transform;
+  }
+
+  .app-shell[data-pane-settling="1"] .pane-swipe-layer {
+    transition: transform 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+
+  /* ── Bottom pane switcher ── */
+  .mobile-pane-tabs {
+    display: flex;
+    position: relative;
+    /* No height: the grid track is the source of truth and `align-self:stretch`
+       fills it. A percentage height here resolved against the wrong box. */
+    box-sizing: border-box;
+    border-top: 1px solid var(--border);
+    background: var(--surface-0);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .mobile-pane-tab {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 11px;
+    line-height: 1.1;
+    cursor: pointer;
+    transition: color 0.18s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-pane-tab-icon {
+    font-size: 17px;
+    line-height: 1;
+  }
+
+  .mobile-pane-tab[aria-selected="true"] {
+    color: var(--accent);
+  }
+
+  /* One indicator that slides between thirds, rather than a border per tab —
+     so a drag can park it mid-travel and show which way the pane is going. */
+  .mobile-pane-indicator {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: calc(100% / 3);
+    height: 2px;
+    background: var(--accent);
+    transform: translateX(calc(var(--pane-index, 0) * 100%));
+    transition: transform 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+
+  .app-shell[data-pane-drag="1"] .mobile-pane-indicator {
+    transition: none;
+  }
+
+  /* ── Scrim behind the drawer ── */
+  .mobile-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 35;
+    background: rgba(0, 0, 0, 0.44);
+    opacity: var(--drawer-progress, 0);
+    transition: opacity 0.26s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .app-shell[data-drawer-drag="1"] ~ .mobile-scrim {
+    transition: none;
   }
 
   /* ── Editor grid: one pane at a time, chosen by data-mobile-view ── */
@@ -3820,7 +4026,10 @@ menu {
 
   /* ── Status bar removed on mobile; session panel carries the info ── */
   .app-shell {
-    grid-template-rows: var(--topbar-height) minmax(0, 1fr) 0;
+    /* .status-bar is display:none here, so it is NOT a grid item and the pane
+       switcher auto-places into the third track — which is why this sizes the
+       third, not a fourth. The safe-area inset is folded into the token. */
+    grid-template-rows: var(--topbar-height) minmax(0, 1fr) var(--mobile-tabbar-height);
   }
 
   .status-bar {
