@@ -950,6 +950,79 @@ p {
   background: var(--surface-0);
 }
 
+/* Collapsed sections keep only their header row, so the file tree gets the
+   space back — it is the reason the sidebar exists. */
+.sidebar-panel[data-collapsed="true"] {
+  padding-bottom: 10px;
+}
+
+.sidebar-panel[data-collapsed="true"] > .sidebar-panel-body {
+  display: none;
+}
+
+.sidebar-panel-body {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The header is a real <button> now; strip the UA chrome so it still reads as
+   a section label rather than a control. */
+.sidebar-panel-toggle {
+  width: 100%;
+  gap: 6px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar-panel-toggle:hover {
+  color: var(--text);
+}
+
+.sidebar-panel-toggle:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* A CSS triangle, so there is no icon font or SVG to keep in sync. */
+.sidebar-panel-caret {
+  flex: none;
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+  transform: rotate(90deg);
+  transition: transform 0.15s ease;
+}
+
+.sidebar-panel[data-collapsed="true"] .sidebar-panel-caret {
+  transform: rotate(0deg);
+}
+
+/* The label takes the slack so it sits next to the caret and any status chip
+   stays hard right — the header's own space-between would otherwise push a
+   two-child header's label to the far edge. */
+.sidebar-panel-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-panel-caret { transition: none; }
+}
+
 .sidebar-panel-header {
   justify-content: space-between;
   font-size: 11px;

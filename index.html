@@ -120,9 +120,12 @@
           <div id="explorer-tree" class="explorer-tree" role="tree" aria-label="Project files"></div>
 
           <section id="links-panel" class="sidebar-panel links-sidebar-panel" aria-label="Linked notes" hidden>
-            <div class="sidebar-panel-header links-panel-header">
-              <span>Linked Notes</span>
-            </div>
+            <button class="sidebar-panel-header links-panel-header sidebar-panel-toggle" type="button"
+              data-panel="links" aria-expanded="true" aria-controls="links-panel-body">
+              <span class="sidebar-panel-caret" aria-hidden="true"></span>
+              <span class="sidebar-panel-title">Linked Notes</span>
+            </button>
+            <div id="links-panel-body" class="sidebar-panel-body">
             <div class="links-section">
               <div class="links-section-label">Outgoing Links</div>
               <div id="outgoing-links-list" class="links-list"></div>
@@ -131,18 +134,25 @@
               <div class="links-section-label">Backlinks</div>
               <div id="backlinks-list" class="links-list"></div>
             </div>
+            </div>
           </section>
 
           <section class="sidebar-panel collaboration-sidebar-panel" aria-label="Collaboration panel">
-            <div class="sidebar-panel-header">
-              <span>Session</span>
+            <button class="sidebar-panel-header sidebar-panel-toggle" type="button"
+              data-panel="session" aria-expanded="true" aria-controls="session-panel-body">
+              <span class="sidebar-panel-caret" aria-hidden="true"></span>
+              <span class="sidebar-panel-title">Session</span>
+              <!-- Stays in the header so the connection state is readable while
+                   the section is collapsed. -->
               <span id="session-id-label" class="subtle-label">Offline</span>
-            </div>
-            <p id="session-detail-text" class="subtle-label">Not connected to a shared session.</p>
-            <div id="presence-strip" class="presence-strip"></div>
-            <div id="workspace-mode-row" class="workspace-mode-row" hidden>
-              <span class="subtle-label">Workspace</span>
-              <button id="workspace-mode-toggle" class="workspace-mode-toggle" type="button">⟳ Synced</button>
+            </button>
+            <div id="session-panel-body" class="sidebar-panel-body">
+              <p id="session-detail-text" class="subtle-label">Not connected to a shared session.</p>
+              <div id="presence-strip" class="presence-strip"></div>
+              <div id="workspace-mode-row" class="workspace-mode-row" hidden>
+                <span class="subtle-label">Workspace</span>
+                <button id="workspace-mode-toggle" class="workspace-mode-toggle" type="button">⟳ Synced</button>
+              </div>
             </div>
           </section>
         </aside>
