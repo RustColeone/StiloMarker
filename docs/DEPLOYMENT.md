@@ -7,13 +7,13 @@ Prepare and test a release in a separate directory before copying it into place.
 
 ## Release numbering
 
-- `v0.1.19`: app release, following `MAJOR.MINOR.PATCH`.
+- `v0.1.20`: app release, following `MAJOR.MINOR.PATCH`.
 - `SYNC_PROTOCOL_VERSION` / `MIN_CLIENT_VERSION`: numeric sync compatibility.
   Keep the wire field `version` numeric so old clients remain safely rejected.
   Ordinary app releases do not need a protocol increment.
 - Document S.E.N labels and workspace revisions are separate and unchanged.
 
-Use `node tools/release-version.mjs 0.1.20` to set the next app release and
+Use `node tools/release-version.mjs 0.1.21` to set the next app release and
 `node tools/release-version.mjs --check` to verify all release labels agree.
 
 ## Coordinated deployment
@@ -168,3 +168,24 @@ Private deployment backup:
 `/home/laplacengan/backups/stilomarker/20260930T044239Z-v0.1.16`.
 The service was stopped for the backup and coordinated copy; nine project
 manifests were validated. Chat sidecars were included where present.
+
+
+## Verified release: v0.1.20
+
+Deployed on 2026-09-30. Mobile browser caret restoration now captures the
+selection before touch focus leaves the editor and ignores stale blurred ranges.
+App version is `0.1.20`; sync compatibility remains `114`. Settings and security
+preferences are unchanged.
+
+Validation: 132 Node tests, 29 Python reliability tests, and 16 MCP tests passed.
+Desktop caret, mobile navigation, and the new mobile touch/return/reload browser
+regressions passed against staged assets on the public origin with isolated
+projects and mocked APIs. The new regression fails against the prior release.
+Public post-deployment verification matched 16 frontend assets and passed an
+isolated two-client guest smoke covering document sync, chat conflicts, presence,
+and stale-write rejection. No persistent writing project was touched. The service
+was active after deployment. Physical-phone verification remains useful.
+
+Private deployment backup:
+`/home/laplacengan/backups/stilomarker/20260930T204116Z-v0.1.20`.
+Nine project manifests were validated in the stopped-service data backup.

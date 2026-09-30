@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v0.1.19";
+const CACHE_NAME = "mdnotes-shell-v0.1.20";
 const APP_SHELL = [
   "./",
   "./index.html",

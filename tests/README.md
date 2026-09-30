@@ -114,3 +114,5 @@ Optional MCP regressions: `python3 -B tests/mcp-client.test.py` (socket-free) an
 The session recovery browser check also simulates a sleeping tab, foreground reconnection, and pagehide close signaling. Presence lease expiry is exercised socket-free by `server-reliability.test.py`.
 
 `tests/caret-restore-browser.py` checks source caret and selection restoration across file switches and reloads, including focus retention and stale-offset clamping. It uses isolated browser storage and the public origin with staged assets.
+
+`tests/mobile-caret-browser.py` checks caret capture before touch blur, return through the mobile explorer, and reload using mobile Chromium emulation on the public origin. It delays `selectionchange` and clears the range on outside touch to cover the browser event ordering that lost the caret. Assets and APIs are isolated from user workspaces.
