@@ -1,5 +1,5 @@
 import { buildTextPatch, transformTextPatch, applyTextPatch } from "./text-patch-service.js";
-import { connectToServer, fetchSessionState, hostSession, openEventStream, openWorkspaceSession, pushCursor, pushOperation, pushSessionState, sanitizeProjectForSync, uploadAsset } from "./sync-service.js";
+import { connectToServer, fetchSessionState, hostSession, openEventStream, openWorkspaceSession, renewSessionLease, leaveSession, pushCursor, pushOperation, pushSessionState, sanitizeProjectForSync, uploadAsset } from "./sync-service.js";
 
 function fingerprintProject(project) {
   return JSON.stringify(sanitizeProjectForSync(project));
@@ -34,6 +34,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
   let reconnectTimer = null;
   let reconnectAttempts = 0;
   let reconnectTask = null;
+  let leaseTimer = null;
   const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 15000, 30000];
 
   function isImageName(name) {
@@ -105,6 +106,37 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     }
   }
 
+  function clearLeaseTimer() {
+    if (leaseTimer !== null) window.clearTimeout(leaseTimer);
+    leaseTimer = null;
+  }
+
+  function scheduleLease() {
+    clearLeaseTimer();
+    if (!connection?.eventSource) return;
+    const token = connection.token;
+    const epoch = generation;
+    leaseTimer = window.setTimeout(async () => {
+      leaseTimer = null;
+      if (epoch !== generation || connection?.token !== token || !connection.eventSource) return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        scheduleLease();
+        return;
+      }
+      try {
+        await renewSessionLease(connection.serverUrl, token);
+      } catch {
+        if (epoch === generation && connection?.token === token) handleStreamError();
+        return;
+      }
+      if (epoch === generation && connection?.token === token) scheduleLease();
+    }, 20000);
+  }
+
+  function leaveOnPageHide() {
+    if (connection?.token) leaveSession(connection.serverUrl, connection.token);
+  }
+
   function disconnect(detail = "Server offline") {
     markUnsyncedDirty();
     // A deliberate teardown (user left / opening a different session): stop any
@@ -120,6 +152,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     reconnectCtx = null;
     reconnectTask = null;
     clearReconnect();
+    clearLeaseTimer();
     clearScheduledSyncs();
     if (connection?.eventSource) {
       connection.eventSource.close();
@@ -151,6 +184,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     reconnectCtx = null;
     reconnectTask = null;
     clearReconnect();
+    clearLeaseTimer();
     clearScheduledSyncs();
     reconnecting = false;
     if (connection?.eventSource) {
@@ -164,6 +198,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
   // keep the connection object alive, mark "reconnecting", and retry with backoff.
   function handleStreamError() {
     if (!connection || reconnecting) return;
+    clearLeaseTimer();
     if (connection.eventSource) {
       try { connection.eventSource.close(); } catch { /* ignore */ }
       connection.eventSource = null;
@@ -180,11 +215,11 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     reconnecting = true;
     reconnectAttempts = 0;
     emitStatus("reconnecting", "Connection lost — reconnecting…");
-    scheduleReconnectAttempt();
+    if (typeof document === "undefined" || document.visibilityState !== "hidden") scheduleReconnectAttempt();
   }
 
   function scheduleReconnectAttempt(immediate = false) {
-    if (!reconnectCtx) return;
+    if (!reconnectCtx || (typeof document !== "undefined" && document.visibilityState === "hidden")) return;
     const delay = immediate ? 0 : RECONNECT_DELAYS[Math.min(reconnectAttempts, RECONNECT_DELAYS.length - 1)];
     reconnectAttempts += 1;
     reconnectTimer = window.setTimeout(() => {
@@ -734,6 +769,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       () => { if (epoch === generation && connection?.eventSource === stream) handleStreamError(); }
     );
     connection.eventSource = stream;
+    scheduleLease();
   }
 
   function handleEvent(event) {
@@ -990,6 +1026,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     resumeConnection,
     hostForGuests,
     disconnect,
+    leaveOnPageHide,
     publishOperation,
     publishSnapshot,
     scheduleTextPatch,

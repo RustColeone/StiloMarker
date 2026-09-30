@@ -110,3 +110,5 @@ Set `STILO_LIVE_ASSETS=1` for `session-recovery-browser.py` to exercise the depl
 frontend instead of staged files; all account/workspace endpoints remain mocked.
 
 Optional MCP regressions: `python3 -B tests/mcp-client.test.py` (socket-free) and `python3 tests/mcp-browser.py` (public origin with mocked APIs and staged assets; requires Playwright).
+
+The session recovery browser check also simulates a sleeping tab, foreground reconnection, and pagehide close signaling. Presence lease expiry is exercised socket-free by `server-reliability.test.py`.
