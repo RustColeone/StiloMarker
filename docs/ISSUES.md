@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-09-24 · release `v0.1.14` (deployed; public verification passed)
+Last updated: 2026-09-25 · release `v0.1.15` (deployed; public verification passed)
 
 ---
 
@@ -29,6 +29,24 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.15: mobile navigation and writing polish
+
+- Navigation, rename, explorer rows, formatting, Find/Replace, and dialog-close
+  controls use larger touch targets. Formatting stays on one scrollable row.
+- Expanded app menus scroll within the available screen height. Find/Replace
+  controls wrap into a phone-sized layout; dialogs use the visual viewport height.
+- Text input, selection, horizontally scrolling content, and the diagram canvas
+  own their gestures. Cancelled touches and multitouch restore the original pane;
+  reversing a swipe or tapping a pane during animation cannot switch it later.
+- Chat collapse and View menu commands now navigate the mobile panes without
+  changing saved desktop layout settings. Menu and explorer flyouts are exclusive;
+  crossing the desktop breakpoint restores the saved chat visibility.
+- Height-only resize events no longer rebuild the source editor, preserving the
+  caret when keyboard/browser chrome changes. Width reflow defers during IME input.
+- Both public-origin browser suites pass at five mobile/tablet viewport sizes
+  with isolated data and mocked chat. Physical-device verification is deferred.
+
 
 ### v0.1.14: chat reliability and mobile interaction
 

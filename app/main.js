@@ -7584,7 +7584,7 @@ let _lastEditorObservedWidth = 0;
 const editorResizeObserver = typeof ResizeObserver === "function"
   ? new ResizeObserver(() => {
     const width = Math.round(elements.editorScroll.getBoundingClientRect().width);
-    if (width === _lastEditorObservedWidth) {
+    if (editorIsComposing || width === _lastEditorObservedWidth) {
       syncEditorScroll();
       return;
     }
@@ -10167,6 +10167,7 @@ document.addEventListener("drop", () => {
 });
 
 function toggleExplorer() {
+  if (isMobileLayout()) { toggleMobileExplorer(); return; }
   settings.explorer = settings.explorer === "collapsed" ? "expanded" : "collapsed";
   elements.explorerSelect.value = settings.explorer;
   persistSettings();
@@ -10200,6 +10201,7 @@ function handleFloatingExplorerOutsidePress(event) {
 }
 
 function togglePreview() {
+  if (isMobileLayout()) { selectMobilePane(mobileView === "preview" ? "source" : "preview"); return; }
   settings.preview = settings.preview === "hidden" ? "shown" : "hidden";
   // Never collapse both panes.
   if (settings.preview === "hidden" && settings.source === "hidden") {
@@ -10211,6 +10213,7 @@ function togglePreview() {
 }
 
 function toggleSource() {
+  if (isMobileLayout()) { selectMobilePane(mobileView === "source" ? "preview" : "source"); return; }
   settings.source = settings.source === "hidden" ? "shown" : "hidden";
   // Collapsing the source is a reading-focused mode — keep the preview visible.
   if (settings.source === "hidden" && settings.preview === "hidden") {
@@ -10222,6 +10225,10 @@ function toggleSource() {
 }
 
 function toggleChat() {
+  if (isMobileLayout()) {
+    selectMobilePane(mobileView === "chat" ? "source" : "chat");
+    return;
+  }
   settings.chatPanel = settings.chatPanel === "hidden" ? "shown" : "hidden";
   persistSettings();
   if (settings.chatPanel === "shown") {
@@ -10242,10 +10249,10 @@ function applyMobileViewState() {
   // The chat panel is normally gated by the global `[hidden] { display:none
   // !important }` rule (driven by settings.chatPanel). In the mobile chat view
   // it must win over that, so drop the attribute and let the cascade decide per
-  // viewport. Desktop is unaffected: mobileView stays "source" there, so this
-  // reduces to the original settings-driven expression.
+  // viewport. A desktop window may retain a previous mobile pane selection;
+  // only the active mobile layout can override the saved chat preference.
   if (elements.chatPanel) {
-    elements.chatPanel.hidden = settings.chatPanel === "hidden" && mobileView !== "chat";
+    elements.chatPanel.hidden = settings.chatPanel === "hidden" && !(isMobileLayout() && mobileView === "chat");
   }
   renderMobilePaneButtons(mobileView);
   renderMobilePaneCaption();
@@ -10290,6 +10297,7 @@ function renderMobilePaneCaption() {
 }
 
 function setMobileView(view) {
+  cancelMobileGesture();
   mobileView = view;
   if (view === "preview") {
     // Mobile has a single pane toggle, so the preview should mirror the file
@@ -10306,7 +10314,8 @@ function setMobileView(view) {
 // a no-op rather than a toggle: with three dedicated buttons the highlight has
 // to mean "this is what you are looking at", and toggling would contradict it.
 function selectMobilePane(view) {
-  if (!PANE_ORDER.includes(view) || view === mobileView) return;
+  if (!PANE_ORDER.includes(view)) return;
+  if (view === mobileView) { cancelMobileGesture(); return; }
   setMobileView(view);
   if (view === "chat") openMobileChatView();
 }
@@ -10361,11 +10370,13 @@ function claimsHorizontalScroll(target) {
 }
 
 function onGestureStart(event) {
+  if (event.touches.length !== 1) { cancelMobileGesture(); return; }
+  if (!isMobileLayout() || paneDrag) return;
   gesture = null;
-  if (!isMobileLayout() || event.touches.length !== 1) return;
-  // Never hijack a drag that starts on a dialog, menu or the drawer's own
-  // scrollable list content.
-  if (event.target.closest?.("dialog, .explorer-context-menu, .tab-overflow-menu")) return;
+  // Editing, canvas interaction, menus, and horizontal content own their drags.
+  // Check before the edge gesture too, so a table at the left edge can scroll.
+  if (event.target.closest?.("dialog, .menu-bar, .explorer-context-menu, .tab-overflow-menu, input, textarea, select, button, a, [contenteditable], .bmap-editor, .cm-editor")) return;
+  if (claimsHorizontalScroll(event.target) || window.getSelection()?.isCollapsed === false) return;
 
   const touch = event.touches[0];
   const drawerOpen = elements.app.dataset.mobileExplorer === "open";
@@ -10384,7 +10395,8 @@ function onGestureStart(event) {
 }
 
 function onGestureMove(event) {
-  if (!gesture || event.touches.length !== 1) return;
+  if (event.touches.length !== 1) { cancelMobileGesture(); return; }
+  if (!gesture) return;
   const touch = event.touches[0];
   const dx = touch.clientX - gesture.startX;
   const dy = touch.clientY - gesture.startY;
@@ -10415,13 +10427,34 @@ function onGestureMove(event) {
   else updatePaneDrag(dx);
 }
 
-function onGestureEnd() {
+function onGestureEnd(event) {
+  if (event.type === "touchcancel") { cancelMobileGesture(); return; }
   if (!gesture) return;
   const g = gesture;
   gesture = null;
   if (!g.claimed) return;
   if (g.kind === "drawer") endDrawerDrag(g);
   else endPaneDrag(g);
+}
+
+// Cancelled touches, rotation, and button navigation must restore the original
+// pane immediately, without a delayed animation switching it back afterward.
+function cancelMobileGesture() {
+  gesture = null;
+  delete elements.app.dataset.drawerDrag;
+  setDrawerProgress(elements.app.dataset.mobileExplorer === "open" ? 1 : 0);
+  const drag = paneDrag;
+  if (!drag) return;
+  paneDrag = null;
+  drag.cancelSettle?.();
+  for (const el of [drag.current, drag.incoming]) {
+    el.classList.remove("pane-swipe-layer");
+    el.style.transform = "";
+  }
+  drag.incoming.hidden = drag.incomingWasHidden;
+  delete elements.app.dataset.paneDrag;
+  delete elements.app.dataset.paneSettling;
+  applyMobileViewState();
 }
 
 // ---- Drawer ----------------------------------------------------------------
@@ -10478,8 +10511,9 @@ function beginPaneDrag(dx) {
 
 function updatePaneDrag(dx) {
   if (!paneDrag) return;
-  const limited = Math.max(-paneDrag.width, Math.min(paneDrag.width, dx));
-  const offset = limited < 0 ? paneDrag.width : -paneDrag.width;
+  const direction = paneDrag.nextIndex > paneDrag.index ? -1 : 1;
+  const limited = direction * Math.max(0, Math.min(paneDrag.width, dx * direction));
+  const offset = -direction * paneDrag.width;
   paneDrag.current.style.transform = `translateX(${limited}px)`;
   paneDrag.incoming.style.transform = `translateX(${offset + limited}px)`;
 }
@@ -10490,15 +10524,18 @@ function endPaneDrag(g) {
   const dx = g.lastX - g.startX;
   const flicked = Math.abs(g.velocity) > FLICK_VELOCITY
     && Math.sign(g.velocity) === Math.sign(dx);
-  const commit = flicked || Math.abs(dx) > drag.width * SNAP_FRACTION;
-  const settleTo = commit ? (dx < 0 ? -drag.width : drag.width) : 0;
+  const direction = drag.nextIndex > drag.index ? -1 : 1;
+  const commit = Math.sign(dx) === direction && (flicked || Math.abs(dx) > drag.width * SNAP_FRACTION);
+  const settleTo = commit ? direction * drag.width : 0;
 
   if (commit) renderMobilePaneButtons(PANE_ORDER[drag.nextIndex]);
   elements.app.dataset.paneSettling = "1";
   drag.current.style.transform = `translateX(${settleTo}px)`;
-  drag.incoming.style.transform = `translateX(${settleTo + (dx < 0 ? drag.width : -drag.width)}px)`;
+  drag.incoming.style.transform = `translateX(${settleTo - direction * drag.width}px)`;
 
   const finish = () => {
+    if (paneDrag !== drag) return;
+    paneDrag = null;
     for (const el of [drag.current, drag.incoming]) {
       el.classList.remove("pane-swipe-layer");
       el.style.transform = "";
@@ -10518,12 +10555,25 @@ function endPaneDrag(g) {
   // Settle on transitionend, with a timer as the backstop for a cancelled or
   // zero-duration transition (reduced motion), so panes can never stay stuck.
   let done = false;
-  const once = () => { if (done) return; done = true; drag.current.removeEventListener("transitionend", once); finish(); };
+  let timer;
+  const once = (event) => {
+    if (event && (event.target !== drag.current || event.propertyName !== "transform")) return;
+    if (done) return;
+    drag.cancelSettle();
+    finish();
+  };
+  drag.cancelSettle = () => {
+    done = true;
+    clearTimeout(timer);
+    drag.current.removeEventListener("transitionend", once);
+  };
   drag.current.addEventListener("transitionend", once);
-  setTimeout(once, 320);
+  timer = setTimeout(once, 320);
 }
 
 function setMobileExplorerOpen(open) {
+  cancelMobileGesture();
+  if (open) setMobileMenuOpen(false);
   elements.app.dataset.mobileExplorer = open ? "open" : "closed";
   elements.mobileExplorerButton?.classList.toggle("is-active", open);
   elements.mobileExplorerButton?.setAttribute("aria-expanded", String(open));
@@ -10535,6 +10585,8 @@ function toggleMobileExplorer() {
 }
 
 function setMobileMenuOpen(open) {
+  cancelMobileGesture();
+  if (open) setMobileExplorerOpen(false);
   elements.app.dataset.mobileMenu = open ? "open" : "closed";
   elements.mobileMenuButton?.classList.toggle("is-active", open);
   elements.mobileMenuButton?.setAttribute("aria-expanded", String(open));
@@ -10813,7 +10865,7 @@ elements.chatInput.addEventListener("input", () => {
   // Typing a draft must not rebuild the conversation or disturb its selection.
   elements.chatSendButton.disabled = !chatState.sending && !elements.chatInput.value.trim();
 });
-installMobileViewport(window, elements.app);
+installMobileViewport(window, document.documentElement);
 
 elements.settingsButton.addEventListener("click", () => {
   logDebug("action", "Settings dialog opened");
@@ -11139,14 +11191,22 @@ elements.bmapAutoPanInput?.addEventListener("change", (event) => {
 });
 
 window.addEventListener("resize", () => {
-  renderEditorContent(getEditorText());
+  cancelMobileGesture();
+  // The width observer above owns editor rendering and preserves the caret.
+  // Keyboard / browser chrome height changes need only scroll alignment.
   syncEditorScroll();
 });
 
 // Crossing the phone breakpoint (rotation, or a resized desktop window) has to
 // re-decide the explorer anchor — see applyWorkspaceSettings.
 window.matchMedia(`(max-width: ${MOBILE_MAX_WIDTH}px)`)
-  .addEventListener("change", () => { applyWorkspaceSettings(); });
+  .addEventListener("change", () => {
+    cancelMobileGesture();
+    setMobileExplorerOpen(false);
+    setMobileMenuOpen(false);
+    applyWorkspaceSettings();
+    applyMobileViewState();
+  });
 
 elements.serverUrlInput.addEventListener("change", (event) => {
   settings.serverUrl = event.target.value.trim();

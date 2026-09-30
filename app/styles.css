@@ -6599,3 +6599,45 @@ pre.proposal-diff-block {
 }
 
 .chat-history-content, .chat-stream-content { flex: 0 0 auto; min-width: 0; }
+
+
+/* Mobile writing controls and flyouts share reachable touch targets. Keep the
+   formatting strip on one scrollable row so it does not crowd out the editor. */
+@media (max-width: 900px) {
+  .topbar { gap: 2px; padding-inline: 4px; }
+  .topbar-mobile-btn,
+  #mobile-rename-button { flex: 0 0 44px; width: 44px; height: 44px; min-height: 44px; }
+  .topbar-mobile-actions { gap: 0; }
+  .sidebar-icon-button, .sidebar-add-button { min-width: 44px; min-height: 44px; }
+  .tree-row { min-height: 44px; }
+  .app-shell[data-mobile-menu="open"] .topbar .menu-bar {
+    max-height: calc(var(--mobile-viewport-height, 100dvh) - var(--topbar-height) - 10px);
+    max-width: calc(100vw - 12px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .app-shell[data-mobile-menu="open"] .topbar .menu-group { flex-shrink: 0; }
+  .menu-trigger, .menu-popover button, .explorer-context-menu button {
+    min-height: 44px;
+    font-size: 14px;
+  }
+  .editor-format-toolbar { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; }
+  .format-toolbar-btn { flex: 0 0 auto; min-width: 44px; height: 44px; font-size: 14px; }
+  .format-toolbar-sep { flex-shrink: 0; }
+  .find-row:not(#find-replace-row) { display: grid; grid-template-columns: repeat(6, minmax(44px, 1fr)); }
+  #find-input { grid-column: 1 / 5; grid-row: 1; }
+  #find-count { grid-column: 5; grid-row: 1; min-width: 0; white-space: normal; }
+  #find-close { grid-column: 6; grid-row: 1; }
+  .find-input { min-width: 0; width: 100%; height: 44px; font-size: 16px; }
+  .find-toggle, .find-nav, .find-btn { min-width: 44px; height: 44px; font-size: 14px; }
+  #find-replace-row .find-input { width: 0; }
+  dialog { max-height: calc(var(--mobile-viewport-height, 100dvh) - 16px); }
+  .dialog-close-corner, #settings-tabs-button { width: 44px; height: 44px; min-height: 44px; }
+  .dialog-header:has(.dialog-close-corner) { padding-right: 44px; min-height: 44px; }
+  #settings-dialog .dialog-header:has(#settings-tabs-button) { padding-left: 44px; }
+  #settings-dialog .settings-form { max-height: none; }
+  #settings-dialog .settings-tab-strip { overflow-y: auto; }
+}
+@media (max-width: 560px) {
+  .topbar .brand-cluster { display: none; }
+}
