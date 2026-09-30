@@ -112,3 +112,5 @@ frontend instead of staged files; all account/workspace endpoints remain mocked.
 Optional MCP regressions: `python3 -B tests/mcp-client.test.py` (socket-free) and `python3 tests/mcp-browser.py` (public origin with mocked APIs and staged assets; requires Playwright).
 
 The session recovery browser check also simulates a sleeping tab, foreground reconnection, and pagehide close signaling. Presence lease expiry is exercised socket-free by `server-reliability.test.py`.
+
+`tests/caret-restore-browser.py` checks source caret and selection restoration across file switches and reloads, including focus retention and stale-offset clamping. It uses isolated browser storage and the public origin with staged assets.

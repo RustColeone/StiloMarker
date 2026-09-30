@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-09-30 · release `v0.1.18` (deployed; public verification passed)
+Last updated: 2026-09-30 · release `v0.1.19` (deployed; public verification passed)
 
 ---
 
@@ -30,6 +30,11 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.19: editor caret and selection restoration
+
+The browser now remembers each file's source caret or text selection and restores it after switching files, reloading, or returning from a cloud session refresh. Saved offsets are scoped to the workspace and clamped when content changes. Restoring a file does not steal focus from another control; the saved position is applied when the editor receives focus.
+
 
 ### v0.1.18: sleeping-tab recovery and stale presence
 
