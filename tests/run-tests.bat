@@ -11,12 +11,12 @@ REM Move to the repository root (this script lives in tests\).
 cd /d "%~dp0\.."
 
 echo.
-echo === [1/2] Node.js unit tests ===========================================
+echo === [1/3] Node.js unit tests ===========================================
 call node --test tests
 if errorlevel 1 goto :failed
 
 echo.
-echo === [2/2] Python backend self-test =====================================
+echo === [2/3] Python backend self-test =====================================
 call python server\mdnotes_server.py --selftest
 if errorlevel 1 (
   REM Fall back to `python3` if `python` is not the right launcher.
@@ -25,6 +25,13 @@ if errorlevel 1 (
 )
 
 echo.
+echo === [3/3] Sync reliability regressions ==================================
+call python -B tests\server-reliability.test.py
+if errorlevel 1 (
+  call python3 -B tests\server-reliability.test.py
+  if errorlevel 1 goto :failed
+)
+
 echo === All tests passed. ==================================================
 endlocal
 exit /b 0

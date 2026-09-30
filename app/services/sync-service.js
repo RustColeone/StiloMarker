@@ -1,12 +1,8 @@
 import { dataUrlToBytes } from "./file-content-service.js";
 
-// This client's app version, sent with sync requests so the server can refuse a
-// stale tab (one on an old cached service worker) before it can clobber newer
-// content. MUST be bumped together with the service-worker CACHE_NAME
-// (mdnotes-shell-vN) on every deploy; the server's MIN_CLIENT_VERSION gate uses it.
-// Pre-gate clients (≤ v73) send no version and are read as 0 → always refused.
-const CLIENT_VERSION = 99;
+import { SYNC_PROTOCOL_VERSION } from "../version.js";
 
+// The numeric wire gate deliberately stays separate from the app release label.
 // Identifies THIS page load. Sent with every workspace open so the server log can
 // tell apart the two very different causes of repeated opens: many distinct
 // pageIds means the page itself keeps reloading, while one pageId opening over and
@@ -175,7 +171,7 @@ async function openWorkspaceSession(serverUrl, accountToken, team, path, device,
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify({
-      team, path, device, version: CLIENT_VERSION,
+      team, path, device, version: SYNC_PROTOCOL_VERSION,
       // Diagnostics: which code path asked, from which page load, how long that
       // page has been alive. Enough to explain any repeated-open pattern.
       reason, pageId: PAGE_ID, uptimeMs: Date.now() - PAGE_LOADED_AT
@@ -431,7 +427,7 @@ async function pushSessionState(serverUrl, token, project, baseRevision) {
       "content-type": "application/json",
       accept: "application/json"
     },
-    body: JSON.stringify({ project: sanitizeProjectForSync(project), baseRevision })
+    body: JSON.stringify({ project: sanitizeProjectForSync(project), baseRevision, version: SYNC_PROTOCOL_VERSION })
   });
 
   if (!response.ok) {
@@ -449,7 +445,7 @@ async function pushOperation(serverUrl, token, operation) {
       "content-type": "application/json",
       accept: "application/json"
     },
-    body: JSON.stringify({ operation, version: CLIENT_VERSION })
+    body: JSON.stringify({ operation, version: SYNC_PROTOCOL_VERSION })
   });
 
   if (!response.ok) {

@@ -1,3 +1,4 @@
+import { APP_VERSION } from "./version.js";
 import { ROOT_ID, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isAllowedFileName, isBmapFileName, isImageFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
 import { createProjectController, seedDefaultProject } from "./domain/project-service.js";
 import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
@@ -23,6 +24,8 @@ import { createBmapView, renderBmapToSvg } from "./ui/bmap-view.js";
 import { buildTableSnippet, getEditorToolbarFormat, renderEditorFormatToolbar } from "./ui/editor-format-toolbar.js";
 import { createTableGridPicker } from "./ui/table-grid-picker.js";
 import { createDefaultBmap, normalizeBmapAst, parseBmap } from "./services/bmap-service.js";
+
+document.querySelectorAll("[data-app-version]").forEach((label) => { label.textContent = `v${APP_VERSION}`; });
 
 const elements = {
   app: query("#app"),
@@ -4385,6 +4388,13 @@ function captureAgentCheckpoint(batchId, baseRevision) {
 }
 
 const collaboration = createCollaborationRuntime({
+  async preserveLocalFiles(files) {
+    const store = snapshotStore();
+    for (const [path, content] of files) {
+      await store.create(path, content, "Recovery: local edits before cloud reload");
+    }
+    showToast(`Local changes saved in Snapshots (${files.size} file(s)); loading the cloud version.`);
+  },
   getProject() {
     return controller.getProject();
   },
@@ -4451,7 +4461,7 @@ const collaboration = createCollaborationRuntime({
       showToast("Connection lost — reconnecting… your changes are kept.");
     }
     if (nextState.status === "connected" && prevStatus === "reconnecting") {
-      showToast("Reconnected — changes synced.");
+      showToast("Reconnected to the cloud workspace.");
     }
     if (nextState.status === "connected") {
       // A clean connect means we're on a good version — reset the one-shot upgrade
@@ -8510,7 +8520,7 @@ function updateStatus(project) {
       ? "Local workspace"
       : "In-browser workspace";
   elements.browserStatusText.textContent = browserSupported ? "Chromium directory access available" : "Fallback import/export mode";
-  elements.serverStatusBarText.textContent = syncState.account
+  elements.serverStatusBarText.textContent = syncState.status === "sync-error" ? "Sync paused" : syncState.account
     ? (syncState.status === "connected"
         ? syncState.account.username
         : `Logged in as ${syncState.account.username}`)
@@ -8536,6 +8546,10 @@ function updateStatus(project) {
     elements.sessionDetailText.textContent = sessionName
       ? `${sessionName}${syncState.displayName ? ` as ${syncState.displayName}` : ""}${syncState.role ? ` (${syncState.role})` : ""}.`
       : (syncState.detail || "Connected to the server.");
+  } else if (syncState.status === "sync-error") {
+    elements.sessionIdLabel.textContent = "Sync paused";
+    elements.sessionIdLabel.title = "";
+    elements.sessionDetailText.textContent = syncState.detail;
   } else if (sessionReachable) {
     elements.sessionIdLabel.textContent = "Reachable";
     elements.sessionIdLabel.title = "";
@@ -12000,6 +12014,7 @@ async function handleOpenWorkspace(team, path, options = {}) {
   // costs a session swap, so skip it unless the caller insists.
   if (!options.force
       && collaboration.isConnected?.()
+      && syncState.status === "connected"
       && workspaceMode === "synced"
       && settings.syncedProjectId === workspaceId) {
     logDebug("action", "Skipped redundant workspace open", `${workspaceId} (${reason})`);
