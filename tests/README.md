@@ -83,3 +83,11 @@ python3 tests/mobile-chat-browser.py
 Set `STILO_BROWSER` to an existing Chromium executable if needed. Set
 `STILO_TEST_URL` to another deployed public origin; no localhost listener is needed.
 This emulates mobile Chromium. Physical iOS keyboard behavior still needs a device check.
+
+- `mobile-navigation-browser.py`: optional Playwright checks for reachable menus,
+  Find/Replace layout, 44px touch controls, caret/IME resize preservation, swipe
+  cancellation/reversal, rapid navigation, canvas gesture ownership, flyout state,
+  chat collapse, and preservation of desktop layout preferences. Uses the same
+  public-origin overlay and isolated/mocked API setup as `mobile-chat-browser.py`.
+  Run with `python3 tests/mobile-navigation-browser.py` after installing Playwright;
+  set `STILO_BROWSER` to an existing Chromium executable when needed.
