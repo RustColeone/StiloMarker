@@ -91,3 +91,20 @@ This emulates mobile Chromium. Physical iOS keyboard behavior still needs a devi
   public-origin overlay and isolated/mocked API setup as `mobile-chat-browser.py`.
   Run with `python3 tests/mobile-navigation-browser.py` after installing Playwright;
   set `STILO_BROWSER` to an existing Chromium executable when needed.
+
+
+## Session recovery regressions
+
+- `session-recovery.test.mjs`: root/legacy paths, automatic retries, foreground
+  wake-up, serialized attempts, and cancellation/auth rejection.
+- `workspace-restore.test.mjs`: production UI handlers preserve drafts on failed
+  opens and refuse late login results after logout.
+- `collaboration-runtime.test.mjs`: foreground reconnection, conflicting drafts,
+  concurrent wake-ups, superseded opens, and callbacks from replaced streams.
+- `session-recovery-browser.py`: public-origin mobile browser regression with
+  staged assets and mocked accounts/workspaces; exercises offline startup,
+  Resume, foreground recovery, session expiry, and logout. Run like the other
+  optional Playwright scripts, with `STILO_BROWSER` when using existing Chromium.
+
+Set `STILO_LIVE_ASSETS=1` for `session-recovery-browser.py` to exercise the deployed
+frontend instead of staged files; all account/workspace endpoints remain mocked.

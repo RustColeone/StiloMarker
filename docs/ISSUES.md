@@ -5,18 +5,19 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-09-25 · release `v0.1.15` (deployed; public verification passed)
+Last updated: 2026-09-30 · release `v0.1.16` (deployed; public verification passed)
 
 ---
 
 ## Open
 
-### 1. Long-open tabs must reload after a server restart
+### 1. Restart recovery can require a fresh cloud snapshot
 **Confidence:** confirmed, intended · **Severity:** informational
 
 The OT rebase log is in-memory and capped at 2,000 entries, so it is empty after a
 restart. Patches based on an older revision are now **refused** rather than applied
-at wrong offsets (which silently corrupted text before). The cost is a forced reload.
+at wrong offsets (which silently corrupted text before). Recovery automatically fetches
+the current cloud snapshot and preserves conflicting local text in Snapshots.
 
 ### 2. Residual risk in the snapshot migration
 **Confidence:** theoretical · **Severity:** low
@@ -29,6 +30,33 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.16: automatic phone/session recovery and working Resume
+
+- Startup failures retry with backoff; returning to the app, browser history
+  restoration, or regaining connectivity immediately resumes pending recovery.
+  Recovery attempts are serialized, including repeated Resume/foreground events.
+- Foreground recovery replaces silently dead streams and refreshes expired account
+  sessions using the existing proven-login credentials. A temporary login outage
+  retries instead of permanently disconnecting. Replaced streams cannot deliver
+  late callbacks into the new connection.
+- Resume accepts team-root workspaces (empty relative path), can sign in again,
+  and restores the active file even when a connection already appears healthy.
+  Local tab/file state survives suspension; if a remembered file is gone, another
+  existing file is selected rather than leaving a populated workspace at welcome.
+- Failed workspace opens retain the visible draft. Recovery uses the existing
+  revision checks and conflict snapshots instead of overwriting newer cloud text.
+- Visibility/pagehide saves replace reliance on beforeunload alone. Login/open/
+  state/write requests have a 15-second timeout so a stalled request cannot hold
+  restoration indefinitely; write timeout remains an ambiguous result, handled by
+  existing recovery rather than treated as a confirmed rejection.
+- Logout invalidates pending authentication and workspace-open results. Automatic
+  restoration does not open the explorer drawer or show an Opened notification.
+- Browser regressions cover offline boot, transient workspace-open failures,
+  root-path/connected-empty Resume, silent foreground recovery, duplicate events,
+  newer cloud text, local view persistence, expired credentials with a login
+  outage, and logout during pending reauthentication. Uses isolated mocked data.
+
 
 ### v0.1.15: mobile navigation and writing polish
 
