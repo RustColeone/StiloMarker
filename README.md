@@ -255,3 +255,5 @@ change sync compatibility or user preferences. Commit/deploy those files with
 the release; there is still no frontend build step.
 
 See [deployment notes](docs/DEPLOYMENT.md) for the coordinated restart procedure.
+
+In-app chat can use optional owner-configured MCP read tools. See [Connected tools setup](docs/MCP.md).

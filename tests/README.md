@@ -108,3 +108,5 @@ This emulates mobile Chromium. Physical iOS keyboard behavior still needs a devi
 
 Set `STILO_LIVE_ASSETS=1` for `session-recovery-browser.py` to exercise the deployed
 frontend instead of staged files; all account/workspace endpoints remain mocked.
+
+Optional MCP regressions: `python3 -B tests/mcp-client.test.py` (socket-free) and `python3 tests/mcp-browser.py` (public origin with mocked APIs and staged assets; requires Playwright).

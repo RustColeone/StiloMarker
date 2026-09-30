@@ -1,6 +1,6 @@
 {
   "name": "mdnotes",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,8 +9,9 @@
     "selftest": "node tools/selftest.mjs",
     "backend:start": "python3 server/mdnotes_server.py",
     "backend:selftest": "python3 server/mdnotes_server.py --selftest",
-    "test:all": "node tools/selftest.mjs && python3 server/mdnotes_server.py --selftest && python3 -B tests/server-reliability.test.py",
+    "test:all": "node tools/selftest.mjs && python3 server/mdnotes_server.py --selftest && python3 -B tests/server-reliability.test.py && python3 -B tests/mcp-client.test.py",
     "test:reliability": "node --test tests/collaboration-runtime.test.mjs tests/collaboration-broker.test.mjs tests/text-patch.test.mjs tests/project-save.test.mjs tests/chat-sync.test.mjs tests/chat-turn.test.mjs && python3 -B tests/server-reliability.test.py",
+    "test:mcp": "python3 -B tests/mcp-client.test.py",
     "version:check": "node tools/release-version.mjs --check"
   }
 }
