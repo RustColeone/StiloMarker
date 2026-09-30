@@ -347,7 +347,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     }
   }
 
-  async function publishOperation(operation) {
+  async function publishOperation(operation, { optimistic = true } = {}) {
     if (!connection || isApplyingRemote || recovering) {
       return;
     }
@@ -362,7 +362,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     const modelEpoch = modelGeneration;
     const pending = inFlightPatches.get(operation.path);
     const operationId = `${generation}-${++nextOperationId}`;
-    ownOperations.add(operationId);
+    if (optimistic) ownOperations.add(operationId);
     if (pending && operation.type === "patch-file") pending.operationId = operationId;
     const request = pushOperation(connection.serverUrl, connection.token, { ...operation, operationId });
     activeWrites.add(request);
@@ -379,6 +379,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       type: "operation", clientId: connection.clientId, revision: result.revision,
       operation: { ...operation, operationId },
     });
+    return result;
   }
 
   // Files the user has edited locally that the server has not confirmed. A pull
@@ -992,7 +993,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     },
     getConnectionInfo() {
       if (!connection) return null;
-      return { serverUrl: connection.serverUrl, token: connection.token };
+      return { serverUrl: connection.serverUrl, token: connection.token, sessionId: connection.sessionId };
     },
     getRole() {
       return connection?.role ?? null;

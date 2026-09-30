@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-09-22 · release `v0.1.13` (deployed and public-domain verified 2026-09-22 19:23 UTC)
+Last updated: 2026-09-24 · release `v0.1.14` (deployed; public verification passed)
 
 ---
 
@@ -29,6 +29,32 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.14: chat reliability and mobile interaction
+
+- Agent turns are bound to the originating workspace and connection. Switching
+  workspaces cancels the turn, retains partial output, and ignores late responses.
+  Delayed delete confirmations cannot affect the next workspace.
+- Agent edits use generation-time document revisions and content checks. Changes
+  made while the agent works cause its proposal to be marked not applied. Cloud
+  operations apply to the requesting browser only after server confirmation.
+- Shared chat saves use an independent revision, atomic persistence, and ordered
+  broadcasts. Conflicts merge threads/messages by ID; stale full-state saves are
+  refused. Selection, composer drafts, and attachments stay local to each device.
+- Chat caches use server + workspace identity rather than the shared project ID.
+  Private-mode chat never publishes through a lingering cloud connection. The
+  last-open workspace's legacy browser cache is migrated without deleting it.
+- Attached-file context is read from the submitted message, after the composer
+  clears its chips. Interrupted replies and reasoning metadata survive cache reload.
+- Mobile Enter adds a newline; composition Enter never submits. Touch controls
+  and the composer are larger; the chat input keeps 16px text. Visual viewport
+  sizing follows keyboard height. Physical iOS verification remains outstanding.
+- Streaming preserves scroll position and existing message DOM/selection. Draft
+  typing updates the send control without rebuilding the conversation.
+
+MCP integration is intentionally a separate follow-up. These changes retain the
+existing chat provider and security settings. Compatibility floor: 114.
+
 
 ### v0.1.13: concurrent editing and local-save follow-up
 

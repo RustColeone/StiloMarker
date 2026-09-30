@@ -58,6 +58,9 @@ function normalizeChatMessage(value) {
   if (typeof value.originatorId === "string" && value.originatorId) {
     msg.originatorId = value.originatorId;
   }
+  if (typeof value.reasoning === "string") msg.reasoning = value.reasoning;
+  if (Number.isFinite(value.reasoningMs)) msg.reasoningMs = value.reasoningMs;
+  if (value.interrupted) msg.interrupted = true;
   return msg;
 }
 
@@ -77,7 +80,8 @@ function normalizeChatThread(value) {
     createdAt: Number.isFinite(Number(value.createdAt)) ? Number(value.createdAt) : Date.now(),
     updatedAt: Number.isFinite(Number(value.updatedAt)) ? Number(value.updatedAt) : Date.now(),
     contextPaths: Array.from(new Set(contextPaths)),
-    messages
+    messages,
+    draft: String(value.draft ?? "")
   };
 }
 
@@ -95,7 +99,8 @@ function normalizeChatWorkspace(value) {
   const activeThreadId = String(value?.activeThreadId ?? "").trim() || threads[0]?.id || null;
   return {
     activeThreadId: threads.some((thread) => thread.id === activeThreadId) ? activeThreadId : (threads[0]?.id ?? null),
-    threads
+    threads,
+    ...(value?.syncBase ? { syncBase: structuredClone(value.syncBase) } : {})
   };
 }
 

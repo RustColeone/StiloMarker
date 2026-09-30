@@ -240,7 +240,7 @@ test('a scheduled whole-project publish keeps its original revision', async (t) 
     operation: { type: 'update-file', path: 'note.md', content: 'peer changed', baseRevision: 1 } });
   await h.tick(120);
   assert.equal(states[0].baseRevision, 1);
-  assert.equal(states[0].version, 113);
+  assert.equal(states[0].version, 114);
   assert.equal(h.local().nodes.file.content, 'peer changed');
 });
 
@@ -321,4 +321,15 @@ test('undoing unsent typing releases the unsynced indicator without sending a pa
   h.edit('temporary'); h.edit('original'); await h.tick(250);
   assert.equal(h.posts.length, 0);
   assert.equal(h.runtime.hasUnsyncedText('note.md'), false);
+});
+
+
+test('server-confirmed agent operations update the initiating client exactly once', async (t) => {
+  const h = harness(t); await h.open();
+  const result = await h.runtime.publishOperation({ type: 'update-file', path: 'note.md', content: 'agent edit', baseRevision: 1 }, { optimistic: false });
+  assert.equal(result.revision, 2);
+  assert.equal(h.local().nodes.file.content, 'agent edit');
+  h.streams[0].event({ type: 'operation', clientId: 'me', revision: 2, operation: h.posts[0] });
+  assert.equal(h.local().nodes.file.content, 'agent edit');
+  assert.equal(h.runtime.getRevision(), 2);
 });

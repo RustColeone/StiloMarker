@@ -1,3 +1,5 @@
+import { createChatSynchronizer } from "./services/chat-sync-service.js";
+import { shouldSubmitChat, isChatNearBottom, installMobileViewport } from "./services/chat-ui-service.js";
 import { snapshotProject, savedFileIds } from "./services/project-save-service.js";
 import { APP_VERSION } from "./version.js";
 import { ROOT_ID, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isAllowedFileName, isBmapFileName, isImageFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
@@ -456,8 +458,17 @@ const addFileState = {
   sourceLabel: ""
 };
 
+const legacyChatProjectId = storedProject?.id ?? "server-project";
+const legacyChatScope = settings.syncedProjectId
+  ? `cloud:${normalizeServerUrl(settings.serverUrl)}/${settings.syncedProjectId}` : null;
+let chatSynchronizer = null;
+let chatConnectionToken = null;
 const chatState = {
   projectId: null,
+  syncBase: null,
+  syncError: null,
+  turn: null,
+  renderedThreadId: null,
   activeThreadId: null,
   threads: [],
   configured: false,
@@ -759,6 +770,9 @@ function renderProposalCard(message, isOriginator) {
       <div class="proposal-card-header"><span class="proposal-card-title proposal-card-resolved">✓ Edits kept (${ops.length})</span></div>
     </div>`;
   }
+  if (state === "stale") {
+    return `<div class="proposal-card is-stale"><div class="proposal-card-header"><span class="proposal-card-title">Edits not applied — the workspace changed. Send a new request using the current notes.</span></div></div>`;
+  }
   if (state === "dropped") {
     return `<div class="proposal-card is-${state}" data-batch-id="${batchId}">
       <div class="proposal-card-header"><span class="proposal-card-title proposal-card-resolved">↩ Edits dropped (${ops.length})</span></div>
@@ -830,37 +844,118 @@ function sortChatThreads() {
   chatState.threads.sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
-function ensureChatWorkspaceLoaded(project) {
-  if (chatState.projectId === project.id) {
-    return;
+function chatConnectionInfo() {
+  return workspaceMode === "synced" ? collaboration.getConnectionInfo?.() : null;
+}
+
+function chatWorkspaceKey(project = controller.getProject()) {
+  const connection = chatConnectionInfo();
+  if (connection?.sessionId) return `cloud:${normalizeServerUrl(connection.serverUrl)}/${connection.sessionId}`;
+  // Keep cloud drafts scoped while its transport reconnects.
+  if (workspaceMode === "synced" && settings.syncedProjectId) {
+    return `cloud:${normalizeServerUrl(settings.serverUrl)}/${settings.syncedProjectId}`;
   }
-  const workspace = loadChatWorkspace(project.id);
-  chatState.projectId = project.id;
-  chatState.threads = workspace.threads;
-  chatState.activeThreadId = workspace.activeThreadId;
-  sortChatThreads();
-  // First load for this project: land on the latest message, not the top.
-  chatState.shouldScrollToBottom = true;
+  return project.id;
+}
+
+function chatWorkspaceSnapshot() {
+  return { threads: chatState.threads, activeThreadId: chatState.activeThreadId, syncBase: chatState.syncBase };
+}
+
+function cacheChatWorkspace() {
+  if (!chatState.projectId) return;
+  try { saveChatWorkspace(chatState.projectId, chatWorkspaceSnapshot()); }
+  catch (error) { chatState.syncError = "Browser storage is full; keep this tab open."; logDebug("response", "Chat cache failed", error.message); }
+}
+
+function cancelChatForWorkspaceChange() {
+  const turn = chatState.turn;
+  if (!turn) return;
+  const thread = chatState.threads.find(thread => thread.id === turn.threadId);
+  if (thread) {
+    const partial = chatState.streamingText.trim();
+    thread.messages.push(createChatMessage(partial ? "assistant" : "system",
+      partial || "Stopped because the workspace changed.", { interrupted: true }));
+    thread.updatedAt = Date.now();
+  }
+  turn.controller.abort();
+  chatState.turn = null;
+  chatState.sending = false;
+  chatState.abortController = null;
+  chatState.streamingText = "";
+  chatState.reasoningText = "";
+  chatState.activity = [];
+  cacheChatWorkspace();
+}
+
+function ensureChatWorkspaceLoaded(project) {
+  const key = chatWorkspaceKey(project);
+  const connection = chatConnectionInfo();
+  if (chatState.turn && (chatState.turn.key !== key || chatState.turn.token !== connection?.token)) {
+    cancelChatForWorkspaceChange();
+  }
+  if (chatState.projectId !== key) {
+    cacheChatWorkspace();
+    chatSynchronizer?.dispose(); chatSynchronizer = null; chatConnectionToken = null;
+    let workspace = loadChatWorkspace(key);
+    // Migrate only the workspace that was selected when this page loaded. Keep
+    // the original cache intact; never copy shared legacy history into every project.
+    if (!workspace.threads.length && key === legacyChatScope) workspace = loadChatWorkspace(legacyChatProjectId);
+    chatState.projectId = key;
+    chatState.threads = workspace.threads;
+    chatState.activeThreadId = workspace.activeThreadId;
+    chatState.syncBase = workspace.syncBase ?? null;
+    chatState.syncError = null;
+    chatState.renderedThreadId = null;
+    elements.chatInput.value = getActiveChatThread()?.draft ?? "";
+    sortChatThreads();
+    chatState.shouldScrollToBottom = true;
+  }
+  if (connection?.token !== chatConnectionToken) {
+    chatSynchronizer?.dispose(); chatSynchronizer = null;
+    chatConnectionToken = connection?.token ?? null;
+    if (connection) {
+      const token = connection.token;
+      const active = () => chatState.projectId === key && chatConnectionToken === token;
+      chatSynchronizer = createChatSynchronizer({
+        base: chatState.syncBase,
+        getLocal: chatWorkspaceSnapshot,
+        setLocal(workspace, base) {
+          if (!active()) return;
+          const oldThreads = new Map(chatState.threads.map(thread => [thread.id, thread]));
+          chatState.threads = workspace.threads.map(next => {
+            const thread = oldThreads.get(next.id);
+            if (!thread) return next;
+            const oldMessages = new Map(thread.messages.map(message => [message.id, message]));
+            const messages = next.messages.map(message => {
+              const old = oldMessages.get(message.id);
+              return old ? Object.assign(old, message) : message;
+            });
+            return Object.assign(thread, next, { messages });
+          });
+          chatState.syncBase = base;
+          chatState.activeThreadId = workspace.activeThreadId ?? workspace.threads[0]?.id ?? null;
+          cacheChatWorkspace();
+          renderChatPanel(controller.getProject());
+        },
+        fetchRemote: () => fetchServerChatWorkspace(connection.serverUrl, token),
+        pushRemote: workspace => pushServerChatWorkspace(connection.serverUrl, token, workspace),
+        onError(error) {
+          if (!active()) return;
+          chatState.syncError = error ? "Chat sync paused; conversation kept on this device." : null;
+          renderChatPanel(controller.getProject());
+        }
+      });
+      chatSynchronizer.schedule(0);
+    }
+  }
 }
 
 function persistChatWorkspaceState(project = controller.getProject()) {
-  if (!project?.id) {
-    return;
-  }
+  if (chatWorkspaceKey(project) !== chatState.projectId) return;
   sortChatThreads();
-  saveChatWorkspace(project.id, {
-    activeThreadId: chatState.activeThreadId,
-    threads: chatState.threads
-  });
-  // Push to the collaboration server when connected so other session members
-  // see the updated thread list and new messages in real time.
-  const connInfo = collaboration.getConnectionInfo?.();
-  if (connInfo) {
-    pushServerChatWorkspace(connInfo.serverUrl, connInfo.token, {
-      activeThreadId: chatState.activeThreadId,
-      threads: chatState.threads
-    }).catch(() => { /* non-critical — server may be temporarily unavailable */ });
-  }
+  cacheChatWorkspace();
+  chatSynchronizer?.schedule();
 }
 
 function getActiveChatThread() {
@@ -995,12 +1090,17 @@ function renderChatPanel(project) {
   ensureChatWorkspaceLoaded(project);
 
   const activeThread = getActiveChatThread();
-  const statusPrefix = chatState.sending ? "Sending…" : chatState.detail;
+  const messageList = elements.chatMessageList;
+  const oldScroll = messageList.scrollTop;
+  const follow = chatState.shouldScrollToBottom || chatState.renderedThreadId !== activeThread?.id || isChatNearBottom(messageList);
+  if (chatState.renderedThreadId !== activeThread?.id) elements.chatInput.value = activeThread?.draft ?? "";
+  chatState.renderedThreadId = activeThread?.id;
+  const statusPrefix = chatState.syncError || (chatState.sending ? "Sending…" : chatState.detail);
   const statusSuffix = chatState.configured && chatState.provider && chatState.model && chatState.models.length <= 1
     ? ` · ${chatState.provider} ${chatState.model}`
     : (chatState.configured && chatState.provider ? ` · ${chatState.provider}` : "");
   elements.chatStatusText.textContent = `${statusPrefix}${statusSuffix}`.trim();
-  const badgeError = chatState.status === "offline" || chatState.status === "restricted" || chatState.status === "unconfigured";
+  const badgeError = Boolean(chatState.syncError) || chatState.status === "offline" || chatState.status === "restricted" || chatState.status === "unconfigured";
   elements.chatStatusText.classList.toggle("is-error", badgeError);
 
   // Model picker — only meaningful when the server offers more than one model.
@@ -1056,7 +1156,7 @@ function renderChatPanel(project) {
   const reasoningHtml = chatState.reasoningText
     ? `<div class="chat-reasoning" aria-label="Agent thinking">${escapeHtmlAttribute(chatState.reasoningText)}</div>`
     : "";
-  const thinkingHtml = chatState.sending
+  const thinkingHtml = chatState.sending && chatState.turn?.threadId === activeThread?.id
     ? `<div class="chat-thinking" aria-label="Agent is working" aria-live="polite">
         ${reasoningHtml}
         ${streamingHtml}
@@ -1071,7 +1171,7 @@ function renderChatPanel(project) {
        </div>`
     : "";
 
-  elements.chatMessageList.innerHTML = activeThread?.messages?.length
+  const historyHtml = activeThread?.messages?.length
     ? activeThread.messages.map((message) => {
       const roleLabel = message.role === "user" ? "You" : message.role === "assistant" ? "Agent" : "System";
       const contentHtml = message.role === "assistant"
@@ -1105,8 +1205,20 @@ function renderChatPanel(project) {
           ${retryHtml}
         </article>
       `;
-    }).join("") + thinkingHtml
+    }).join("")
     : '<div class="chat-empty-state">No messages yet.<br>Attach context files below, then send a prompt.</div>';
+
+  // Update only the live reply while streaming; keep earlier DOM nodes intact
+  // so selections and expanded message controls survive incoming tokens.
+  let history = messageList.querySelector(".chat-history-content");
+  let stream = messageList.querySelector(".chat-stream-content");
+  if (!history || !stream) {
+    history = document.createElement("div"); history.className = "chat-history-content";
+    stream = document.createElement("div"); stream.className = "chat-stream-content";
+    messageList.replaceChildren(history, stream);
+  }
+  if (history._renderedHtml !== historyHtml) { history.innerHTML = historyHtml; history._renderedHtml = historyHtml; }
+  if (stream._renderedHtml !== thinkingHtml) { stream.innerHTML = thinkingHtml; stream._renderedHtml = thinkingHtml; }
 
   // While a turn is in flight the send button becomes a Stop control — before
   // this there was no way to interrupt the agent once it started.
@@ -1114,15 +1226,13 @@ function renderChatPanel(project) {
   elements.chatSendButton.disabled = sending ? false : !elements.chatInput.value.trim();
   elements.chatSendButton.classList.toggle("is-stop", sending);
   elements.chatSendButton.textContent = sending ? "\u25a0" : "\u2191";
-  elements.chatSendButton.title = sending ? "Stop the agent" : "Send (Enter)";
+  elements.chatSendButton.title = sending ? "Stop the agent" : (isMobileLayout() ? "Send" : "Send (Enter)");
   elements.chatSendButton.setAttribute("aria-label", sending ? "Stop the agent" : "Send");
   elements.chatAddActiveFileButton.disabled = !project.activeFileId;
-  elements.chatInput.disabled = sending;
+  elements.chatInput.disabled = false;
 
-  if (chatState.shouldScrollToBottom) {
-    elements.chatMessageList.scrollTop = elements.chatMessageList.scrollHeight;
-    chatState.shouldScrollToBottom = false;
-  }
+  messageList.scrollTop = follow ? messageList.scrollHeight : oldScroll;
+  chatState.shouldScrollToBottom = false;
 
   // Refresh in-editor agent bar whenever proposal state changes.
   updateEditorAgentBar();
@@ -1325,6 +1435,7 @@ async function handleChatSubmit() {
   sortChatThreads();
   chatState.activeThreadId = thread.id;
   elements.chatInput.value = "";
+  thread.draft = "";
   await runAgentTurn(thread, project);
 }
 
@@ -1355,10 +1466,19 @@ function stopAgentTurn() {
 }
 
 async function runAgentTurn(thread, project) {
-  const contextFiles = resolveChatContextFiles(project, thread);
+  const contextFiles = resolveChatContextFiles(project, {
+    contextPaths: [...thread.messages].reverse().find(message => message.role === "user")?.contextPaths ?? thread.contextPaths
+  });
   chatState.sending = true;
   chatState.stopped = false;
   chatState.abortController = new AbortController();
+  const turn = { key: chatWorkspaceKey(project), threadId: thread.id,
+    token: chatConnectionInfo()?.token, controller: chatState.abortController,
+    signature: agentDocumentSignature(project), baseRevision: collaboration.getRevision(),
+    clientId: collaboration.getClientId() };
+  chatState.turn = turn;
+  const current = () => chatState.turn === turn && chatWorkspaceKey() === turn.key
+    && chatConnectionInfo()?.token === turn.token;
   chatState.activity = [];
   chatState.activityExpanded = false;
   chatState.streamingText = "";
@@ -1366,12 +1486,13 @@ async function runAgentTurn(thread, project) {
   chatState.turnStartedAt = Date.now();
   chatState.shouldScrollToBottom = true;
   persistChatWorkspaceState(project);
-  renderChatPanel(project);
+  renderChatPanel(controller.getProject());
 
   try {
     if (!chatState.configured) {
       await refreshChatStatus({ silent: true });
     }
+    if (!current()) return;
     if (!chatState.configured) {
       throw new Error(chatState.detail);
     }
@@ -1387,17 +1508,16 @@ async function runAgentTurn(thread, project) {
       // Own-key mode: pass the user's key/url/model so the proxy uses them.
       ...agentRequestOverride()
     }, (event) => {
+      if (!current() || turn.controller.signal.aborted) return;
       if (event.type === "delta") {
         chatState.streamingText += event.text || "";
-        chatState.shouldScrollToBottom = true;
-        renderChatPanel(project);
+        renderChatPanel(controller.getProject());
         return;
       }
       // Reasoning-model chain-of-thought (shown live as muted "thinking" text).
       if (event.type === "reasoning") {
         chatState.reasoningText += event.text || "";
-        chatState.shouldScrollToBottom = true;
-        renderChatPanel(project);
+        renderChatPanel(controller.getProject());
         return;
       }
       // A new model turn starts fresh: clear any streamed text from the prior turn.
@@ -1414,16 +1534,17 @@ async function runAgentTurn(thread, project) {
       // line in place instead of flooding the log with near-duplicates.
       if (event.type === "writing" && typeof last === "string" && last.startsWith(line.split("\u2026")[0])) {
         chatState.activity[chatState.activity.length - 1] = line;
-        chatState.shouldScrollToBottom = true;
-        renderChatPanel(project);
+        renderChatPanel(controller.getProject());
         return;
       }
       if (line !== last) {
         chatState.activity.push(line);
-        chatState.shouldScrollToBottom = true;
-        renderChatPanel(project);
+        renderChatPanel(controller.getProject());
       }
-    }, chatState.abortController.signal);
+    }, turn.controller.signal);
+    if (!current()) return;
+    if (turn.controller.signal.aborted) throw new DOMException("Stopped", "AbortError");
+    thread = chatState.threads.find(candidate => candidate.id === turn.threadId) ?? thread;
 
     chatState.provider = response.provider ?? chatState.provider;
     chatState.model = response.model ?? chatState.model;
@@ -1438,9 +1559,9 @@ async function runAgentTurn(thread, project) {
     if (proposals.length > 0) {
       msgExtra.proposedOperations = proposals;
       msgExtra.batchId = response.batchId ?? null;
-      msgExtra.baseRevision = collaboration.getRevision();
+      msgExtra.baseRevision = turn.baseRevision;
       msgExtra.proposalState = "pending";
-      msgExtra.originatorId = collaboration.getClientId() ?? null;
+      msgExtra.originatorId = turn.clientId ?? null;
     }
     const assistantMessage = createChatMessage("assistant", response.message, msgExtra);
     thread.messages.push(assistantMessage);
@@ -1451,9 +1572,13 @@ async function runAgentTurn(thread, project) {
     // then decide Keep or Drop (no separate Accept step — Accept and Keep/Drop
     // were redundant; the user couldn't preview a proposal without applying it).
     if (proposals.length > 0) {
-      autoApplyProposals(assistantMessage);
+      await autoApplyProposals(assistantMessage, {
+        current: () => current() && !turn.controller.signal.aborted, signature: turn.signature, baseRevision: turn.baseRevision
+      });
     }
   } catch (error) {
+    if (!current()) return;
+    thread = chatState.threads.find(candidate => candidate.id === turn.threadId) ?? thread;
     if (error?.name === "AbortError" || chatState.stopped) {
       // User interrupted the turn. Keep whatever the model produced rather than
       // throwing the partial answer away.
@@ -1474,14 +1599,15 @@ async function runAgentTurn(thread, project) {
       persistChatWorkspaceState(project);
     }
   } finally {
+    if (!current()) return;
+    chatState.turn = null;
     chatState.abortController = null;
     chatState.stopped = false;
     chatState.sending = false;
     chatState.activity = [];
     chatState.streamingText = "";
     chatState.reasoningText = "";
-    chatState.shouldScrollToBottom = true;
-    renderChatPanel(project);
+    renderChatPanel(controller.getProject());
   }
 }
 
@@ -4487,21 +4613,6 @@ const collaboration = createCollaborationRuntime({
     syncState.displayName = nextState.displayName ?? null;
     syncState.clientId = nextState.clientId ?? null;
     syncState.role = nextState.role ?? null;
-    // When first connecting, load the shared chat workspace from the server so
-    // all session members share the same conversation history.
-    if (!wasConnected && nextState.status === "connected") {
-      const connInfo = collaboration.getConnectionInfo?.();
-      if (connInfo) {
-        fetchServerChatWorkspace(connInfo.serverUrl, connInfo.token).then((workspace) => {
-          if (workspace?.threads?.length) {
-            chatState.threads = workspace.threads;
-            chatState.activeThreadId = workspace.activeThreadId ?? chatState.activeThreadId;
-            sortChatThreads();
-            renderChatPanel(controller.getProject());
-          }
-        }).catch(() => { /* non-critical */ });
-      }
-    }
     // Auto-switch workspace mode on connect/disconnect.
     if (!wasConnected && nextState.status === "connected" && workspaceMode === "private") {
       if (syncState.role === "client") {
@@ -4597,17 +4708,8 @@ const collaboration = createCollaborationRuntime({
     renderEditorFromModel();
   },
   onChatWorkspaceUpdate(workspace) {
-    // A peer pushed a chat workspace update — apply it locally and re-render.
-    if (!workspace || !Array.isArray(workspace.threads)) return;
-    chatState.threads = workspace.threads;
-    chatState.activeThreadId = workspace.activeThreadId ?? chatState.activeThreadId;
-    chatState.shouldScrollToBottom = true;
-    sortChatThreads();
-    saveChatWorkspace(chatState.projectId ?? "", {
-      activeThreadId: chatState.activeThreadId,
-      threads: chatState.threads
-    });
-    renderChatPanel(controller.getProject());
+    ensureChatWorkspaceLoaded(controller.getProject());
+    if (workspace && Number.isInteger(workspace.revision)) chatSynchronizer?.receive(workspace);
   }
 });
 
@@ -7646,86 +7748,73 @@ function findBatchMessage(batchId) {
 /** Apply an agent batch immediately on arrival, then surface Keep/Drop review.
  *  Deletes still get a one-time confirm (Phase 7 safety) since they're destructive,
  *  but everything is recoverable via Drop (the checkpoint captures pre-apply state). */
-function autoApplyProposals(message) {
-  const ops = message.proposedOperations ?? [];
-  if (ops.length === 0) return;
-
-  const apply = () => {
-    acceptAgentOperations(ops, message);
-    message.proposalState = "accepted";
-    persistChatWorkspaceState(controller.getProject());
-    renderChatPanel(controller.getProject());
-  };
-
-  const hasDeletes = ops.some((op) => op.type === "delete-node");
-  if (hasDeletes) {
-    showConfirmDialog({
-      title: "Delete included",
-      message: "Some of these changes permanently delete files or folders. Apply them now? You can still Drop to undo.",
-      acceptLabel: "Apply"
-    }).then((confirmed) => {
-      if (confirmed) {
-        apply();
-      } else {
-        message.proposalState = "dropped";
-        persistChatWorkspaceState(controller.getProject());
-        renderChatPanel(controller.getProject());
-      }
-    });
-    return;
-  }
-  apply();
+function agentDocumentSignature(project) {
+  return JSON.stringify(Object.values(project.nodes).map(node => ({
+    path: getPath(project, node.id), kind: node.kind, content: node.kind === "file" ? node.content : undefined
+  })).sort((a, b) => a.path.localeCompare(b.path)));
 }
 
-/**
- * Apply a set of agent-proposed operations locally (or via collaboration when
- * synced). Marks each op's proposalState as "accepted" or "stale".
- * Phase 3 will add the full synced transport; this covers the local path.
- */
-function acceptAgentOperations(ops, message) {
-  // Capture baseRevision at accept time (before any op is applied).
-  if (!message.baseRevision) {
-    message.baseRevision = collaboration.getRevision();
+async function autoApplyProposals(message, guard) {
+  const ops = message.proposedOperations ?? [];
+  if (!ops.length) return;
+  const valid = () => guard.current() && agentDocumentSignature(controller.getProject()) === guard.signature;
+  if (ops.some(op => op.type === "delete-node")) {
+    const confirmed = await showConfirmDialog({ title: "Delete included",
+      message: "Some of these changes delete files or folders. Apply them now? You can still Drop to undo.", acceptLabel: "Apply" });
+    if (!guard.current()) return;
+    if (!confirmed) { message.proposalState = "dropped"; persistChatWorkspaceState(); return; }
   }
-  // Capture checkpoint BEFORE applying (Phase 6 / subtask 6.1).
-  if (message.batchId) {
-    captureAgentCheckpoint(message.batchId, message.baseRevision);
+  if (!valid()) {
+    message.proposalState = "stale";
+    for (const op of ops) op.proposalState = "stale";
+    if (guard.current()) { showToast("The workspace changed while the agent was working. Its edits were not applied."); persistChatWorkspaceState(); }
+    return;
   }
-  const project = controller.getProject();
+  await acceptAgentOperations(ops, message, guard);
+  if (!guard.current()) return;
+  message.proposalState = ops.some(op => op.proposalState === "accepted") ? "accepted" : "stale";
+  persistChatWorkspaceState();
+  renderChatPanel(controller.getProject());
+}
+
+async function acceptAgentOperations(ops, message, guard) {
+  if (message.batchId) captureAgentCheckpoint(message.batchId, message.baseRevision);
+  let revision = guard.baseRevision;
+  let signature = guard.signature;
   for (const op of ops) {
-    // Phase 7: block text ops on image files (safety edge case).
-    const opFileName = op.name ?? op.path?.split("/").pop() ?? "";
-    if ((op.type === "update-file" || op.type === "create-file") && isImageFileName(opFileName)) {
-      op.proposalState = "stale";
-      continue;
+    if (!guard.current() || agentDocumentSignature(controller.getProject()) !== signature) {
+      op.proposalState = "stale"; continue;
     }
-    // Re-resolve path at accept time to detect staleness (plan §3.2).
-    if (op.path) {
-      const nodeId = getNodeIdByPath(project, op.path);
-      if (!nodeId && op.type !== "create-file" && op.type !== "create-folder") {
-        op.proposalState = "stale";
-        continue;
-      }
+    const project = controller.getProject();
+    const name = op.name ?? op.path?.split("/").pop() ?? "";
+    if ((op.type === "update-file" || op.type === "create-file") && isImageFileName(name)) {
+      op.proposalState = "stale"; continue;
     }
-    const cleanOp = { ...op };
-    delete cleanOp.proposalId;
-    delete cleanOp.preImage;
-    delete cleanOp.proposalState;
+    const nodeId = op.path ? getNodeIdByPath(project, op.path) : null;
+    if (op.path && !nodeId) { op.proposalState = "stale"; continue; }
+    if (op.type === "update-file" && project.nodes[nodeId]?.content !== op.preImage) {
+      op.proposalState = "stale"; continue;
+    }
+    const { proposalId, preImage, proposalState, ...cleanOp } = op;
     try {
       if (collaboration.isConnected() && workspaceMode === "synced") {
-        collaboration.publishOperation(cleanOp).catch((err) => notify(err.message));
+        const result = await collaboration.publishOperation({ ...cleanOp, baseRevision: revision, expectedRevision: revision }, { optimistic: false });
+        if (!result) throw new Error("Workspace connection changed");
+        revision = result.revision;
       } else {
         controller.applySyncOperation(cleanOp);
       }
       op.proposalState = "accepted";
-    } catch {
+      if (!guard.current()) return;
+      signature = agentDocumentSignature(controller.getProject());
+    } catch (error) {
       op.proposalState = "stale";
+      for (const remaining of ops.slice(ops.indexOf(op) + 1)) remaining.proposalState = "stale";
+      if (guard.current()) showToast(`Agent edit was not applied: ${error.message}`);
+      break;
     }
   }
-  // Register editor decorations for all accepted ops (Phase 5).
-  if (message.batchId) {
-    registerAgentDecorations(ops, message.batchId);
-  }
+  if (guard.current() && message.batchId) registerAgentDecorations(ops, message.batchId);
 }
 
 document.addEventListener("click", (event) => {
@@ -10713,15 +10802,18 @@ elements.chatComposeForm.addEventListener("submit", (event) => {
   void handleChatSubmit();
 });
 elements.chatInput.addEventListener("keydown", (event) => {
-  if (event.key !== "Enter" || event.shiftKey) {
-    return;
-  }
+  if (!shouldSubmitChat(event, isMobileLayout()) || chatState.sending) return;
   event.preventDefault();
   void handleChatSubmit();
 });
 elements.chatInput.addEventListener("input", () => {
-  renderChatPanel(controller.getProject());
+  const thread = ensureActiveChatThread();
+  thread.draft = elements.chatInput.value;
+  cacheChatWorkspace();
+  // Typing a draft must not rebuild the conversation or disturb its selection.
+  elements.chatSendButton.disabled = !chatState.sending && !elements.chatInput.value.trim();
 });
+installMobileViewport(window, elements.app);
 
 elements.settingsButton.addEventListener("click", () => {
   logDebug("action", "Settings dialog opened");
