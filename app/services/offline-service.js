@@ -1,4 +1,6 @@
-const CACHE_NAME = "mdnotes-shell-v1";
+import { APP_VERSION } from "../version.js";
+
+const CACHE_NAME = `mdnotes-shell-v${APP_VERSION}`;
 const CACHE_PREFIX = "mdnotes-shell-";
 
 async function registerOfflineShell() {

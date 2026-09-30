@@ -240,3 +240,18 @@ For a full technical reference including all file format specifications and deta
 
 - [docs/ISSUES.md](docs/ISSUES.md) — known issues, open and fixed, with severity and confidence.
 - [docs/HISTORY.md](docs/HISTORY.md) — project history, architecture rules, and superseded decisions.
+
+## App releases
+
+The app uses `vMAJOR.MINOR.PATCH` release labels, beginning with **v0.1.12**.
+This is separate from each document's S.E.N version and the internal numeric
+sync compatibility gate. The installed app version appears in Settings and
+`GET /api/ping` returns `appVersion` for deployment checks.
+
+To prepare a release, run `node tools/release-version.mjs 0.1.13`, then
+`node tools/release-version.mjs --check`. This updates `package.json`,
+`app/version.js`, and the service-worker cache label together. It does not
+change sync compatibility or user preferences. Commit/deploy those files with
+the release; there is still no frontend build step.
+
+See [deployment notes](docs/DEPLOYMENT.md) for the coordinated restart procedure.

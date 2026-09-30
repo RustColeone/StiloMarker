@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-09-18 · app build `mdnotes-shell-v102`
+Last updated: 2026-09-22 · release `v0.1.12` (deployment pending)
 
 ---
 
@@ -29,6 +29,37 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### September 22 follow-up: sync recovery and durable saves
+
+- Reconnect and conflict recovery no longer upload dirty old files with a newly
+  fetched revision. Divergent local text (including files deleted upstream) is
+  saved as a **Recovery** version in Snapshots before adopting the cloud copy.
+  If preservation fails, sync pauses and the local draft stays on screen.
+- Reconciliation keeps the original base revision across all files and rechecks
+  it after fetching. A peer changing the workspace during recovery cannot grant
+  permission to overwrite their content.
+- Rejected patches release their in-flight slot, preserve the draft and pull a
+  fresh base. Transport failures reconnect cloud sessions. Delayed responses from
+  an earlier session cannot modify the new session.
+- Patch offsets and OT lengths use UTF-16 units on both sides; the browser diff
+  avoids splitting emoji surrogate pairs.
+- Stream `ready` revisions detect changes between the initial fetch and the
+  subscription. Catch-up buffers events, ignores already included revisions, and
+  detects later gaps. The server queues mutation broadcasts in revision order.
+- Workspace writes use an fsynced redo journal, atomic file replacements, and
+  manifest-last commits. Startup replays interrupted commits. Unchanged text
+  files are skipped during ordinary commits. Snapshot blobs/indexes are flushed
+  before recovery history is acknowledged. Directory fsync is POSIX-only;
+  Windows still uses flushed files and atomic replacement.
+
+Regression coverage: `npm run test:reliability` runs the real browser sync runtime
+with fake transport/timers and the Python broker with temporary workspaces and
+injected storage failures. It also includes the existing broker regressions.
+No localhost listener or live workspace is needed. Deploy frontend and backend
+together: app release v0.1.12 uses minimum sync compatibility 112, including full-state
+writes, so cached clients with the unsafe recovery path are refused.
+
 
 ### Sync and data loss — the serious cluster
 

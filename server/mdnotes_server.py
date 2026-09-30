@@ -12,6 +12,7 @@ import re
 import secrets
 import shutil
 import threading
+import tempfile
 import time
 import uuid
 from functools import partial
@@ -43,13 +44,15 @@ def _read_int_env(name: str, default: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, value))
 
 
-# Minimum client (app) version allowed to open or mutate a workspace. A stale tab
-# — e.g. one still running an old cached service worker — is refused (HTTP 426) so
-# it cannot clobber newer content with its out-of-date local copy; the client then
-# force-updates. Bump this (or set MDNOTES_MIN_CLIENT_VERSION) when a client-side
-# fix MUST be adopted before a client is allowed to sync again. Keep it in step
-# with the client's CLIENT_VERSION / the service-worker CACHE_NAME (mdnotes-shell-vN).
-MIN_CLIENT_VERSION = _read_int_env("MDNOTES_MIN_CLIENT_VERSION", 98, 0, 1_000_000)
+# Human-facing release version comes from the package manifest. The numeric
+# sync compatibility gate remains monotonic and independent of release labels.
+APP_VERSION = json.loads((Path(__file__).resolve().parents[1] / "package.json").read_text(encoding="utf-8"))["version"]
+
+# Refuse clients with an unsafe sync implementation, including old cached tabs.
+# Keep this gate aligned with SYNC_PROTOCOL_VERSION in app/version.js when a
+# compatibility break is necessary; ordinary release bumps do not change it.
+
+MIN_CLIENT_VERSION = _read_int_env("MDNOTES_MIN_CLIENT_VERSION", 112, 0, 1_000_000)
 
 # A writing "sitting": edits to one file separated by less than this gap belong
 # to the same session. It is the E in the S.E.N version label — snapshots you
@@ -57,6 +60,52 @@ MIN_CLIENT_VERSION = _read_int_env("MDNOTES_MIN_CLIENT_VERSION", 98, 0, 1_000_00
 # document (this server, or the sharer in a guest-hosted session) so everyone in
 # the room shares one session number instead of each peer counting its own.
 EDIT_SESSION_GAP_SECONDS = _read_int_env("MDNOTES_EDIT_SESSION_GAP", 600, 30, 86_400)
+
+
+def _fsync_directory(path: Path):
+    if os.name == "nt":
+        return  # Windows does not expose directory fsync through os.open.
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _atomic_write(path: Path, data: bytes):
+    """Flush a sibling temporary file, then replace the destination atomically."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            if path.exists():
+                os.chmod(name, path.stat().st_mode & 0o777)
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(name, path)
+        _fsync_directory(path.parent)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
+def _utf16_length(text: str) -> int:
+    return len(text.encode("utf-16-le", errors="surrogatepass")) // 2
+
+
+def _utf16_index(text: str, offset: int) -> int:
+    """Translate a browser offset, refusing ranges that split a surrogate pair."""
+    units = 0
+    for index, char in enumerate(text):
+        if units == offset:
+            return index
+        units += 2 if ord(char) > 0xffff else 1
+        if units > offset:
+            raise ValueError("Text patch range splits a Unicode character")
+    if units == offset:
+        return len(text)
+    raise ValueError("Text patch range exceeds content length")
 
 
 class ChatProxy:
@@ -932,6 +981,8 @@ class CollaborationBroker:
         self.workspace_dir = workspace_dir
         self.lock = threading.RLock()
         self.project = None
+        self._persisted_project = None
+        self._persist_failed = False
         self.revision = 0
         self.tokens = {}
         self.subscribers = {}
@@ -1010,12 +1061,12 @@ class CollaborationBroker:
         if is_image_name(node.get("name", "")):
             data = self._decode_data_url(node.get("content", ""))
             if data is not None:
-                path.write_bytes(data)
+                _atomic_write(path, data)
                 node["content"] = ""  # bytes now live on disk; served by URL
             elif not path.exists():
-                path.write_bytes(b"")
+                _atomic_write(path, b"")
         else:
-            path.write_text(str(node.get("content", "")), encoding="utf-8")
+            _atomic_write(path, str(node.get("content", "")).encode("utf-8"))
 
     def _remove_path(self, path: Path) -> None:
         try:
@@ -1038,7 +1089,7 @@ class CollaborationBroker:
                     rel = self._path_in(project, node_id)
                     dest = self.workspace_dir / rel
                     dest.parent.mkdir(parents=True, exist_ok=True)
-                    dest.write_bytes(data)
+                    _atomic_write(dest, data)
                     node["content"] = ""
 
     def _path_in(self, project: dict, node_id: str) -> str:
@@ -1098,6 +1149,9 @@ class CollaborationBroker:
         self._path_change_floor = self.revision  # in-memory map is empty after a load
 
     def _load_state_dir(self):
+        journal = self.workspace_dir / ".pending-state.json"
+        if journal.exists():
+            self._finish_directory_commit(json.loads(journal.read_text(encoding="utf-8")))
         manifest = self.workspace_dir / "manifest.json"
         if not manifest.exists():
             self.project = self._default_project()
@@ -1113,31 +1167,107 @@ class CollaborationBroker:
                 continue
             path = self._abs_path(node_id)
             node["content"] = path.read_text(encoding="utf-8") if path.exists() else ""
+        self._persisted_project = copy.deepcopy(self.project)
+
+    def _ensure_persisted(self):
+        # A failed commit must be completed (or the last committed model reloaded)
+        # before serving or accepting more changes. Never acknowledge dirty RAM.
+        if self._persist_failed:
+            self._load_state()
+            self.operation_log.clear()
+            self.path_changed_at.clear()
+            self._path_change_floor = self.revision
+            self._persist_failed = False
+            self._broadcast({"type": "state", "revision": self.revision,
+                             "project": copy.deepcopy(self.project), "serverTime": time.time()})
 
     def _persist_state(self):
-        if self.workspace_dir is not None:
-            return self._persist_state_dir()
-        if self.state_file is None:
-            return  # ephemeral session — never touch disk
-        self.state_file.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"project": self.project, "revision": self.revision}
-        self.state_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        try:
+            if self.workspace_dir is not None:
+                return self._persist_state_dir()
+            if self.state_file is None:
+                return
+            payload = {"project": self.project, "revision": self.revision}
+            _atomic_write(self.state_file, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+        except OSError:
+            self._persist_failed = True
+            raise
 
     def _persist_state_dir(self):
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
-        # Write every text file's current content; images are written at edit time.
-        for node_id, node in self.project.get("nodes", {}).items():
-            if node.get("kind") == "file" and not is_image_name(node.get("name", "")):
-                path = self._abs_path(node_id)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(str(node.get("content", "")), encoding="utf-8")
-        # Manifest = structure only (all file content stripped to "").
-        manifest_project = copy.deepcopy(self.project)
+        project = copy.deepcopy(self.project)
+        previous = self._persisted_project or self._default_project()
+        # Capture moved images before any destination is replaced. The redo
+        # journal must contain their bytes too, so a crash halfway through a
+        # rename/swap never makes recovery depend on an already-deleted source.
+        for node_id, node in project.get("nodes", {}).items():
+            if node.get("kind") != "file" or not is_image_name(node.get("name", "")):
+                continue
+            if self._decode_data_url(node.get("content", "")) is not None:
+                continue
+            old = previous.get("nodes", {}).get(node_id)
+            if old and self._path_in(previous, node_id) != self._path_in(project, node_id):
+                source = self.workspace_dir / self._path_in(previous, node_id)
+                if source.is_file():
+                    node["content"] = "data:application/octet-stream;base64," + base64.b64encode(source.read_bytes()).decode("ascii")
+        payload = {"project": project, "revision": self.revision, "previousProject": previous}
+        # Write-ahead redo record: durable BEFORE changing any workspace files.
+        _atomic_write(self.workspace_dir / ".pending-state.json",
+                      json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+        self._finish_directory_commit(payload, skip_unchanged=True)
+        self.project = payload["project"]
+        self._persisted_project = copy.deepcopy(self.project)
+
+    def _finish_directory_commit(self, payload, skip_unchanged=False):
+        project = payload["project"]
+        previous = payload.get("previousProject") or self._default_project()
+        old_files = {self._path_in(previous, node_id): node
+                     for node_id, node in previous.get("nodes", {}).items()
+                     if node.get("kind") == "file"}
+        paths = set()
+        for node_id, node in project.get("nodes", {}).items():
+            if node_id == project.get("rootId"):
+                continue
+            rel = self._path_in(project, node_id)
+            paths.add(rel)
+            dest = self.workspace_dir / rel
+            if node.get("kind") == "folder":
+                dest.mkdir(parents=True, exist_ok=True)
+                _fsync_directory(dest.parent)
+                continue
+            if is_image_name(node.get("name", "")):
+                data = self._decode_data_url(node.get("content", ""))
+                if data is not None:
+                    _atomic_write(dest, data)
+                elif not dest.exists():
+                    _atomic_write(dest, b"")
+                node["content"] = ""
+            else:
+                content = str(node.get("content", ""))
+                old = old_files.get(rel)
+                if not (skip_unchanged and old and old.get("content") == content and dest.is_file()):
+                    _atomic_write(dest, content.encode("utf-8"))
+        old_paths = {self._path_in(previous, node_id)
+                     for node_id in previous.get("nodes", {}) if node_id != previous.get("rootId")}
+        for rel in sorted(old_paths - paths, key=lambda value: value.count("/"), reverse=True):
+            dest = self.workspace_dir / rel
+            if dest.is_dir():
+                shutil.rmtree(dest)  # explicit deletion of a removed project folder
+            elif dest.exists():
+                dest.unlink()
+            if dest.parent.exists():
+                _fsync_directory(dest.parent)
+        manifest_project = copy.deepcopy(project)
         for node in manifest_project.get("nodes", {}).values():
             if node.get("kind") == "file":
                 node["content"] = ""
-        payload = {"project": manifest_project, "revision": self.revision}
-        (self.workspace_dir / "manifest.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        _atomic_write(self.workspace_dir / "manifest.json", json.dumps({
+            "project": manifest_project, "revision": payload["revision"]
+        }, ensure_ascii=False).encode("utf-8"))
+        journal = self.workspace_dir / ".pending-state.json"
+        if journal.exists():
+            journal.unlink()
+            _fsync_directory(self.workspace_dir)
 
     def _broadcast(self, event, exclude_token: str | None = None):
         subscribers = {}
@@ -1283,6 +1413,7 @@ class CollaborationBroker:
         end = int(operation.get("end", -1))
         insert_text = str(operation.get("text", ""))
         removed_text = str(operation.get("removedText", ""))
+        insert_text.encode("utf-8")  # reject lone surrogates before mutating the model
         path = str(operation.get("path", ""))
 
         if start < 0 or end < start:
@@ -1297,10 +1428,9 @@ class CollaborationBroker:
                 _log("OT", f"Rebased {path!r}  {orig_start}\u2013{orig_end} \u2192 {start}\u2013{end}",
                      baseRev=base_revision, currentRev=self.revision)
 
-        if end > len(content):
-            raise ValueError("Text patch range exceeds content length")
-
-        current_slice = content[start:end]
+        py_start = _utf16_index(content, start)
+        py_end = _utf16_index(content, end)
+        current_slice = content[py_start:py_end]
         if removed_text and current_slice != removed_text:
             # After OT transform the removed region may no longer match (e.g. a
             # concurrent delete already erased those chars).  Treat as a pure
@@ -1308,8 +1438,9 @@ class CollaborationBroker:
             _log("OT-SNAP", f"removedText mismatch on {path!r} at {start}\u2013{end}  \u2192 snap to insert-only",
                  expected=repr(removed_text[:20]), got=repr(current_slice[:20]))
             end = start
+            py_end = py_start
 
-        return f"{content[:start]}{insert_text}{content[end:]}", start, end
+        return f"{content[:py_start]}{insert_text}{content[py_end:]}", start, end
 
     def _append_node(self, parent_id: str, node: dict):
         parent = self.project["nodes"][parent_id]
@@ -1338,7 +1469,6 @@ class CollaborationBroker:
 
     def _apply_operation(self, operation):
         operation_type = operation.get("type")
-        dir_mode = self.workspace_dir is not None
         if operation_type == "replace-project":
             # Wholesale tree replacement is the most destructive operation there
             # is; it must be based on what the server currently has.
@@ -1348,11 +1478,6 @@ class CollaborationBroker:
                     f"replace-project conflict: based on revision {base_revision} but the server is at "
                     f"{self.revision} — reload before publishing over it"
                 )
-            if dir_mode:
-                # Adopting a whole new tree (e.g. publish): reset the file tree,
-                # then externalize its images to real files (content stripped).
-                self._wipe_workspace_dir()
-                self._externalize_images(operation["project"])
             self.project = operation["project"]
             return
 
@@ -1361,6 +1486,8 @@ class CollaborationBroker:
             parent_id = self._get_node_id_by_path(parent_path) if parent_path else self.project["rootId"]
             if not parent_id:
                 raise ValueError(f"Parent path not found: {parent_path}")
+            if self._find_child_by_name(parent_id, operation["name"]):
+                raise ValueError("create conflict: a file or folder with that name already exists")
             node = {
                 "id": self._create_id("folder"),
                 "kind": "folder",
@@ -1370,8 +1497,6 @@ class CollaborationBroker:
                 "expanded": True,
             }
             self._append_node(parent_id, node)
-            if dir_mode:
-                self._abs_path(node["id"]).mkdir(parents=True, exist_ok=True)
             return
 
         if operation_type == "create-file":
@@ -1379,6 +1504,8 @@ class CollaborationBroker:
             parent_id = self._get_node_id_by_path(parent_path) if parent_path else self.project["rootId"]
             if not parent_id:
                 raise ValueError(f"Parent path not found: {parent_path}")
+            if self._find_child_by_name(parent_id, operation["name"]):
+                raise ValueError("create conflict: a file or folder with that name already exists")
             node = {
                 "id": self._create_id("file"),
                 "kind": "file",
@@ -1392,37 +1519,25 @@ class CollaborationBroker:
                 "lastEditAt": 0,
             }
             self._append_node(parent_id, node)
-            if dir_mode:
-                self._write_node_file(node["id"])  # externalizes images, writes text
-                if is_image_name(node["name"]):
-                    operation["content"] = ""  # peers fetch the image by URL, not a data URL
+            if self.workspace_dir is not None and is_image_name(node["name"]):
+                operation["content"] = ""
             return
 
         if operation_type == "rename-node":
             node_id = self._get_node_id_by_path(operation["path"])
             if not node_id:
                 raise ValueError(f"Node path not found: {operation['path']}")
-            old_abs = self._abs_path(node_id) if dir_mode else None
             self.project["nodes"][node_id]["name"] = operation["name"]
-            if dir_mode:
-                new_abs = self._abs_path(node_id)
-                if old_abs != new_abs and old_abs is not None and old_abs.exists():
-                    new_abs.parent.mkdir(parents=True, exist_ok=True)
-                    self._remove_path(new_abs)
-                    old_abs.rename(new_abs)
             return
 
         if operation_type == "delete-node":
             node_id = self._get_node_id_by_path(operation["path"])
             if not node_id:
                 return
-            abs_path = self._abs_path(node_id) if dir_mode else None
             node = self.project["nodes"][node_id]
             parent = self.project["nodes"][node["parentId"]]
             parent["children"] = [child_id for child_id in parent.get("children", []) if child_id != node_id]
             self._remove_node_recursive(node_id)
-            if dir_mode and abs_path is not None:
-                self._remove_path(abs_path)
             return
 
         if operation_type == "update-file":
@@ -1454,10 +1569,8 @@ class CollaborationBroker:
             node["content"] = operation.get("content", "")
             node["dirty"] = False
             operation["counters"] = self._bump_edit_counters(node)
-            if dir_mode:
-                self._write_node_file(node_id)  # externalizes images, writes text
-                if is_image_name(node["name"]):
-                    operation["content"] = ""  # peers fetch the image by URL, not a data URL
+            if self.workspace_dir is not None and is_image_name(node["name"]):
+                operation["content"] = ""
             return
 
         if operation_type == "patch-file":
@@ -1495,7 +1608,7 @@ class CollaborationBroker:
             operation["start"] = rebased_start
             operation["end"] = rebased_end
             # Record the transformed op so later concurrent patches can be rebased.
-            inserted_length = len(str(operation.get("text", "")))
+            inserted_length = _utf16_length(str(operation.get("text", "")))
             self._record_operation(str(operation.get("path", "")), rebased_start, rebased_end, inserted_length)
             return
 
@@ -1562,6 +1675,7 @@ class CollaborationBroker:
         cleaned_name = display_name.strip()[:40]
         display_name = cleaned_name or f"Peer {client_id[-4:]}"
         with self.lock:
+            self._ensure_persisted()
             self.tokens[token] = client_id
             self.presence[token] = {"clientId": client_id, "displayName": display_name, "connectedAt": time.time(), "user": identity, "device": device}
             if role == "master":
@@ -1615,7 +1729,8 @@ class CollaborationBroker:
     def get_state(self, token: str):
         self.authorize(token)
         with self.lock:
-            return {"project": self.project, "revision": self.revision, "presence": self.get_presence(), "sessionId": "default"}
+            self._ensure_persisted()
+            return {"project": copy.deepcopy(self.project), "revision": self.revision, "presence": self.get_presence(), "sessionId": "default"}
 
     def get_presence(self):
         with self.lock:
@@ -1628,6 +1743,7 @@ class CollaborationBroker:
                 raise PermissionError("Only the session master can replace the project state")
         event = None
         with self.lock:
+            self._ensure_persisted()
             # This is the most destructive path in the server: it WIPES the
             # workspace directory and swaps the whole tree. It had no revision
             # check at all, and every logged-in account is admitted as master, so
@@ -1640,27 +1756,22 @@ class CollaborationBroker:
                     f"replace conflict: this client is based on revision {base_revision} but the server is at "
                     f"{self.revision} — reload to get the newer copy before replacing it"
                 )
-            if self.workspace_dir is not None:
-                # Replacing the whole tree (publish): reset the file tree and
-                # externalize inline images to real files (content stripped, so the
-                # broadcast + manifest carry no data URLs — peers fetch by URL).
-                self._wipe_workspace_dir()
-                self._externalize_images(project)
             self.project = project
             self.revision += 1
             # The whole tree just changed: every path is "changed as of now", so
             # anything based on an older revision must pull before writing.
             self.path_changed_at.clear()
             self._path_change_floor = self.revision
+            self.operation_log.clear()
             self._persist_state()
             event = {
                 "type": "state",
                 "clientId": client_id,
                 "revision": self.revision,
-                "project": project,
+                "project": copy.deepcopy(self.project),
                 "serverTime": time.time()
             }
-        self._broadcast(event)
+            self._broadcast(event)
 
         return event
 
@@ -1736,6 +1847,7 @@ class CollaborationBroker:
     def apply_operation(self, token: str, operation):
         client_id = self.authorize(token)
         with self.lock:
+            self._ensure_persisted()
             op_type = operation.get("type")
             op_path = operation.get("path", "")
 
@@ -1767,7 +1879,7 @@ class CollaborationBroker:
                     "type": "state",
                     "clientId": client_id,
                     "revision": self.revision,
-                    "project": self.project,
+                    "project": copy.deepcopy(self.project),
                     "serverTime": time.time(),
                 }
                 recipient_names = [
@@ -1806,6 +1918,7 @@ class CollaborationBroker:
                 self.presence.get(t, {}).get("displayName", f"\u2026{t[-4:]}")
                 for t in self.subscribers if t != token
             ]
+            self._broadcast(copy.deepcopy(event))
         if op_type == "patch-file":
             insert_text = str(operation.get("text", ""))
             text_preview = repr(insert_text[:30])
@@ -1826,7 +1939,6 @@ class CollaborationBroker:
             if recipient_names:
                 to_str = ", ".join(recipient_names)
                 _log("BROADCAST", f"{op_type}  rev={self.revision}  to=[{to_str}]")
-        self._broadcast(event)
         return event
 
     def broadcast_cursor(self, token: str, file_id: str, sel_start: int, sel_end: int):
@@ -1851,15 +1963,15 @@ class CollaborationBroker:
         client_id = self.authorize(token)
         event_queue = queue.Queue()
         with self.lock:
+            self._ensure_persisted()
+            # Enqueue ready and register atomically with respect to mutations.
+            # The client compares this revision to its fetched snapshot, then
+            # fetches again while buffering the now-subscribed stream if needed.
+            event_queue.put({
+                "type": "ready", "clientId": client_id,
+                "revision": self.revision, "serverTime": time.time()
+            })
             self.subscribers[token] = event_queue
-            revision = self.revision
-        ready_event = {
-            "type": "ready",
-            "clientId": client_id,
-            "revision": revision,
-            "serverTime": time.time()
-        }
-        event_queue.put(ready_event)
         return event_queue
 
     def unsubscribe(self, token: str):
@@ -2366,9 +2478,7 @@ class WorkspaceRegistry:
     @staticmethod
     def _snapshot_save(directory, index):
         directory.mkdir(parents=True, exist_ok=True)
-        tmp = directory / "index.json.tmp"
-        tmp.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, directory / "index.json")
+        _atomic_write(directory / "index.json", json.dumps(index, ensure_ascii=False).encode("utf-8"))
 
     @staticmethod
     def _snapshot_release(directory, index, blob):
@@ -2441,9 +2551,7 @@ class WorkspaceRegistry:
             if not blob_path.exists():
                 blob_path.parent.mkdir(parents=True, exist_ok=True)
                 packed = gzip.compress(raw)
-                tmp = blob_path.parent / f"{blob}.tmp"
-                tmp.write_bytes(packed)
-                os.replace(tmp, blob_path)
+                _atomic_write(blob_path, packed)
                 index["bytes"] += len(packed)
             index["refs"][blob] = index["refs"].get(blob, 0) + 1
             version = {
@@ -3120,6 +3228,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._write_json(HTTPStatus.OK, {
                 "message": "pong",
                 "server": "mdnotes",
+                "appVersion": APP_VERSION,
+                "minSyncVersion": MIN_CLIENT_VERSION,
                 "transport": "sse-text-ops",
                 "accounts": self.registry.accounts.enabled,  # capability flag for the Login UI
                 "hosting": True,  # this backend supports ephemeral guest-PIN hosting
@@ -3234,7 +3344,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         return token
 
     def _client_version(self, payload=None, parsed=None) -> int:
-        """The client app version (integer), from the JSON body's `version` or the
+        """The client sync compatibility level (integer), from the JSON body's `version` or the
         `v` query param. Missing/malformed → 0, which is always considered stale."""
         if payload is not None and payload.get("version") is not None:
             try:
@@ -3254,8 +3364,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         if client_version >= MIN_CLIENT_VERSION:
             return False
         self._write_json(HTTPStatus.UPGRADE_REQUIRED, {
-            "message": (f"This app version (v{client_version}) is out of date; "
-                        f"v{MIN_CLIENT_VERSION} or newer is required. Reload to update."),
+            "message": (f"This tab uses an older sync implementation. "
+                        f"Reload to update to Stilo Marker v{APP_VERSION}."),
             "upgradeRequired": True,
             "minVersion": MIN_CLIENT_VERSION,
         })
@@ -3803,6 +3913,9 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             self._write_json(HTTPStatus.OK, self.registry.broker_for_token(token).get_state(token))
         except PermissionError as error:
             self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+        except OSError as error:
+            self._write_json(HTTPStatus.SERVICE_UNAVAILABLE, {"message": "Workspace storage is unavailable; changes are not yet confirmed."})
+            self._log_request(503, str(error))
 
     def _handle_get_presence(self, parsed):
         try:
@@ -3817,6 +3930,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         try:
             token = self._extract_token(parsed)
             payload = self._read_json()
+            if self._refuse_if_stale(self._client_version(payload=payload)):
+                return
             project = payload.get("project")
             if not isinstance(project, dict):
                 raise ValueError("Project payload is required")
@@ -3830,6 +3945,9 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             status = HTTPStatus.CONFLICT if "conflict" in str(error).lower() else HTTPStatus.BAD_REQUEST
             self._write_json(status, {"message": str(error)})
             self._log_request(int(status), str(error))
+        except OSError as error:
+            self._write_json(HTTPStatus.SERVICE_UNAVAILABLE, {"message": "Workspace storage is unavailable; changes are not yet confirmed."})
+            self._log_request(503, str(error))
 
     def _handle_post_presence(self, parsed):
         try:
@@ -3873,6 +3991,9 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             status = HTTPStatus.CONFLICT if "conflict" in str(error).lower() else HTTPStatus.BAD_REQUEST
             self._write_json(status, {"message": str(error)})
             self._log_request(400, str(error))
+        except OSError as error:
+            self._write_json(HTTPStatus.SERVICE_UNAVAILABLE, {"message": "Workspace storage is unavailable; changes are not yet confirmed."})
+            self._log_request(503, str(error))
 
     def _handle_event_stream(self, parsed):
         try:
@@ -4156,467 +4277,7 @@ def run_selftest():
         # After A: "01AAA23456789"; B's offset 8 rebases +3 → 11 → "01AAA234567BBB89".
         assert ot_file["content"] == "01AAA234567BBB89", f"OT rebase misplaced text: {ot_file['content']!r}"
 
-        # --- directory-backed workspace: real files + externalized image asset ---
-        import base64 as _b64, tempfile as _tf, shutil as _sh
-        _dir = Path(_tf.mkdtemp()) / "WorkNotes"
-        _b = CollaborationBroker("2468", None, workspace_dir=_dir)
-        _png = "data:image/png;base64," + _b64.b64encode(bytes.fromhex(
-            "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
-            "0000000d4944415478da6360000002000154a24f5f0000000049454e44ae426082")).decode()
-        _b._apply_operation({"type": "create-file", "parentPath": "", "name": "welcome.md", "content": "# Hi"})
-        _img_op = {"type": "create-file", "parentPath": "", "name": "logo.png", "content": _png}
-        _b._apply_operation(_img_op)
-        _b._persist_state()
-        assert (_dir / "welcome.md").read_text(encoding="utf-8") == "# Hi", "text not written as a real file"
-        assert (_dir / "logo.png").read_bytes()[:4] == b"\x89PNG", "image not written as real bytes"
-        assert _img_op["content"] == "", "image data URL not stripped from the broadcast op"
-        assert "data:image" not in (_dir / "manifest.json").read_text(encoding="utf-8"), "manifest still inlines images"
-        assert _b.resolve_asset("logo.png") == (_dir / "logo.png").resolve(), "asset path not resolvable"
-        assert _b.resolve_asset("../../etc/passwd") is None, "asset path traversal not blocked"
-        _b2 = CollaborationBroker("2468", None, workspace_dir=_dir)  # reload
-        _reload = {n["name"]: n for n in _b2.project["nodes"].values() if n.get("kind") == "file"}
-        assert _reload["welcome.md"]["content"] == "# Hi", "text not re-hydrated on load"
-        assert _reload["logo.png"]["content"] == "", "image should stay externalized on load"
-        _sh.rmtree(_dir.parent, ignore_errors=True)
-
-        # --- file-browser navigation: nested folders, projects, access rules ----
-        _data = Path(_tf.mkdtemp())
-        _acct = AccountStore(None)
-        _acct.users = {
-            "alice": {"password": "pw", "teams": ["qa"]},
-            "bob": {"password": "pw", "teams": ["qa"]},
-            "carol": {"password": "pw", "teams": ["other"]},
-        }
-        _reg = WorkspaceRegistry("2468", state_file, master_pin="1367", accounts=_acct, data_dir=_data)
-        _alice = _reg.login("alice", "pw")["token"]
-        _bob = _reg.login("bob", "pw")["token"]
-        _alice_id = {"username": "alice", "teams": ["qa"]}
-        _bob_id = {"username": "bob", "teams": ["qa"]}
-
-        # No team → the caller's teams (name + modified); a fresh team is empty.
-        assert [t["name"] for t in _reg.browse(_alice)["teams"]] == ["qa"], "browse should list the caller's teams"
-        assert _reg.browse(_alice, "qa", "")["entries"] == [], "fresh team should browse empty"
-
-        # Create a normal folder, then a project inside it.
-        _reg.make_folder(_alice, "qa", "", "workspaces")
-        _created = _reg.create_project(_alice, "qa", "workspaces", "Alpha")
-        assert _created["id"] == "qa/workspaces/Alpha"
-        _alpha_dir = _data / "team_qa" / "workspaces" / "Alpha"
-        assert (_alpha_dir / "manifest.json").is_file(), "project must carry a manifest.json"
-        assert (_alpha_dir / "access.json").is_file(), "project must record access.json"
-
-        # Browse classifies dir-with-manifest as project, others as folder.
-        _root = {e["name"]: e for e in _reg.browse(_alice, "qa", "")["entries"]}
-        assert _root["workspaces"]["kind"] == "folder"
-        _ws = {e["name"]: e for e in _reg.browse(_alice, "qa", "workspaces")["entries"]}
-        assert _ws["Alpha"]["kind"] == "project" and _ws["Alpha"]["path"] == "workspaces/Alpha"
-        # Reserved bookkeeping files never appear as entries.
-        assert "manifest.json" not in _ws and "access.json" not in _ws and "index.json" not in _root
-
-        # Browsing into a project is rejected (open it instead).
-        try:
-            _reg.browse(_alice, "qa", "workspaces/Alpha")
-            assert False, "browsing into a project should fail"
-        except ValueError:
-            pass
-
-        # Open-by-path admits and binds a directory-backed broker.
-        _sess = _reg.open_workspace(_alice, "qa", "workspaces/Alpha")
-        assert _sess["workspace"] == "qa/workspaces/Alpha"
-        assert _reg.brokers["qa/workspaces/Alpha"].workspace_dir is not None, "opened broker not directory-backed"
-
-        # Access: both lists empty ⇒ everyone in the team.
-        assert _reg.can_access(_bob_id, "qa", "workspaces/Alpha"), "empty access should allow team members"
-        # Whitelist limits to listed members.
-        _reg.set_access(_alice, "qa", "workspaces/Alpha", ["alice"], [])
-        assert _reg.can_access(_alice_id, "qa", "workspaces/Alpha")
-        assert not _reg.can_access(_bob_id, "qa", "workspaces/Alpha"), "whitelist should exclude bob"
-        # Blacklist excludes a member even with an empty whitelist.
-        _reg.set_access(_alice, "qa", "workspaces/Alpha", [], ["bob"])
-        assert _reg.can_access(_alice_id, "qa", "workspaces/Alpha")
-        assert not _reg.can_access(_bob_id, "qa", "workspaces/Alpha"), "blacklist should exclude bob"
-        # Only the owner may change access.
-        try:
-            _reg.set_access(_bob, "qa", "workspaces/Alpha", [], [])
-            assert False, "non-owner should not edit access"
-        except PermissionError:
-            pass
-
-        # access.json survives a publish/replace-project wipe.
-        _reg.set_access(_alice, "qa", "workspaces/Alpha", ["alice"], [])
-        _broker = _reg.brokers["qa/workspaces/Alpha"]
-        _broker._apply_operation({"type": "replace-project", "baseRevision": _broker.revision, "project": _broker._default_project()})
-        assert (_alpha_dir / "access.json").is_file(), "access.json must survive replace-project"
-        assert _reg.read_access("qa", "workspaces/Alpha")["whitelist"] == ["alice"], "whitelist lost on publish"
-
-        # Lazy-migrate a legacy index.json members list into the whitelist.
-        _legacy = _data / "team_qa" / "workspaces" / "Legacy"
-        _legacy.mkdir(parents=True, exist_ok=True)
-        (_legacy / "manifest.json").write_text('{"project":{},"revision":0}', encoding="utf-8")
-        _reg._write_index("qa", {"workspaces": {"Legacy": {"members": ["bob"], "createdBy": "bob"}}})
-        _acc = _reg.read_access("qa", "workspaces/Legacy")
-        assert _acc["whitelist"] == ["bob"] and _acc["createdBy"] == "bob", "legacy members not migrated"
-        assert (_legacy / "access.json").is_file(), "migration should persist access.json"
-        assert not _reg.can_access(_alice_id, "qa", "workspaces/Legacy"), "migrated whitelist should gate alice"
-
-        # Path traversal in a browse path is rejected.
-        try:
-            _reg.browse(_alice, "qa", "../../etc")
-            assert False, "path traversal should be rejected"
-        except (ValueError, PermissionError):
-            pass
-
-        # Per-user resume state: save + read back is per account, and survives a
-        # publish (user-state.json is preserved like access.json).
-        _alpha_broker = _reg.brokers["qa/workspaces/Alpha"]
-        _alpha_broker._persist_state()  # restore manifest.json (an earlier test wiped it)
-        assert _reg.read_user_state("qa", "workspaces/Alpha", "alice")["openFiles"] == [], "default resume is empty"
-        _reg.write_user_state(_alice, "qa", "workspaces/Alpha", ["welcome.md", "docs/spec.md"], "welcome.md")
-        _rs = _reg.read_user_state("qa", "workspaces/Alpha", "alice")
-        assert _rs["openFiles"] == ["welcome.md", "docs/spec.md"] and _rs["activeFile"] == "welcome.md", "resume not saved"
-        assert _reg.read_user_state("qa", "workspaces/Alpha", "bob")["openFiles"] == [], "resume must be per-user"
-        assert (_alpha_dir / "user-state.json").is_file(), "resume sidecar not written"
-        # A publish (replace-project + persist) must preserve the resume sidecar.
-        _alpha_broker._apply_operation({"type": "replace-project", "baseRevision": _alpha_broker.revision, "project": _alpha_broker._default_project()})
-        _alpha_broker._persist_state()
-        assert (_alpha_dir / "user-state.json").is_file(), "user-state.json must survive replace-project"
-        assert _reg.read_user_state("qa", "workspaces/Alpha", "alice")["activeFile"] == "welcome.md", "resume lost on publish"
-        # open_workspace hands the resume state back to the client.
-        _sess2 = _reg.open_workspace(_alice, "qa", "workspaces/Alpha")
-        assert _sess2.get("resume", {}).get("activeFile") == "welcome.md", "open should return resume state"
-
-        # Cross-device resume: opening records the account's last workspace, and a
-        # fresh login (a different device) gets it back.
-        _login = _reg.login("alice", "pw")
-        assert _login.get("lastWorkspace", {}).get("path") == "workspaces/Alpha", "login should return last workspace"
-        assert _login["lastWorkspace"]["team"] == "qa", "last workspace team"
-
-        # --- Line comments (metadata about a line, never in the document) --------
-        _CP = "workspaces/Alpha"
-        _cf = "第一卷/第一回试写.md"  # CJK path must work here too
-        _c1 = _reg.save_comment(_alice, "qa", _CP, {"file": _cf, "line": 41,
-                                                    "anchorText": "原文这一行", "text": "check this pacing"})["comment"]
-        assert _c1["author"] == "alice" and _c1["line"] == 41
-        _all = _reg.list_comments(_alice, "qa", _CP)["files"]
-        assert [c["text"] for c in _all[_cf]] == ["check this pacing"]
-        # comments.json lives beside the project but is never a browseable file.
-        assert (_alpha_dir / "comments.json").is_file(), "sidecar not written"
-        assert "comments.json" not in {e["name"] for e in _reg.browse(_alice, "qa", "workspaces")["entries"]}
-
-        # Editing by id updates in place rather than adding a duplicate.
-        _reg.save_comment(_alice, "qa", _CP, {"file": _cf, "id": _c1["id"], "text": "revised note"})
-        assert len(_reg.list_comments(_alice, "qa", _CP)["files"][_cf]) == 1
-        assert _reg.list_comments(_alice, "qa", _CP)["files"][_cf][0]["text"] == "revised note"
-
-        # Re-anchoring moves a comment when edits above shift its line.
-        _reg.reanchor_comments(_alice, "qa", _CP, _cf, [{"id": _c1["id"], "line": 57, "anchorText": "原文这一行"}])
-        assert _reg.list_comments(_alice, "qa", _CP)["files"][_cf][0]["line"] == 57, "re-anchor did not move the comment"
-
-        # Comments survive a publish (replace-project wipes the project dir).
-        _alpha_broker._apply_operation({"type": "replace-project", "baseRevision": _alpha_broker.revision,
-                                        "project": _alpha_broker._default_project()})
-        _alpha_broker._persist_state()
-        assert (_alpha_dir / "comments.json").is_file(), "comments.json must survive replace-project"
-        assert _reg.list_comments(_alice, "qa", _CP)["files"][_cf][0]["text"] == "revised note", "comments lost on publish"
-
-        # Empty text is rejected; access follows the project (bob is blacklisted/off-list).
-        try:
-            _reg.save_comment(_alice, "qa", _CP, {"file": _cf, "text": "   "})
-            assert False, "empty comment should be rejected"
-        except ValueError:
-            pass
-        for _call in (lambda: _reg.list_comments(_bob, "qa", _CP),
-                      lambda: _reg.save_comment(_bob, "qa", _CP, {"file": _cf, "text": "nope"})):
-            try:
-                _call()
-                assert False, "non-whitelisted user must not reach comments"
-            except PermissionError:
-                pass
-
-        assert _reg.delete_comment(_alice, "qa", _CP, _c1["id"])["deleted"], "delete failed"
-        assert _reg.list_comments(_alice, "qa", _CP)["files"] == {}, "comment not removed"
-
-        # --- Stale-write protection (an old tab must not overwrite newer work) ---
-        _ss = _reg.open_workspace(_alice, "qa", "workspaces/Alpha")
-        _stok = _ss["token"]
-        _sb = _reg.brokers["qa/workspaces/Alpha"]
-        _sb.apply_operation(_stok, {"type": "create-file", "parentPath": "", "name": "race.md", "content": "v1"})
-        _nid = _sb._get_node_id_by_path("race.md")
-        _created_at = _sb.revision  # race.md last changed here
-
-        # A whole-file write that doesn't say what it is based on is refused.
-        try:
-            _sb.apply_operation(_stok, {"type": "update-file", "path": "race.md", "content": "CLOBBER"})
-            assert False, "unguarded update-file must be refused"
-        except ValueError as e:
-            assert "conflict" in str(e).lower()
-        # A write from a client that hadn't seen the latest change is refused...
-        try:
-            _sb.apply_operation(_stok, {"type": "update-file", "path": "race.md",
-                                        "content": "STALE", "baseRevision": _created_at - 1})
-            assert False, "stale update-file must be refused"
-        except ValueError as e:
-            assert "conflict" in str(e).lower()
-        assert _sb.project["nodes"][_nid]["content"] == "v1", "refused write must not change content"
-        # ...an up-to-date one still applies (normal saving must keep working).
-        _sb.apply_operation(_stok, {"type": "update-file", "path": "race.md",
-                                    "content": "v2", "baseRevision": _sb.revision})
-        assert _sb.project["nodes"][_nid]["content"] == "v2", "matching update-file must apply"
-        # Editing a DIFFERENT file doesn't make this one stale (per-path, not global).
-        _sb.apply_operation(_stok, {"type": "create-file", "parentPath": "", "name": "other.md", "content": "o"})
-        _sb.apply_operation(_stok, {"type": "update-file", "path": "race.md",
-                                    "content": "v3", "baseRevision": _sb.path_changed_at["race.md"]})
-        assert _sb.project["nodes"][_nid]["content"] == "v3", "unrelated edits must not block a write"
-
-        # A patch whose base predates what we can rebase from is refused rather
-        # than silently landing at the wrong offsets (corrupting the file).
-        _sb.operation_log = []  # e.g. after a server restart, or trimmed away
-        try:
-            _sb.apply_operation(_stok, {"type": "patch-file", "path": "race.md", "start": 0, "end": 0,
-                                        "removedText": "", "text": "X", "baseRevision": max(0, _sb.revision - 5)})
-            assert False, "un-rebasable patch must be refused"
-        except ValueError as e:
-            assert "conflict" in str(e).lower()
-
-        # set_state (publish) WIPES the tree: it must be based on the current revision.
-        try:
-            _sb.set_state(_stok, _sb._default_project(), base_revision=_sb.revision - 1)
-            assert False, "stale replace must be refused"
-        except ValueError as e:
-            assert "conflict" in str(e).lower()
-        try:
-            _sb.set_state(_stok, _sb._default_project(), base_revision=None)
-            assert False, "unguarded replace must be refused"
-        except ValueError as e:
-            assert "conflict" in str(e).lower()
-        assert _sb._get_node_id_by_path("race.md"), "refused replace must not wipe the tree"
-        _sb.set_state(_stok, _sb._default_project(), base_revision=_sb.revision)  # current base is accepted
-
-        # --- Server-side snapshots ---------------------------------------------
-        _P = "workspaces/Alpha"
-        _f = "第一卷/第一回试写.md"  # CJK path: must NOT go through safe_component
-        _r1 = _reg.create_snapshot(_alice, "qa", _P, _f, "第一版 content", "first")
-        assert _r1["created"] and _r1["version"]["author"] == "alice", "snapshot not created"
-        assert not _reg.create_snapshot(_alice, "qa", _P, _f, "第一版 content")["created"], "identical content must dedup"
-        _r2 = _reg.create_snapshot(_alice, "qa", _P, _f, "第二版 content")
-        _vers = _reg.list_snapshot_versions(_alice, "qa", _P, _f)["versions"]
-        assert [v["id"] for v in _vers] == [_r2["version"]["id"], _r1["version"]["id"]], "versions must be newest first"
-        assert _reg.get_snapshot_content(_alice, "qa", _P, _r1["version"]["id"])["content"] == "第一版 content", "CJK content round-trip"
-        assert _reg.list_snapshot_paths(_alice, "qa", _P)["paths"] == [_f], "path listing"
-
-        # Identical content in another file shares one blob (content-addressed).
-        _reg.create_snapshot(_alice, "qa", _P, "大纲.md", "第二版 content")
-        _snapdir = _reg._snapshot_dir("qa", _P)
-        _idx = _reg._snapshot_load(_snapdir)
-        assert _idx["refs"][_r2["version"]["blob"]] == 2, "shared blob should be refcounted twice"
-        assert len(list((_snapdir / "blobs").glob("*.gz"))) == 2, "dedup: two distinct contents -> two blobs"
-
-        # Stored OUTSIDE the project dir, so a publish (which wipes it) keeps them.
-        assert not any("_snapshots" in str(x) for x in _alpha_dir.rglob("*")), "snapshots must not live in the project dir"
-        _alpha_broker._apply_operation({"type": "replace-project", "baseRevision": _alpha_broker.revision, "project": _alpha_broker._default_project()})
-        _alpha_broker._persist_state()
-        assert _reg.list_snapshot_paths(_alice, "qa", _P)["paths"] == ["大纲.md", _f], "snapshots lost on publish"
-
-        # Per-file cap of 30; pruned blobs are actually deleted from disk.
-        for _i in range(35):
-            _reg.create_snapshot(_alice, "qa", _P, "churn.md", f"rev {_i}")
-        _churn = _reg.list_snapshot_versions(_alice, "qa", _P, "churn.md")["versions"]
-        assert len(_churn) == 30, f"expected 30 versions, got {len(_churn)}"
-        assert _churn[0]["byteSize"] == len("rev 34"), "newest version kept"
-        _live_blobs = {v["blob"] for vs in _reg._snapshot_load(_snapdir)["files"].values() for v in vs}
-        assert {b.stem for b in (_snapdir / "blobs").glob("*.gz")} == _live_blobs, "orphan blobs left behind"
-
-        # Delete drops the version; its unshared blob goes with it.
-        _reg.delete_snapshot(_alice, "qa", _P, _r1["version"]["id"])
-        assert _r1["version"]["blob"] not in _reg._snapshot_load(_snapdir)["refs"], "released blob still referenced"
-        assert not (_snapdir / "blobs" / f"{_r1['version']['blob']}.gz").exists(), "unreferenced blob not deleted"
-
-        # Import (migration) keeps the original timestamp and is idempotent.
-        _t = 1700000000000
-        _imp = _reg.create_snapshot(_alice, "qa", _P, "migrated.md", "old text", created_at=_t)
-        assert _imp["created"] and _imp["version"]["createdAt"] == _t, "import must keep its timestamp"
-        assert not _reg.create_snapshot(_alice, "qa", _P, "migrated.md", "old text", created_at=_t)["created"], "re-import must be a no-op"
-        _reg.create_snapshot(_alice, "qa", _P, "migrated.md", "newer text")
-        # An older import whose content equals the newest is still real history.
-        assert _reg.create_snapshot(_alice, "qa", _P, "migrated.md", "newer text", created_at=_t - 1000)["created"], "historical import dropped"
-        assert len(_reg.list_snapshot_versions(_alice, "qa", _P, "migrated.md")["versions"]) == 3
-
-        # Access control follows the project: bob is not on Alpha's whitelist.
-        for _call in (lambda: _reg.list_snapshot_paths(_bob, "qa", _P),
-                      lambda: _reg.create_snapshot(_bob, "qa", _P, "x.md", "nope")):
-            try:
-                _call()
-                assert False, "non-whitelisted user must not reach snapshots"
-            except PermissionError:
-                pass
-        # Traversal / bad keys are rejected.
-        for _bad in ("../../etc", ""):
-            try:
-                _reg.list_snapshot_paths(_alice, "qa", _bad)
-                assert False, f"bad project path accepted: {_bad!r}"
-            except (ValueError, PermissionError):
-                pass
-        try:
-            _reg.create_snapshot(_alice, "qa", _P, "/../", "x")
-            assert False, "empty file key accepted"
-        except ValueError:
-            pass
-
-        # --- Capability tiers: master / editor / reader -------------------------
-        _RP = "workspaces/Alpha"
-        _reg.set_access(_alice, "qa", _RP, [], [], [])          # open to the team, no readers
-        assert _reg.role_for(_alice_id, "qa", _RP) == "master", "creator should be master"
-        assert _reg.role_for(_bob_id, "qa", _RP) == "editor", "a plain member should be an editor"
-        _reg.set_access(_alice, "qa", _RP, [], [], ["bob"])
-        assert _reg.role_for(_bob_id, "qa", _RP) == "reader", "listed reader should be read-only"
-        # readers survive a whitelist edit that omits them
-        _reg.set_access(_alice, "qa", _RP, [], [])
-        assert _reg.read_access("qa", _RP)["readers"] == ["bob"], "omitted readers must not be cleared"
-
-        _rb = _reg.brokers["qa/" + _RP]
-        _rs = _reg.open_workspace(_bob, "qa", _RP)
-        assert _rs["role"] == "reader", f"expected reader session, got {_rs['role']}"
-        for _op in ({"type": "create-file", "parentPath": "", "name": "nope.md", "content": "x"},
-                    {"type": "update-file", "path": "race.md", "content": "x", "baseRevision": _rb.revision}):
-            try:
-                _rb.apply_operation(_rs["token"], _op)
-                assert False, "a reader must not be able to write"
-            except PermissionError:
-                pass
-
-        # An editor may write, but may NOT replace the whole tree.
-        _reg.set_access(_alice, "qa", _RP, [], [], [])
-        _es = _reg.open_workspace(_bob, "qa", _RP)
-        assert _es["role"] == "editor"
-        _rb.apply_operation(_es["token"], {"type": "create-file", "parentPath": "", "name": "editor-ok.md", "content": "x"})
-        assert _rb._get_node_id_by_path("editor-ok.md"), "editor write should apply"
-        try:
-            _rb.set_state(_es["token"], _rb._default_project(), base_revision=_rb.revision)
-            assert False, "an editor must not replace the whole tree"
-        except PermissionError:
-            pass
-        # ...but the owner still can.
-        _ms = _reg.open_workspace(_alice, "qa", _RP)
-        assert _ms["role"] == "master", "owner should still be master"
-        _rb.set_state(_ms["token"], _rb._default_project(), base_revision=_rb.revision)
-
-        # --- S.E.N display counters -------------------------------------
-        # E counts writing sittings, N edits within one. Both are cosmetic:
-        # nothing orders on them, which is why they may reset.
-        _node = {"sourceVersion": 0, "editSessions": 0, "sessionEdits": 0, "lastEditAt": 0}
-        _t0 = 1_000_000.0
-        CollaborationBroker._bump_edit_counters(_node, _t0)
-        assert (_node["editSessions"], _node["sessionEdits"]) == (1, 1), _node
-        # Two more edits moments later stay in the same sitting.
-        CollaborationBroker._bump_edit_counters(_node, _t0 + 5)
-        CollaborationBroker._bump_edit_counters(_node, _t0 + 30)
-        assert (_node["editSessions"], _node["sessionEdits"]) == (1, 3), _node
-        # A gap longer than the threshold opens a new sitting and resets N.
-        CollaborationBroker._bump_edit_counters(_node, _t0 + 30 + EDIT_SESSION_GAP_SECONDS + 1)
-        assert (_node["editSessions"], _node["sessionEdits"]) == (2, 1), _node
-        # A gap of exactly the threshold is still the same sitting (strict >):
-        # the previous edit landed at _t0+631, so this one is 600s later.
-        CollaborationBroker._bump_edit_counters(_node, _t0 + 30 + 2 * EDIT_SESSION_GAP_SECONDS + 1)
-        assert (_node["editSessions"], _node["sessionEdits"]) == (2, 2), _node
-        # The lifetime counter never resets, and nothing here touched revision.
-        assert _node["sourceVersion"] == 5, _node
-        # Counters survive a real edit path, and a second author in the same
-        # room joins the SAME sitting rather than starting their own.
-        _cb = CollaborationBroker("1234", None)
-        _m = _cb.connect("1234")
-        _cb.apply_operation(_m["token"], {"type": "create-file", "parentPath": "", "name": "sen.md", "content": ""})
-        _rev_before = _cb.revision
-        _cb.apply_operation(_m["token"], {"type": "update-file", "path": "sen.md", "content": "a",
-                                          "baseRevision": _cb.revision})
-        _cb.apply_operation(_m["token"], {"type": "update-file", "path": "sen.md", "content": "ab",
-                                          "baseRevision": _cb.revision})
-        _sen = _cb.project["nodes"][_cb._get_node_id_by_path("sen.md")]
-        assert (_sen["editSessions"], _sen["sessionEdits"]) == (1, 2), _sen
-        assert _cb.revision == _rev_before + 2, "revision must still advance once per operation"
-
-        # A snapshot records the file's counters as the baseline the label
-        # counts from, and must do so WITHOUT touching the project tree: no
-        # revision bump and no path_changed_at, or snapshotting a file you are
-        # editing would make your own next write conflict.
-        _ws = _reg.open_workspace(_alice, "qa", _RP)
-        _wb = _reg.brokers["qa/" + _RP]
-        _wb.apply_operation(_ws["token"], {"type": "create-file", "parentPath": "", "name": "sen.md", "content": ""})
-        for _i in range(4):
-            _wb.apply_operation(_ws["token"], {"type": "update-file", "path": "sen.md",
-                                               "content": "x" * (_i + 1), "baseRevision": _wb.revision})
-        _snap_node = _wb.project["nodes"][_wb._get_node_id_by_path("sen.md")]
-        assert (_snap_node["editSessions"], _snap_node["sessionEdits"]) == (1, 4), _snap_node
-        _rev_at_snapshot = _wb.revision
-        _changed_at = dict(_wb.path_changed_at)
-        _made = _reg.create_snapshot(_alice, "qa", _RP, "sen.md", "xxxx", "first cut")
-        assert _made["created"], "snapshot should be created"
-        assert _made["version"]["editSessions"] == 1 and _made["version"]["sessionEdits"] == 4, _made["version"]
-        assert _wb.revision == _rev_at_snapshot, "a snapshot must not bump the revision"
-        assert _wb.path_changed_at == _changed_at, "a snapshot must not mark the path changed"
-        # ...so the very next write from a client based on the pre-snapshot
-        # revision still applies rather than 409ing.
-        _wb.apply_operation(_ws["token"], {"type": "update-file", "path": "sen.md",
-                                           "content": "xxxxy", "baseRevision": _rev_at_snapshot})
-        # The listing hands the client S and the baseline in one call.
-        _listing = _reg.list_snapshot_paths(_alice, "qa", _RP)
-        _base = _listing["baselines"]["sen.md"]
-        assert _base == {"count": 1, "editSessions": 1, "sessionEdits": 4}, _base
-        assert "sen.md" in _listing["paths"], _listing["paths"]
-        # Label maths (mirrors fileVersionLabel in main.js): same sitting, so N
-        # subtracts the baseline — one edit since the snapshot reads v1.0.1.
-        _now = _wb.project["nodes"][_wb._get_node_id_by_path("sen.md")]
-        _E = _now["editSessions"] - _base["editSessions"]
-        _N = _now["sessionEdits"] if _E > 0 else _now["sessionEdits"] - _base["sessionEdits"]
-        assert (_base["count"], _E, _N) == (1, 0, 1), (_base["count"], _E, _N)
-
-        # Snapshotting while another thread edits the same file: the baseline is
-        # read under the broker's lock and BEFORE _snapshot_lock, so this must
-        # neither deadlock nor record a half-applied counter rollover. Re-nesting
-        # those two locks would hang this loop.
-        import threading as _th
-        _stop = _th.Event()
-        _errors = []
-
-        def _hammer():
-            try:
-                while not _stop.is_set():
-                    _wb.apply_operation(_ws["token"], {"type": "update-file", "path": "sen.md",
-                                                       "content": "y" * 8, "baseRevision": _wb.revision})
-            except Exception as _e:  # noqa: BLE001 - surfaced on the main thread
-                _errors.append(_e)
-
-        _t = _th.Thread(target=_hammer, daemon=True)
-        _t.start()
-        try:
-            for _i in range(25):
-                _v = _reg.create_snapshot(_alice, "qa", _RP, "sen.md", f"concurrent {_i}")
-                _ver = _v.get("version") or {}
-                if "sessionEdits" in _ver:
-                    assert _ver["sessionEdits"] <= _ver["sourceVersion"], _ver
-                    assert _ver["editSessions"] >= 1, _ver
-        finally:
-            _stop.set()
-            _t.join(timeout=10)
-        assert not _t.is_alive(), "snapshot/edit contention deadlocked"
-        assert not _errors, _errors
-
-        # Directly prove the baseline read takes the broker's lock: while another
-        # thread holds it, the read must block rather than observe a node that is
-        # mid-bump. (The contention loop above only shows it does not crash.)
-        _done = _th.Event()
-
-        def _read_baseline():
-            _reg._snapshot_counter_baseline("qa", _RP, "sen.md")
-            _done.set()
-
-        with _wb.lock:
-            _reader = _th.Thread(target=_read_baseline, daemon=True)
-            _reader.start()
-            assert not _done.wait(timeout=0.5), "baseline read did NOT take the broker lock"
-        _reader.join(timeout=5)
-        assert _done.is_set(), "baseline read never completed after the lock was released"
-
-        _sh.rmtree(_data, ignore_errors=True)
+        run_broker_selftest(state_file)
 
         print("Backend self-test passed.")
     finally:
@@ -4624,6 +4285,471 @@ def run_selftest():
         server.server_close()
         if state_file.exists():
             state_file.unlink()
+
+
+def run_broker_selftest(state_file):
+    # --- directory-backed workspace: real files + externalized image asset ---
+    import base64 as _b64, tempfile as _tf, shutil as _sh
+    _dir = Path(_tf.mkdtemp()) / "WorkNotes"
+    _b = CollaborationBroker("2468", None, workspace_dir=_dir)
+    _png = "data:image/png;base64," + _b64.b64encode(bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+        "0000000d4944415478da6360000002000154a24f5f0000000049454e44ae426082")).decode()
+    _b._apply_operation({"type": "create-file", "parentPath": "", "name": "welcome.md", "content": "# Hi"})
+    _img_op = {"type": "create-file", "parentPath": "", "name": "logo.png", "content": _png}
+    _b._apply_operation(_img_op)
+    _b._persist_state()
+    assert (_dir / "welcome.md").read_text(encoding="utf-8") == "# Hi", "text not written as a real file"
+    assert (_dir / "logo.png").read_bytes()[:4] == b"\x89PNG", "image not written as real bytes"
+    assert _img_op["content"] == "", "image data URL not stripped from the broadcast op"
+    assert "data:image" not in (_dir / "manifest.json").read_text(encoding="utf-8"), "manifest still inlines images"
+    assert _b.resolve_asset("logo.png") == (_dir / "logo.png").resolve(), "asset path not resolvable"
+    assert _b.resolve_asset("../../etc/passwd") is None, "asset path traversal not blocked"
+    _b2 = CollaborationBroker("2468", None, workspace_dir=_dir)  # reload
+    _reload = {n["name"]: n for n in _b2.project["nodes"].values() if n.get("kind") == "file"}
+    assert _reload["welcome.md"]["content"] == "# Hi", "text not re-hydrated on load"
+    assert _reload["logo.png"]["content"] == "", "image should stay externalized on load"
+    _sh.rmtree(_dir.parent, ignore_errors=True)
+
+    # --- file-browser navigation: nested folders, projects, access rules ----
+    _data = Path(_tf.mkdtemp())
+    _acct = AccountStore(None)
+    _acct.users = {
+        "alice": {"password": "pw", "teams": ["qa"]},
+        "bob": {"password": "pw", "teams": ["qa"]},
+        "carol": {"password": "pw", "teams": ["other"]},
+    }
+    _reg = WorkspaceRegistry("2468", state_file, master_pin="1367", accounts=_acct, data_dir=_data)
+    _alice = _reg.login("alice", "pw")["token"]
+    _bob = _reg.login("bob", "pw")["token"]
+    _alice_id = {"username": "alice", "teams": ["qa"]}
+    _bob_id = {"username": "bob", "teams": ["qa"]}
+
+    # No team → the caller's teams (name + modified); a fresh team is empty.
+    assert [t["name"] for t in _reg.browse(_alice)["teams"]] == ["qa"], "browse should list the caller's teams"
+    assert _reg.browse(_alice, "qa", "")["entries"] == [], "fresh team should browse empty"
+
+    # Create a normal folder, then a project inside it.
+    _reg.make_folder(_alice, "qa", "", "workspaces")
+    _created = _reg.create_project(_alice, "qa", "workspaces", "Alpha")
+    assert _created["id"] == "qa/workspaces/Alpha"
+    _alpha_dir = _data / "team_qa" / "workspaces" / "Alpha"
+    assert (_alpha_dir / "manifest.json").is_file(), "project must carry a manifest.json"
+    assert (_alpha_dir / "access.json").is_file(), "project must record access.json"
+
+    # Browse classifies dir-with-manifest as project, others as folder.
+    _root = {e["name"]: e for e in _reg.browse(_alice, "qa", "")["entries"]}
+    assert _root["workspaces"]["kind"] == "folder"
+    _ws = {e["name"]: e for e in _reg.browse(_alice, "qa", "workspaces")["entries"]}
+    assert _ws["Alpha"]["kind"] == "project" and _ws["Alpha"]["path"] == "workspaces/Alpha"
+    # Reserved bookkeeping files never appear as entries.
+    assert "manifest.json" not in _ws and "access.json" not in _ws and "index.json" not in _root
+
+    # Browsing into a project is rejected (open it instead).
+    try:
+        _reg.browse(_alice, "qa", "workspaces/Alpha")
+        assert False, "browsing into a project should fail"
+    except ValueError:
+        pass
+
+    # Open-by-path admits and binds a directory-backed broker.
+    _sess = _reg.open_workspace(_alice, "qa", "workspaces/Alpha")
+    assert _sess["workspace"] == "qa/workspaces/Alpha"
+    assert _reg.brokers["qa/workspaces/Alpha"].workspace_dir is not None, "opened broker not directory-backed"
+
+    # Access: both lists empty ⇒ everyone in the team.
+    assert _reg.can_access(_bob_id, "qa", "workspaces/Alpha"), "empty access should allow team members"
+    # Whitelist limits to listed members.
+    _reg.set_access(_alice, "qa", "workspaces/Alpha", ["alice"], [])
+    assert _reg.can_access(_alice_id, "qa", "workspaces/Alpha")
+    assert not _reg.can_access(_bob_id, "qa", "workspaces/Alpha"), "whitelist should exclude bob"
+    # Blacklist excludes a member even with an empty whitelist.
+    _reg.set_access(_alice, "qa", "workspaces/Alpha", [], ["bob"])
+    assert _reg.can_access(_alice_id, "qa", "workspaces/Alpha")
+    assert not _reg.can_access(_bob_id, "qa", "workspaces/Alpha"), "blacklist should exclude bob"
+    # Only the owner may change access.
+    try:
+        _reg.set_access(_bob, "qa", "workspaces/Alpha", [], [])
+        assert False, "non-owner should not edit access"
+    except PermissionError:
+        pass
+
+    # access.json survives a publish/replace-project wipe.
+    _reg.set_access(_alice, "qa", "workspaces/Alpha", ["alice"], [])
+    _broker = _reg.brokers["qa/workspaces/Alpha"]
+    _broker._apply_operation({"type": "replace-project", "baseRevision": _broker.revision, "project": _broker._default_project()})
+    assert (_alpha_dir / "access.json").is_file(), "access.json must survive replace-project"
+    assert _reg.read_access("qa", "workspaces/Alpha")["whitelist"] == ["alice"], "whitelist lost on publish"
+
+    # Lazy-migrate a legacy index.json members list into the whitelist.
+    _legacy = _data / "team_qa" / "workspaces" / "Legacy"
+    _legacy.mkdir(parents=True, exist_ok=True)
+    (_legacy / "manifest.json").write_text('{"project":{},"revision":0}', encoding="utf-8")
+    _reg._write_index("qa", {"workspaces": {"Legacy": {"members": ["bob"], "createdBy": "bob"}}})
+    _acc = _reg.read_access("qa", "workspaces/Legacy")
+    assert _acc["whitelist"] == ["bob"] and _acc["createdBy"] == "bob", "legacy members not migrated"
+    assert (_legacy / "access.json").is_file(), "migration should persist access.json"
+    assert not _reg.can_access(_alice_id, "qa", "workspaces/Legacy"), "migrated whitelist should gate alice"
+
+    # Path traversal in a browse path is rejected.
+    try:
+        _reg.browse(_alice, "qa", "../../etc")
+        assert False, "path traversal should be rejected"
+    except (ValueError, PermissionError):
+        pass
+
+    # Per-user resume state: save + read back is per account, and survives a
+    # publish (user-state.json is preserved like access.json).
+    _alpha_broker = _reg.brokers["qa/workspaces/Alpha"]
+    _alpha_broker._persist_state()  # restore manifest.json (an earlier test wiped it)
+    assert _reg.read_user_state("qa", "workspaces/Alpha", "alice")["openFiles"] == [], "default resume is empty"
+    _reg.write_user_state(_alice, "qa", "workspaces/Alpha", ["welcome.md", "docs/spec.md"], "welcome.md")
+    _rs = _reg.read_user_state("qa", "workspaces/Alpha", "alice")
+    assert _rs["openFiles"] == ["welcome.md", "docs/spec.md"] and _rs["activeFile"] == "welcome.md", "resume not saved"
+    assert _reg.read_user_state("qa", "workspaces/Alpha", "bob")["openFiles"] == [], "resume must be per-user"
+    assert (_alpha_dir / "user-state.json").is_file(), "resume sidecar not written"
+    # A publish (replace-project + persist) must preserve the resume sidecar.
+    _alpha_broker._apply_operation({"type": "replace-project", "baseRevision": _alpha_broker.revision, "project": _alpha_broker._default_project()})
+    _alpha_broker._persist_state()
+    assert (_alpha_dir / "user-state.json").is_file(), "user-state.json must survive replace-project"
+    assert _reg.read_user_state("qa", "workspaces/Alpha", "alice")["activeFile"] == "welcome.md", "resume lost on publish"
+    # open_workspace hands the resume state back to the client.
+    _sess2 = _reg.open_workspace(_alice, "qa", "workspaces/Alpha")
+    assert _sess2.get("resume", {}).get("activeFile") == "welcome.md", "open should return resume state"
+
+    # Cross-device resume: opening records the account's last workspace, and a
+    # fresh login (a different device) gets it back.
+    _login = _reg.login("alice", "pw")
+    assert _login.get("lastWorkspace", {}).get("path") == "workspaces/Alpha", "login should return last workspace"
+    assert _login["lastWorkspace"]["team"] == "qa", "last workspace team"
+
+    # --- Line comments (metadata about a line, never in the document) --------
+    _CP = "workspaces/Alpha"
+    _cf = "第一卷/第一回试写.md"  # CJK path must work here too
+    _c1 = _reg.save_comment(_alice, "qa", _CP, {"file": _cf, "line": 41,
+                                                "anchorText": "原文这一行", "text": "check this pacing"})["comment"]
+    assert _c1["author"] == "alice" and _c1["line"] == 41
+    _all = _reg.list_comments(_alice, "qa", _CP)["files"]
+    assert [c["text"] for c in _all[_cf]] == ["check this pacing"]
+    # comments.json lives beside the project but is never a browseable file.
+    assert (_alpha_dir / "comments.json").is_file(), "sidecar not written"
+    assert "comments.json" not in {e["name"] for e in _reg.browse(_alice, "qa", "workspaces")["entries"]}
+
+    # Editing by id updates in place rather than adding a duplicate.
+    _reg.save_comment(_alice, "qa", _CP, {"file": _cf, "id": _c1["id"], "text": "revised note"})
+    assert len(_reg.list_comments(_alice, "qa", _CP)["files"][_cf]) == 1
+    assert _reg.list_comments(_alice, "qa", _CP)["files"][_cf][0]["text"] == "revised note"
+
+    # Re-anchoring moves a comment when edits above shift its line.
+    _reg.reanchor_comments(_alice, "qa", _CP, _cf, [{"id": _c1["id"], "line": 57, "anchorText": "原文这一行"}])
+    assert _reg.list_comments(_alice, "qa", _CP)["files"][_cf][0]["line"] == 57, "re-anchor did not move the comment"
+
+    # Comments survive a publish (replace-project wipes the project dir).
+    _alpha_broker._apply_operation({"type": "replace-project", "baseRevision": _alpha_broker.revision,
+                                    "project": _alpha_broker._default_project()})
+    _alpha_broker._persist_state()
+    assert (_alpha_dir / "comments.json").is_file(), "comments.json must survive replace-project"
+    assert _reg.list_comments(_alice, "qa", _CP)["files"][_cf][0]["text"] == "revised note", "comments lost on publish"
+
+    # Empty text is rejected; access follows the project (bob is blacklisted/off-list).
+    try:
+        _reg.save_comment(_alice, "qa", _CP, {"file": _cf, "text": "   "})
+        assert False, "empty comment should be rejected"
+    except ValueError:
+        pass
+    for _call in (lambda: _reg.list_comments(_bob, "qa", _CP),
+                  lambda: _reg.save_comment(_bob, "qa", _CP, {"file": _cf, "text": "nope"})):
+        try:
+            _call()
+            assert False, "non-whitelisted user must not reach comments"
+        except PermissionError:
+            pass
+
+    assert _reg.delete_comment(_alice, "qa", _CP, _c1["id"])["deleted"], "delete failed"
+    assert _reg.list_comments(_alice, "qa", _CP)["files"] == {}, "comment not removed"
+
+    # --- Stale-write protection (an old tab must not overwrite newer work) ---
+    _ss = _reg.open_workspace(_alice, "qa", "workspaces/Alpha")
+    _stok = _ss["token"]
+    _sb = _reg.brokers["qa/workspaces/Alpha"]
+    _sb.apply_operation(_stok, {"type": "create-file", "parentPath": "", "name": "race.md", "content": "v1"})
+    _nid = _sb._get_node_id_by_path("race.md")
+    _created_at = _sb.revision  # race.md last changed here
+
+    # A whole-file write that doesn't say what it is based on is refused.
+    try:
+        _sb.apply_operation(_stok, {"type": "update-file", "path": "race.md", "content": "CLOBBER"})
+        assert False, "unguarded update-file must be refused"
+    except ValueError as e:
+        assert "conflict" in str(e).lower()
+    # A write from a client that hadn't seen the latest change is refused...
+    try:
+        _sb.apply_operation(_stok, {"type": "update-file", "path": "race.md",
+                                    "content": "STALE", "baseRevision": _created_at - 1})
+        assert False, "stale update-file must be refused"
+    except ValueError as e:
+        assert "conflict" in str(e).lower()
+    assert _sb.project["nodes"][_nid]["content"] == "v1", "refused write must not change content"
+    # ...an up-to-date one still applies (normal saving must keep working).
+    _sb.apply_operation(_stok, {"type": "update-file", "path": "race.md",
+                                "content": "v2", "baseRevision": _sb.revision})
+    assert _sb.project["nodes"][_nid]["content"] == "v2", "matching update-file must apply"
+    # Editing a DIFFERENT file doesn't make this one stale (per-path, not global).
+    _sb.apply_operation(_stok, {"type": "create-file", "parentPath": "", "name": "other.md", "content": "o"})
+    _sb.apply_operation(_stok, {"type": "update-file", "path": "race.md",
+                                "content": "v3", "baseRevision": _sb.path_changed_at["race.md"]})
+    assert _sb.project["nodes"][_nid]["content"] == "v3", "unrelated edits must not block a write"
+
+    # A patch whose base predates what we can rebase from is refused rather
+    # than silently landing at the wrong offsets (corrupting the file).
+    _sb.operation_log = []  # e.g. after a server restart, or trimmed away
+    try:
+        _sb.apply_operation(_stok, {"type": "patch-file", "path": "race.md", "start": 0, "end": 0,
+                                    "removedText": "", "text": "X", "baseRevision": max(0, _sb.revision - 5)})
+        assert False, "un-rebasable patch must be refused"
+    except ValueError as e:
+        assert "conflict" in str(e).lower()
+
+    # set_state (publish) WIPES the tree: it must be based on the current revision.
+    try:
+        _sb.set_state(_stok, _sb._default_project(), base_revision=_sb.revision - 1)
+        assert False, "stale replace must be refused"
+    except ValueError as e:
+        assert "conflict" in str(e).lower()
+    try:
+        _sb.set_state(_stok, _sb._default_project(), base_revision=None)
+        assert False, "unguarded replace must be refused"
+    except ValueError as e:
+        assert "conflict" in str(e).lower()
+    assert _sb._get_node_id_by_path("race.md"), "refused replace must not wipe the tree"
+    _sb.set_state(_stok, _sb._default_project(), base_revision=_sb.revision)  # current base is accepted
+
+    # --- Server-side snapshots ---------------------------------------------
+    _P = "workspaces/Alpha"
+    _f = "第一卷/第一回试写.md"  # CJK path: must NOT go through safe_component
+    _r1 = _reg.create_snapshot(_alice, "qa", _P, _f, "第一版 content", "first")
+    assert _r1["created"] and _r1["version"]["author"] == "alice", "snapshot not created"
+    assert not _reg.create_snapshot(_alice, "qa", _P, _f, "第一版 content")["created"], "identical content must dedup"
+    _r2 = _reg.create_snapshot(_alice, "qa", _P, _f, "第二版 content")
+    _vers = _reg.list_snapshot_versions(_alice, "qa", _P, _f)["versions"]
+    assert [v["id"] for v in _vers] == [_r2["version"]["id"], _r1["version"]["id"]], "versions must be newest first"
+    assert _reg.get_snapshot_content(_alice, "qa", _P, _r1["version"]["id"])["content"] == "第一版 content", "CJK content round-trip"
+    assert _reg.list_snapshot_paths(_alice, "qa", _P)["paths"] == [_f], "path listing"
+
+    # Identical content in another file shares one blob (content-addressed).
+    _reg.create_snapshot(_alice, "qa", _P, "大纲.md", "第二版 content")
+    _snapdir = _reg._snapshot_dir("qa", _P)
+    _idx = _reg._snapshot_load(_snapdir)
+    assert _idx["refs"][_r2["version"]["blob"]] == 2, "shared blob should be refcounted twice"
+    assert len(list((_snapdir / "blobs").glob("*.gz"))) == 2, "dedup: two distinct contents -> two blobs"
+
+    # Stored OUTSIDE the project dir, so a publish (which wipes it) keeps them.
+    assert not any("_snapshots" in str(x) for x in _alpha_dir.rglob("*")), "snapshots must not live in the project dir"
+    _alpha_broker._apply_operation({"type": "replace-project", "baseRevision": _alpha_broker.revision, "project": _alpha_broker._default_project()})
+    _alpha_broker._persist_state()
+    assert _reg.list_snapshot_paths(_alice, "qa", _P)["paths"] == ["大纲.md", _f], "snapshots lost on publish"
+
+    # Per-file cap of 30; pruned blobs are actually deleted from disk.
+    for _i in range(35):
+        _reg.create_snapshot(_alice, "qa", _P, "churn.md", f"rev {_i}")
+    _churn = _reg.list_snapshot_versions(_alice, "qa", _P, "churn.md")["versions"]
+    assert len(_churn) == 30, f"expected 30 versions, got {len(_churn)}"
+    assert _churn[0]["byteSize"] == len("rev 34"), "newest version kept"
+    _live_blobs = {v["blob"] for vs in _reg._snapshot_load(_snapdir)["files"].values() for v in vs}
+    assert {b.stem for b in (_snapdir / "blobs").glob("*.gz")} == _live_blobs, "orphan blobs left behind"
+
+    # Delete drops the version; its unshared blob goes with it.
+    _reg.delete_snapshot(_alice, "qa", _P, _r1["version"]["id"])
+    assert _r1["version"]["blob"] not in _reg._snapshot_load(_snapdir)["refs"], "released blob still referenced"
+    assert not (_snapdir / "blobs" / f"{_r1['version']['blob']}.gz").exists(), "unreferenced blob not deleted"
+
+    # Import (migration) keeps the original timestamp and is idempotent.
+    _t = 1700000000000
+    _imp = _reg.create_snapshot(_alice, "qa", _P, "migrated.md", "old text", created_at=_t)
+    assert _imp["created"] and _imp["version"]["createdAt"] == _t, "import must keep its timestamp"
+    assert not _reg.create_snapshot(_alice, "qa", _P, "migrated.md", "old text", created_at=_t)["created"], "re-import must be a no-op"
+    _reg.create_snapshot(_alice, "qa", _P, "migrated.md", "newer text")
+    # An older import whose content equals the newest is still real history.
+    assert _reg.create_snapshot(_alice, "qa", _P, "migrated.md", "newer text", created_at=_t - 1000)["created"], "historical import dropped"
+    assert len(_reg.list_snapshot_versions(_alice, "qa", _P, "migrated.md")["versions"]) == 3
+
+    # Access control follows the project: bob is not on Alpha's whitelist.
+    for _call in (lambda: _reg.list_snapshot_paths(_bob, "qa", _P),
+                  lambda: _reg.create_snapshot(_bob, "qa", _P, "x.md", "nope")):
+        try:
+            _call()
+            assert False, "non-whitelisted user must not reach snapshots"
+        except PermissionError:
+            pass
+    # Traversal / bad keys are rejected.
+    for _bad in ("../../etc", ""):
+        try:
+            _reg.list_snapshot_paths(_alice, "qa", _bad)
+            assert False, f"bad project path accepted: {_bad!r}"
+        except (ValueError, PermissionError):
+            pass
+    try:
+        _reg.create_snapshot(_alice, "qa", _P, "/../", "x")
+        assert False, "empty file key accepted"
+    except ValueError:
+        pass
+
+    # --- Capability tiers: master / editor / reader -------------------------
+    _RP = "workspaces/Alpha"
+    _reg.set_access(_alice, "qa", _RP, [], [], [])          # open to the team, no readers
+    assert _reg.role_for(_alice_id, "qa", _RP) == "master", "creator should be master"
+    assert _reg.role_for(_bob_id, "qa", _RP) == "editor", "a plain member should be an editor"
+    _reg.set_access(_alice, "qa", _RP, [], [], ["bob"])
+    assert _reg.role_for(_bob_id, "qa", _RP) == "reader", "listed reader should be read-only"
+    # readers survive a whitelist edit that omits them
+    _reg.set_access(_alice, "qa", _RP, [], [])
+    assert _reg.read_access("qa", _RP)["readers"] == ["bob"], "omitted readers must not be cleared"
+
+    _rb = _reg.brokers["qa/" + _RP]
+    _rs = _reg.open_workspace(_bob, "qa", _RP)
+    assert _rs["role"] == "reader", f"expected reader session, got {_rs['role']}"
+    for _op in ({"type": "create-file", "parentPath": "", "name": "nope.md", "content": "x"},
+                {"type": "update-file", "path": "race.md", "content": "x", "baseRevision": _rb.revision}):
+        try:
+            _rb.apply_operation(_rs["token"], _op)
+            assert False, "a reader must not be able to write"
+        except PermissionError:
+            pass
+
+    # An editor may write, but may NOT replace the whole tree.
+    _reg.set_access(_alice, "qa", _RP, [], [], [])
+    _es = _reg.open_workspace(_bob, "qa", _RP)
+    assert _es["role"] == "editor"
+    _rb.apply_operation(_es["token"], {"type": "create-file", "parentPath": "", "name": "editor-ok.md", "content": "x"})
+    assert _rb._get_node_id_by_path("editor-ok.md"), "editor write should apply"
+    try:
+        _rb.set_state(_es["token"], _rb._default_project(), base_revision=_rb.revision)
+        assert False, "an editor must not replace the whole tree"
+    except PermissionError:
+        pass
+    # ...but the owner still can.
+    _ms = _reg.open_workspace(_alice, "qa", _RP)
+    assert _ms["role"] == "master", "owner should still be master"
+    _rb.set_state(_ms["token"], _rb._default_project(), base_revision=_rb.revision)
+
+    # --- S.E.N display counters -------------------------------------
+    # E counts writing sittings, N edits within one. Both are cosmetic:
+    # nothing orders on them, which is why they may reset.
+    _node = {"sourceVersion": 0, "editSessions": 0, "sessionEdits": 0, "lastEditAt": 0}
+    _t0 = 1_000_000.0
+    CollaborationBroker._bump_edit_counters(_node, _t0)
+    assert (_node["editSessions"], _node["sessionEdits"]) == (1, 1), _node
+    # Two more edits moments later stay in the same sitting.
+    CollaborationBroker._bump_edit_counters(_node, _t0 + 5)
+    CollaborationBroker._bump_edit_counters(_node, _t0 + 30)
+    assert (_node["editSessions"], _node["sessionEdits"]) == (1, 3), _node
+    # A gap longer than the threshold opens a new sitting and resets N.
+    CollaborationBroker._bump_edit_counters(_node, _t0 + 30 + EDIT_SESSION_GAP_SECONDS + 1)
+    assert (_node["editSessions"], _node["sessionEdits"]) == (2, 1), _node
+    # A gap of exactly the threshold is still the same sitting (strict >):
+    # the previous edit landed at _t0+631, so this one is 600s later.
+    CollaborationBroker._bump_edit_counters(_node, _t0 + 30 + 2 * EDIT_SESSION_GAP_SECONDS + 1)
+    assert (_node["editSessions"], _node["sessionEdits"]) == (2, 2), _node
+    # The lifetime counter never resets, and nothing here touched revision.
+    assert _node["sourceVersion"] == 5, _node
+    # Counters survive a real edit path, and a second author in the same
+    # room joins the SAME sitting rather than starting their own.
+    _cb = CollaborationBroker("1234", None)
+    _m = _cb.connect("1234")
+    _cb.apply_operation(_m["token"], {"type": "create-file", "parentPath": "", "name": "sen.md", "content": ""})
+    _rev_before = _cb.revision
+    _cb.apply_operation(_m["token"], {"type": "update-file", "path": "sen.md", "content": "a",
+                                      "baseRevision": _cb.revision})
+    _cb.apply_operation(_m["token"], {"type": "update-file", "path": "sen.md", "content": "ab",
+                                      "baseRevision": _cb.revision})
+    _sen = _cb.project["nodes"][_cb._get_node_id_by_path("sen.md")]
+    assert (_sen["editSessions"], _sen["sessionEdits"]) == (1, 2), _sen
+    assert _cb.revision == _rev_before + 2, "revision must still advance once per operation"
+
+    # A snapshot records the file's counters as the baseline the label
+    # counts from, and must do so WITHOUT touching the project tree: no
+    # revision bump and no path_changed_at, or snapshotting a file you are
+    # editing would make your own next write conflict.
+    _ws = _reg.open_workspace(_alice, "qa", _RP)
+    _wb = _reg.brokers["qa/" + _RP]
+    _wb.apply_operation(_ws["token"], {"type": "create-file", "parentPath": "", "name": "sen.md", "content": ""})
+    for _i in range(4):
+        _wb.apply_operation(_ws["token"], {"type": "update-file", "path": "sen.md",
+                                           "content": "x" * (_i + 1), "baseRevision": _wb.revision})
+    _snap_node = _wb.project["nodes"][_wb._get_node_id_by_path("sen.md")]
+    assert (_snap_node["editSessions"], _snap_node["sessionEdits"]) == (1, 4), _snap_node
+    _rev_at_snapshot = _wb.revision
+    _changed_at = dict(_wb.path_changed_at)
+    _made = _reg.create_snapshot(_alice, "qa", _RP, "sen.md", "xxxx", "first cut")
+    assert _made["created"], "snapshot should be created"
+    assert _made["version"]["editSessions"] == 1 and _made["version"]["sessionEdits"] == 4, _made["version"]
+    assert _wb.revision == _rev_at_snapshot, "a snapshot must not bump the revision"
+    assert _wb.path_changed_at == _changed_at, "a snapshot must not mark the path changed"
+    # ...so the very next write from a client based on the pre-snapshot
+    # revision still applies rather than 409ing.
+    _wb.apply_operation(_ws["token"], {"type": "update-file", "path": "sen.md",
+                                       "content": "xxxxy", "baseRevision": _rev_at_snapshot})
+    # The listing hands the client S and the baseline in one call.
+    _listing = _reg.list_snapshot_paths(_alice, "qa", _RP)
+    _base = _listing["baselines"]["sen.md"]
+    assert _base == {"count": 1, "editSessions": 1, "sessionEdits": 4}, _base
+    assert "sen.md" in _listing["paths"], _listing["paths"]
+    # Label maths (mirrors fileVersionLabel in main.js): same sitting, so N
+    # subtracts the baseline — one edit since the snapshot reads v1.0.1.
+    _now = _wb.project["nodes"][_wb._get_node_id_by_path("sen.md")]
+    _E = _now["editSessions"] - _base["editSessions"]
+    _N = _now["sessionEdits"] if _E > 0 else _now["sessionEdits"] - _base["sessionEdits"]
+    assert (_base["count"], _E, _N) == (1, 0, 1), (_base["count"], _E, _N)
+
+    # Snapshotting while another thread edits the same file: the baseline is
+    # read under the broker's lock and BEFORE _snapshot_lock, so this must
+    # neither deadlock nor record a half-applied counter rollover. Re-nesting
+    # those two locks would hang this loop.
+    import threading as _th
+    _stop = _th.Event()
+    _errors = []
+
+    def _hammer():
+        try:
+            while not _stop.is_set():
+                _wb.apply_operation(_ws["token"], {"type": "update-file", "path": "sen.md",
+                                                   "content": "y" * 8, "baseRevision": _wb.revision})
+        except Exception as _e:  # noqa: BLE001 - surfaced on the main thread
+            _errors.append(_e)
+
+    _t = _th.Thread(target=_hammer, daemon=True)
+    _t.start()
+    try:
+        for _i in range(25):
+            _v = _reg.create_snapshot(_alice, "qa", _RP, "sen.md", f"concurrent {_i}")
+            _ver = _v.get("version") or {}
+            if "sessionEdits" in _ver:
+                assert _ver["sessionEdits"] <= _ver["sourceVersion"], _ver
+                assert _ver["editSessions"] >= 1, _ver
+    finally:
+        _stop.set()
+        _t.join(timeout=10)
+    assert not _t.is_alive(), "snapshot/edit contention deadlocked"
+    assert not _errors, _errors
+
+    # Directly prove the baseline read takes the broker's lock: while another
+    # thread holds it, the read must block rather than observe a node that is
+    # mid-bump. (The contention loop above only shows it does not crash.)
+    _done = _th.Event()
+
+    def _read_baseline():
+        _reg._snapshot_counter_baseline("qa", _RP, "sen.md")
+        _done.set()
+
+    with _wb.lock:
+        _reader = _th.Thread(target=_read_baseline, daemon=True)
+        _reader.start()
+        assert not _done.wait(timeout=0.5), "baseline read did NOT take the broker lock"
+    _reader.join(timeout=5)
+    assert _done.is_set(), "baseline read never completed after the lock was released"
+
+    _sh.rmtree(_data, ignore_errors=True)
+
 
 
 def main():

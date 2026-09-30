@@ -11,11 +11,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo
-echo "=== [1/2] Node.js unit tests ==========================================="
+echo "=== [1/3] Node.js unit tests ==========================================="
 node --test tests
 
 echo
-echo "=== [2/2] Python backend self-test ====================================="
+echo "=== [2/3] Python backend self-test ====================================="
 if command -v python3 >/dev/null 2>&1; then
   python3 server/mdnotes_server.py --selftest
 else
@@ -23,4 +23,11 @@ else
 fi
 
 echo
+echo "=== [3/3] Sync reliability regressions =================================="
+if command -v python3 >/dev/null 2>&1; then
+  python3 -B tests/server-reliability.test.py
+else
+  python -B tests/server-reliability.test.py
+fi
+
 echo "=== All tests passed. =================================================="
