@@ -74,7 +74,11 @@ async def main():
   assert await page.locator('#app').get_attribute('data-mobile-explorer')!='open'
   # Reproduce an apparently connected workspace stranded at the welcome screen.
   await page.evaluate('''() => {const t=recoveryTest;t.controller.getProject().activeFileId=null;t.render(t.controller.getProject());}''')
-  await page.locator('#welcome-resume').click()
+  assert await page.locator('#welcome-resume').is_hidden()
+  await page.evaluate('''() => {
+   Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});document.dispatchEvent(new Event('visibilitychange'));
+   Object.defineProperty(document,'visibilityState',{configurable:true,value:'visible'});document.dispatchEvent(new Event('visibilitychange'));
+  }''')
   await page.wait_for_function('window.recoveryTest.controller.getActiveFile()?.name === "session.md"')
   # A silently dead stream must reconnect on foreground, pulling newer cloud
   # content without writing the stale local version back over it.
@@ -104,6 +108,16 @@ async def main():
   assert await page.evaluate('recoveryTest.getStatus()')=='connected',state
   assert 'Newer cloud campaign notes' in await page.locator('#editor-content').inner_text()
   assert state['writes']==0,state
+  # BFCache suspension keeps the session; a real tab close sends a best-effort
+  # leave signal for this token. A lost signal is handled by the server lease.
+  beacons=await page.evaluate('''() => {
+   const sent=[];
+   Object.defineProperty(navigator,'sendBeacon',{configurable:true,value:url=>{sent.push(url);return true;}});
+   const saved=new Event('pagehide');Object.defineProperty(saved,'persisted',{value:true});dispatchEvent(saved);
+   const closed=new Event('pagehide');Object.defineProperty(closed,'persisted',{value:false});dispatchEvent(closed);
+   return sent;
+  }''')
+  assert len(beacons)==1 and '/api/session/leave?token=session-' in beacons[0],beacons
   # Logout while a replacement login is pending must remain logged out.
   state['expire_all']=True;state['hold_login']=True
   await page.evaluate('window.dispatchEvent(new Event("online"))')
@@ -117,6 +131,6 @@ async def main():
   assert not await page.evaluate('recoveryTest.hasAccount()')
   assert await page.evaluate('JSON.parse(localStorage.getItem("mdnotes.settings.v1")).accountPassword')==''
   assert not errors,errors
-  print(json.dumps({'checks':['offline boot retries','failed open recovers','root-path Resume works','connected empty view resumes','foreground replaces silent stream','duplicate events coalesce','new cloud text not overwritten','active file persists on suspension','expired account and login outage recover','logout invalidates pending login'],'runtimeErrors':len(errors),'opens':state['opens'],'writes':state['writes']}))
+  print(json.dumps({'checks':['offline boot retries','failed open recovers','root-path auto restore works','connected empty view resumes on foreground','foreground replaces silent stream','duplicate events coalesce','new cloud text not overwritten','active file persists on suspension','expired account and login outage recover','pagehide closes phone session','logout invalidates pending login'],'runtimeErrors':len(errors),'opens':state['opens'],'writes':state['writes']}))
   await browser.close()
 asyncio.run(main())

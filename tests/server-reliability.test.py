@@ -270,6 +270,53 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual((self.directory / 'a.png').read_bytes(), b'abc')
         self.assertEqual((self.directory / 'comments.json').read_text(), '{"keep":true}')
 
+    def test_presence_lease_expires_a_suspended_phone_session(self):
+        queue = self.broker.subscribe(self.token, leased=True)
+        self.assertEqual(queue.get_nowait()['type'], 'ready')
+        self.assertFalse(self.broker.session_should_close(self.token))
+        self.broker.renew_lease(self.token)
+        self.assertFalse(self.broker.session_should_close(self.token))
+        self.broker.leases[self.token] -= 76
+        self.assertTrue(self.broker.session_should_close(self.token))
+        self.broker.unsubscribe(self.token, revoke=True)
+        self.assertEqual(self.broker.get_presence(), [])
+        with self.assertRaises(PermissionError):
+            self.broker.get_state(self.token)
+
+    def test_old_stream_has_no_new_lease_and_replaced_token_closes(self):
+        self.broker.subscribe(self.token)
+        self.assertFalse(self.broker.session_should_close(self.token))
+        self.broker.evict_user('nobody')
+        self.broker.unsubscribe(self.token)
+        self.assertFalse(self.broker.session_should_close(self.token))
+        self.broker.unsubscribe(self.token, revoke=True)
+        self.assertTrue(self.broker.session_should_close(self.token))
+
+    def test_lease_sweep_removes_a_session_even_without_a_stream(self):
+        registry = server.WorkspaceRegistry('2468', Path(self.tmp.name) / 'default.json')
+        session = registry.connect(None, '2468', 'Phone', leased=True)
+        token = session['token']
+        broker = registry.broker_for_token(token)
+        broker.leases[token] -= 76
+        self.assertEqual(registry.expire_leases(), 1)
+        self.assertEqual(registry.expire_leases(), 0)
+        self.assertEqual(broker.get_presence(), [])
+        self.assertNotIn(token, registry.token_workspace)
+        with self.assertRaises(PermissionError):
+            broker.get_state(token)
+
+    def test_explicit_leave_clears_presence_and_token_mapping(self):
+        registry = server.WorkspaceRegistry('2468', Path(self.tmp.name) / 'default.json')
+        session = registry.connect(None, '2468', 'Phone')
+        token = session['token']
+        broker = registry.broker_for_token(token)
+        self.assertEqual(len(broker.get_presence()), 1)
+        registry.close_session(token)
+        self.assertEqual(broker.get_presence(), [])
+        self.assertNotIn(token, registry.token_workspace)
+        with self.assertRaises(PermissionError):
+            broker.get_state(token)
+
     def test_state_snapshot_is_immutable_and_stream_starts_with_ready(self):
         snapshot = self.broker.get_state(self.token)
         queue = self.broker.subscribe(self.token)

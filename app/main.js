@@ -10789,7 +10789,11 @@ elements.mobileRenameButton?.addEventListener("click", () => {
 // the last cloud workspace, and Open-a-workspace only when signed in.
 function renderWelcomeState() {
   const last = settings.lastWorkspace;
-  const canResume = Boolean(rememberedWorkspace(last));
+  const target = rememberedWorkspace(last);
+  const alreadyOpen = target && settings.syncedProjectId === `${target.team}/${target.path}`
+    && workspaceMode === "synced"
+    && (["connected", "reconnecting"].includes(syncState.status) || sessionRestorer?.isPending());
+  const canResume = Boolean(target) && !alreadyOpen;
   if (elements.welcomeResume) {
     elements.welcomeResume.hidden = !canResume;
     if (canResume) {
@@ -12493,7 +12497,10 @@ function persistBeforeSuspension() {
   if (settings.syncedProjectId) patchStoredSettings(stored => stored.syncedProjectId === settings.syncedProjectId
     ? { syncedRevision: settings.syncedRevision } : null);
 }
-window.addEventListener("pagehide", persistBeforeSuspension);
+window.addEventListener("pagehide", event => {
+  persistBeforeSuspension();
+  if (!event.persisted) collaboration.leaveOnPageHide();
+});
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") persistBeforeSuspension();
 });
@@ -12596,6 +12603,7 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 window.addEventListener("online", () => {
+  if (document.visibilityState === "hidden") return;
   if (workspaceMode === "synced" || !controller.getActiveFile() || sessionRestorer.isPending()) void sessionRestorer.run();
 });
 window.addEventListener("pageshow", event => {

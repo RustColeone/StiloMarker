@@ -1038,6 +1038,7 @@ class CollaborationBroker:
         self.tokens = {}
         self.subscribers = {}
         self.presence = {}
+        self.leases = {}  # monotonic heartbeat time for clients using presence leases
         self.master_tokens: set[str] = set()  # tokens that authenticated with master_pin
         self.reader_tokens: set[str] = set()  # read-only sessions (access.readers)
         # Ring buffer of applied operations for OT rebase, keyed by revision number.
@@ -1728,7 +1729,7 @@ class CollaborationBroker:
                     "Drop is only allowed when you are the sole author of all edits since the target."
                 )
 
-    def _admit(self, display_name: str, role: str, identity: str | None = None, device: str | None = None):
+    def _admit(self, display_name: str, role: str, identity: str | None = None, device: str | None = None, leased: bool = False):
         """Mint a session token + presence for an already-authorized joiner.
         Shared by PIN connect() and account/workspace opens (which have no PIN).
         `identity` (an account username) + `device` dedupe sessions — see
@@ -1743,6 +1744,8 @@ class CollaborationBroker:
             self._ensure_persisted()
             self.tokens[token] = client_id
             self.presence[token] = {"clientId": client_id, "displayName": display_name, "connectedAt": time.time(), "user": identity, "device": device}
+            if leased:
+                self.leases[token] = time.monotonic()
             if role == "master":
                 self.master_tokens.add(token)
             elif role == "reader":
@@ -1767,6 +1770,7 @@ class CollaborationBroker:
             ]
             for tok in stale:
                 self.presence.pop(tok, None)
+                self.leases.pop(tok, None)
                 self.tokens.pop(tok, None)
                 self.master_tokens.discard(tok)
                 self.reader_tokens.discard(tok)
@@ -1774,7 +1778,7 @@ class CollaborationBroker:
         if stale:
             self._broadcast_presence("Replaced a duplicate session.")
 
-    def connect(self, pin: str, display_name: str = ""):
+    def connect(self, pin: str, display_name: str = "", leased: bool = False):
         if pin == self.master_pin:
             role = "master"
         elif pin == self.pin:
@@ -1782,7 +1786,7 @@ class CollaborationBroker:
         else:
             _log("AUTH", "Rejected connect — wrong PIN")
             raise PermissionError("Invalid PIN")
-        return self._admit(display_name, role)
+        return self._admit(display_name, role, leased=leased)
 
     def authorize(self, token: str):
         with self.lock:
@@ -2041,7 +2045,7 @@ class CollaborationBroker:
         self._broadcast(event, exclude_token=token)
         _log("CURSOR", f"from={display_name!r}  fileId={file_id!r}  sel={sel_start}\u2013{sel_end}  to={recipient_count} peer(s)")
 
-    def subscribe(self, token: str):
+    def subscribe(self, token: str, leased: bool = False):
         client_id = self.authorize(token)
         event_queue = queue.Queue()
         with self.lock:
@@ -2054,13 +2058,34 @@ class CollaborationBroker:
                 "revision": self.revision, "serverTime": time.time()
             })
             self.subscribers[token] = event_queue
+            if leased:
+                self.leases[token] = time.monotonic()
         return event_queue
 
-    def unsubscribe(self, token: str):
+    def renew_lease(self, token: str) -> None:
+        with self.lock:
+            self.authorize(token)
+            if token in self.leases:
+                self.leases[token] = time.monotonic()
+
+    def session_should_close(self, token: str) -> bool:
+        with self.lock:
+            return token not in self.tokens or (token in self.leases and time.monotonic() - self.leases[token] > 75)
+
+    def unsubscribe(self, token: str, expected_queue=None, expired_only=False, revoke=False):
         client_id = None
+        had_token = False
         display_name = None
         with self.lock:
+            if expected_queue is not None and self.subscribers.get(token) is not expected_queue:
+                return False
+            if expired_only and not (token in self.leases and time.monotonic() - self.leases[token] > 75):
+                return False
+            had_token = token in self.tokens
             self.subscribers.pop(token, None)
+            if revoke:
+                self.leases.pop(token, None)
+                self.tokens.pop(token, None)
             self.master_tokens.discard(token)
             self.reader_tokens.discard(token)
             presence = self.presence.pop(token, None)
@@ -2070,6 +2095,7 @@ class CollaborationBroker:
         if client_id:
             _log("DISCONNECT", f"{display_name} left", clientId=client_id)
             self._broadcast_presence(f"{display_name} left the session.")
+        return had_token
 
 
 # Special team that holds today's single PIN session and any ephemeral
@@ -3096,7 +3122,7 @@ class WorkspaceRegistry:
         _log("WORKSPACE", f"{identity['username']} created {team}/{name}", members=members)
         return {"team": team, "name": name, "id": f"{team}/{name}", "members": members, "createdBy": identity["username"]}
 
-    def open_workspace(self, token: str, team: str, path: str, device: str | None = None) -> dict:
+    def open_workspace(self, token: str, team: str, path: str, device: str | None = None, leased: bool = False) -> dict:
         """Admit a logged-in account into a team project (role master), loading
         or creating its persisted broker. ``path`` points at a project directory
         relative to the team root (e.g. ``workspaces/WorkNotes``)."""
@@ -3119,7 +3145,7 @@ class WorkspaceRegistry:
         # stays connected (self-collaboration across devices; no reconnect war).
         broker.evict_user(identity["username"], device)
         role = self.role_for(identity, team, relpath)
-        session = broker._admit(identity["username"], role, identity=identity["username"], device=device)
+        session = broker._admit(identity["username"], role, identity=identity["username"], device=device, leased=leased)
         self.set_last_workspace(identity["username"], team, relpath)  # cross-device resume
         with self.lock:
             self.token_workspace[session["token"]] = workspace_id
@@ -3207,7 +3233,7 @@ class WorkspaceRegistry:
         session["workspace"] = workspace_id
         return session
 
-    def connect(self, workspace_id: str | None, pin: str, display_name: str = ""):
+    def connect(self, workspace_id: str | None, pin: str, display_name: str = "", leased: bool = False):
         """Guest-PIN connect. With an explicit workspace, joins it; otherwise the
         PIN is resolved — first against the default workspace, then against any
         ephemeral guest-hosted session — so a guest only needs the shared PIN."""
@@ -3215,10 +3241,10 @@ class WorkspaceRegistry:
             broker = self.get_broker(workspace_id)
             if broker is None:
                 raise PermissionError("Unknown workspace")
-            return self._bind_session(workspace_id, broker.connect(pin, display_name))
+            return self._bind_session(workspace_id, broker.connect(pin, display_name, leased=leased))
         # No workspace given: try the legacy default session first.
         try:
-            return self._bind_session(DEFAULT_WORKSPACE_ID, self.default_broker.connect(pin, display_name))
+            return self._bind_session(DEFAULT_WORKSPACE_ID, self.default_broker.connect(pin, display_name, leased=leased))
         except PermissionError:
             pass
         # Then any ephemeral host whose guest PIN matches.
@@ -3227,9 +3253,9 @@ class WorkspaceRegistry:
         if match is None:
             raise PermissionError("Invalid PIN")
         broker = self.get_broker(match)
-        return self._bind_session(match, broker.connect(pin, display_name))
+        return self._bind_session(match, broker.connect(pin, display_name, leased=leased))
 
-    def host_ephemeral(self, display_name: str) -> dict:
+    def host_ephemeral(self, display_name: str, leased: bool = False) -> dict:
         """Create an in-memory guest-hosted session for a local project. Returns a
         master session + the generated guest PIN. Evicted when the master leaves."""
         guest_pin = f"{secrets.randbelow(900000) + 100000}"  # 6-digit shareable PIN
@@ -3237,7 +3263,7 @@ class WorkspaceRegistry:
         broker = CollaborationBroker(guest_pin, None, master_pin=secrets.token_urlsafe(16))
         with self.lock:
             self.brokers[workspace_id] = broker
-        session = broker._admit(display_name, "master")
+        session = broker._admit(display_name, "master", leased=leased)
         with self.lock:
             self.ephemeral[workspace_id] = {"ownerToken": session["token"], "guestPin": guest_pin}
         self._bind_session(workspace_id, session)
@@ -3245,7 +3271,20 @@ class WorkspaceRegistry:
         _log("HOST", f"{session['displayName']} hosting ephemeral {workspace_id}", guestPin=guest_pin)
         return session
 
-    def on_disconnect(self, token: str) -> None:
+    def expire_leases(self) -> int:
+        with self.lock:
+            brokers = list(self.brokers.values())
+        expired = 0
+        for broker in brokers:
+            with broker.lock:
+                candidates = [token for token, last in broker.leases.items() if time.monotonic() - last > 75]
+            for token in candidates:
+                if broker.unsubscribe(token, expired_only=True, revoke=True):
+                    self.on_disconnect(token, revoke=True)
+                    expired += 1
+        return expired
+
+    def on_disconnect(self, token: str, revoke: bool = False) -> None:
         """Called when a session's SSE stream closes. If the departing token owns
         an ephemeral workspace, evict it (in-memory state discarded)."""
         with self.lock:
@@ -3254,6 +3293,15 @@ class WorkspaceRegistry:
             is_owner = bool(meta and meta.get("ownerToken") == token)
         if is_owner:
             self._evict_ephemeral(workspace_id)
+        elif revoke:
+            with self.lock:
+                self.token_workspace.pop(token, None)
+
+    def close_session(self, token: str) -> None:
+        broker = self.broker_for_token(token)
+        broker.authorize(token)
+        broker.unsubscribe(token, revoke=True)
+        self.on_disconnect(token, revoke=True)
 
     def _evict_ephemeral(self, workspace_id: str) -> None:
         with self.lock:
@@ -3394,6 +3442,10 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_post_state(parsed)
         if parsed.path == "/api/session/presence":
             return self._handle_post_presence(parsed)
+        if parsed.path == "/api/session/lease":
+            return self._handle_session_lease(parsed)
+        if parsed.path == "/api/session/leave":
+            return self._handle_session_leave(parsed)
         if parsed.path == "/api/operations":
             return self._handle_operation(parsed)
         self._write_json(HTTPStatus.NOT_FOUND, {"message": "Not found"})
@@ -3553,7 +3605,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             if not path and payload.get("name"):
                 path = f"workspaces/{payload.get('name')}"
             device = str(payload.get("device") or "").strip()[:64] or None
-            session = self.registry.open_workspace(token, str(payload.get("team", "")), path, device)
+            session = self.registry.open_workspace(token, str(payload.get("team", "")), path, device, leased=payload.get("lease") is True)
             self._write_json(HTTPStatus.OK, session)
             # Diagnostics for repeated-open churn: `pageId` distinguishes "the page
             # keeps reloading" (many ids) from "one tab keeps reconnecting" (one id),
@@ -3809,7 +3861,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
     def _handle_host(self):
         try:
             payload = self._read_json()
-            session = self.registry.host_ephemeral(str(payload.get("displayName", "")))
+            session = self.registry.host_ephemeral(str(payload.get("displayName", "")), leased=payload.get("lease") is True)
             self._write_json(HTTPStatus.OK, session)
             self._log_request(200, f"host {session['workspace']} pin={session['guestPin']}")
         except ValueError as error:
@@ -3824,6 +3876,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
                 workspace,
                 str(payload.get("pin", "")),
                 str(payload.get("displayName", "")),
+                leased=payload.get("lease") is True,
             )
             self._write_json(HTTPStatus.OK, session)
             self._log_request(200, f"role={session['role']}  name={session['displayName']!r}  ws={session['workspace']}")
@@ -4086,6 +4139,22 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         except (ValueError, TypeError) as error:
             self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
 
+    def _handle_session_lease(self, parsed):
+        try:
+            token = self._extract_token(parsed)
+            self.registry.broker_for_token(token).renew_lease(token)
+            self._write_json(HTTPStatus.OK, {"message": "session active"})
+        except PermissionError:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": "Session expired"})
+
+    def _handle_session_leave(self, parsed):
+        try:
+            token = self._extract_token(parsed)
+            self.registry.close_session(token)
+            self._write_json(HTTPStatus.OK, {"message": "session closed"})
+        except PermissionError:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": "Session expired"})
+
     def _handle_operation(self, parsed):
         try:
             token = self._extract_token(parsed)
@@ -4122,7 +4191,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         try:
             token = self._extract_token(parsed)
             broker = self.registry.broker_for_token(token)
-            events = broker.subscribe(token)
+            events = broker.subscribe(token, leased=parse_qs(parsed.query).get("lease") == ["1"])
         except PermissionError as error:
             self._log_request(403, str(error))
             return self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
@@ -4147,8 +4216,13 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
 
         try:
             while True:
+                if broker.session_should_close(token):
+                    _log("SSE", f"Session expired or replaced after {time.time() - stream_started:.0f}s", client=display_name)
+                    break
                 try:
                     event = events.get(timeout=15)
+                    if broker.session_should_close(token):
+                        break
                     payload = json.dumps(event)
                     self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
                     # Log meaningful events sent to this client (skip noisy cursor/presence/keepalives).
@@ -4173,9 +4247,13 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             _log("SSE", f"Stream closed after {time.time() - stream_started:.0f}s  {self.client_address[0]}",
                  client=display_name)
         finally:
-            broker.unsubscribe(token)
-            # Evict an ephemeral guest-hosted session once its master disconnects.
-            self.registry.on_disconnect(token)
+            ended = broker.unsubscribe(token, expected_queue=events)
+            # A replaced stream may no longer own this token. Its cleanup must
+            # not close a newer stream using the same token.
+            with broker.lock:
+                revoked = token not in broker.tokens
+            if ended or revoked:
+                self.registry.on_disconnect(token)
 
     # Server-side files that live under the repo (== static root) but must never
     # be handed out over HTTP: collaboration state, account whitelist, secrets,
@@ -4235,7 +4313,18 @@ def build_server(host: str, port: int, pin: str, static_root: Path, state_file: 
                 return
             super().handle_error(request, client_address)
 
-    return QuietThreadingHTTPServer((host, port), handler)
+    class ServerWithPresenceSweep(QuietThreadingHTTPServer):
+        def server_close(self):
+            self.presence_stop.set()
+            super().server_close()
+
+    server = ServerWithPresenceSweep((host, port), handler)
+    server.presence_stop = threading.Event()
+    def sweep_presence():
+        while not server.presence_stop.wait(15):
+            registry.expire_leases()
+    threading.Thread(target=sweep_presence, daemon=True, name="presence-lease-sweep").start()
+    return server
 
 
 def run_selftest():

@@ -7,13 +7,13 @@ Prepare and test a release in a separate directory before copying it into place.
 
 ## Release numbering
 
-- `v0.1.17`: app release, following `MAJOR.MINOR.PATCH`.
+- `v0.1.18`: app release, following `MAJOR.MINOR.PATCH`.
 - `SYNC_PROTOCOL_VERSION` / `MIN_CLIENT_VERSION`: numeric sync compatibility.
   Keep the wire field `version` numeric so old clients remain safely rejected.
   Ordinary app releases do not need a protocol increment.
 - Document S.E.N labels and workspace revisions are separate and unchanged.
 
-Use `node tools/release-version.mjs 0.1.18` to set the next app release and
+Use `node tools/release-version.mjs 0.1.19` to set the next app release and
 `node tools/release-version.mjs --check` to verify all release labels agree.
 
 ## Coordinated deployment

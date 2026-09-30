@@ -21,6 +21,7 @@ function harness(t) {
   let nextTimer = 1;
   const streams = [];
   const posts = [];
+  const leases = [], leaves = [];
   const archives = [];
   const statuses = [];
   let local = project();
@@ -28,7 +29,7 @@ function harness(t) {
   const hooks = {};
   globalThis.window = { setTimeout(fn, delay) { const id = nextTimer++; timers.set(id, { fn, delay }); return id; }, clearTimeout(id) { timers.delete(id); } };
   globalThis.EventSource = class {
-    constructor() { streams.push(this); }
+    constructor(url) { this.url = url; streams.push(this); }
     close() { this.closed = true; }
     event(event) { this.onmessage({ data: JSON.stringify(event) }); }
   };
@@ -39,6 +40,8 @@ function harness(t) {
       if (hooks.get) return hooks.get();
       return json(structuredClone(server));
     }
+    if (url.includes('/session/lease')) { leases.push(url); return json({message:'session active'}); }
+    if (url.includes('/session/leave')) { leaves.push(url); return json({message:'session closed'}); }
     if (url.includes('/operations')) {
       const { operation } = JSON.parse(options.body);
       posts.push(operation);
@@ -61,7 +64,7 @@ function harness(t) {
   });
   t.after(() => { runtime.disconnect(); Object.assign(globalThis, old); });
   return {
-    runtime, server, hooks, posts, archives, statuses, streams, json,
+    runtime, server, hooks, posts, leases, leaves, archives, statuses, streams, json,
     local: () => local,
     async open(options = {}) { await runtime.openWorkspace('https://example.test', 'account', 'team', 'test', options); },
     edit(text) { const oldText = local.nodes.file.content; local.nodes.file.content = text; local.nodes.file.dirty = true; runtime.scheduleTextPatch('note.md', oldText, text); },
@@ -364,4 +367,30 @@ test('queued callbacks from a replaced stream cannot break the recovered session
   old.onerror();old.event({type:'operation',revision:99,operation:{type:'update-file',path:'note.md',content:'stale stream'}});
   assert.equal(h.runtime.isReconnecting(),false);assert.equal(h.runtime.getRevision(),1);
   assert.equal(h.local().nodes.file.content,'original');
+});
+
+test('visible cloud tab renews its lease and pagehide closes only its session', async t => {
+  const h = harness(t); await h.open();
+  assert.match(h.streams[0].url, /lease=1/);
+  await h.tick(20000);
+  assert.equal(h.leases.length, 1);
+  h.runtime.leaveOnPageHide(); await settle();
+  assert.equal(h.leaves.length, 1);
+  assert.match(h.leaves[0], /token=session/);
+});
+
+test('a sleeping tab pauses heartbeats and waits for foreground to reconnect', async t => {
+  const oldDocument = globalThis.document;
+  globalThis.document = { visibilityState: 'hidden' };
+  t.after(() => { globalThis.document = oldDocument; });
+  const h = harness(t); await h.open();
+  await h.tick(20000);
+  assert.equal(h.leases.length, 0);
+  h.streams[0].onerror();
+  assert.equal(h.runtime.isReconnecting(), true);
+  assert.equal(h.statuses.at(-1).status, 'reconnecting');
+  globalThis.document.visibilityState = 'visible';
+  await h.runtime.resumeConnection();
+  assert.equal(h.runtime.isReconnecting(), false);
+  assert.equal(h.statuses.at(-1).status, 'connected');
 });

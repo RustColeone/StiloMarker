@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-09-30 · release `v0.1.17` (deployed; public verification passed)
+Last updated: 2026-09-30 · release `v0.1.18` (deployed; public verification passed)
 
 ---
 
@@ -30,6 +30,11 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.18: sleeping-tab recovery and stale presence
+
+An account or PIN session opened by this release renews a 75-second presence lease while its tab is visible. The server expires the token and broadcasts departure when the heartbeat stops, even if a mobile browser leaves a TCP stream apparently open; a tab-close signal removes it immediately when delivered. Returning to a sleeping cloud tab reconnects automatically and keeps the workspace on screen. The no-file view does not offer Resume when the same workspace is already connected or reconnecting. Older tabs remain on their prior stream-close behavior until refreshed.
+
 
 ### v0.1.17: optional in-app MCP read tools
 

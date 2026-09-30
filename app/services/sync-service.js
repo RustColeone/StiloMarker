@@ -75,7 +75,7 @@ async function connectToServer(serverUrl, pin, displayName = "") {
       "content-type": "application/json",
       accept: "application/json, text/plain;q=0.9"
     },
-    body: JSON.stringify({ pin: trimmedPin, displayName: displayName.trim() })
+    body: JSON.stringify({ pin: trimmedPin, displayName: displayName.trim(), lease: true })
   });
 
   if (!response.ok) {
@@ -159,7 +159,7 @@ async function hostSession(serverUrl, displayName) {
   const response = await fetch(`${baseUrl}/api/session/host`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({ displayName: String(displayName ?? "").trim() })
+    body: JSON.stringify({ displayName: String(displayName ?? "").trim(), lease: true })
   });
   if (!response.ok) {
     await throwForResponse("Could not start hosting.", response);
@@ -174,7 +174,7 @@ async function openWorkspaceSession(serverUrl, accountToken, team, path, device,
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify({
-      team, path, device, version: SYNC_PROTOCOL_VERSION,
+      team, path, device, lease: true, version: SYNC_PROTOCOL_VERSION,
       // Diagnostics: which code path asked, from which page load, how long that
       // page has been alive. Enough to explain any repeated-open pattern.
       reason, pageId: PAGE_ID, uptimeMs: Date.now() - PAGE_LOADED_AT
@@ -476,9 +476,27 @@ async function pushCursor(serverUrl, token, { fileId, selStart, selEnd }) {
   return response.ok;
 }
 
+async function renewSessionLease(serverUrl, token) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const response = await fetch(`${baseUrl}/api/session/lease?token=${encodeURIComponent(token)}`, {
+    method: "POST", signal: AbortSignal.timeout(10000)
+  });
+  if (!response.ok) await throwForResponse("Connection check failed.", response);
+}
+
+function leaveSession(serverUrl, token) {
+  if (!token) return;
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const url = `${baseUrl}/api/session/leave?token=${encodeURIComponent(token)}`;
+  // pagehide is the last reliable callback on many phones. Beacon may still be
+  // dropped when the OS kills a tab; the server lease bounds that case.
+  if (typeof navigator !== "undefined" && navigator.sendBeacon?.(url)) return;
+  void fetch(url, { method: "POST", keepalive: true }).catch(() => {});
+}
+
 function openEventStream(serverUrl, token, onEvent, onError) {
   const baseUrl = normalizeServerUrl(serverUrl);
-  const eventSource = new EventSource(`${baseUrl}/api/events/stream?token=${encodeURIComponent(token)}`);
+  const eventSource = new EventSource(`${baseUrl}/api/events/stream?token=${encodeURIComponent(token)}&lease=1`);
 
   eventSource.onmessage = (event) => {
     try {
@@ -519,6 +537,8 @@ export {
   normalizeServerUrl,
   openEventStream,
   openWorkspaceSession,
+  renewSessionLease,
+  leaveSession,
   pingServer,
   pushCursor,
   pushOperation,
