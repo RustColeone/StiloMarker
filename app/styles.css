@@ -6641,3 +6641,12 @@ pre.proposal-diff-block {
 @media (max-width: 560px) {
   .topbar .brand-cluster { display: none; }
 }
+
+
+.mcp-connection { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.mcp-connection label { min-width: 0; overflow-wrap: anywhere; }
+.mcp-connection-status { grid-column: 1 / -1; overflow-wrap: anywhere; }
+#chat-mcp-summary { padding: 4px 8px; overflow-wrap: anywhere; }
+@media (max-width: 900px) {
+  #mcp-load-button, .mcp-connection button, .mcp-connection label { min-height: 44px; }
+}

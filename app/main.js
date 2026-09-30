@@ -1,3 +1,4 @@
+import { createMcpControls } from "./services/mcp-ui-service.js";
 import { rememberedWorkspace, createSessionRecovery } from "./services/session-recovery-service.js";
 import { createChatSynchronizer } from "./services/chat-sync-service.js";
 import { shouldSubmitChat, isChatNearBottom, installMobileViewport } from "./services/chat-ui-service.js";
@@ -436,6 +437,7 @@ const syncState = {
 // "private" = user's local workspace; "synced" = connected server workspace.
 let workspaceMode = "private";
 let sessionRestorer = null;
+let mcpControls = null;
 
 // Mobile pane state (drives #app[data-mobile-view]). Declared here so the layout
 // pass that runs during module load can read it before its helpers execute.
@@ -1011,6 +1013,8 @@ function resolveChatContextFiles(project, thread) {
 
 /** Human-readable line for one agent progress step. */
 function describeAgentActivity(event) {
+  if (event.type === "mcp-status") return `${event.server}: ${event.message}`;
+  if (event.type === "tool" && event.server) return `${event.server} · ${event.name}`;
   if (event.type === "status") {
     return event.iteration > 0 ? "Reviewing the workspace…" : "Reading your request…";
   }
@@ -1089,6 +1093,7 @@ function renderAgentActivity() {
 }
 
 function renderChatPanel(project) {
+  mcpControls?.render();
   ensureChatWorkspaceLoaded(project);
 
   const activeThread = getActiveChatThread();
@@ -1293,6 +1298,14 @@ function addActiveFileToChatContext() {
   }
   addChatContextPath(getPath(project, project.activeFileId));
 }
+
+mcpControls = createMcpControls({
+  list: query("#mcp-connections"), status: query("#mcp-status"), loadButton: query("#mcp-load-button"), summary: query("#chat-mcp-summary"),
+  getIdentity: () => syncState.account ? {
+    serverUrl: settings.serverUrl, token: syncState.account.token,
+    scope: JSON.stringify([normalizeServerUrl(settings.serverUrl), syncState.account.username, chatWorkspaceKey()])
+  } : null
+});
 
 // Own-key mode: the request override sent to the proxy (empty in server mode or
 // when no key is entered, so the server's own key is used instead).
@@ -1507,6 +1520,7 @@ async function runAgentTurn(thread, project) {
         .map((message) => ({ role: message.role, content: message.content })),
       contextFiles,
       project: buildAgentProjectSnapshot(project),
+      ...mcpControls.getRequest(),
       // Own-key mode: pass the user's key/url/model so the proxy uses them.
       ...agentRequestOverride()
     }, (event) => {
@@ -10948,6 +10962,7 @@ function openSettingsDialog(tab = "appearance") {
     elements.settingsDialog.showModal();
   }
   applyAgentSettingsControls();
+  mcpControls.render();
   // Re-check the agent backend so the Agent tab shows fresh status.
   void refreshChatStatus({ silent: true });
   switchSettingsTab(tab);

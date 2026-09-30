@@ -309,6 +309,7 @@
                   title="Add the currently open file to context">&#64; Active</button>
                 <span class="chat-compose-drop-hint">or drag files here</span>
               </div>
+              <div id="chat-mcp-summary" class="subtle-label" hidden></div>
               <div class="chat-compose-input-row">
                 <textarea id="chat-input" class="chat-input" rows="2" spellcheck="true"
                   placeholder="Ask the agent…"></textarea>
@@ -624,6 +625,13 @@
                 </label>
                 <p class="subtle-label">Your key is sent over HTTPS to this server's proxy for each request and is never stored server-side. It stays in this browser.</p>
               </div>
+            </section>
+            <section class="settings-section" aria-label="Connected tools">
+              <h3>Connected tools (MCP)</h3>
+              <p class="subtle-label">Use read-only tools provided by your server, such as search or reference libraries. Selected tools may receive search terms and relevant excerpts from your request.</p>
+              <button id="mcp-load-button" type="button">Load connections</button>
+              <p id="mcp-status" class="subtle-label" role="status">Sign in to use the connections provided by your server.</p>
+              <div id="mcp-connections"></div>
             </section>
           </div>
         </div>

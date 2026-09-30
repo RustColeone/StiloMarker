@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-09-30 · release `v0.1.16` (deployed; public verification passed)
+Last updated: 2026-09-30 · release `v0.1.17` (deployed; public verification passed)
 
 ---
 
@@ -30,6 +30,11 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.17: optional in-app MCP read tools
+
+Agent chat can discover owner-configured Streamable HTTP connections, limited to approved teams and declared read-only tools. Connections are loaded or checked only on request; the selection is per account/workspace in the tab. No actual provider is enabled until an owner supplies an endpoint and credential. See [MCP setup](MCP.md).
+
 
 ### v0.1.16: automatic phone/session recovery and working Resume
 

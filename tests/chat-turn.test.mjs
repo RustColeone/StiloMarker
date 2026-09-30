@@ -12,7 +12,7 @@ function harness() {
   const gate=deferred(), thread={id:'thread',messages:[{role:'user',content:'request',contextPaths:['note.md']}],contextPaths:[]};
   const state={configured:true,threads:[thread],streamingText:'',reasoningText:''}, applications=[],saves=[];
   const dependencies = {
-    chatState:state, controller:{getProject:()=>project}, settings:{serverUrl:'https://test.invalid'},
+    mcpControls:{getRequest:()=>({})}, chatState:state, controller:{getProject:()=>project}, settings:{serverUrl:'https://test.invalid'},
     chatWorkspaceKey:()=>project.id, chatConnectionInfo:()=>({token}), agentDocumentSignature:p=>p.content,
     collaboration:{getConnectionInfo:()=>({token}),getRevision:()=>5,getClientId:()=> 'client'},
     resolveChatContextFiles:(_,ctx)=>ctx.contextPaths, persistChatWorkspaceState:()=>saves.push(project.id),cacheChatWorkspace:()=>{},
