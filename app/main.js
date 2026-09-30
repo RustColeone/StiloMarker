@@ -396,8 +396,8 @@ function setViewState(fileId, patch) {
   saveViewStates(viewStates);
 }
 
-/** Snapshot the current preview bmap's pan/zoom and the active editor scroll, so
- *  switching documents or leaving the page can resume them later. */
+/** Snapshot the current preview bmap and editor position before a file switch
+ *  or page suspension. The selection listener also remembers unfocused clicks. */
 function captureViewState() {
   const project = controller.getProject();
   if (previewFileId && previewBmapView) {
@@ -412,7 +412,27 @@ function captureViewState() {
     // The REAL scroller is #editor-content (#editor-scroll is overflow:hidden and
     // always reports scrollTop 0), so persist the content scroll for this file.
     setViewState(activeId, { editorScroll: elements.editorContent.scrollTop });
+    rememberEditorSelection();
   }
+}
+
+function savedEditorSelection(fileId, text) {
+  const saved = getViewState(fileId)?.editorSelection;
+  if (!saved || saved.scope !== chatWorkspaceKey() || !Number.isInteger(saved.start) || !Number.isInteger(saved.end)) return null;
+  return clampEditorSelection(text, saved.start, saved.end);
+}
+
+function rememberEditorSelection() {
+  const fileId = controller.getProject().activeFileId;
+  const selection = window.getSelection();
+  if (!fileId || lastRenderedFileId !== fileId || !selection?.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  if (!elements.editorContent.contains(range.startContainer) || !elements.editorContent.contains(range.endContainer)) return;
+  const { start, end } = getEditorSelection();
+  const scope = chatWorkspaceKey();
+  const previous = getViewState(fileId)?.editorSelection;
+  if (previous?.scope === scope && previous.start === start && previous.end === end) return;
+  setViewState(fileId, { editorSelection: { scope, start, end } });
 }
 let mathJaxLoadPromise = null;
 let previewBmapView = null;
@@ -4272,6 +4292,7 @@ function attachSelectionChangeListener() {
   if (_selectionChangeListenerAttached) return;
   _selectionChangeListenerAttached = true;
   document.addEventListener("selectionchange", () => {
+    if (document.activeElement === elements.editorContent && !_editorUpdating && !editorIsComposing) rememberEditorSelection();
     if (!collaboration.isConnected()) return;
     const activeFile = controller.getActiveFile();
     if (!activeFile) return;
@@ -8772,9 +8793,9 @@ function updateStatus(project) {
     renderRemoteCursors([]);
   }
   if (!_editorUpdating && fileChanged) {
-    logDebug("response", "caret", `render→loadEditorContent (fileChanged: last=${lastRenderedFileId} new=${activeFile.id}) → caret to 0`);
+    const savedSelection = savedEditorSelection(activeFile.id, nextText);
     lastRenderedFileId = activeFile.id;
-    loadEditorContent(nextText);
+    loadEditorContent(nextText, savedSelection?.start ?? 0, savedSelection?.end ?? savedSelection?.start ?? 0);
     // Resume the reader's previous scroll position in this document. The real
     // scroller is #editor-content (#editor-scroll is overflow:hidden).
     const savedScroll = getViewState(activeFile.id)?.editorScroll;
@@ -9779,6 +9800,15 @@ elements.editorContent.addEventListener("input", (event) => {
   // Reposition remote cursor overlays now that the DOM has changed.
   renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
   showEditorAutocomplete();
+});
+
+// File tabs and workspace opens need not move focus into the editor. Restore the
+// saved caret when the user returns with keyboard or pointer focus instead.
+elements.editorContent.addEventListener("focus", () => {
+  const active = controller.getActiveFile();
+  if (!active || lastRenderedFileId !== active.id) return;
+  const saved = savedEditorSelection(active.id, getEditorText());
+  if (saved) setEditorSelection(saved.start, saved.end);
 });
 
 elements.editorContent.addEventListener("scroll", () => {

@@ -1,4 +1,4 @@
-// Per-document view state (bmap pan/zoom, document scroll) cached client-side so
+// Per-document view state (bmap pan/zoom, editor scroll and selection) cached client-side so
 // the user resumes where they left off. Keyed by file id; lives in localStorage.
 const VIEW_STATE_KEY = "mdnotes.viewstate.v1";
 
