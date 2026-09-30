@@ -52,7 +52,7 @@ APP_VERSION = json.loads((Path(__file__).resolve().parents[1] / "package.json").
 # Keep this gate aligned with SYNC_PROTOCOL_VERSION in app/version.js when a
 # compatibility break is necessary; ordinary release bumps do not change it.
 
-MIN_CLIENT_VERSION = _read_int_env("MDNOTES_MIN_CLIENT_VERSION", 113, 0, 1_000_000)
+MIN_CLIENT_VERSION = _read_int_env("MDNOTES_MIN_CLIENT_VERSION", 114, 0, 1_000_000)
 
 # A writing "sitting": edits to one file separated by less than this gap belong
 # to the same session. It is the E in the S.E.N version label — snapshots you
@@ -1013,8 +1013,12 @@ class CollaborationBroker:
         # Client calls /api/operations with a revert-to-revision to resolve them.
         self._pinned_base_revisions: set[int] = set()
         # Chat workspace: shared thread list broadcast to all session members.
-        self.chat_workspace: dict = {"threads": [], "activeThreadId": None}
+        self.chat_workspace: dict = {"threads": [], "revision": 0}
         self._load_state()
+        self.chat_file = (self.workspace_dir / "chat.json" if self.workspace_dir is not None else
+                          self.state_file.with_suffix(".chat.json") if self.state_file is not None else None)
+        if self.chat_file is not None and self.chat_file.exists():
+            self.chat_workspace = json.loads(self.chat_file.read_text(encoding="utf-8"))
 
     def _default_project(self):
         return {
@@ -1467,7 +1471,7 @@ class CollaborationBroker:
         if self.workspace_dir is None or not self.workspace_dir.exists():
             return
         for child in self.workspace_dir.iterdir():
-            if child.name in ("access.json", "user-state.json", "comments.json"):
+            if child.name in ("access.json", "user-state.json", "comments.json", "chat.json"):
                 continue
             self._remove_path(child)
 
@@ -1788,24 +1792,38 @@ class CollaborationBroker:
     def get_chat_workspace(self, token: str) -> dict:
         self.authorize(token)
         with self.lock:
-            return dict(self.chat_workspace)
+            return copy.deepcopy(self.chat_workspace)
 
-    def set_chat_workspace(self, token: str, workspace: dict) -> None:
+    def set_chat_workspace(self, token: str, workspace: dict) -> dict:
         client_id = self.authorize(token)
         threads = workspace.get("threads")
         if not isinstance(threads, list):
             raise ValueError("threads must be a list")
-        active_thread_id = workspace.get("activeThreadId")
+        # IDs are merge keys, not optional display metadata.
+        seen = set()
+        for thread in threads:
+            if not isinstance(thread, dict) or not isinstance(thread.get("id"), str) or not thread["id"] or thread["id"] in seen:
+                raise ValueError("Each chat thread requires a unique ID")
+            seen.add(thread["id"])
+            messages = thread.get("messages")
+            if not isinstance(messages, list):
+                raise ValueError("Chat messages must be a list")
+            ids = set()
+            for message in messages:
+                if not isinstance(message, dict) or not isinstance(message.get("id"), str) or not message["id"] or message["id"] in ids:
+                    raise ValueError("Each chat message requires a unique ID")
+                ids.add(message["id"])
         with self.lock:
-            self.chat_workspace = {"threads": threads, "activeThreadId": active_thread_id}
-            workspace_snapshot = dict(self.chat_workspace)
-        event = {
-            "type": "chat-workspace-update",
-            "workspace": workspace_snapshot,
-            "clientId": client_id,
-            "serverTime": time.time(),
-        }
-        self._broadcast(event, exclude_token=token)
+            revision = self.chat_workspace["revision"]
+            if workspace.get("baseRevision") != revision:
+                raise ValueError("Chat conflict: reload the conversation before saving")
+            snapshot = {"threads": copy.deepcopy(threads), "revision": revision + 1}
+            if self.chat_file is not None:
+                _atomic_write(self.chat_file, json.dumps(snapshot, ensure_ascii=False).encode("utf-8"))
+            self.chat_workspace = snapshot
+            self._broadcast({"type": "chat-workspace-update", "workspace": copy.deepcopy(snapshot),
+                             "clientId": client_id, "serverTime": time.time()}, exclude_token=token)
+            return copy.deepcopy(snapshot)
 
     # ------------------------------------------------------------------
     # Sole-author revert infrastructure (Phase 2)
@@ -1860,6 +1878,8 @@ class CollaborationBroker:
             self._ensure_persisted()
             op_type = operation.get("type")
             op_path = operation.get("path", "")
+            if "expectedRevision" in operation and operation["expectedRevision"] != self.revision:
+                raise ValueError("Agent edit conflict: workspace changed since this proposal was prepared")
 
             if token in self.reader_tokens:
                 raise PermissionError("You have read-only access to this project")
@@ -2187,7 +2207,7 @@ class WorkspaceRegistry:
 
     # ---- File-browser navigation (nested folders + per-project access) ---------
     # Files that are storage bookkeeping, never shown as browseable entries.
-    _RESERVED_NAMES = {"index.json", "access.json", "manifest.json", "user-state.json", "comments.json"}
+    _RESERVED_NAMES = {"index.json", "access.json", "manifest.json", "user-state.json", "comments.json", "chat.json"}
 
     def _safe_relpath(self, path: str) -> str:
         """Sanitize a '/'-separated path relative to a team dir. Each segment is
@@ -3908,15 +3928,19 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         try:
             token = self._extract_token(parsed)
             payload = self._read_json()
-            self.registry.broker_for_token(token).set_chat_workspace(token, payload)
-            self._write_json(HTTPStatus.OK, {"message": "chat workspace saved"})
+            if self._refuse_if_stale(self._client_version(payload=payload)):
+                return
+            workspace = self.registry.broker_for_token(token).set_chat_workspace(token, payload)
+            self._write_json(HTTPStatus.OK, workspace)
             self._log_request(200, "chat workspace updated")
         except PermissionError as error:
             self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
             self._log_request(403, str(error))
         except ValueError as error:
-            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            self._write_json(HTTPStatus.CONFLICT if "conflict" in str(error).lower() else HTTPStatus.BAD_REQUEST, {"message": str(error)})
             self._log_request(400, str(error))
+        except OSError:
+            self._write_json(HTTPStatus.SERVICE_UNAVAILABLE, {"message": "Chat storage is unavailable; your local conversation is kept."})
 
     def _handle_get_state(self, parsed):
         try:

@@ -114,6 +114,63 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(self.content(self.reopen(), 'other.md'), 'other')
         self.assertEqual(self.content(), 'A😀BC')
 
+    def chat(self, messages, revision=0):
+        return self.broker.set_chat_workspace(self.token, {'baseRevision': revision, 'threads': [
+            {'id': 'thread', 'messages': [{'id': text, 'role': 'user', 'content': text} for text in messages]}
+        ]})
+
+    def test_stale_chat_save_cannot_erase_new_messages(self):
+        saved = self.chat(['original'])
+        self.chat(['original', 'new'], saved['revision'])
+        with self.assertRaisesRegex(ValueError, 'conflict'):
+            self.chat(['original'], saved['revision'])
+        self.assertEqual([m['id'] for m in self.broker.get_chat_workspace(self.token)['threads'][0]['messages']], ['original', 'new'])
+        self.assertEqual(self.broker.revision, 1, 'chat has an independent revision')
+
+    def test_chat_persists_across_restart_and_returns_detached_copies(self):
+        result = self.chat(['kept'])
+        result['threads'].clear()
+        loaded = self.reopen()
+        token = loaded.connect('2468', 'reopened')['token']
+        chat = loaded.get_chat_workspace(token)
+        self.assertEqual(chat['revision'], 1)
+        self.assertEqual(chat['threads'][0]['messages'][0]['content'], 'kept')
+        chat['threads'].clear()
+        self.assertEqual(len(loaded.get_chat_workspace(token)['threads']), 1)
+
+    def test_chat_disk_failure_does_not_confirm_or_broadcast_a_save(self):
+        self.chat(['kept'])
+        with patch.object(server, '_atomic_write', side_effect=OSError('disk full')):
+            with self.assertRaises(OSError):
+                self.chat(['kept', 'failed'], 1)
+        self.assertEqual(self.broker.get_chat_workspace(self.token)['revision'], 1)
+        loaded = self.reopen()
+        self.assertEqual(loaded.chat_workspace['threads'][0]['messages'][0]['content'], 'kept')
+
+    def test_concurrent_chat_saves_have_one_winner_and_one_conflict(self):
+        barrier = threading.Barrier(2)
+        outcomes = []
+        def save(text):
+            barrier.wait()
+            try: self.chat([text]); outcomes.append('saved')
+            except ValueError: outcomes.append('conflict')
+        workers = [threading.Thread(target=save, args=(name,)) for name in ('A', 'B')]
+        for worker in workers: worker.start()
+        for worker in workers: worker.join()
+        self.assertCountEqual(outcomes, ['saved', 'conflict'])
+        self.assertEqual(self.broker.chat_workspace['revision'], 1)
+
+    def test_chat_save_requires_revision_and_unique_merge_ids(self):
+        for payload in ({'threads': []}, {'baseRevision': 0, 'threads': [{'id': 't', 'messages': [{'id': 'a'}, {'id': 'a'}]}]}):
+            with self.assertRaises(ValueError): self.broker.set_chat_workspace(self.token, payload)
+        self.assertEqual(self.broker.chat_workspace['revision'], 0)
+
+    def test_stale_agent_structural_edits_are_refused(self):
+        for op in ({'type': 'delete-node', 'path': 'note.md'}, {'type': 'rename-node', 'path': 'note.md', 'name': 'wrong.md'}):
+            with self.assertRaisesRegex(ValueError, 'conflict'):
+                self.op({**op, 'expectedRevision': 0})
+        self.assertEqual(self.content(), 'A😀BC')
+
     def test_existing_broker_regressions(self):
         server.run_broker_selftest(Path(self.tmp.name) / 'legacy.json')
 

@@ -6571,3 +6571,31 @@ pre.proposal-diff-block {
   background: color-mix(in srgb, var(--text-dim) 4%, var(--editor));
   cursor: default;
 }
+
+/* Keep the composer visible as mobile browser chrome and the keyboard change
+   the visual viewport. Desktop sizing remains independent. */
+@media (max-width: 900px) {
+  body { min-height: 100dvh; }
+  .app-shell {
+    height: var(--mobile-viewport-height, 100dvh);
+    min-height: 0;
+  }
+  .chat-toolbar { min-height: 48px; height: auto; }
+  .chat-toolbar-icon-btn,
+  .chat-send-button { width: 44px; height: 44px; min-height: 44px; }
+  .chat-input,
+  .chat-model-select { font-size: 16px; }
+  .chat-input { min-height: 44px; max-height: min(160px, 26dvh); box-sizing: border-box; }
+  .chat-compose-chip-btn,
+  .chat-message-retry,
+  .proposal-btn { min-height: 44px; }
+  .chat-context-chip button { min-width: 44px; min-height: 44px; }
+  .chat-compose-shell { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .chat-compose-drop-hint { display: none; }
+  .chat-message-list { overscroll-behavior: contain; overflow-wrap: anywhere; }
+  .chat-toolbar-title { display: none; }
+  .chat-model-badge { flex: 1; max-width: none; min-height: 44px; }
+  .chat-model-select { max-width: 38vw; }
+}
+
+.chat-history-content, .chat-stream-content { flex: 0 0 auto; min-width: 0; }

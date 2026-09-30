@@ -60,3 +60,26 @@ test("describes the behavior", () => {
 ```
 
 The runner auto-discovers any file matching `*.test.mjs`.
+
+
+## Chat and mobile regression checks
+
+- `chat-sync.test.mjs`: simultaneous chat saves, conflict merging, late responses,
+  local drafts/selection, cache metadata, IME input, viewport resizing, and wire compatibility.
+- `chat-turn.test.mjs`: the production turn handlers under workspace changes,
+  transport cancellation, stale proposals, and delayed delete confirmation.
+- `mobile-chat-browser.py`: optional Playwright browser test using the public
+  origin, isolated browser storage, staged static responses, and mocked chat APIs.
+  Checks five viewport sizes, composing/sending, attachments, draft switching,
+  scroll/selection preservation, and cloud chat isolation. It makes no paid model
+  calls and does not open a real user's cloud project.
+
+With Python Playwright and a Chromium browser installed:
+
+```bash
+python3 tests/mobile-chat-browser.py
+```
+
+Set `STILO_BROWSER` to an existing Chromium executable if needed. Set
+`STILO_TEST_URL` to another deployed public origin; no localhost listener is needed.
+This emulates mobile Chromium. Physical iOS keyboard behavior still needs a device check.
