@@ -397,7 +397,8 @@ function setViewState(fileId, patch) {
 }
 
 /** Snapshot the current preview bmap and editor position before a file switch
- *  or page suspension. The selection listener also remembers unfocused clicks. */
+ *  or page suspension. Selection and pointer-down handlers save the caret
+ *  before the editor loses focus. */
 function captureViewState() {
   const project = controller.getProject();
   if (previewFileId && previewBmapView) {
@@ -424,6 +425,9 @@ function savedEditorSelection(fileId, text) {
 
 function rememberEditorSelection() {
   const fileId = controller.getProject().activeFileId;
+  // A blurred contenteditable may retain a ghost range at offset 0. It is not
+  // the user's caret and must never replace a position captured before blur.
+  if (document.activeElement !== elements.editorContent) return;
   const selection = window.getSelection();
   if (!fileId || lastRenderedFileId !== fileId || !selection?.rangeCount) return;
   const range = selection.getRangeAt(0);
@@ -2835,6 +2839,7 @@ function applyEditorRender(text, selStart, selEnd) {
       elements.editorContent.focus({ preventScroll: true });
     }
     setEditorSelection(selStart, selEnd);
+    rememberEditorSelection();
     // Diagnostic: verify the caret actually landed where we asked. When it
     // doesn't (the "jump to line 1 / offset 0" bug), capture WHY — the resolved
     // DOM position, the DOM text length vs the model, and the line count — so we
@@ -4291,6 +4296,13 @@ let _selectionChangeListenerAttached = false;
 function attachSelectionChangeListener() {
   if (_selectionChangeListenerAttached) return;
   _selectionChangeListenerAttached = true;
+  // On touch devices, tapping another control can clear the DOM selection before
+  // its click handler switches files. Save it at pointer-down, while the editor
+  // still owns the range. The selectionchange event may arrive too late (or not
+  // at all when the browser puts the tab to sleep).
+  document.addEventListener("pointerdown", (event) => {
+    if (!elements.editorContent.contains(event.target)) rememberEditorSelection();
+  }, true);
   document.addEventListener("selectionchange", () => {
     if (document.activeElement === elements.editorContent && !_editorUpdating && !editorIsComposing) rememberEditorSelection();
     if (!collaboration.isConnected()) return;
@@ -9641,6 +9653,7 @@ elements.editorContent.addEventListener("compositionend", () => {
   // The render triggered by notifyEditorChanged may have re-rendered the DOM
   // (if a remote op landed simultaneously); restore cursor explicitly.
   setEditorSelection(start, end);
+  rememberEditorSelection();
   showEditorAutocomplete();
 });
 
@@ -9784,6 +9797,7 @@ elements.editorContent.addEventListener("input", (event) => {
     elements.editorContent.focus({ preventScroll: true });
   }
   setEditorSelection(start, end);
+  rememberEditorSelection();
   elements.editorContent.scrollTop = savedScroll;
   syncEditorScroll();
   caretIntoView();

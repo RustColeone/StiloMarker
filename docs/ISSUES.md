@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-09-30 · release `v0.1.19` (deployed; public verification passed)
+Last updated: 2026-09-30 · release `v0.1.20` (deployed; public verification passed)
 
 ---
 
@@ -30,6 +30,10 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.20: mobile browser caret restoration
+
+The editor saves its caret before a touch on the explorer or another control can clear the browser selection. Blurred editor ranges are ignored so a stale zero-offset range cannot overwrite the saved position. Native typing, programmatic edits, and IME completion also save the restored caret immediately. A mobile Chromium touch regression verifies return through the explorer and reload.
 
 ### v0.1.19: editor caret and selection restoration
 
