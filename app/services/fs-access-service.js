@@ -1,3 +1,4 @@
+import { createProjectSaveQueue } from "./project-save-service.js";
 import { ROOT_ID, addFile, addFolder, createProject, getNode, getPath, isImageFileName, listVisibleNodes } from "../domain/project-model.js";
 import { bytesToDataUrl, dataUrlToBlob, decodeTextBytes, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent } from "./file-content-service.js";
 import { extractZipEntries } from "./zip-service.js";
@@ -31,9 +32,20 @@ function supportsDirectoryAccess() {
   return typeof window.showDirectoryPicker === "function";
 }
 
+function listStoredNodes(project) {
+  const rows = [];
+  function walk(id) {
+    const node = getNode(project, id);
+    if (id !== project.rootId) rows.push({ node, path: getPath(project, id) });
+    if (node.kind === "folder") for (const child of node.children ?? []) walk(child);
+  }
+  walk(project.rootId);
+  return rows;
+}
+
 function buildSourceIndex(project) {
   const index = {};
-  listVisibleNodes(project).forEach(({ node, path }) => {
+  listStoredNodes(project).forEach(({ node, path }) => {
     index[node.id] = { path, kind: node.kind };
   });
   return index;
@@ -122,7 +134,14 @@ async function importDirectory() {
   return buildProjectFromDirectoryHandle(directoryHandle, directoryHandle.name || "Directory", "filesystem");
 }
 
+const queuedSave = createProjectSaveQueue(writeProjectToHandles);
+
 async function saveProjectToHandles(project) {
+  if (project.sourceMode !== "filesystem" && project.sourceMode !== "opfs") return false;
+  return queuedSave(project);
+}
+
+async function writeProjectToHandles(project) {
   // "opfs" projects live in the browser's Origin Private File System but use the
   // same handle API as an OS-picked "filesystem" directory, so they persist here.
   if ((project.sourceMode !== "filesystem" && project.sourceMode !== "opfs") || !project.handles) {
@@ -131,10 +150,11 @@ async function saveProjectToHandles(project) {
 
   const rootHandle = project.handles[ROOT_ID];
   const previousSourceIndex = project.sourceIndex ?? {};
-  const currentRows = listVisibleNodes(project);
+  const currentRows = listStoredNodes(project);
   const currentSourceIndex = buildSourceIndex(project);
+  const currentPaths = new Set(Object.values(currentSourceIndex).map((entry) => entry.path));
   const deletedEntries = Object.entries(previousSourceIndex)
-    .filter(([nodeId, entry]) => currentSourceIndex[nodeId]?.path !== entry.path)
+    .filter(([, entry]) => !currentPaths.has(entry.path))
     .map(([, entry]) => entry);
 
   const deletedFolderPaths = deletedEntries
@@ -150,10 +170,6 @@ async function saveProjectToHandles(project) {
       }
       return getPathDepth(right.path) - getPathDepth(left.path);
     });
-
-  for (const entry of filteredDeletedEntries) {
-    await removeEntryAtPath(rootHandle, entry);
-  }
 
   project.handles = { [ROOT_ID]: rootHandle };
 
@@ -177,6 +193,12 @@ async function saveProjectToHandles(project) {
     project.handles[fileNode.id] = fileHandle;
   }
 
+  // Write the new paths before removing renamed/deleted paths. Failed saves
+  // keep the previous copy; retries tolerate cleanup already completed.
+  for (const entry of filteredDeletedEntries) {
+    try { await removeEntryAtPath(rootHandle, entry); }
+    catch (error) { if (error.name !== "NotFoundError") throw error; }
+  }
   project.sourceIndex = currentSourceIndex;
 
   return true;

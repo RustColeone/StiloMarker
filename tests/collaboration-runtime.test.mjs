@@ -240,25 +240,85 @@ test('a scheduled whole-project publish keeps its original revision', async (t) 
     operation: { type: 'update-file', path: 'note.md', content: 'peer changed', baseRevision: 1 } });
   await h.tick(120);
   assert.equal(states[0].baseRevision, 1);
-  assert.equal(states[0].version, 112);
+  assert.equal(states[0].version, 113);
   assert.equal(h.local().nodes.file.content, 'peer changed');
 });
 
-// Follow-up review probe; intentionally asserts the observed divergence.
-test('AUDIT: same-position concurrent inserts diverge on the originating client', async (t) => {
+for (const acknowledgment of ['stream-first', 'http-first']) {
+  for (const queued of [false, true]) test(`concurrent tie converges with ${acknowledgment}, queued=${queued}`, async (t) => {
+    const h = harness(t); h.server.project = project('x'); await h.open();
+    const gate = deferred(); h.hooks.post = () => gate.promise;
+    h.edit('Bx'); await h.tick(250);
+    if (queued) h.edit('BCx');
+    const op = h.posts[0];
+    h.server.project = project('BAx'); h.server.revision = 3;
+    h.streams[0].event({ type: 'operation', clientId: 'peer', revision: 2,
+      operation: { type: 'patch-file', path: 'note.md', start: 0, end: 0, text: 'A', removedText: '' } });
+    assert.equal(h.local().nodes.file.content, queued ? 'BCAx' : 'BAx');
+    const own = { type: 'operation', clientId: 'me', revision: 3, operation: op };
+    if (acknowledgment === 'stream-first') h.streams[0].event(own);
+    gate.resolve(h.json(own)); await settle();
+    if (acknowledgment === 'http-first') h.streams[0].event(own);
+    delete h.hooks.post;
+    if (queued) await h.tick(250);
+    assert.equal(h.local().nodes.file.content, h.server.project.nodes.file.content);
+    assert.equal(h.runtime.hasUnsyncedText('note.md'), false);
+    assert.equal(h.archives.length, 0);
+  });
+}
+
+test('an unsent edit rebases without an unnecessary request during incoming apply', async (t) => {
   const h = harness(t); h.server.project = project('x'); await h.open();
-  const gate = deferred();
-  h.hooks.post = async (op) => { await gate.promise; return h.json({ revision: 3 }); };
-  h.edit('Bx'); await h.tick(250);
-  const sent=h.posts[0];
+  h.edit('Bx');
   h.server.project = project('Ax'); h.server.revision = 2;
-  h.streams[0].event({ type:'operation', clientId:'peer', revision:2,
-    operation:{type:'patch-file',path:'note.md',start:0,end:0,text:'A',removedText:'',baseRevision:1} });
-  // The server's <= offset tie rule places the later B before the earlier A.
+  h.streams[0].event({ type: 'operation', clientId: 'peer', revision: 2,
+    operation: { type: 'patch-file', path: 'note.md', start: 0, end: 0, text: 'A', removedText: '' } });
+  assert.equal(h.posts.length, 0);
+  assert.equal(h.local().nodes.file.content, 'BAx');
+  await h.tick(250);
+  assert.equal(h.posts[0].baseRevision, 2);
+  assert.equal(h.server.project.nodes.file.content, 'BAx');
+});
+
+test('overlapping replacements preserve the draft before loading the cloud version', async (t) => {
+  const h = harness(t); h.server.project = project('abc'); await h.open();
+  h.edit('aLOCALc'); h.server.project = project('aREMOTEc'); h.server.revision = 2;
+  h.streams[0].event({ type: 'operation', clientId: 'peer', revision: 2,
+    operation: { type: 'patch-file', path: 'note.md', start: 1, end: 2, text: 'REMOTE', removedText: 'b' } });
+  await settle();
+  assert.equal(h.archives[0].get('note.md'), 'aLOCALc');
+  assert.equal(h.local().nodes.file.content, 'aREMOTEc');
+});
+
+test('whole-file replacement preserves an unsent local draft', async (t) => {
+  const h = harness(t); await h.open(); h.edit('unsent draft');
+  h.server.project = project('replacement'); h.server.revision = 2;
+  h.streams[0].event({ type: 'operation', clientId: 'peer', revision: 2,
+    operation: { type: 'update-file', path: 'note.md', content: 'replacement', baseRevision: 1 } });
+  await settle();
+  assert.equal(h.archives[0].get('note.md'), 'unsent draft');
+  assert.equal(h.local().nodes.file.content, 'replacement');
+});
+
+test('HTTP acknowledgment ahead of the stream catches up without double-applying edits', async (t) => {
+  const h = harness(t); h.server.project = project('x'); await h.open();
+  const gate = deferred(); h.hooks.post = () => gate.promise;
+  h.edit('Bx'); await h.tick(250);
+  const own = { type: 'operation', clientId: 'me', revision: 3, operation: h.posts[0] };
   h.server.project = project('BAx'); h.server.revision = 3;
-  gate.resolve(); await settle();
-  h.streams[0].event({type:'operation',clientId:'me',revision:3,operation:sent});
-  assert.equal(h.local().nodes.file.content,'ABx');
-  assert.equal(h.server.project.nodes.file.content,'BAx');
-  console.log('AUDIT confirmed: client=ABx, server=BAx after same-position concurrent inserts.');
+  gate.resolve(h.json(own)); await settle();
+  h.streams[0].event({ type: 'operation', clientId: 'peer', revision: 2,
+    operation: { type: 'patch-file', path: 'note.md', start: 0, end: 0, text: 'A', removedText: '' } });
+  h.streams[0].event(own); await settle();
+  assert.equal(h.local().nodes.file.content, 'BAx');
+  assert.equal(h.runtime.getRevision(), 3);
+  assert.equal(h.runtime.hasUnsyncedText('note.md'), false);
+});
+
+
+test('undoing unsent typing releases the unsynced indicator without sending a patch', async (t) => {
+  const h = harness(t); await h.open();
+  h.edit('temporary'); h.edit('original'); await h.tick(250);
+  assert.equal(h.posts.length, 0);
+  assert.equal(h.runtime.hasUnsyncedText('note.md'), false);
 });

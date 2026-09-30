@@ -52,7 +52,7 @@ APP_VERSION = json.loads((Path(__file__).resolve().parents[1] / "package.json").
 # Keep this gate aligned with SYNC_PROTOCOL_VERSION in app/version.js when a
 # compatibility break is necessary; ordinary release bumps do not change it.
 
-MIN_CLIENT_VERSION = _read_int_env("MDNOTES_MIN_CLIENT_VERSION", 112, 0, 1_000_000)
+MIN_CLIENT_VERSION = _read_int_env("MDNOTES_MIN_CLIENT_VERSION", 113, 0, 1_000_000)
 
 # A writing "sitting": edits to one file separated by less than this gap belong
 # to the same session. It is the E in the S.E.N version label — snapshots you
@@ -999,6 +999,7 @@ class CollaborationBroker:
         # restart — when this map is empty — an out-of-date client still can't
         # clobber: it is treated as behind and made to pull.
         self.path_changed_at: dict[str, int] = {}
+        self.path_replaced_at: dict[str, int] = {}
         self._path_change_floor = 0
         self.operation_log_max = 2000
         # Per-revision author tracking for sole-author revert (Phase 2 / subtask 2.1).
@@ -1318,32 +1319,34 @@ class CollaborationBroker:
         return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
     @staticmethod
-    def _transform_offset(offset: int, applied_start: int, applied_end: int, inserted_length: int) -> int:
-        """Adjust a text offset after a single already-applied operation."""
-        removed_length = applied_end - applied_start
-        if offset <= applied_start:
-            return offset
-        if offset <= applied_end:
-            # Offset was inside the removed region — snap to the insertion point.
-            return applied_start + inserted_length
-        return offset + inserted_length - removed_length
+    def _transform_range(start, end, a_start, a_end, inserted):
+        """Rebase a later splice; ambiguous overlaps require draft recovery."""
+        delta = inserted - (a_end - a_start)
+        if start == end and a_start == a_end:
+            return (start + inserted, end + inserted) if a_start < start else (start, end)
+        if start == end:
+            if a_start < start < a_end:
+                raise ValueError("patch conflict: insertion inside concurrently removed text")
+            return (start + delta, end + delta) if start >= a_end else (start, end)
+        if a_start == a_end:
+            if start < a_start < end:
+                raise ValueError("patch conflict: concurrent insertion inside removed text")
+            return (start + inserted, end + inserted) if a_start <= start else (start, end)
+        if start < a_end and a_start < end:
+            raise ValueError("patch conflict: overlapping replacements")
+        return (start + delta, end + delta) if a_end <= start else (start, end)
+
+    def _path_revision(self, changes, path):
+        return max([self._path_change_floor] + [revision for changed, revision in changes.items()
+                   if path == changed or path.startswith(changed + "/")])
 
     def _rebase_patch(self, path: str, start: int, end: int, base_revision: int) -> tuple[int, int]:
-        """
-        Transform (start, end) through all operations applied to `path` since
-        base_revision, up to (but not including) the current revision.
-        Returns the adjusted (start, end).
-        """
+        if base_revision < self._path_revision(self.path_replaced_at, path):
+            raise ValueError("patch conflict: file was replaced or its path changed — reload to continue")
         for entry in self.operation_log:
-            if entry["revision"] <= base_revision:
+            if entry["revision"] <= base_revision or entry["path"] != path:
                 continue
-            if entry["path"] != path:
-                continue
-            a_start = entry["start"]
-            a_end = entry["end"]
-            a_inserted = entry["insertedLength"]
-            start = self._transform_offset(start, a_start, a_end, a_inserted)
-            end = self._transform_offset(end, a_start, a_end, a_inserted)
+            start, end = self._transform_range(start, end, entry["start"], entry["end"], entry["insertedLength"])
         return start, end
 
     @staticmethod
@@ -1371,6 +1374,11 @@ class CollaborationBroker:
     def _note_path_changed(self, operation: dict):
         """Record the revision at which a file path last changed (see path_changed_at)."""
         op_type = operation.get("type")
+        if op_type in ("replace-project", "revert-to-revision"):
+            self.operation_log.clear()
+            self.path_changed_at.clear()
+            self.path_replaced_at.clear()
+            self._path_change_floor = self.revision
         touched = []
         if op_type in ("patch-file", "update-file", "delete-node"):
             touched.append(str(operation.get("path", "")))
@@ -1387,6 +1395,8 @@ class CollaborationBroker:
         for path in touched:
             if path:
                 self.path_changed_at[path] = self.revision
+                if op_type != "patch-file":
+                    self.path_replaced_at[path] = self.revision
 
     def _record_operation(self, path: str, start: int, end: int, inserted_length: int):
         # revision is incremented in apply_operation after _apply_operation returns,
@@ -1431,14 +1441,8 @@ class CollaborationBroker:
         py_start = _utf16_index(content, start)
         py_end = _utf16_index(content, end)
         current_slice = content[py_start:py_end]
-        if removed_text and current_slice != removed_text:
-            # After OT transform the removed region may no longer match (e.g. a
-            # concurrent delete already erased those chars).  Treat as a pure
-            # insertion at the transformed start so the typed text is preserved.
-            _log("OT-SNAP", f"removedText mismatch on {path!r} at {start}\u2013{end}  \u2192 snap to insert-only",
-                 expected=repr(removed_text[:20]), got=repr(current_slice[:20]))
-            end = start
-            py_end = py_start
+        if current_slice != removed_text:
+            raise ValueError("patch conflict: removed text no longer matches — reload to continue")
 
         return f"{content[:py_start]}{insert_text}{content[py_end:]}", start, end
 
@@ -1527,7 +1531,11 @@ class CollaborationBroker:
             node_id = self._get_node_id_by_path(operation["path"])
             if not node_id:
                 raise ValueError(f"Node path not found: {operation['path']}")
-            self.project["nodes"][node_id]["name"] = operation["name"]
+            node = self.project["nodes"][node_id]
+            sibling = self._find_child_by_name(node["parentId"], operation["name"])
+            if sibling and sibling["id"] != node_id:
+                raise ValueError("rename conflict: a file or folder with that name already exists")
+            node["name"] = operation["name"]
             return
 
         if operation_type == "delete-node":
@@ -1559,8 +1567,8 @@ class CollaborationBroker:
                     "update-file conflict: the client did not say which revision it is based on "
                     "(reload to update this tab)"
                 )
-            changed_at = self.path_changed_at.get(operation["path"], self._path_change_floor)
-            if int(base_revision) < changed_at:
+            changed_at = self._path_revision(self.path_changed_at, operation["path"])
+            if int(base_revision) < changed_at or int(base_revision) > self.revision:
                 raise ValueError(
                     f"update-file conflict on {operation['path']!r}: this client is based on revision "
                     f"{int(base_revision)} but that file changed at revision {changed_at} — "
@@ -1581,6 +1589,8 @@ class CollaborationBroker:
             if node["kind"] != "file":
                 raise ValueError("Only files can receive text patches")
             base_revision = operation.get("baseRevision")
+            if base_revision is None or int(base_revision) < 0 or int(base_revision) > self.revision:
+                raise ValueError("patch conflict: invalid or missing base revision")
             if base_revision is not None:
                 base_revision = int(base_revision)
                 # The rebase log is in-memory and capped, so it can no longer
@@ -1869,6 +1879,7 @@ class CollaborationBroker:
                     raise ValueError(f"Snapshot for revision {target} not found.")
                 self.project = copy.deepcopy(snapshot_map[target])
                 self.revision += 1
+                self._note_path_changed(operation)
                 self._persist_state()
                 self.revision_authors[self.revision] = client_id
                 self.snapshot_history.append((self.revision, copy.deepcopy(self.project)))
@@ -3975,7 +3986,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             if not isinstance(operation, dict):
                 raise ValueError("Operation payload is required")
             event = self.registry.broker_for_token(token).apply_operation(token, operation)
-            ack = {"message": "operation stored", "revision": event["revision"]}
+            ack = {**event, "message": "operation stored"}
             counters = (event.get("operation") or {}).get("counters")
             if counters:
                 ack["counters"] = counters

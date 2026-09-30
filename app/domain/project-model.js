@@ -104,7 +104,10 @@ function applyTextPatch(content, operation, { skipConflictCheck = false } = {}) 
 }
 
 function cloneProject(project) {
-  return structuredClone(project);
+  // Handles are capabilities; preserve their identity across model edits so
+  // writes for the same directory share one serialization queue.
+  const { handles, ...model } = project;
+  return { ...structuredClone(model), ...(handles ? { handles: { ...handles } } : {}) };
 }
 
 function getNode(project, nodeId) {
