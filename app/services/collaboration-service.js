@@ -1,3 +1,4 @@
+import { buildTextPatch, transformTextPatch, applyTextPatch } from "./text-patch-service.js";
 import { connectToServer, fetchSessionState, hostSession, openEventStream, openWorkspaceSession, pushCursor, pushOperation, pushSessionState, sanitizeProjectForSync, uploadAsset } from "./sync-service.js";
 
 function fingerprintProject(project) {
@@ -362,6 +363,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     const pending = inFlightPatches.get(operation.path);
     const operationId = `${generation}-${++nextOperationId}`;
     ownOperations.add(operationId);
+    if (pending && operation.type === "patch-file") pending.operationId = operationId;
     const request = pushOperation(connection.serverUrl, connection.token, { ...operation, operationId });
     activeWrites.add(request);
     let result;
@@ -371,25 +373,12 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       throw error;
     } finally { activeWrites.delete(request); }
     if (epoch !== generation || modelEpoch !== modelGeneration || !connection) return;
-    if (Number(result.revision) > localRevision + 1 && !recovering) {
-      await reloadFromServer("Caught up with changes confirmed by the server.");
-      return;
-    }
-    localRevision = Math.max(localRevision, result.revision ?? localRevision);
-    connection.revision = localRevision;
-    adoptHostCounters(result);
-    // Once the server confirms this op, it's no longer in-flight.
-    if (operation.type === "patch-file" && inFlightPatches.get(operation.path) === pending) {
-      inFlightPatches.delete(operation.path);
-      if (!pendingTextPatches.has(operation.path)) localEdits.delete(operation.path);
-    }
-    lastFingerprint = fingerprintProject(getProject());
-    if (!recovering) emitStatus("connected", `Connected. Revision ${connection.revision}.`);
-    // Text is now confirmed on the server — broadcast the definitive cursor
-    // position so peers see where we ended up after the edit.
-    if (typeof onPatchConfirmed === "function") {
-      onPatchConfirmed();
-    }
+    // HTTP and SSE may arrive in either order. Both confirm through the same
+    // ordered event path; a raw HTTP response must not discard our OT context.
+    handleEvent(result.type ? result : {
+      type: "operation", clientId: connection.clientId, revision: result.revision,
+      operation: { ...operation, operationId },
+    });
   }
 
   // Files the user has edited locally that the server has not confirmed. A pull
@@ -485,18 +474,6 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     return task;
   }
 
-  /**
-   * Mirror of the server's _transform_offset: adjust one offset through a
-   * single already-applied operation described by (appliedStart, appliedEnd,
-   * insertedLength).
-   */
-  function transformOffset(offset, appliedStart, appliedEnd, insertedLength) {
-    const removedLength = appliedEnd - appliedStart;
-    if (offset <= appliedStart) return offset;
-    if (offset <= appliedEnd) return appliedStart + insertedLength;
-    return offset + insertedLength - removedLength;
-  }
-
   function scheduleTextPatch(path, previousContent, nextContent) {
     if (!connection || isApplyingRemote || recovering) {
       return;
@@ -556,12 +533,12 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     }
     pendingTextPatches.delete(path);
     const op = buildPatchOp(path, entry.baseContent, entry.latest); // baseRevision = localRevision (now)
-    if (!op) return;
+    if (!op) { localEdits.delete(path); return; }
     const epoch = generation;
     const modelEpoch = modelGeneration;
     const pending = inFlightPatches.get(path);
     publishOperation(op).catch(async (error) => {
-      if (epoch !== generation || modelEpoch !== modelGeneration || !connection) return;
+      if (epoch !== generation || modelEpoch !== modelGeneration || !connection || pending?.confirmed) return;
       // Preserve the rejected draft even if a remote operation cleared dirty.
       const file = flattenProjectPaths(getProject()).files.find((f) => f.path === path);
       if (inFlightPatches.get(path) === pending) inFlightPatches.delete(path);
@@ -630,42 +607,8 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
   }
 
   function buildPatchOp(path, previousContent, nextContent, baseRevision = localRevision) {
-    if (previousContent === nextContent) return null;
-
-    let start = 0;
-    while (start < previousContent.length && start < nextContent.length && previousContent[start] === nextContent[start]) {
-      start += 1;
-    }
-
-    let previousEnd = previousContent.length;
-    let nextEnd = nextContent.length;
-    while (previousEnd > start && nextEnd > start && previousContent[previousEnd - 1] === nextContent[nextEnd - 1]) {
-      previousEnd -= 1;
-      nextEnd -= 1;
-    }
-
-    const splitsPair = (text, offset) => offset > 0 && offset < text.length
-      && /[\uD800-\uDBFF]/.test(text[offset - 1]) && /[\uDC00-\uDFFF]/.test(text[offset]);
-    if (splitsPair(previousContent, start) || splitsPair(nextContent, start)) start -= 1;
-    if (splitsPair(previousContent, previousEnd) || splitsPair(nextContent, nextEnd)) {
-      previousEnd += 1;
-      nextEnd += 1;
-    }
-    const removedText = previousContent.slice(start, previousEnd);
-    const insertText = nextContent.slice(start, nextEnd);
-
-    const operation = {
-      type: "patch-file",
-      path,
-      start,
-      end: previousEnd,
-      removedText,
-      text: insertText,
-      baseRevision
-    };
-
-    // Track in-flight for OT rebase.
-    inFlightPatches.set(path, { baseRevision, start, end: previousEnd, text: insertText, removedText });
+    const operation = buildTextPatch(path, previousContent, nextContent, baseRevision);
+    if (operation) inFlightPatches.set(path, { ...operation });
     return operation;
   }
 
@@ -798,50 +741,53 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
 
     if (event.type === "operation" && event.operation) {
       if (event.clientId === connection.clientId && ownOperations.delete(event.operation.operationId)) {
+        const pending = inFlightPatches.get(event.operation.path);
+        if (pending?.operationId === event.operation.operationId) {
+          pending.confirmed = true;
+          inFlightPatches.delete(event.operation.path);
+          if (!pendingTextPatches.has(event.operation.path)) localEdits.delete(event.operation.path);
+        }
+        adoptHostCounters({ path: event.operation.path, counters: event.operation.counters });
+        lastFingerprint = fingerprintProject(getProject());
         localRevision = Math.max(localRevision, event.revision ?? localRevision);
         connection.revision = localRevision;
         emitStatus("connected", `Connected. Revision ${connection.revision}.`);
+        if (typeof onPatchConfirmed === "function") onPatchConfirmed();
         return;
       }
-      // OT diamond: when we have an in-flight (unconfirmed) pending patch on the
-      // same file as the incoming remote op, we must:
-      //   1. Transform the INCOMING op through our pending op so it lands at the
-      //      correct position in our local model (which already has pending applied).
-      //   2. Transform our PENDING op through the incoming op so our next send has
-      //      positions relative to the new server-canonical state.
       let opToApply = event.operation;
-      if (event.operation.type === "patch-file" && event.operation.path) {
-        const p = event.operation.path;
-        // If we have UNSENT local edits for this file (a debounced patch not
-        // yet in flight), flush them NOW so they become the in-flight op the
-        // diamond accounts for below. Without this, the remote op is applied
-        // at an offset that ignores our not-yet-sent insert/delete — which is
-        // how characters ended up shifted while two devices edited together.
-        // The flush is sent with the pre-remote baseRevision, so the server
-        // rebases it through this remote op correctly.
-        if (pendingTextPatches.has(p) && !inFlightPatches.has(p)) {
-          window.clearTimeout(pendingTextPatches.get(p).timer);
-          sendTextPatch(p);
+      try {
+        if (opToApply.type === "patch-file" && opToApply.path) {
+          const path = opToApply.path;
+          const pending = inFlightPatches.get(path);
+          if (pending) {
+            // Server orders a later insert before an earlier insert at a tie.
+            // Incoming is earlier; our optimistic local edit is later.
+            const remote = opToApply;
+            opToApply = transformTextPatch(remote, pending, true);
+            Object.assign(pending, transformTextPatch(pending, remote));
+          }
+          // Typing can continue while a sent patch awaits confirmation. Rebase
+          // this second, unsent layer too, retaining its updated base content.
+          const queued = pendingTextPatches.get(path);
+          if (queued) {
+            const unsent = buildTextPatch(path, queued.baseContent, queued.latest);
+            const remote = opToApply;
+            if (unsent) opToApply = transformTextPatch(remote, unsent, true);
+            queued.baseContent = applyTextPatch(queued.baseContent, remote);
+            queued.latest = applyTextPatch(queued.latest, opToApply);
+          }
+          const file = flattenProjectPaths(getProject()).files.find((file) => file.path === path);
+          if (!file) throw new Error("Remote patch targets a missing file");
+          applyTextPatch(file.content, opToApply); // strict validation before model mutation
+        } else if (collectUnsyncedLocalFiles().size) {
+          // Whole-file/structural changes cannot safely commute with drafts.
+          throw new Error("Workspace changed while local edits were pending");
         }
-        const pending = inFlightPatches.get(p);
-        if (pending) {
-          // Save originals before mutating pending.
-          const pendStart = pending.start;
-          const pendEnd   = pending.end;
-          const pendInsLen = String(pending.text ?? "").length;
-          // 1. Adjust incoming op positions to our local-model coordinate space.
-          opToApply = {
-            ...event.operation,
-            start: transformOffset(Number(event.operation.start), pendStart, pendEnd, pendInsLen),
-            end:   transformOffset(Number(event.operation.end),   pendStart, pendEnd, pendInsLen),
-          };
-          // 2. Advance pending positions past the incoming op.
-          const remStart = Number(event.operation.start);
-          const remEnd   = Number(event.operation.end);
-          const remInsLen = String(event.operation.text ?? "").length;
-          pending.start = transformOffset(pendStart, remStart, remEnd, remInsLen);
-          pending.end   = transformOffset(pendEnd,   remStart, remEnd, remInsLen);
-        }
+      } catch (error) {
+        void reloadFromServer(`Sync conflict — preserving local edits and loading the cloud version.`)
+          .catch((error) => emitStatus("sync-error", `Sync paused; local edits kept. ${error.message}`));
+        return;
       }
       isApplyingRemote = true;
       try {

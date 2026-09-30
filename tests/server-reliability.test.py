@@ -42,6 +42,78 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(self.broker.revision, revision)
         self.assertEqual(self.content(self.reopen()), 'A😀BC')
 
+    def test_patch_cannot_cross_whole_file_replacement(self):
+        self.op({'type': 'patch-file', 'path': 'note.md', 'start': 5, 'end': 5,
+                 'text': '!', 'baseRevision': self.broker.revision})
+        base = self.broker.revision
+        self.op({'type': 'update-file', 'path': 'note.md', 'content': 'replacement', 'baseRevision': base})
+        with self.assertRaisesRegex(ValueError, 'conflict'):
+            self.op({'type': 'patch-file', 'path': 'note.md', 'start': 2, 'end': 2, 'text': 'BAD', 'baseRevision': base})
+        self.assertEqual(self.content(self.reopen()), 'replacement')
+
+    def test_patch_cannot_cross_delete_recreate_or_rename(self):
+        for change in ('recreate', 'rename'):
+            with self.subTest(change=change):
+                self.op({'type': 'patch-file', 'path': 'note.md', 'start': 0, 'end': 0,
+                         'text': 'x', 'baseRevision': self.broker.revision})
+                base = self.broker.revision
+                if change == 'recreate':
+                    self.op({'type': 'delete-node', 'path': 'note.md'})
+                    self.op({'type': 'create-file', 'parentPath': '', 'name': 'note.md', 'content': 'new'})
+                    path = 'note.md'
+                else:
+                    self.op({'type': 'rename-node', 'path': 'note.md', 'name': 'renamed.md'})
+                    path = 'renamed.md'
+                with self.assertRaisesRegex(ValueError, 'conflict'):
+                    self.op({'type': 'patch-file', 'path': path, 'start': 0, 'end': 0, 'text': 'BAD', 'baseRevision': base})
+
+    def test_revert_and_replace_project_are_rebase_barriers(self):
+        for kind in ('revert-to-revision', 'replace-project'):
+            self.op({'type': 'patch-file', 'path': 'note.md', 'start': 0, 'end': 0,
+                     'text': 'x', 'baseRevision': self.broker.revision})
+            base = self.broker.revision
+            op = {'type': kind, 'baseRevision': base, 'targetRevision': base - 1,
+                  'project': copy.deepcopy(self.broker.project)}
+            self.op(op)
+            with self.assertRaisesRegex(ValueError, 'conflict'):
+                self.op({'type': 'patch-file', 'path': 'note.md', 'start': 0, 'end': 0, 'text': 'BAD', 'baseRevision': base})
+            with self.assertRaisesRegex(ValueError, 'conflict'):
+                self.op({'type': 'update-file', 'path': 'note.md', 'content': 'BAD', 'baseRevision': base})
+
+    def test_folder_rename_blocks_stale_descendant_writes(self):
+        self.op({'type': 'create-folder', 'parentPath': '', 'name': 'old'})
+        self.op({'type': 'create-file', 'parentPath': 'old', 'name': 'nested.md', 'content': 'kept'})
+        base = self.broker.revision
+        self.op({'type': 'rename-node', 'path': 'old', 'name': 'new'})
+        for kind in ('patch-file', 'update-file'):
+            with self.assertRaisesRegex(ValueError, 'conflict'):
+                self.op({'type': kind, 'path': 'new/nested.md', 'start': 0, 'end': 0,
+                         'text': 'BAD', 'content': 'BAD', 'baseRevision': base})
+        self.assertEqual(self.content(path='new/nested.md'), 'kept')
+
+    def test_overlapping_or_mismatched_removals_are_not_insertions(self):
+        base = self.broker.revision
+        self.op({'type': 'patch-file', 'path': 'note.md', 'start': 1, 'end': 3,
+                 'removedText': '😀', 'text': 'X', 'baseRevision': base})
+        for revision in (base, self.broker.revision):
+            with self.assertRaisesRegex(ValueError, 'conflict'):
+                self.op({'type': 'patch-file', 'path': 'note.md', 'start': 1, 'end': 3,
+                         'removedText': '😀', 'text': 'BAD', 'baseRevision': revision})
+        self.assertEqual(self.content(), 'AXBC')
+
+    def test_missing_negative_and_future_patch_bases_are_refused(self):
+        for base in (None, -1, self.broker.revision + 1):
+            with self.assertRaisesRegex(ValueError, 'conflict'):
+                self.op({'type': 'patch-file', 'path': 'note.md', 'start': 0, 'end': 0,
+                         'text': 'BAD', 'baseRevision': base})
+
+    def test_rename_collision_is_refused(self):
+        self.op({'type': 'create-file', 'parentPath': '', 'name': 'other.md', 'content': 'other'})
+        with self.assertRaisesRegex(ValueError, 'conflict'):
+            self.op({'type': 'rename-node', 'path': 'note.md', 'name': 'other.md'})
+        self.assertEqual(self.content(self.reopen(), 'other.md'), 'other')
+        self.assertEqual(self.content(), 'A😀BC')
+
     def test_existing_broker_regressions(self):
         server.run_broker_selftest(Path(self.tmp.name) / 'legacy.json')
 

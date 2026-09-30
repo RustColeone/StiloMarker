@@ -1,3 +1,4 @@
+import { snapshotProject, savedFileIds } from "./services/project-save-service.js";
 import { APP_VERSION } from "./version.js";
 import { ROOT_ID, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isAllowedFileName, isBmapFileName, isImageFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
 import { createProjectController, seedDefaultProject } from "./domain/project-service.js";
@@ -6648,25 +6649,19 @@ function openUrlDbEntryInPane(fileId, entryId, pane) {
 }
 
 async function saveActiveWorkspaceFile() {
-  const project = controller.getProject();
-  const activeFile = controller.getActiveFile();
-  if (!activeFile) {
-    return;
-  }
-  if (project.sourceMode === "opfs") {
-    // Local workspace: flush through the shared guarded writer so an explicit
-    // save never races the debounced background flush.
-    await flushOpfsProject();
-    controller.markSaved(activeFile.id, workspaceMode !== "synced");
-    return;
-  }
-  const wroteToDisk = await saveProjectToHandles(project);
-  controller.markSaved(activeFile.id, workspaceMode !== "synced");
-  if (!wroteToDisk) {
-    // No live directory (e.g. Firefox / no File System Access) — the workspace
-    // lives in localStorage. Persist there silently rather than nagging on every
-    // save; Export remains the way to pull files out.
-    saveProject(project);
+  const saved = snapshotProject(controller.getProject());
+  const scope = snapshotProjectKey();
+  const activeId = saved.activeFileId;
+  if (!activeId) return;
+  const wroteToDisk = await saveProjectToHandles(saved);
+  if (!wroteToDisk) saveProject(saved);
+  if (scope !== snapshotProjectKey()) return;
+  const current = controller.getProject();
+  if (!savedFileIds(current, saved).includes(activeId)) return;
+  const confirmed = workspaceMode !== "synced" || (collaboration.isConnected?.()
+    && !collaboration.hasUnsyncedText?.(getPath(current, activeId)));
+  if (confirmed) {
+    controller.markSaved(activeId, workspaceMode !== "synced");
   }
 }
 
@@ -8730,54 +8725,30 @@ function renderPreviewOrDiff(project, previewFile) {
   }
 }
 
-// Local (OPFS) projects mirror every change back to their OPFS directory. Writes
-// are debounced and guarded against overlap so a burst of edits collapses into a
-// single flush, and a change arriving mid-flush re-arms one more pass.
-let opfsFlushTimer = null;
-let opfsFlushInFlight = false;
-let opfsFlushPending = false;
+// Local (OPFS) projects mirror changes to disk. Debounce per directory; the
+// shared writer serializes background, automatic, and explicit saves.
+const opfsFlushTimers = new Map();
 
 function scheduleOpfsFlush(project) {
-  if (project?.sourceMode !== "opfs") {
-    return;
-  }
-  opfsFlushPending = true;
-  if (opfsFlushTimer) {
-    return;
-  }
-  opfsFlushTimer = setTimeout(() => {
-    opfsFlushTimer = null;
-    void flushOpfsProject();
-  }, 500);
-}
-
-async function flushOpfsProject() {
-  if (opfsFlushInFlight) {
-    return;
-  }
-  const project = controller.getProject();
-  if (project?.sourceMode !== "opfs") {
-    opfsFlushPending = false;
-    return;
-  }
-  opfsFlushInFlight = true;
-  opfsFlushPending = false;
-  try {
-    await saveProjectToHandles(project);
-  } catch (error) {
-    logDebug("response", "Local workspace save failed", error.message);
-  } finally {
-    opfsFlushInFlight = false;
-    if (opfsFlushPending) {
-      scheduleOpfsFlush(controller.getProject());
-    }
-  }
+  if (project?.sourceMode !== "opfs") return;
+  const root = project.handles?.[project.rootId];
+  if (!root) return;
+  const previous = opfsFlushTimers.get(root);
+  if (previous) clearTimeout(previous);
+  // Capture this workspace. Switching views must not redirect its pending save.
+  opfsFlushTimers.set(root, setTimeout(() => {
+    opfsFlushTimers.delete(root);
+    void saveProjectToHandles(project).catch((error) => {
+      logDebug("response", "Local workspace save failed", error.message);
+    });
+  }, 500));
 }
 
 function render(project) {
   explorer.render(project, new Set(agentPendingDecorations.keys()));
   updateStatus(project);
-  saveProject(project);
+  try { saveProject(project); }
+  catch (error) { logDebug("response", "Browser recovery save failed", error.message); }
   scheduleOpfsFlush(project);
   scheduleAutoSave(project);
 }
@@ -8817,14 +8788,20 @@ async function runAutoSave(reason) {
   if (!settings.autoSave) return;
   // Don't churn a render (markManySaved) mid-IME-composition; wait until it ends.
   if (editorIsComposing) return;
-  const project = controller.getProject();
+  const project = snapshotProject(controller.getProject());
+  const scope = snapshotProjectKey();
   if (project.sourceMode === "filesystem") return; // explicit save only
   const dirty = dirtyFileIds(project);
   if (!dirty.length) return;
   try {
     if (project.sourceMode === "opfs") {
-      await flushOpfsProject(); // durable: mirror to the OPFS directory
+      await saveProjectToHandles(project);
+    } else {
+      saveProject(project); // propagate quota/storage errors before clearing dirty
     }
+    if (scope !== snapshotProjectKey()) return;
+    const unchanged = new Set(savedFileIds(controller.getProject(), project));
+    const savedDirty = dirty.filter((id) => unchanged.has(id));
     // memory/import already mirror to localStorage on every render.
     // A cloud workspace's durable home is the SERVER, so only clear dirty once the
     // server confirmed the text (nothing pending / in-flight / mid-reconnect) —
@@ -8835,9 +8812,9 @@ async function runAutoSave(reason) {
     const cloud = workspaceMode === "synced";
     const savable = cloud
       ? (collaboration.isConnected?.()
-          ? dirty.filter((id) => !collaboration.hasUnsyncedText?.(getPath(project, id)))
+          ? savedDirty.filter((id) => !collaboration.hasUnsyncedText?.(getPath(project, id)))
           : [])
-      : dirty;
+      : savedDirty;
     if (savable.length) {
       controller.markManySaved(savable, !cloud);  // host owns the counters when synced
       logDebug("response", `Auto-saved ${savable.length} file(s) (${reason})`);

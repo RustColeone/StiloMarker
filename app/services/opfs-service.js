@@ -252,12 +252,6 @@ async function importProjectModelOpfs(destPath, name, project) {
   await writeManifest(dir, finalName);
   const rootId = project.rootId ?? ROOT_ID;
   const nodes = JSON.parse(JSON.stringify(project.nodes ?? {}));
-  // saveProjectToHandles walks the tree via listVisibleNodes, which only
-  // descends folders whose `expanded` flag is set. A portable model may carry
-  // collapsed folders, so force every folder open to flush the whole tree.
-  for (const node of Object.values(nodes)) {
-    if (node && node.kind === "folder") node.expanded = true;
-  }
   const model = {
     id: project.id ?? `project-${finalName}`,
     name: finalName,

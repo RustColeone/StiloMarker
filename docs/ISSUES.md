@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-09-22 · release `v0.1.12` (deployment pending)
+Last updated: 2026-09-22 · release `v0.1.13` (deployed and public-domain verified 2026-09-22 19:23 UTC)
 
 ---
 
@@ -29,6 +29,31 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.13: concurrent editing and local-save follow-up
+
+- **A — Concurrent text divergence:** deterministic insertion ties on client and
+  server; queued typing rebased alongside sent patches; HTTP/SSE confirmations
+  share ordered event handling. Ambiguous overlapping replacements recover the
+  local draft through Snapshots rather than guessing at a merge.
+- **B — Patches across replacements:** whole-file/tree replacement, restore,
+  delete/recreate, and file/folder rename act as rebase barriers. Obsolete patches
+  receive 409. Removed text must match; invalid/future base revisions are refused.
+- **C — False save confirmation:** local writes are serialized and failures
+  propagate. Automatic and explicit saves only clear dirty for unchanged content
+  and paths in the same workspace. Continued typing remains dirty.
+- **Collapsed-folder data loss:** disk persistence walks the complete tree rather
+  than the visible explorer rows. Collapsing a folder no longer removes its files.
+- Rename saves write new paths before removing old paths; retries tolerate partial
+  cleanup and use the last completed disk index. Cloud rename collisions are
+  refused. Browser-storage quota errors no longer abort the editor's sync handler.
+- Undoing an unsent edit to its original content clears its pending-sync status.
+
+Validation includes two production clients and the Python broker over stdio,
+HTTP/SSE ordering, exhaustive short splice pairs, save failure injection, and the
+actual UI save handlers. Release v0.1.13 requires sync compatibility 113 because
+older clients use the unsafe transform/acknowledgment behavior.
+
 
 ### September 22 follow-up: sync recovery and durable saves
 

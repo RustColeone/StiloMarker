@@ -35,6 +35,9 @@ node --test tests/       # raw test runner
 | `urldb-service.test.mjs` | `.urldb` serialize/parse/update/remove round-trips. |
 | `zip-fs.test.mjs` | ZIP import/export and File System Access persistence. |
 | `collaboration-runtime.test.mjs` | Production sync runtime: reconnect conflicts, recovery snapshots, request races, patch rejection, join gaps, Unicode. |
+| `collaboration-broker.test.mjs` | Two real clients + the Python broker over stdio, both send/ack orders. |
+| `text-patch.test.mjs` | Exhaustive short splice-pair convergence and overlap rejection. |
+| `project-save.test.mjs` | Queued writes, errors, typing during saves, collapsed folders, rename retries, UI save handlers. |
 | `server-reliability.test.py` | Production broker: UTF-16, disk-failure recovery, ordered events, and existing broker regressions. |
 | `sync-service.test.mjs` | Collaboration transport against a mock HTTP server. |
 | `agent-collaborator.test.mjs` | Agent proposal round-trips + agent-feature wiring. |

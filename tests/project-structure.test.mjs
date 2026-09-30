@@ -137,7 +137,7 @@ test("collaboration-service.js wires transport and OT", async () => {
     /baseRevision/,
     /localRevision/,
     /inFlightPatches/,
-    /transformOffset/,
+    /transformTextPatch/,
     /scheduleAwareness/,
     /getRole/,
     /session\.role/
@@ -161,7 +161,7 @@ test("backend exposes collaboration + OT endpoints", async () => {
     /Persisting collaborative state/,
     /Backend self-test passed\./,
     /operation_log/,
-    /_transform_offset/,
+    /_transform_range/,
     /_rebase_patch/,
     /broadcast_cursor/,
     /api\/session\/presence/,
