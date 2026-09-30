@@ -34,7 +34,7 @@ function harness(t) {
   };
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
   globalThis.fetch = async (url, options = {}) => {
-    if (url.includes('/workspaces/open')) return json({ token: 'session', clientId: 'me', workspace: 'team/test', revision: server.revision });
+    if (url.includes('/workspaces/open')) return hooks.open ? hooks.open() : json({ token: 'session', clientId: 'me', workspace: 'team/test', revision: server.revision });
     if (url.includes('/session/state') && options.method === 'GET') {
       if (hooks.get) return hooks.get();
       return json(structuredClone(server));
@@ -332,4 +332,36 @@ test('server-confirmed agent operations update the initiating client exactly onc
   h.streams[0].event({ type: 'operation', clientId: 'me', revision: 2, operation: h.posts[0] });
   assert.equal(h.local().nodes.file.content, 'agent edit');
   assert.equal(h.runtime.getRevision(), 2);
+});
+
+test('foreground recovery replaces a silently dead stream and preserves a conflicting draft', async t => {
+  const h=harness(t);await h.open();h.edit('phone draft');
+  h.server.project=project('newer cloud');h.server.revision=2;
+  await h.runtime.resumeConnection();
+  assert.equal(h.streams[0].closed,true);assert.equal(h.streams.length,2);
+  assert.equal(h.local().nodes.file.content,'newer cloud');
+  assert.equal(h.archives[0].get('note.md'),'phone draft');assert.equal(h.posts.length,0);
+});
+test('overlapping foreground notifications share the reconnect handshake',async t=>{
+  const h=harness(t);await h.open();const gate=deferred();let reads=0;
+  h.hooks.get=()=>{reads++;return reads===1 ? gate.promise : h.json(structuredClone(h.server));};
+  const first=h.runtime.resumeConnection(),second=h.runtime.resumeConnection();await settle();
+  assert.equal(reads,1);gate.resolve(h.json(structuredClone(h.server)));
+  await Promise.all([first,second]);assert.equal(h.streams.length,2);
+});
+
+
+test('logout invalidates an unfinished workspace handshake',async t=>{
+  const h=harness(t),gate=deferred();h.hooks.open=()=>gate.promise;
+  const opening=h.open();await settle();h.runtime.disconnect();
+  gate.resolve(h.json({token:'late',clientId:'me',workspace:'team/test',revision:1}));
+  await assert.rejects(opening,{status:499});assert.equal(h.runtime.isConnected(),false);assert.equal(h.streams.length,0);
+});
+
+
+test('queued callbacks from a replaced stream cannot break the recovered session',async t=>{
+  const h=harness(t);await h.open();const old=h.streams[0];await h.runtime.resumeConnection();
+  old.onerror();old.event({type:'operation',revision:99,operation:{type:'update-file',path:'note.md',content:'stale stream'}});
+  assert.equal(h.runtime.isReconnecting(),false);assert.equal(h.runtime.getRevision(),1);
+  assert.equal(h.local().nodes.file.content,'original');
 });

@@ -48,6 +48,7 @@ async function throwForResponse(prefix, response) {
 async function pingServer(serverUrl) {
   const baseUrl = normalizeServerUrl(serverUrl);
   const response = await fetch(`${baseUrl}/api/ping`, {
+    signal: AbortSignal.timeout(15000),
     method: "GET",
     headers: {
       accept: "application/json, text/plain;q=0.9"
@@ -91,6 +92,7 @@ async function loginToServer(serverUrl, username, password) {
     throw new Error("Username is required.");
   }
   const response = await fetch(`${baseUrl}/api/auth/login`, {
+    signal: AbortSignal.timeout(15000),
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -168,6 +170,7 @@ async function hostSession(serverUrl, displayName) {
 async function openWorkspaceSession(serverUrl, accountToken, team, path, device, reason = "unspecified") {
   const baseUrl = normalizeServerUrl(serverUrl);
   const response = await fetch(`${baseUrl}/api/workspaces/open?token=${encodeURIComponent(accountToken)}`, {
+    signal: AbortSignal.timeout(15000),
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify({
@@ -406,6 +409,7 @@ function sanitizeProjectForSync(project) {
 async function fetchSessionState(serverUrl, token) {
   const baseUrl = normalizeServerUrl(serverUrl);
   const response = await fetch(`${baseUrl}/api/session/state?token=${encodeURIComponent(token)}`, {
+    signal: AbortSignal.timeout(15000),
     method: "GET",
     headers: {
       accept: "application/json"
@@ -422,6 +426,7 @@ async function fetchSessionState(serverUrl, token) {
 async function pushSessionState(serverUrl, token, project, baseRevision) {
   const baseUrl = normalizeServerUrl(serverUrl);
   const response = await fetch(`${baseUrl}/api/session/state?token=${encodeURIComponent(token)}`, {
+    signal: AbortSignal.timeout(15000),
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -440,6 +445,7 @@ async function pushSessionState(serverUrl, token, project, baseRevision) {
 async function pushOperation(serverUrl, token, operation) {
   const baseUrl = normalizeServerUrl(serverUrl);
   const response = await fetch(`${baseUrl}/api/operations?token=${encodeURIComponent(token)}`, {
+    signal: AbortSignal.timeout(15000),
     method: "POST",
     headers: {
       "content-type": "application/json",

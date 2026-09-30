@@ -33,6 +33,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
   let reconnecting = false;
   let reconnectTimer = null;
   let reconnectAttempts = 0;
+  let reconnectTask = null;
   const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 15000, 30000];
 
   function isImageName(name) {
@@ -117,6 +118,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     recovering = false;
     deferredEvents = [];
     reconnectCtx = null;
+    reconnectTask = null;
     clearReconnect();
     clearScheduledSyncs();
     if (connection?.eventSource) {
@@ -138,7 +140,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
   // again can. Without this a tab retries the same dead token forever: one was
   // observed making 504 failed attempts over four hours.
   function isAuthExpiredError(error) {
-    return error?.status === 403 || /not logged in|invalid or expired/i.test(error?.message ?? "");
+    return error?.status === 401 || error?.status === 403 || /not logged in|invalid or expired/i.test(error?.message ?? "");
   }
   let reauthInFlight = false;
 
@@ -147,6 +149,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
   // this status into an upgrade prompt / forced refresh.
   function handleUpgradeRequired(error) {
     reconnectCtx = null;
+    reconnectTask = null;
     clearReconnect();
     clearScheduledSyncs();
     reconnecting = false;
@@ -180,9 +183,9 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     scheduleReconnectAttempt();
   }
 
-  function scheduleReconnectAttempt() {
+  function scheduleReconnectAttempt(immediate = false) {
     if (!reconnectCtx) return;
-    const delay = RECONNECT_DELAYS[Math.min(reconnectAttempts, RECONNECT_DELAYS.length - 1)];
+    const delay = immediate ? 0 : RECONNECT_DELAYS[Math.min(reconnectAttempts, RECONNECT_DELAYS.length - 1)];
     reconnectAttempts += 1;
     reconnectTimer = window.setTimeout(() => {
       reconnectTimer = null;
@@ -190,7 +193,24 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     }, delay);
   }
 
-  async function attemptReconnect() {
+  function attemptReconnect() {
+    if (reconnectTask) return reconnectTask;
+    const task = runReconnect();
+    reconnectTask = task;
+    task.finally(() => { if (reconnectTask === task) reconnectTask = null; }).catch(() => {});
+    return task;
+  }
+
+  async function resumeConnection() {
+    if (!connection || !reconnectCtx) return false;
+    if (!reconnecting) handleStreamError();
+    if (reconnectTimer) window.clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    await attemptReconnect();
+    return true;
+  }
+
+  async function runReconnect() {
     if (!reconnectCtx || !connection) return;
     const epoch = generation;
     const baseBeforeReconnect = localRevision;
@@ -234,7 +254,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
             reconnectCtx.accountToken = freshToken;
             emitStatus("reconnecting", "Signed in again — reconnecting…");
             reauthInFlight = false;
-            void attemptReconnect(); // retry straight away with the new token
+            scheduleReconnectAttempt(true); // retry with the new token after this attempt settles
             return;
           }
           // Could not sign in (no stored credentials, or they were rejected):
@@ -242,9 +262,10 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
           clearReconnect();
           disconnect("Session expired — sign in again to reconnect.");
           return;
-        } catch {
-          clearReconnect();
-          disconnect("Session expired — sign in again to reconnect.");
+        } catch (authError) {
+          if (epoch !== generation) return;
+          emitStatus("reconnecting", `Sign-in temporarily unavailable — retrying… (${authError.message})`);
+          scheduleReconnectAttempt();
           return;
         } finally {
           reauthInFlight = false;
@@ -706,12 +727,13 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
   // both PIN connect() and account openWorkspace().
   function attachEventStream(serverUrl) {
     const epoch = generation;
-    connection.eventSource = openEventStream(
+    const stream = openEventStream(
       serverUrl,
       connection.token,
-      (event) => { if (epoch === generation) handleEvent(event); },
-      () => { if (epoch === generation) handleStreamError(); }
+      (event) => { if (epoch === generation && connection?.eventSource === stream) handleEvent(event); },
+      () => { if (epoch === generation && connection?.eventSource === stream) handleStreamError(); }
     );
+    connection.eventSource = stream;
   }
 
   function handleEvent(event) {
@@ -856,6 +878,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
   // into the server so nothing typed offline is clobbered by a stale pull.
   async function openWorkspace(serverUrl, accountToken, team, path, options = {}) {
     disconnect();
+    const epoch = generation;
     emitStatus("reachable", "Opening workspace…");
 
     const device = options.device || null;
@@ -867,6 +890,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       if (isUpgradeError(error)) handleUpgradeRequired(error);
       throw error;
     }
+    if (epoch !== generation) throw Object.assign(new Error("Workspace open was superseded."), { status: 499 });
     connection = {
       serverUrl,
       token: session.token,
@@ -906,12 +930,14 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
 
     if (shouldReconcile) {
       await reconcileLocalIntoServer(localBase);
+      if (epoch !== generation) throw Object.assign(new Error("Workspace open was superseded."), { status: 499 });
       emitStatus("connected", `Opened ${session.workspace} — restored unsynced changes.`);
     } else {
       if (options.reconcileLocal) {
         await reloadFromServer("Loaded the newer cloud workspace.");
       } else {
         const snapshot = await fetchSessionState(serverUrl, connection.token);
+        if (epoch !== generation) throw Object.assign(new Error("Workspace open was superseded."), { status: 499 });
         // Opening another workspace must not archive the previous one's files.
         isApplyingRemote = true;
         try { replaceProject(snapshot.project); } finally { isApplyingRemote = false; }
@@ -921,6 +947,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
         connection.revision = localRevision;
         lastFingerprint = fingerprintProject(snapshot.project);
       }
+      if (epoch !== generation) throw Object.assign(new Error("Workspace open was superseded."), { status: 499 });
       emitStatus("connected", `Opened ${session.workspace} at revision ${connection.revision}.`);
     }
 
@@ -960,6 +987,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
   return {
     connect,
     openWorkspace,
+    resumeConnection,
     hostForGuests,
     disconnect,
     publishOperation,
