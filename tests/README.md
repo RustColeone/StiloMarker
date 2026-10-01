@@ -87,7 +87,7 @@ This emulates mobile Chromium. Physical iOS keyboard behavior still needs a devi
 - `mobile-navigation-browser.py`: optional Playwright checks for reachable menus,
   Find/Replace layout, 44px touch controls, caret/IME resize preservation, swipe
   cancellation/reversal, rapid navigation, canvas gesture ownership, flyout state,
-  chat collapse, and preservation of desktop layout preferences. Uses the same
+  chat collapse, keyboard-height document containment, and preservation of desktop layout preferences. Uses the same
   public-origin overlay and isolated/mocked API setup as `mobile-chat-browser.py`.
   Run with `python3 tests/mobile-navigation-browser.py` after installing Playwright;
   set `STILO_BROWSER` to an existing Chromium executable when needed.

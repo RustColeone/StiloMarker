@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-09-30 · release `v0.1.20` (deployed; public verification passed)
+Last updated: 2026-09-30 · release `v0.1.21` (deployed; public verification passed)
 
 ---
 
@@ -30,6 +30,10 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.21: mobile keyboard blank-area scrolling
+
+The page now stays the same height as the visible app when the mobile keyboard reduces the viewport. Chromium is asked to resize its layout viewport with the keyboard; root overscroll and scroll chaining from the editor, preview, and explorer are contained. A browser regression reproduces the former 844px document behind a 350px app and verifies the corrected layout.
 
 ### v0.1.20: mobile browser caret restoration
 
