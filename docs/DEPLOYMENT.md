@@ -7,13 +7,13 @@ Prepare and test a release in a separate directory before copying it into place.
 
 ## Release numbering
 
-- `v0.1.20`: app release, following `MAJOR.MINOR.PATCH`.
+- `v0.1.21`: app release, following `MAJOR.MINOR.PATCH`.
 - `SYNC_PROTOCOL_VERSION` / `MIN_CLIENT_VERSION`: numeric sync compatibility.
   Keep the wire field `version` numeric so old clients remain safely rejected.
   Ordinary app releases do not need a protocol increment.
 - Document S.E.N labels and workspace revisions are separate and unchanged.
 
-Use `node tools/release-version.mjs 0.1.21` to set the next app release and
+Use `node tools/release-version.mjs 0.1.22` to set the next app release and
 `node tools/release-version.mjs --check` to verify all release labels agree.
 
 ## Coordinated deployment
@@ -188,4 +188,25 @@ was active after deployment. Physical-phone verification remains useful.
 
 Private deployment backup:
 `/home/laplacengan/backups/stilomarker/20260930T204116Z-v0.1.20`.
+Nine project manifests were validated in the stopped-service data backup.
+
+
+## Verified release: v0.1.21
+
+Deployed on 2026-10-01. The mobile keyboard no longer leaves a full-height
+scrollable page behind the shortened editor. The document follows the visible
+app height, Chromium resizes its layout viewport with the keyboard, and inner
+scroll areas contain gestures. App version is `0.1.21`; sync compatibility is
+unchanged at `114`. Settings and security preferences are unchanged.
+
+The mobile Chromium regression reproduces the old 844px document behind a
+350px app and passes with this release. Validation also included 132 Node tests,
+29 Python reliability tests, 16 MCP tests, and the mobile chat/caret suites.
+The public smoke matched 16 assets and passed isolated two-client document,
+chat, and presence checks; no persistent writing project was touched. A physical
+keyboard check is still useful because browser emulation cannot display the OS
+keyboard.
+
+Private deployment backup:
+`/home/laplacengan/backups/stilomarker/20261001T043028Z-v0.1.21`.
 Nine project manifests were validated in the stopped-service data backup.

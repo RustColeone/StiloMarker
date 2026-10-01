@@ -63,6 +63,21 @@ async def main():
         await page.goto(BASE, wait_until='networkidle')
         await page.wait_for_function('Boolean(window.__chatTest)')
         assert not errors, errors
+        # A keyboard may shrink only the visual viewport. The document must not
+        # retain a full-height blank area below the shortened app.
+        keyboard_layout = await page.evaluate('''() => {
+          document.documentElement.style.setProperty('--mobile-viewport-height', '350px');
+          const body = document.body.getBoundingClientRect();
+          const app = document.querySelector('#app').getBoundingClientRect();
+          const editor = document.querySelector('#editor-content').getBoundingClientRect();
+          const result = { body: body.height, app: app.height, editorBottom: editor.bottom,
+            viewportMeta: document.querySelector('meta[name="viewport"]').content };
+          document.documentElement.style.removeProperty('--mobile-viewport-height');
+          return result;
+        }''')
+        assert keyboard_layout['body'] <= keyboard_layout['app'] + 1, keyboard_layout
+        assert keyboard_layout['editorBottom'] <= keyboard_layout['app'] + 1, keyboard_layout
+        assert 'interactive-widget=resizes-content' in keyboard_layout['viewportMeta'], keyboard_layout
         # All clicks stay in the isolated browser; API calls are mocked above.
         for width,height in [(320,640),(390,844),(768,1024),(852,393),(390,350)]:
             await page.set_viewport_size({'width':width,'height':height})
@@ -194,7 +209,7 @@ async def main():
         await page.set_viewport_size({'width':390,'height':844})
         await page.screenshot(path='/tmp/stilomarker-mobile-source-v0.1.15.png')
         assert not errors,errors
-        print(json.dumps({'mobileViewports':5,'runtimeErrors':len(errors),'checks':['reachable menus','44px controls','Find controls fit','height resize preserves caret','IME resize preserves DOM','editing owns swipes','cancel and multitouch restore pane','direction reversal','rapid navigation','normal pane swipe','chat close','canvas and wide content own gestures','edge drawer','exclusive flyouts','desktop settings preserved','breakpoint state','short-screen settings']}))
+        print(json.dumps({'mobileViewports':5,'runtimeErrors':len(errors),'checks':['keyboard-height document containment','reachable menus','44px controls','Find controls fit','height resize preserves caret','IME resize preserves DOM','editing owns swipes','cancel and multitouch restore pane','direction reversal','rapid navigation','normal pane swipe','chat close','canvas and wide content own gestures','edge drawer','exclusive flyouts','desktop settings preserved','breakpoint state','short-screen settings']}))
         await browser.close()
 
 asyncio.run(main())

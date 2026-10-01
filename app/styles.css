@@ -6575,7 +6575,13 @@ pre.proposal-diff-block {
 /* Keep the composer visible as mobile browser chrome and the keyboard change
    the visual viewport. Desktop sizing remains independent. */
 @media (max-width: 900px) {
-  body { min-height: 100dvh; }
+  /* Keep the document the same height as the visible app when the keyboard
+     shrinks the viewport. The editor/preview remain the scrollable surfaces. */
+  html, body { overscroll-behavior-y: none; }
+  body { height: var(--mobile-viewport-height, 100dvh); min-height: 0; }
+  #editor-content, .preview-output, .explorer-tree, .editor-empty-state {
+    overscroll-behavior-y: contain;
+  }
   .app-shell {
     height: var(--mobile-viewport-height, 100dvh);
     min-height: 0;
