@@ -236,3 +236,23 @@ the unit file, and a stopped-service data copy: nine project manifests, all
 valid, 127/127 files. `stilomarker.env` and `whitelist.json` were not copied;
 the update does not touch ignored files.
 
+
+## Verified release: v0.1.23
+
+Deployed on 2026-10-11 at 07:02 UTC. The backend now gzips text assets of 1KB
+or more when the browser accepts it, and dead JavaScript functions and CSS rules
+were removed. App version `0.1.23`; sync compatibility unchanged at `115`.
+
+Through nginx, eight checked assets arrive compressed exactly when they are 1KB
+or larger: 945KB → 231KB on the wire, each byte-identical to the checkout after
+decoding. Clients that do not accept gzip still receive raw files, and the
+service-worker cache label is `mdnotes-shell-v0.1.23`. Locally, the service worker
+installed and served the whole shell from compressed responses. A guest-session
+smoke (create, emoji content, `move-node`) passed; no persistent writing project
+was touched. Validation: 140 Node tests, the Python reliability, move-node,
+static-compression and MCP suites, the backend self-test, and eight browser suites.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261011T070223Z-v0.1.23`.
+Nine project manifests valid, 127/127 files; configuration files with secrets
+were not copied.
+
