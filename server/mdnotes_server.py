@@ -3406,6 +3406,33 @@ class WorkspaceRegistry:
             self.token_workspace.pop(token, None)
 
 
+# Compressed static files, keyed by path and invalidated when the file changes
+# on disk, so a release is never served stale bytes. Bounded: it only ever holds
+# the app shell (~1MB raw), but a stray tree of text files must not grow it.
+_GZIP_CACHE: dict[str, tuple[int, int, bytes]] = {}
+_GZIP_CACHE_LOCK = threading.Lock()
+_GZIP_CACHE_MAX = 256
+
+
+def _gzip_static(path: Path, content: bytes) -> bytes:
+    try:
+        stat = path.stat()
+        key, stamp = str(path), (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        return gzip.compress(content, compresslevel=6, mtime=0)
+    with _GZIP_CACHE_LOCK:
+        hit = _GZIP_CACHE.get(key)
+        if hit and (hit[0], hit[1]) == stamp:
+            return hit[2]
+    # mtime=0: identical bytes for identical files, whichever worker compressed them.
+    packed = gzip.compress(content, compresslevel=6, mtime=0)
+    with _GZIP_CACHE_LOCK:
+        if len(_GZIP_CACHE) >= _GZIP_CACHE_MAX:
+            _GZIP_CACHE.clear()
+        _GZIP_CACHE[key] = (stamp[0], stamp[1], packed)
+    return packed
+
+
 class MDNotesRequestHandler(BaseHTTPRequestHandler):
     server_version = "MDNotesServer/0.1"
 
@@ -4368,11 +4395,45 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
 
         content = candidate.read_bytes()
         content_type, _ = mimetypes.guess_type(str(candidate))
+        content_type = content_type or "application/octet-stream"
+        # Text assets were sent raw: ~930KB of JavaScript per first load or per
+        # release, ~4x what gzip makes it. Compress when the browser accepts it.
+        encoded = None
+        if self._is_compressible(content_type, len(content)) and self._accepts_gzip():
+            encoded = _gzip_static(candidate, content)
         self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", f"{content_type or 'application/octet-stream'}")
+        self.send_header("Content-Type", content_type)
+        self.send_header("Vary", "Accept-Encoding")  # caches must keep the variants apart
+        if encoded is not None:
+            content = encoded
+            self.send_header("Content-Encoding", "gzip")
         self.send_header("Content-Length", str(len(content)))
         self.end_headers()
         self.wfile.write(content)
+
+    _COMPRESSIBLE_TYPES = ("text/", "application/javascript", "application/json", "application/manifest+json", "image/svg+xml")
+
+    @classmethod
+    def _is_compressible(cls, content_type: str, size: int) -> bool:
+        # Tiny files gain nothing; images, fonts and archives are compressed already.
+        return size >= 1024 and content_type.startswith(cls._COMPRESSIBLE_TYPES)
+
+    def _accepts_gzip(self) -> bool:
+        """True when Accept-Encoding allows gzip (an explicit q=0 refuses it)."""
+        for part in (self.headers.get("Accept-Encoding") or "").split(","):
+            name, _, params = part.strip().partition(";")
+            if name.strip().lower() not in ("gzip", "*"):
+                continue
+            quality = 1.0
+            for param in params.split(";"):
+                key, _, value = param.strip().partition("=")
+                if key.strip().lower() == "q":
+                    try:
+                        quality = float(value)
+                    except ValueError:
+                        quality = 0.0
+            return quality > 0
+        return False
 
 
 def build_server(host: str, port: int, pin: str, static_root: Path, state_file: Path, master_pin: str | None = None, chat_proxy: ChatProxy | None = None, whitelist_file: Path | None = None, data_dir: Path | None = None):

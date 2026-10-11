@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-11 · release `v0.1.22` (deployed; public verification passed)
+Last updated: 2026-10-11 · release `v0.1.23` (prepared; not yet deployed)
 
 ---
 
@@ -30,6 +30,21 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.23: compressed static files, dead code removed
+
+Static files were served uncompressed (~930KB of JavaScript on a first load and
+after every release). The backend now gzips text assets of 1KB or more when the
+browser accepts it — `main.js` 528KB → ~136KB — honours `q=0`, sends
+`Vary: Accept-Encoding`, and caches each compressed file until it changes on disk.
+Images, fonts and tiny files go out as before. The service worker installs and
+serves the shell normally from compressed responses.
+
+Removed code nothing used: nine functions (four of them leftovers from the
+v0.1.22 renderer) and 13 CSS classes left behind by earlier redesigns (the old
+"accept" agent buttons, the `editor-measure` helper, `link-button`, and others).
+Each was checked by hand, including class names built at runtime such as
+`is-${state}` and `bmap-resize-${edge}`, which are kept. 150 lines.
 
 ### v0.1.22: typing performance, explorer drift, drag duplicates, template race
 

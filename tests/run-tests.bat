@@ -38,6 +38,12 @@ if errorlevel 1 (
   if errorlevel 1 goto :failed
 )
 
+call python -B tests\static-compression.test.py
+if errorlevel 1 (
+  call python3 -B tests\static-compression.test.py
+  if errorlevel 1 goto :failed
+)
+
 echo.
 echo === [4/4] MCP connection regressions ==================================
 call python -B tests\mcp-client.test.py

@@ -1031,12 +1031,6 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       : null;
   }
 
-  function getSelectedConnector() {
-    return selection.length === 1 && selection[0].type === "connector"
-      ? ast.connectors[selection[0].index] ?? null
-      : null;
-  }
-
   function ensureSelectionStillExists() {
     selection = selection.filter((item) =>
       item.type === "node" ? Boolean(getNodeById(item.id)) : Boolean(ast.connectors[item.index]));

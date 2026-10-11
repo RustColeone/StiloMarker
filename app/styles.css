@@ -104,7 +104,6 @@ body {
 /* Dialogs are their own stacking/inheritance island in some engines; state the
    size explicitly so Settings can never drift back to the UA default. */
 dialog,
-.dialog-body,
 .settings-form,
 .settings-section {
   font-size: var(--ui-font-size);
@@ -1583,10 +1582,6 @@ p {
   justify-content: flex-end;
 }
 
-.editor-gutter-line.is-continuation {
-  color: transparent;
-}
-
 /* Phase 5: agent-pending line decoration */
 .editor-line.is-agent-pending {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
@@ -1659,14 +1654,12 @@ p {
   cursor: not-allowed;
 }
 
-.agent-bar-btn.agent-bar-keep,
-.agent-bar-btn.agent-bar-accept {
+.agent-bar-btn.agent-bar-keep {
   color: var(--accent);
   border-color: var(--accent);
 }
 
-.agent-bar-btn.agent-bar-keep:hover:not(:disabled),
-.agent-bar-btn.agent-bar-accept:hover:not(:disabled) {
+.agent-bar-btn.agent-bar-keep:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
@@ -1818,21 +1811,6 @@ p {
 
 .editor-empty-state[hidden] {
   display: none;
-}
-
-/* Text button styled as an inline hyperlink. */
-.link-button {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--accent-strong);
-  font: inherit;
-  text-decoration: underline;
-  cursor: pointer;
-}
-
-.link-button:hover {
-  color: var(--accent);
 }
 
 .editor-drop-caret {
@@ -2296,21 +2274,6 @@ p {
   color: #fff;
   pointer-events: none;
   user-select: none;
-}
-
-.editor-measure {
-  position: absolute;
-  top: -99999px;
-  left: -99999px;
-  visibility: hidden;
-  pointer-events: none;
-  contain: layout style;
-}
-
-.editor-measure-line {
-  display: block;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
 #editor-content::selection,
@@ -4064,11 +4027,6 @@ menu {
   gap: 8px;
 }
 
-.bmap-toolbar-group-compact {
-  align-items: center;
-  justify-content: center;
-}
-
 .bmap-toolbar-btn,
 .bmap-inspector-actions button {
   padding: 6px 10px;
@@ -4908,10 +4866,6 @@ menu {
   min-height: 88px;
 }
 
-.bmap-field.is-disabled {
-  opacity: 0.55;
-}
-
 .bmap-checkbox-field {
   flex-direction: row;
   align-items: center;
@@ -5210,8 +5164,7 @@ menu {
 
 @media (max-width: 980px) {
 
-  .bmap-toolbar-group,
-  .bmap-toolbar-group-compact {
+  .bmap-toolbar-group {
     justify-content: flex-start;
   }
 
@@ -5917,10 +5870,6 @@ menu {
   border-bottom: 1px solid var(--border);
 }
 
-.proposal-card.is-accepted .proposal-card-header {
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface-2));
-}
-
 .proposal-card-title {
   font-weight: 600;
   color: var(--text);
@@ -5959,16 +5908,6 @@ menu {
 .proposal-btn:disabled {
   opacity: 0.4;
   cursor: default;
-}
-
-.proposal-btn-accept-all {
-  background: color-mix(in srgb, var(--accent) 18%, var(--surface-3));
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-  color: var(--accent);
-}
-
-.proposal-btn-accept-all:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 28%, var(--surface-3));
 }
 
 .proposal-btn-keep {
@@ -6040,35 +5979,6 @@ menu {
   border: 1px solid var(--border);
   border-radius: 3px;
   padding: 0 4px;
-}
-
-.proposal-op-btn {
-  padding: 1px 6px;
-  border-radius: 3px;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text-dim);
-  font-size: 11px;
-  cursor: pointer;
-  line-height: 1.6;
-  flex-shrink: 0;
-}
-
-.proposal-op-accept:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-}
-
-.proposal-op-drop:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger, #e05) 12%, var(--surface-2));
-  color: var(--danger, #e05);
-  border-color: color-mix(in srgb, var(--danger, #e05) 30%, transparent);
-}
-
-.proposal-op-btn:disabled {
-  opacity: 0.3;
-  cursor: default;
 }
 
 .proposal-op-diff {
