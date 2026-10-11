@@ -1,14 +1,20 @@
 // Splice coordinates are UTF-16 offsets, matching browser selections.
+// Compares UTF-16 code units with charCodeAt, not text[i]: indexing a string of
+// CJK text allocates a one-character string per position, so finding the
+// changed span of a long chapter allocated ~180k strings on every keystroke.
+// Same units, same result.
 export function buildTextPatch(path, previousContent, nextContent, baseRevision) {
     if (previousContent === nextContent) return null;
     let start = 0;
-    while (start < previousContent.length && start < nextContent.length && previousContent[start] === nextContent[start]) {
+    while (start < previousContent.length && start < nextContent.length
+      && previousContent.charCodeAt(start) === nextContent.charCodeAt(start)) {
       start += 1;
     }
 
     let previousEnd = previousContent.length;
     let nextEnd = nextContent.length;
-    while (previousEnd > start && nextEnd > start && previousContent[previousEnd - 1] === nextContent[nextEnd - 1]) {
+    while (previousEnd > start && nextEnd > start
+      && previousContent.charCodeAt(previousEnd - 1) === nextContent.charCodeAt(nextEnd - 1)) {
       previousEnd -= 1;
       nextEnd -= 1;
     }

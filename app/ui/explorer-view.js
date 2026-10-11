@@ -424,18 +424,51 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
     return row;
   }
 
+  // Everything the tree displays, as one string. render() runs on every app
+  // render — a collaborator's keystroke, a presence ping — but the tree only
+  // changes when structure, names, expansion, selection, filter or agent
+  // markers do. Rebuilding it anyway cost DOM churn and, worse, threw away the
+  // browser's scroll anchor each time: some engines then re-anchor with a
+  // sub-pixel correction, which read as the explorer creeping up on every key.
+  let renderedSignature = null;
+
+  function treeSignature(project, rows, pendingPaths, filterMode) {
+    const selected = getSelectedTarget?.() ?? { nodeId: ROOT_ID, entryId: null };
+    const parts = [project?.name ?? "", filterMode, selected.nodeId ?? "", selected.entryId ?? ""];
+    for (const { node, depth, path } of rows) {
+      parts.push(node.id, node.kind, node.name, depth, path, node.expanded ? 1 : 0, pendingPaths.has(path) ? 1 : 0);
+      if (/\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(node.name)) {
+        // Data-URL sources can be huge; their length and ends identify them.
+        const src = String(getAssetPreviewSrc?.(node.id) ?? "");
+        parts.push(`${src.length}:${src.slice(0, 80)}:${src.slice(-40)}`);
+      }
+      if (node.kind === "file" && isUrlDbFileName(node.name) && node.expanded) {
+        for (const entry of getUrlDbEntries?.(node.id) ?? []) {
+          parts.push(entry.id, entry.name, entry.url, entry.description ?? "");
+        }
+      }
+    }
+    return parts.join("\u0001");
+  }
+
   function render(project, pendingPaths = new Set()) {
     currentProject = project;
-    container.replaceChildren();
-    container.append(createProjectRootRow(project));
     const filterMode = getFilterMode?.() ?? "all";
     const rows = listVisibleNodes(project).filter(({ node }) => nodeMatchesFilter(node, filterMode));
+    const signature = treeSignature(project, rows, pendingPaths, filterMode);
+    if (signature === renderedSignature && container.childElementCount > 0) return;
+    renderedSignature = signature;
+    // A real rebuild still must not move the list: keep the reader's place.
+    const scrollTop = container.scrollTop;
+    container.replaceChildren();
+    container.append(createProjectRootRow(project));
 
     if (rows.length === 0) {
       const empty = document.createElement("div");
       empty.className = "subtle-label";
       empty.textContent = "No files yet. Right-click to create one.";
       container.append(empty);
+      container.scrollTop = scrollTop;
       return;
     }
 
@@ -543,6 +576,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
         });
       }
     });
+    container.scrollTop = scrollTop;
   }
 
   function showQuickAddMenu(anchorElement, nodeId = ROOT_ID) {

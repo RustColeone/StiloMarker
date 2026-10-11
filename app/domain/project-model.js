@@ -103,11 +103,30 @@ function applyTextPatch(content, operation, { skipConflictCheck = false } = {}) 
   return `${content.slice(0, start)}${insertText}${content.slice(end)}`;
 }
 
+// A deep copy of the model's objects and arrays that SHARES its strings.
+// structuredClone copies string data too, and every edit clones the project —
+// so each keystroke used to duplicate every file's full text (~600KB for a
+// novel-sized workspace) straight into long-lived memory, which is what kept
+// triggering full garbage collections. Strings are immutable, so sharing them
+// is safe; objects and arrays are still fresh, so mutating a node of the copy
+// never touches the original — the same guarantee structuredClone gave.
+// Anything that is not plain data (a Date, Map, buffer…) still goes through
+// structuredClone, so no value changes meaning.
+function cloneModelData(value) {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(cloneModelData);
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return structuredClone(value);
+  const copy = {};
+  for (const key of Object.keys(value)) copy[key] = cloneModelData(value[key]);
+  return copy;
+}
+
 function cloneProject(project) {
   // Handles are capabilities; preserve their identity across model edits so
   // writes for the same directory share one serialization queue.
   const { handles, ...model } = project;
-  return { ...structuredClone(model), ...(handles ? { handles: { ...handles } } : {}) };
+  return { ...cloneModelData(model), ...(handles ? { handles: { ...handles } } : {}) };
 }
 
 function getNode(project, nodeId) {
@@ -319,13 +338,20 @@ function moveNode(project, nodeId, targetParentId, targetIndex = null) {
 
   const sourceParent = getNode(next, node.parentId);
   const sourceIndex = sourceParent.children.indexOf(nodeId);
+  // targetIndex is a slot in the destination's list as it is BEFORE the move —
+  // what the explorer computes from the drop position. Clamp against that
+  // length, then account for the removal. Clamping against the shortened list
+  // first meant a file dragged to the end of its own folder (index = length)
+  // landed one above the bottom; no-index "append" had the same off-by-one.
+  const sameParent = sourceParent.id === targetParentId;
+  const slots = getNode(next, targetParentId).children.length; // still includes the node if sameParent
   sourceParent.children = sourceParent.children.filter((childId) => childId !== nodeId);
 
   const insertionParent = getNode(next, targetParentId);
   const clampedIndex = targetIndex === null
-    ? insertionParent.children.length
-    : Math.max(0, Math.min(targetIndex, insertionParent.children.length));
-  const normalizedIndex = sourceParent.id === insertionParent.id && sourceIndex >= 0 && sourceIndex < clampedIndex
+    ? slots
+    : Math.max(0, Math.min(targetIndex, slots));
+  const normalizedIndex = sameParent && sourceIndex >= 0 && sourceIndex < clampedIndex
     ? clampedIndex - 1
     : clampedIndex;
 
@@ -473,6 +499,7 @@ function applySyncOperation(project, operation) {
 
 export {
   ALLOWED_FILE_EXTENSIONS,
+  cloneModelData,
   IMAGE_FILE_EXTENSIONS,
   ROOT_ID,
   TEXT_FILE_EXTENSIONS,

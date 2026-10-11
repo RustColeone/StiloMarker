@@ -26,8 +26,10 @@ echo
 echo "=== [3/4] Sync reliability regressions =================================="
 if command -v python3 >/dev/null 2>&1; then
   python3 -B tests/server-reliability.test.py
+  python3 -B tests/move-node.test.py
 else
   python -B tests/server-reliability.test.py
+  python -B tests/move-node.test.py
 fi
 
 echo
