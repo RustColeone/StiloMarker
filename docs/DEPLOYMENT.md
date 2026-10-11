@@ -256,3 +256,30 @@ Private deployment backup: `/home/laplacengan/backups/stilomarker/20261011T07022
 Nine project manifests valid, 127/127 files; configuration files with secrets
 were not copied.
 
+
+## Verified release: v0.1.24
+
+Deployed on 2026-10-11 at 07:22 UTC. Adds server-side workspace backups (one
+per day a workspace changed, plus safety copies before destructive changes) and
+**Edit → Workspace History…** to restore one file or everything; per-file
+Snapshots can now restore a deleted file. App version `0.1.24`; sync
+compatibility unchanged at `115`. Backups live in `server/data/_backups/`; the
+first daily backup of each workspace is taken by the sweep within 15 minutes of
+it being opened, and a final sweep runs when the service stops.
+
+SIGTERM is now a clean shutdown (verified on a throwaway server: exit code 0
+and the final backup contained a file written just before the signal). The stop
+for this deploy still ran the previous code, so it took no shutdown backup.
+
+Public checks: ping, five assets byte-identical and gzipped, the
+`mdnotes-shell-v0.1.24` cache label, the Workspace History dialog in the served
+page, `/api/backups` refusing an invalid login with 403, and a guest-session
+create/delete smoke. Backups of real workspaces were not exercised on the live
+server (no account credentials are used for smoke tests). Validation: 140 Node
+tests, the Python reliability, move-node, static-compression, workspace-backup
+and MCP suites, the backend self-test, and nine browser suites including the
+new real-backend `workspace-history-browser.py`. Service log clean.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261011T072212Z-v0.1.24`.
+Nine project manifests valid, 127/127 files.
+
