@@ -1,5 +1,6 @@
 import argparse
 import base64
+import calendar
 import copy
 import gzip
 import hashlib
@@ -61,6 +62,10 @@ APP_VERSION = json.loads((Path(__file__).resolve().parents[1] / "package.json").
 # compatibility break is necessary; ordinary release bumps do not change it.
 # 115: tabs older than this never send move-node, so a drag left the old path on
 # the server and the next reconnect re-uploaded the file — a duplicate per move.
+
+# How often live workspaces that changed are backed up (see WorkspaceRegistry
+# backups). Each active day keeps one daily backup, refreshed on each sweep.
+BACKUP_SWEEP_SECONDS = _read_int_env("MDNOTES_BACKUP_SWEEP_SECONDS", 15 * 60, 60, 24 * 3600)
 
 MIN_CLIENT_VERSION = _read_int_env("MDNOTES_MIN_CLIENT_VERSION", 115, 0, 1_000_000)
 
@@ -1056,6 +1061,8 @@ class CollaborationBroker:
         self.path_replaced_at: dict[str, int] = {}
         self._path_change_floor = 0
         self.operation_log_max = 2000
+        # Called just before a destructive change (see WorkspaceRegistry backups).
+        self.on_before_destructive = None
         # Per-revision author tracking for sole-author revert (Phase 2 / subtask 2.1).
         self.revision_authors: dict[int, str] = {}
         # Bounded snapshot history for revert-to-revision (Phase 2 / subtask 2.2).
@@ -1150,6 +1157,15 @@ class CollaborationBroker:
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     _atomic_write(dest, data)
                     node["content"] = ""
+
+    def _before_destructive(self, reason: str):
+        hook = self.on_before_destructive
+        if hook is None:
+            return
+        try:
+            hook(self, reason)
+        except Exception as error:  # noqa: BLE001 — never block the change itself
+            _log("BACKUP", f"pre-change hook failed: {error}")
 
     def _subtree_paths(self, node_id: str) -> list[str]:
         """Paths of a node and everything beneath it, in the current tree."""
@@ -1905,6 +1921,7 @@ class CollaborationBroker:
                     f"replace conflict: this client is based on revision {base_revision} but the server is at "
                     f"{self.revision} — reload to get the newer copy before replacing it"
                 )
+            self._before_destructive("replacing the whole project")
             self.project = project
             self.revision += 1
             # The whole tree just changed: every path is "changed as of now", so
@@ -2014,7 +2031,7 @@ class CollaborationBroker:
             op_type = operation.get("type")
             op_path = operation.get("path", "")
             if "expectedRevision" in operation and operation["expectedRevision"] != self.revision:
-                raise ValueError("Agent edit conflict: workspace changed since this proposal was prepared")
+                raise ValueError("Edit conflict: the workspace changed since this change was prepared")
 
             if token in self.reader_tokens:
                 raise PermissionError("You have read-only access to this project")
@@ -2029,6 +2046,7 @@ class CollaborationBroker:
                 if token not in self.master_tokens:
                     self._authorize_sole_author_revert(token, target)
                 # Reconstruct project from snapshot — NEVER from request body (forgery guard R3).
+                self._before_destructive(f"reverting to revision {target}")
                 snapshot_map = dict(self.snapshot_history)
                 if target not in snapshot_map:
                     raise ValueError(f"Snapshot for revision {target} not found.")
@@ -2058,6 +2076,8 @@ class CollaborationBroker:
                 return event
 
             # --- normal operations ---
+            if op_type in ("delete-node", "replace-project"):
+                self._before_destructive("deleting " + str(op_path) if op_type == "delete-node" else "replacing the project")
             # Capture original positions before _apply_operation may rebase them.
             orig_start = operation.get("start")
             orig_end = operation.get("end")
@@ -2249,6 +2269,7 @@ class WorkspaceRegistry:
                  accounts: "AccountStore | None" = None, data_dir: Path | None = None):
         self.lock = threading.RLock()
         self._snapshot_lock = threading.Lock()  # guards data/_snapshots index writes
+        self._backup_lock = threading.RLock()   # guards data/_backups (re-entered by a safety backup)
         self.pin = pin
         self.master_pin = master_pin or pin
         self.accounts = accounts or AccountStore(None)
@@ -2327,6 +2348,7 @@ class WorkspaceRegistry:
                 _log("WORKSPACE", f"Migrated {team}/{name} to directory storage")
             except (OSError, ValueError, json.JSONDecodeError) as error:
                 _log("WORKSPACE", f"Migration failed for {team}/{name}: {error}")
+        broker.on_before_destructive = self.backup_before_destructive  # safety backups
         return broker
 
     def _require_account(self, token: str) -> dict:
@@ -2849,6 +2871,252 @@ class WorkspaceRegistry:
             self._snapshot_save(directory, index)
         return {"deleted": True}
 
+    # ---- Workspace backups ----------------------------------------------------
+    # Whole-workspace history, so a bad day — everything deleted, a chapter
+    # overwritten — can be undone to the state of an earlier day. Per-file
+    # Snapshots don't cover that: they are mostly taken by hand, and a file never
+    # snapshotted has none.
+    #
+    # A workspace is backed up only on days it actually changed: a sweep keeps
+    # one "daily" backup per active day, refreshed to that day's latest state;
+    # idle days add nothing. Separately, a "safety" backup is taken just before
+    # anything destructive (deleting files, replacing the whole project,
+    # reverting), so the state right before a mistake is always kept.
+    #
+    # Storage reuses the snapshot design — content-addressed, gzip-compressed,
+    # refcounted blobs — in its own store (data/_backups/<team>/<project>) so the
+    # snapshot budget can never evict backups or vice versa. Unchanged files are
+    # shared between backups, so a day's backup costs roughly what changed.
+    BACKUP_KEEP_DAILY_DAYS = 14   # every active day for two weeks...
+    BACKUP_KEEP_WEEKLY = 8        # ...then the last active day of each week...
+    BACKUP_KEEP_MONTHLY = 6       # ...then of each month
+    BACKUP_KEEP_SAFETY_DAYS = 14
+    BACKUP_MAX_SAFETY = 60
+    BACKUP_SAFETY_BURST_SECONDS = 60
+    BACKUP_MAX_FILE_BYTES = 25 * 1024 * 1024
+
+    def _backup_dir(self, team, relpath):
+        base = (self.data_dir / "_backups" / self.safe_component(team)).resolve()
+        target = (base / relpath).resolve()
+        if base not in target.parents:
+            raise PermissionError("Path escapes backup directory")
+        return target
+
+    @staticmethod
+    def _backup_load(directory):
+        index_path = directory / "index.json"
+        if index_path.exists():
+            try:
+                data = json.loads(index_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    data.setdefault("backups", [])
+                    data.setdefault("refs", {})
+                    data.setdefault("bytes", 0)
+                    return data
+            except (OSError, json.JSONDecodeError):
+                pass
+        return {"backups": [], "refs": {}, "bytes": 0}
+
+    def _backup_store_blob(self, directory, index, raw: bytes) -> str:
+        blob = hashlib.sha256(raw).hexdigest()
+        blob_path = directory / "blobs" / f"{blob}.gz"
+        if not blob_path.exists():
+            blob_path.parent.mkdir(parents=True, exist_ok=True)
+            packed = gzip.compress(raw, mtime=0)
+            tmp = blob_path.parent / f"{blob}.tmp"
+            tmp.write_bytes(packed)
+            os.replace(tmp, blob_path)
+            index["bytes"] += len(packed)
+        index["refs"][blob] = index["refs"].get(blob, 0) + 1
+        return blob
+
+    def _backup_drop(self, directory, index, backup):
+        for entry in backup.get("files", []):
+            self._snapshot_release(directory, index, entry["blob"])
+
+    def _workspace_id_of(self, broker):
+        with self.lock:
+            return next((wid for wid, b in self.brokers.items() if b is broker), None)
+
+    def _backup_capture(self, broker):
+        """(revision, folders, files) of a live workspace, read under its lock.
+        Text comes from memory; images are externalised to disk in directory
+        mode, so their bytes are read from the workspace folder."""
+        with broker.lock:
+            project = copy.deepcopy(broker.project)
+            revision = broker.revision
+        nodes = project.get("nodes", {})
+        folders, files = [], []
+        for node_id, node in nodes.items():
+            if node_id == project.get("rootId"):
+                continue
+            path = broker._path_in(project, node_id)
+            if node.get("kind") == "folder":
+                folders.append(path)
+                continue
+            content = node.get("content") or ""
+            raw = None
+            if is_image_name(node.get("name", "")):
+                data = broker._decode_data_url(content) if content else None
+                if data is not None:
+                    raw = data
+                elif broker.workspace_dir is not None and (broker.workspace_dir / path).is_file():
+                    raw = (broker.workspace_dir / path).read_bytes()
+                else:
+                    raw = b""
+            else:
+                raw = str(content).encode("utf-8")
+            if len(raw) <= self.BACKUP_MAX_FILE_BYTES:
+                files.append((path, raw, is_image_name(node.get("name", ""))))
+        return revision, sorted(folders), sorted(files, key=lambda item: item[0])
+
+    def backup_workspace(self, team, relpath, kind="daily", label="", now=None):
+        """Back up one live workspace. Returns the new backup's summary, or None
+        when there was nothing to do (not live, or unchanged since the last one)."""
+        broker = self.get_broker(f"{team}/{relpath}")
+        if broker is None or broker.workspace_dir is None or self.data_dir is None:
+            return None
+        stamp = int((time.time() if now is None else now) * 1000)
+        day = time.strftime("%Y-%m-%d", time.gmtime(stamp / 1000))
+        directory = self._backup_dir(team, relpath)
+        with self._backup_lock:
+            index = self._backup_load(directory)
+            backups = index["backups"]
+            revision = broker.revision
+            latest = backups[-1] if backups else None
+            # Nothing changed since the most recent backup of any kind: a daily
+            # adds nothing, and a safety copy would duplicate it.
+            if latest and latest.get("revision") == revision and kind in ("daily", "safety"):
+                return None
+            # A burst of destructive changes (deleting files one after another, a
+            # restore removing several) shares the copy taken just before it began.
+            if kind == "safety" and latest and latest.get("kind") in ("safety", "manual") \
+                    and stamp - latest.get("createdAt", 0) < self.BACKUP_SAFETY_BURST_SECONDS * 1000:
+                return None
+            revision, folders, files = self._backup_capture(broker)
+            entries = [{"path": path, "blob": self._backup_store_blob(directory, index, raw),
+                        "size": len(raw), **({"image": True} if image else {})}
+                       for path, raw, image in files]
+            backup = {
+                "id": f"{stamp}-{secrets.token_hex(4)}", "createdAt": stamp, "day": day,
+                "kind": kind, "label": str(label or "")[:200], "revision": revision,
+                "folders": folders, "files": entries, "size": sum(e["size"] for e in entries),
+            }
+            if kind == "daily":
+                # One per active day: replace today's, keeping the latest state of the day.
+                for old in [b for b in backups if b.get("kind") == "daily" and b.get("day") == day]:
+                    backups.remove(old)
+                    self._backup_drop(directory, index, old)
+            backups.append(backup)
+            backups.sort(key=lambda b: b.get("createdAt", 0))
+            self._backup_prune(directory, index, stamp)
+            self._snapshot_save(directory, index)
+        return self._backup_summary(backup)
+
+    def _backup_prune(self, directory, index, now_ms):
+        day_number = lambda day: calendar.timegm(time.strptime(day, "%Y-%m-%d")) // 86400  # UTC, DST-proof
+        today_ord = int(now_ms / 1000) // 86400
+        keep = set()
+        dailies = sorted((b for b in index["backups"] if b.get("kind") == "daily"),
+                         key=lambda b: b.get("createdAt", 0), reverse=True)
+        weeks, months = {}, {}
+        for b in dailies:
+            day_ord = day_number(b["day"])
+            if today_ord - day_ord < self.BACKUP_KEEP_DAILY_DAYS:
+                keep.add(b["id"])
+            parsed = time.strptime(b["day"], "%Y-%m-%d")
+            weeks.setdefault(time.strftime("%G-%V", parsed), b)   # newest daily of each ISO week
+            months.setdefault(b["day"][:7], b)                   # newest daily of each month
+        for key in sorted(weeks, reverse=True)[:self.BACKUP_KEEP_WEEKLY]:
+            keep.add(weeks[key]["id"])
+        for key in sorted(months, reverse=True)[:self.BACKUP_KEEP_MONTHLY]:
+            keep.add(months[key]["id"])
+        others = sorted((b for b in index["backups"] if b.get("kind") != "daily"),
+                        key=lambda b: b.get("createdAt", 0), reverse=True)
+        for position, b in enumerate(others):
+            young = now_ms - b.get("createdAt", 0) < self.BACKUP_KEEP_SAFETY_DAYS * 86400 * 1000
+            if young and position < self.BACKUP_MAX_SAFETY:
+                keep.add(b["id"])
+        for b in [b for b in index["backups"] if b["id"] not in keep]:
+            index["backups"].remove(b)
+            self._backup_drop(directory, index, b)
+
+    @staticmethod
+    def _backup_summary(backup):
+        return {key: backup.get(key) for key in ("id", "createdAt", "day", "kind", "label", "revision", "size")} | {
+            "fileCount": len(backup.get("files", [])), "folderCount": len(backup.get("folders", []))}
+
+    def backup_before_destructive(self, broker, reason):
+        """Hook run by a workspace broker just before a destructive change."""
+        workspace_id = self._workspace_id_of(broker)
+        if not workspace_id or workspace_id.startswith(f"{DEFAULT_TEAM}/"):
+            return
+        team, relpath = workspace_id.split("/", 1)
+        try:
+            self.backup_workspace(team, relpath, kind="safety", label=f"Before {reason}")
+        except Exception as error:  # noqa: BLE001 — a backup failure must never block the edit
+            _log("BACKUP", f"safety backup failed for {workspace_id}: {error}")
+
+    def backup_sweep(self, now=None):
+        """Daily backups for every live workspace that changed since its last one."""
+        with self.lock:
+            live = [(wid, b) for wid, b in self.brokers.items()
+                    if not wid.startswith(f"{DEFAULT_TEAM}/") and b.workspace_dir is not None]
+        made = 0
+        for workspace_id, _ in live:
+            team, relpath = workspace_id.split("/", 1)
+            try:
+                if self.backup_workspace(team, relpath, kind="daily", now=now):
+                    made += 1
+            except Exception as error:  # noqa: BLE001 — one workspace must not stop the others
+                _log("BACKUP", f"daily backup failed for {workspace_id}: {error}")
+        return made
+
+    def list_backups(self, token, team, path):
+        _, team, relpath = self._project_authorize(token, team, path)
+        with self._backup_lock:
+            index = self._backup_load(self._backup_dir(team, relpath))
+        return {"backups": [self._backup_summary(b) for b in sorted(index["backups"], key=lambda b: -b.get("createdAt", 0))]}
+
+    def _backup_find(self, team, relpath, backup_id):
+        index = self._backup_load(self._backup_dir(team, relpath))
+        backup = next((b for b in index["backups"] if b.get("id") == str(backup_id)), None)
+        if backup is None:
+            raise ValueError("That backup no longer exists")
+        return backup
+
+    def list_backup_files(self, token, team, path, backup_id):
+        _, team, relpath = self._project_authorize(token, team, path)
+        with self._backup_lock:
+            backup = self._backup_find(team, relpath, backup_id)
+        return {"backup": self._backup_summary(backup), "folders": backup.get("folders", []),
+                "files": [{"path": e["path"], "size": e["size"], "image": bool(e.get("image")), "blob": e["blob"]}
+                          for e in backup.get("files", [])]}
+
+    def get_backup_content(self, token, team, path, backup_id, file_path):
+        _, team, relpath = self._project_authorize(token, team, path)
+        key = self._snapshot_file_key(file_path)
+        directory = self._backup_dir(team, relpath)
+        with self._backup_lock:
+            backup = self._backup_find(team, relpath, backup_id)
+            entry = next((e for e in backup.get("files", []) if e["path"] == key), None)
+            if entry is None:
+                raise ValueError("That file is not in this backup")
+            raw = gzip.decompress((directory / "blobs" / f"{entry['blob']}.gz").read_bytes())
+        if entry.get("image"):
+            mime = mimetypes.guess_type(key)[0] or "application/octet-stream"
+            return {"path": key, "image": True, "content": f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"}
+        return {"path": key, "image": False, "content": raw.decode("utf-8", errors="replace")}
+
+    def create_backup(self, token, team, path, label=""):
+        identity, team, relpath = self._project_authorize(token, team, path)
+        if self.role_for(identity, team, relpath) == "reader":
+            raise PermissionError("You have read-only access to this project")
+        if self.get_broker(f"{team}/{relpath}") is None:
+            raise ValueError("Open the workspace first")
+        result = self.backup_workspace(team, relpath, kind="manual", label=label or "Manual backup")
+        return {"created": result is not None, "backup": result}
+
     # ---- Per-user resume state (which files a user had open) -------------------
     def read_user_state(self, team: str, relpath: str, username: str) -> dict:
         """The caller's saved open-files state for this project, or an empty
@@ -3178,9 +3446,11 @@ class WorkspaceRegistry:
         if len(parts) == 2 and parts[0] == "workspaces":
             return self._make_workspace_broker(team, parts[1])
         workspace_dir = self._abs_under_team(team, relpath)
-        return CollaborationBroker(
+        broker = CollaborationBroker(
             self.pin, None, master_pin=self.master_pin, workspace_dir=workspace_dir
         )
+        broker.on_before_destructive = self.backup_before_destructive  # safety backups
+        return broker
 
     def create_workspace(self, token: str, team: str, name: str, share_team: bool = False) -> dict:
         identity = self._require_account(token)
@@ -3491,6 +3761,12 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_snapshots_get(parsed, "paths")
         if parsed.path == "/api/snapshots/versions":
             return self._handle_snapshots_get(parsed, "versions")
+        if parsed.path == "/api/backups":
+            return self._handle_backups_get(parsed, "list")
+        if parsed.path == "/api/backups/files":
+            return self._handle_backups_get(parsed, "files")
+        if parsed.path == "/api/backups/content":
+            return self._handle_backups_get(parsed, "content")
         if parsed.path == "/api/snapshots/content":
             return self._handle_snapshots_get(parsed, "content")
         if parsed.path == "/api/workspaces/export":
@@ -3533,6 +3809,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_comments_post(parsed, "reanchor")
         if parsed.path == "/api/snapshots":
             return self._handle_snapshots_post(parsed, "create")
+        if parsed.path == "/api/backups":
+            return self._handle_backups_post(parsed)
         if parsed.path == "/api/snapshots/delete":
             return self._handle_snapshots_post(parsed, "delete")
         if parsed.path == "/api/workspaces/user-state":
@@ -3836,6 +4114,39 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
         except ValueError as error:
             self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+
+    def _handle_backups_get(self, parsed, kind):
+        try:
+            token = self._extract_token(parsed)
+            query = parse_qs(parsed.query)
+            team = query.get("team", [""])[0]
+            path = query.get("path", [""])[0]
+            if kind == "list":
+                result = self.registry.list_backups(token, team, path)
+            elif kind == "files":
+                result = self.registry.list_backup_files(token, team, path, query.get("id", [""])[0])
+            else:
+                result = self.registry.get_backup_content(token, team, path, query.get("id", [""])[0], query.get("file", [""])[0])
+            self._write_json(HTTPStatus.OK, result)
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+        except ValueError as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+
+    def _handle_backups_post(self, parsed):
+        try:
+            token = self._extract_token(parsed)
+            payload = self._read_json()
+            result = self.registry.create_backup(token, str(payload.get("team", "")), str(payload.get("path", "")),
+                                                 str(payload.get("label", "")))
+            self._write_json(HTTPStatus.OK, result)
+            self._log_request(200, f"backup {'created' if result['created'] else 'unchanged'}")
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
+            self._log_request(403, str(error))
+        except ValueError as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+            self._log_request(400, str(error))
 
     def _handle_snapshots_post(self, parsed, kind):
         try:
@@ -4457,6 +4768,11 @@ def build_server(host: str, port: int, pin: str, static_root: Path, state_file: 
     class ServerWithPresenceSweep(QuietThreadingHTTPServer):
         def server_close(self):
             self.presence_stop.set()
+            # Keep the day's last state: a restart (deploy) must not lose it.
+            try:
+                registry.backup_sweep()
+            except Exception as error:  # noqa: BLE001
+                _log("BACKUP", f"shutdown backup sweep failed: {error}")
             super().server_close()
 
     server = ServerWithPresenceSweep((host, port), handler)
@@ -4465,6 +4781,13 @@ def build_server(host: str, port: int, pin: str, static_root: Path, state_file: 
         while not server.presence_stop.wait(15):
             registry.expire_leases()
     threading.Thread(target=sweep_presence, daemon=True, name="presence-lease-sweep").start()
+    def sweep_backups():
+        while not server.presence_stop.wait(BACKUP_SWEEP_SECONDS):
+            made = registry.backup_sweep()
+            if made:
+                _log("BACKUP", f"daily backup refreshed for {made} workspace(s)")
+    if data_dir is not None:
+        threading.Thread(target=sweep_backups, daemon=True, name="workspace-backup-sweep").start()
     return server
 
 
@@ -5145,6 +5468,13 @@ def main():
     else:
         print("Set DEEPSEEK_API_KEY or MDNOTES_CHAT_API_KEY in the server environment to enable chat.")
     print("─" * 60)
+    # systemd stops the service with SIGTERM, which by default kills Python on
+    # the spot and skips server_close(), so the shutdown backup sweep never ran.
+    # Treat it like Ctrl+C. Every write is already journaled and atomic.
+    import signal
+    def _stop(_signum, _frame):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, _stop)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -44,6 +44,8 @@ node --test tests/       # raw test runner
 | `project-structure.test.mjs` | Required files, `index.html` ids, and source-symbol wiring. |
 | `move-node.test.py` / `move-node.test.mjs` | Moves on the server (disk, ordering, refusals, patch barriers) and in the browser; both read `move-node-cases.json` so peers and server order a moved file identically. |
 | `static-compression.test.py` | Static files are gzipped only when accepted (q=0 honoured), small/binary files untouched, `Vary` sent, never stale after a file changes. |
+| `workspace-backups.test.py` | Workspace backups: a backup only on days the workspace changed, one per day refreshed to its latest state, a safety copy before deletes/replacements (a burst shares one), retention with blob cleanup, images, permissions, and a final backup on shutdown. |
+| `workspace-history-browser.py` | Browser + real backend (throwaway server): back up, delete everything from another account, restore one file, restore everything (backing up first), recover a deleted file via Snapshots. |
 | `editor-typing-browser.py` | Browser: a long chapter stays correct and incremental while typing (DOM/gutter/caret/highlight per edit, incremental == full render, churn budget, undo/redo, no explorer drift). |
 | `template-race-browser.py` | Browser: the first-run template never replaces a cloud workspace that restored first. |
 
