@@ -1042,17 +1042,6 @@ function ensureActiveChatThread() {
   return thread;
 }
 
-function listChatFiles(project) {
-  return Object.values(project.nodes)
-    .filter((node) => node?.kind === "file")
-    .map((node) => ({
-      id: node.id,
-      name: node.name,
-      path: getPath(project, node.id)
-    }))
-    .sort((left, right) => left.path.localeCompare(right.path));
-}
-
 function resolveChatContextFiles(project, thread) {
   return (thread?.contextPaths ?? []).map((path) => {
     const nodeId = getNodeIdByPath(project, path);
@@ -4555,11 +4544,6 @@ function acceptEditorAutocomplete(index = autocompleteState.activeIndex) {
   hideEditorAutocomplete();
 }
 
-function insertReferenceAtCursor(referenceText) {
-  const { start, end } = getEditorSelection();
-  replaceEditorRange(start, end, referenceText);
-}
-
 // ── Markdown formatting toolbar ──────────────────────────────────────────────
 
 /** Wrap the current selection (or a placeholder) with inline markers and leave
@@ -5449,10 +5433,6 @@ function highlightMtreeLines(value) {
   });
 }
 
-function highlightMtreeSource(value) {
-  return highlightMtreeLines(value).join("");
-}
-
 function highlightUrlDbLines(value) {
   const lines = value.replace(/\r\n/g, "\n").split("\n");
 
@@ -5483,10 +5463,6 @@ function highlightUrlDbLines(value) {
 
     return `<div class="editor-line">${escaped}</div>`;
   });
-}
-
-function highlightUrlDbSource(value) {
-  return highlightUrlDbLines(value).join("");
 }
 
 function highlightBmapValue(rawVal) {
@@ -5584,10 +5560,6 @@ function highlightBmapLines(value) {
 
     return `<div class="editor-line">${escapeEditorHtml(rawLine)}</div>`;
   });
-}
-
-function highlightBmapSource(value) {
-  return highlightBmapLines(value).join("");
 }
 
 // One markdown source line → its editor HTML, given whether it starts inside a
@@ -5745,10 +5717,6 @@ function showEditorDropCaret(clientX, clientY) {
   elements.editorDropCaret.hidden = false;
 }
 
-function syncEditorViewportMetrics() {
-  // No-op retained for call-site compatibility; layout is now native.
-}
-
 // Cached toolbar format so we only rebuild the buttons when it actually changes
 // (renderEditorContent runs on every keystroke). null = toolbar hidden.
 let currentToolbarFormat = undefined;
@@ -5791,19 +5759,6 @@ function refreshFormatToolbar() {
 // child count are still what we rendered. Anything else is re-rendered, and any
 // doubt — new file, different highlighter, stray text nodes, a count mismatch
 // afterwards — falls back to the old full rebuild.
-
-function resetEditorRenderCache() {
-  editorRenderCache.fileId = null;
-  editorRenderCache.kind = null;
-  editorRenderCache.els = [];
-  editorRenderCache.texts = [];
-  editorRenderCache.html = [];
-  editorRenderCache.heights = [];
-  editorRenderCache.gutter = [];
-  editorRenderCache.metricsKey = "";
-  editorRenderCache.gutterEpoch = "";
-  editorRenderCache.textExact = true;
-}
 
 function editorHighlightKind(name) {
   if (name?.endsWith(".mtree")) return "mtree";
@@ -6093,12 +6048,6 @@ function renderEditorContent(text, { full = false } = {}) {
 
   // Update the floating in-editor agent action bar.
   updateEditorAgentBar();
-}
-
-// Alias kept so existing call sites that pass `elements.textarea.value` still
-// work; TEXT is ignored but extracted from the DOM instead.
-function renderEditorDecorations(_text) {
-  renderEditorContent(getEditorText());
 }
 
 // ── Link hover tooltip ───────────────────────────────────────────────────────
