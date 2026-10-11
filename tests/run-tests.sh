@@ -28,10 +28,12 @@ if command -v python3 >/dev/null 2>&1; then
   python3 -B tests/server-reliability.test.py
   python3 -B tests/move-node.test.py
   python3 -B tests/static-compression.test.py
+  python3 -B tests/workspace-backups.test.py
 else
   python -B tests/server-reliability.test.py
   python -B tests/move-node.test.py
   python -B tests/static-compression.test.py
+  python -B tests/workspace-backups.test.py
 fi
 
 echo

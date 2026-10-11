@@ -342,6 +342,35 @@ function deleteServerSnapshot(serverUrl, accountToken, team, path, id) {
   return snapshotPost(serverUrl, accountToken, "/delete", { team, path, id }, "Could not delete snapshot.");
 }
 
+// ---- Workspace backups (whole-workspace history, one per day it changed) ----
+async function backupRequest(serverUrl, accountToken, route, params, body, failure) {
+  const baseUrl = normalizeServerUrl(serverUrl);
+  const query = new URLSearchParams({ token: accountToken, ...(body ? {} : params) });
+  const response = await fetch(`${baseUrl}/api/backups${route}?${query.toString()}`, body
+    ? { method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify(body) }
+    : { method: "GET", headers: { accept: "application/json" } });
+  if (!response.ok) {
+    await throwForResponse(failure, response);
+  }
+  return parseResponse(response);
+}
+
+function listWorkspaceBackups(serverUrl, accountToken, team, path) {
+  return backupRequest(serverUrl, accountToken, "", { team, path }, null, "Could not list backups.");
+}
+
+function listWorkspaceBackupFiles(serverUrl, accountToken, team, path, id) {
+  return backupRequest(serverUrl, accountToken, "/files", { team, path, id }, null, "Could not read that backup.");
+}
+
+function getWorkspaceBackupContent(serverUrl, accountToken, team, path, id, file) {
+  return backupRequest(serverUrl, accountToken, "/content", { team, path, id, file }, null, "Could not read that file from the backup.");
+}
+
+function createWorkspaceBackup(serverUrl, accountToken, team, path, label = "") {
+  return backupRequest(serverUrl, accountToken, "", null, { team, path, label }, "Could not create a backup.");
+}
+
 // Persist which files the user has open in a cloud workspace, so they can be
 // restored on the next open/reconnect (per-user, server-side resume state).
 async function saveUserState(serverUrl, accountToken, team, path, openFiles, activeFile) {
@@ -514,6 +543,10 @@ function openEventStream(serverUrl, token, onEvent, onError) {
 }
 
 export {
+  createWorkspaceBackup,
+  getWorkspaceBackupContent,
+  listWorkspaceBackupFiles,
+  listWorkspaceBackups,
   browseServer,
   connectToServer,
   createProjectServer,

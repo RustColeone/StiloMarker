@@ -44,6 +44,7 @@
             <div id="edit-menu" class="menu-popover" hidden>
               <button id="find-replace-menu-button" type="button">Find &amp; Replace</button>
               <button id="snapshots-button" type="button">Snapshots…</button>
+              <button id="workspace-history-button" type="button">Workspace History…</button>
               <button id="rename-selected-button" type="button">Rename Selected</button>
               <button id="delete-selected-button" type="button">Delete Selected</button>
             </div>
@@ -995,6 +996,34 @@
           <button id="snapshots-compare-btn" type="button" disabled>Compare</button>
           <button id="snapshots-restore-btn" type="button" disabled>Restore</button>
           <button id="snapshots-delete-btn" type="button" class="browser-danger-btn" disabled>Delete</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="workspace-history-dialog" class="app-dialog">
+      <form method="dialog" class="app-dialog-form">
+        <header class="dialog-header">
+          <div>
+            <div class="eyebrow">History</div>
+            <h2>Workspace History</h2>
+          </div>
+          <p class="subtle-label">Backups of the whole workspace: one for each day it changed, plus a copy taken just before anything was deleted or replaced. Select one to restore a single file — even one deleted since — or everything.</p>
+          <button class="dialog-close-corner" type="submit" value="cancel" formnovalidate aria-label="Close">&#215;</button>
+        </header>
+        <div class="settings-actions-row snapshots-toolbar">
+          <span id="workspace-history-status" class="subtle-label"></span>
+          <button id="workspace-history-backup-now" type="button" class="browser-tool-btn">Back Up Now</button>
+        </div>
+        <ul id="workspace-history-list" class="snapshots-list" role="listbox" aria-label="Backups"></ul>
+        <p id="workspace-history-empty" class="subtle-label" hidden>No backups yet. One is made automatically on each day this workspace changes.</p>
+        <div id="workspace-history-files-wrap" hidden>
+          <div class="subtle-label workspace-history-files-caption" id="workspace-history-files-caption"></div>
+          <ul id="workspace-history-files" class="snapshots-list workspace-history-files" role="listbox" aria-label="Files in this backup"></ul>
+        </div>
+        <menu class="dialog-actions snapshots-actionbar">
+          <span id="workspace-history-selection" class="subtle-label browser-selection-label"></span>
+          <button id="workspace-history-restore-file" type="button" disabled>Restore File</button>
+          <button id="workspace-history-restore-all" type="button" class="browser-danger-btn" disabled>Restore All</button>
         </menu>
       </form>
     </dialog>

@@ -2065,6 +2065,40 @@ p {
 
 /* Bound the dialog to the viewport (border-box includes its padding) so its flex
    rows wrap instead of pushing the dialog wider than the screen. */
+/* Workspace History: two lists (backups, then the chosen backup's files) share
+   the dialog, so each gets half the height a single snapshot list would. */
+#workspace-history-dialog {
+  width: min(680px, calc(100vw - 16px));
+  box-sizing: border-box;
+}
+
+#workspace-history-dialog .app-dialog-form {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+#workspace-history-dialog .snapshots-list {
+  height: auto;
+  max-height: min(26vh, 220px);
+}
+
+.workspace-history-files-caption {
+  margin: 10px 0 4px;
+}
+
+.workspace-history-file.is-deleted .snapshot-count {
+  color: var(--danger, #c0392b);
+}
+
+.workspace-history-file.is-changed .snapshot-count {
+  color: var(--accent);
+}
+
+.workspace-history-file.is-same .snapshot-time {
+  color: var(--text-dim);
+}
+
 #snapshots-dialog {
   width: min(94vw, 460px);
   box-sizing: border-box;
@@ -2079,7 +2113,8 @@ p {
 /* Phones: put the selection label on its own line so the compact actions get a
    row to themselves (right-aligned) and never crowd off the edge. */
 @media (max-width: 560px) {
-  #snapshots-selection-label {
+  #snapshots-selection-label,
+  #workspace-history-selection {
     flex-basis: 100%;
     margin-right: 0;
   }

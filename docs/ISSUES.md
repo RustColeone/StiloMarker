@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-11 · release `v0.1.23` (deployed; public verification passed)
+Last updated: 2026-10-11 · release `v0.1.24` (prepared; not yet deployed)
 
 ---
 
@@ -30,6 +30,37 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.24: workspace backups (Workspace History)
+
+There was no way back from "everything was deleted": per-file Snapshots are
+mostly taken by hand, a file never snapshotted had no history, and the app
+refused to restore a snapshot of a file that no longer existed.
+
+The server now keeps whole-workspace backups, but only for days the workspace
+actually changed. A sweep every 15 minutes refreshes that day's single "daily"
+backup to the latest state; idle days add nothing. A final sweep runs when the
+service stops, so a deploy restart keeps the day's last state (SIGTERM is now a
+clean shutdown). Just before anything destructive — deleting files or folders,
+replacing the whole project, reverting — a "safety" copy is taken; a burst of
+such changes within a minute shares one copy. Retention: every active day for 14
+days, then the last active day of each week for 8 weeks and of each month for 6
+months; safety and manual copies for 14 days (at most 60). Storage is
+content-addressed and refcounted like Snapshots, in its own store
+(`data/_backups/…`, outside the project folder), so unchanged files cost nothing
+from day to day and neither store can evict the other.
+
+**Edit → Workspace History…** lists the backups, compares one with the
+workspace as it is now (deleted / changed / created since), and restores a
+single file — including one deleted since — or everything. Restore All backs up
+the current state first, so it can itself be undone, then removes what was
+created since, brings back what was deleted and puts back what changed. Each
+change is confirmed by the server before the browser applies it and chained on
+the confirmed revision, so a collaborator's edit stops the restore instead of
+being overwritten. Per-file Snapshots can now bring back a deleted file too.
+
+Tests: `tests/workspace-backups.test.py` (10 server cases) and
+`tests/workspace-history-browser.py` (real backend + browser, 9 checks).
 
 ### v0.1.23: compressed static files, dead code removed
 
