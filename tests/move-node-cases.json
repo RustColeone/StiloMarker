@@ -1,0 +1,77 @@
+{
+  "comment": "Shared by move-node.test.py (server) and move-node.test.mjs (browser moveNode). Both must produce the same order, because peers apply a broadcast move with the browser function.",
+  "start": [
+    "a.md",
+    "b.md",
+    "c.md",
+    "d.md"
+  ],
+  "cases": [
+    {
+      "name": "earlier to later (index is a pre-removal slot)",
+      "move": "a.md",
+      "index": 2,
+      "expect": [
+        "b.md",
+        "a.md",
+        "c.md",
+        "d.md"
+      ]
+    },
+    {
+      "name": "later to earlier",
+      "move": "d.md",
+      "index": 1,
+      "expect": [
+        "a.md",
+        "d.md",
+        "b.md",
+        "c.md"
+      ]
+    },
+    {
+      "name": "to the very end",
+      "move": "b.md",
+      "index": 4,
+      "expect": [
+        "a.md",
+        "c.md",
+        "d.md",
+        "b.md"
+      ]
+    },
+    {
+      "name": "index past the end is clamped",
+      "move": "a.md",
+      "index": 99,
+      "expect": [
+        "b.md",
+        "c.md",
+        "d.md",
+        "a.md"
+      ]
+    },
+    {
+      "name": "negative index is clamped to the front",
+      "move": "c.md",
+      "index": -5,
+      "expect": [
+        "c.md",
+        "a.md",
+        "b.md",
+        "d.md"
+      ]
+    },
+    {
+      "name": "no index appends at the end",
+      "move": "a.md",
+      "index": null,
+      "expect": [
+        "b.md",
+        "c.md",
+        "d.md",
+        "a.md"
+      ]
+    }
+  ]
+}

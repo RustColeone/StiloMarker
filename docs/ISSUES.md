@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-09-30 · release `v0.1.21` (deployed; public verification passed)
+Last updated: 2026-10-11 · release `v0.1.22` (prepared on branch `perf-and-fixes`; not yet deployed)
 
 ---
 
@@ -30,6 +30,69 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.22: typing performance, explorer drift, drag duplicates, template race
+
+Measured on a synthetic workspace the size of the real Novel (23 files, ~290k
+characters, one chapter of 90k characters / 2,392 lines), Chromium, the same
+2-vCPU host for both builds.
+
+**Typing was ~25× slower than it needed to be.** At ~12 keys/s the median
+keystroke reached the screen after 18.7 s (keys queued behind each other); now
+0.71 s on the same throttled host, ~25–35 ms when it is not throttled. Causes, all
+on every keystroke:
+
+| Cost | Fix |
+|---|---|
+| The whole editor (2,392 lines, ~18k nodes) was rebuilt, then every line measured for the gutter | Only lines whose HTML changed are replaced; gutter heights are cached and rows patched. A MutationObserver tracks native edits so the cache is never trusted blindly |
+| Every later layout read (scroll sync, chat, caret) paid for that rebuild: ~10 forced layouts per key | Typing no longer triggers the app-wide render; explorer, tabs, preview, links and chat catch up 250 ms after typing pauses (at least every 1.5 s) |
+| Every line re-highlighted: tens of thousands of strings per key, GC pauses up to ~200 ms | Per-line highlight memo keyed by (text, fence state) |
+| The project was `structuredClone`d per key, copying every file's text | Clone shares immutable strings, still an independent object graph |
+| Undo kept a full copy of the document per entry (~72 MB at 400 entries on a long chapter) | Undo stores patches; one current copy |
+| The whole project serialised to localStorage per render (and per collaborator keystroke) | Debounced (0.8 s, at most 3 s), flushed on pagehide / tab hidden |
+| Preview re-rendered even for a different file, or when nothing changed | Skipped when its inputs are unchanged |
+| Chat re-rendered markdown for every message on every render — cost grew with conversation length | Memoised per message; scroll only touched when the conversation changes |
+| Linked Notes re-parsed every markdown file in the workspace for backlinks | Memoised per file content |
+| `text[i]` scans on CJK text (patch diff, overview ruler) allocated a string per character | `charCodeAt` / `indexOf` |
+| Sync fingerprinted the whole project after every confirmed patch | Lazy; computed only when a whole-project publish compares it |
+
+Net: allocation 13.2 → 1.7 MB per keystroke; over 30 keystrokes, major GCs 131 → 21
+and minor 276 → 48; DOM nodes replaced per keystroke 5,262 → 2 in the editor and
+11,481 → ~3,800 (amortised, during pauses only) in the preview.
+
+**Explorer crept up while typing (Chromium).** It was rebuilt on every keystroke,
+and Chromium's scroll anchoring re-picked an anchor after each rebuild — 299 → 29 px
+over 30 keys in the reproduction. Firefox was unaffected. The tree now skips
+rebuilds when nothing it shows changed, preserves its scroll position when it does
+rebuild, and sets `overflow-anchor: none`. Either of the last two alone prevents
+the drift on real rebuilds (a collaborator adding files).
+
+**A drag in the explorer left a copy.** Moves were never sent to the server; the
+server kept the old path and the next reconnect's reconcile — which can only add
+what the server lacks — uploaded the file at its new path, so both existed. This is
+also why `第七回试写.md` could not be moved out of the root. Added a server
+`move-node` operation (validation and ordering mirror the browser's `moveNode`;
+both are tested against one shared case table) and the explorer now publishes it,
+re-keying any pending text patch first as rename does. Agent-proposed moves, which
+the server previously rejected as unsupported, now apply. Also fixed an
+off-by-one: a file dropped after the last item of its own folder landed one above
+the bottom.
+
+**The first-run template could replace a cloud workspace.** On a fresh browser the
+welcome template loads file by file; if the workspace restored first, the template
+replaced it on screen inside the synced session, and a reconnect then uploaded the
+template files into the cloud workspace (reproduced). The template is now ignored
+if a workspace, another project or edits arrived first.
+
+Sync compatibility raised to **115**: older tabs never send `move-node` and would
+keep creating duplicates, so they must reload. Checked and found clean: no
+accumulation of timers, event streams, DOM nodes or listeners across reconnects
+and file switches (an apparent per-switch growth was the test tooling holding
+element handles).
+
+Tests: `tests/move-node.test.py`, `tests/move-node.test.mjs` (shared
+`move-node-cases.json`), `tests/editor-typing-browser.py` (fails on v0.1.21: 12,050
+line elements for 10 keys), `tests/template-race-browser.py` (fails on v0.1.21).
 
 ### v0.1.21: mobile keyboard blank-area scrolling
 

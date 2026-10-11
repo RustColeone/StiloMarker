@@ -678,6 +678,9 @@ p {
   gap: 1px;
   min-height: 0;
   overflow: auto;
+  /* The tree restores its own scroll position when it rebuilds; browser scroll
+     anchoring re-picking an anchor after a rebuild only adds sub-pixel drift. */
+  overflow-anchor: none;
   padding: 6px 0;
 }
 

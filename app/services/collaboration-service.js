@@ -1,4 +1,5 @@
 import { buildTextPatch, transformTextPatch, applyTextPatch } from "./text-patch-service.js";
+import { cloneModelData } from "../domain/project-model.js";
 import { connectToServer, fetchSessionState, hostSession, openEventStream, openWorkspaceSession, renewSessionLease, leaveSession, pushCursor, pushOperation, pushSessionState, sanitizeProjectForSync, uploadAsset } from "./sync-service.js";
 
 function fingerprintProject(project) {
@@ -10,7 +11,23 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
   let isApplyingRemote = false;
   let pendingTextPatches = new Map();
   let pendingSnapshotTimer = null;
+  // The project as last known to match the server, for publishSnapshot's "is
+  // there anything new to send" check. It used to be serialised eagerly — a
+  // structuredClone of every file plus a JSON string, ~1MB — after every
+  // confirmed patch and every collaborator's keystroke, though only a
+  // whole-project publish (rare) ever reads it. Now an independent copy that
+  // shares the immutable text is kept, and serialised only when compared.
+  let lastSyncedSource = null;
   let lastFingerprint = "";
+  const noteSynced = (project) => {
+    const { handles, sourceIndex, ...model } = project ?? {};
+    lastSyncedSource = cloneModelData(model);
+    lastFingerprint = null;
+  };
+  const syncedFingerprint = () => {
+    if (lastFingerprint === null) lastFingerprint = lastSyncedSource ? fingerprintProject(lastSyncedSource) : "";
+    return lastFingerprint;
+  };
   let presence = [];
   // OT state: revision we last confirmed with the server, and in-flight patch ops
   let localRevision = 0;
@@ -377,7 +394,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     }
 
     const fingerprint = fingerprintProject(project);
-    if (fingerprint === lastFingerprint) {
+    if (fingerprint === syncedFingerprint()) {
       return;
     }
 
@@ -392,6 +409,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     try { result = await request; } finally { activeWrites.delete(request); }
     if (epoch !== generation || modelEpoch !== modelGeneration || !connection) return;
     lastFingerprint = fingerprint;
+    lastSyncedSource = null;
     localRevision = Math.max(localRevision, result.revision ?? localRevision);
     connection.revision = localRevision;
     emitStatus("connected", `Connected. Revision ${connection.revision}.`);
@@ -494,7 +512,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     localRevision = Number(snapshot.revision);
     eventRevision = localRevision;
     connection.revision = localRevision;
-    lastFingerprint = fingerprintProject(snapshot.project);
+    noteSynced(snapshot.project);
     return archived.size;
   }
 
@@ -744,7 +762,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       isApplyingRemote = true;
       replaceProject(snapshot.project);
       isApplyingRemote = false;
-      lastFingerprint = fingerprintProject(snapshot.project);
+      noteSynced(snapshot.project);
       localRevision = Number(snapshot.revision);
       eventRevision = localRevision;
       connection.revision = localRevision;
@@ -807,7 +825,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
           if (!pendingTextPatches.has(event.operation.path)) localEdits.delete(event.operation.path);
         }
         adoptHostCounters({ path: event.operation.path, counters: event.operation.counters });
-        lastFingerprint = fingerprintProject(getProject());
+        noteSynced(getProject());
         localRevision = Math.max(localRevision, event.revision ?? localRevision);
         connection.revision = localRevision;
         emitStatus("connected", `Connected. Revision ${connection.revision}.`);
@@ -860,7 +878,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
       } finally {
         isApplyingRemote = false;
       }
-      lastFingerprint = fingerprintProject(getProject());
+      noteSynced(getProject());
       localRevision = Math.max(localRevision, event.revision ?? localRevision);
       connection.revision = localRevision;
       emitStatus("connected", `Connected. Applied remote operation at revision ${connection.revision}.`);
@@ -981,7 +999,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
         localRevision = Number(snapshot.revision);
         eventRevision = localRevision;
         connection.revision = localRevision;
-        lastFingerprint = fingerprintProject(snapshot.project);
+        noteSynced(snapshot.project);
       }
       if (epoch !== generation) throw Object.assign(new Error("Workspace open was superseded."), { status: 499 });
       emitStatus("connected", `Opened ${session.workspace} at revision ${connection.revision}.`);

@@ -1,8 +1,8 @@
-import { getPath } from "../domain/project-model.js";
+import { cloneModelData, getPath } from "../domain/project-model.js";
 
 export function snapshotProject(project) {
   const { handles, ...model } = project;
-  return { ...structuredClone(model), ...(handles ? { handles: { ...handles } } : {}) };
+  return { ...cloneModelData(model), ...(handles ? { handles: { ...handles } } : {}) };
 }
 
 // A successful write only confirms the exact path/content included in it.

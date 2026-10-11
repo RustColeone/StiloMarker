@@ -358,6 +358,41 @@ let previewFileId = controller.getProject().activeFileId ?? null;
 // updateStatus. null → no text file open (the counter hides). Declared up here so
 // the hoisted updateStatus can never touch it inside its temporal dead zone.
 let statusCharTotal = null;
+// Typing fast path + deferred/debounced work (see render()). Declared up here:
+// render() runs during module initialisation, before its own section executes.
+let typingUpdate = false;
+const DEFERRED_RENDER_IDLE_MS = 250;
+const DEFERRED_RENDER_MAX_MS = 1500;
+let deferredRenderTimer = null;
+let deferredRenderDeadline = 0;
+const RECOVERY_SAVE_IDLE_MS = 800;
+const RECOVERY_SAVE_MAX_MS = 3000;
+let recoverySaveTimer = null;
+let recoverySaveDeadline = 0;
+let recoverySavePending = null;
+// What has changed in the editor DOM since the last render (see
+// trackEditorDom). Lets text/caret reads use the render cache instead of
+// re-reading every line's textContent — each read allocated a fresh string.
+const editorDomTracker = {
+  observer: null,
+  dirty: new Set(),   // top-level lines whose content changed since the last render
+  structural: false,  // lines were added/removed directly under the editor
+  text: null          // getEditorText() result, valid until the next mutation
+};
+// Incremental editor render cache (see renderEditorContent). Declared up here
+// because the first render runs before that part of the module has executed.
+const editorRenderCache = {
+  fileId: null,     // file the cache describes
+  kind: null,       // highlighter used
+  els: [],          // line elements, in DOM order, as rendered
+  texts: [],        // each line's text as rendered
+  html: [],         // each line's final HTML as rendered
+  heights: [],      // gutter heights measured for each line
+  gutter: [],       // gutter row HTML as rendered
+  metricsKey: "",   // geometry the heights were measured under (see below)
+  gutterEpoch: "",  // line count / agent range / comments the gutter rows reflect
+  textExact: true   // every line's DOM text equals its source line
+};
 // Touch-gesture tuning and state. Declared up here because the hoisted mobile
 // render helpers reach them during the first render, which would otherwise be
 // inside their temporal dead zone.
@@ -534,11 +569,16 @@ const editorDragState = {
 };
 
 // Undo/redo history for the contenteditable editor.
-// Each entry: { text: string, start: number, end: number }
+// Each entry: { start, end, patch } where `patch` turns the previous entry's
+// text into this one's: { at, removed, inserted } (null for the first entry).
+// Only `text` — the text of entry `index` — is held in full. Entries used to
+// carry a full copy of the document each: on a 90k-character chapter that was
+// ~180KB per keystroke, ~72MB at the 400-entry cap, for every open file.
 const editorHistory = {
   stack: [],
   index: -1,
-  maxSize: 400
+  maxSize: 400,
+  text: ""
 };
 
 let editorIsComposing = false;
@@ -1116,15 +1156,34 @@ function renderAgentActivity() {
   return lines + toggle;
 }
 
+// Rendered markdown per chat message. The panel re-renders on many app events,
+// and re-running markdown over every reply in the thread each time made its
+// cost grow with the length of the conversation — the longer you used the
+// agent, the slower everything else got.
+const chatMarkdownCache = new Map(); // message id -> { content, html }
+
+function chatMessageMarkdown(message) {
+  const content = message.content ?? "";
+  const hit = chatMarkdownCache.get(message.id);
+  if (hit && hit.content === content) return hit.html;
+  const html = renderMarkdown(content);
+  if (chatMarkdownCache.size > 2000) chatMarkdownCache.clear(); // bound memory across workspaces
+  chatMarkdownCache.set(message.id, { content, html });
+  return html;
+}
+
 function renderChatPanel(project) {
   mcpControls?.render();
   ensureChatWorkspaceLoaded(project);
 
   const activeThread = getActiveChatThread();
   const messageList = elements.chatMessageList;
-  const oldScroll = messageList.scrollTop;
-  const follow = chatState.shouldScrollToBottom || chatState.renderedThreadId !== activeThread?.id || isChatNearBottom(messageList);
-  if (chatState.renderedThreadId !== activeThread?.id) elements.chatInput.value = activeThread?.draft ?? "";
+  // Scroll state is read (and later written) only when the conversation will
+  // actually change. Reading scrollTop forces a layout of the whole page, and
+  // this panel renders on many unrelated events — it was paying for laying out
+  // a freshly rebuilt preview on every one of them, even while hidden.
+  const threadChanged = chatState.renderedThreadId !== activeThread?.id;
+  if (threadChanged) elements.chatInput.value = activeThread?.draft ?? "";
   chatState.renderedThreadId = activeThread?.id;
   const statusPrefix = chatState.syncError || (chatState.sending ? "Sending…" : chatState.detail);
   const statusSuffix = chatState.configured && chatState.provider && chatState.model && chatState.models.length <= 1
@@ -1206,7 +1265,7 @@ function renderChatPanel(project) {
     ? activeThread.messages.map((message) => {
       const roleLabel = message.role === "user" ? "You" : message.role === "assistant" ? "Agent" : "System";
       const contentHtml = message.role === "assistant"
-        ? renderMarkdown(message.content)
+        ? chatMessageMarkdown(message)
         : escapeHtmlAttribute(message.content);
       const contextBadgesHtml = message.contextPaths?.length
         ? `<div class="chat-message-context">${
@@ -1243,6 +1302,12 @@ function renderChatPanel(project) {
   // so selections and expanded message controls survive incoming tokens.
   let history = messageList.querySelector(".chat-history-content");
   let stream = messageList.querySelector(".chat-stream-content");
+  const conversationChanged = threadChanged || chatState.shouldScrollToBottom || !history || !stream
+    || history._renderedHtml !== historyHtml || stream._renderedHtml !== thinkingHtml;
+  // Measured BEFORE the content changes: were we following the bottom?
+  const oldScroll = conversationChanged ? messageList.scrollTop : 0;
+  const follow = conversationChanged
+    && (chatState.shouldScrollToBottom || threadChanged || isChatNearBottom(messageList));
   if (!history || !stream) {
     history = document.createElement("div"); history.className = "chat-history-content";
     stream = document.createElement("div"); stream.className = "chat-stream-content";
@@ -1262,7 +1327,7 @@ function renderChatPanel(project) {
   elements.chatAddActiveFileButton.disabled = !project.activeFileId;
   elements.chatInput.disabled = false;
 
-  messageList.scrollTop = follow ? messageList.scrollHeight : oldScroll;
+  if (conversationChanged) messageList.scrollTop = follow ? messageList.scrollHeight : oldScroll;
   chatState.shouldScrollToBottom = false;
 
   // Refresh in-editor agent bar whenever proposal state changes.
@@ -1818,9 +1883,7 @@ function logDebug(kind, message, detail = "") {
 }
 
 function getEditorLineIndexAtOffset(textOffset) {
-  const lineEls = Array.from(
-    elements.editorContent.querySelectorAll(":scope > .editor-line")
-  );
+  const lineEls = Array.from(elements.editorContent.children);
   let remaining = Math.max(0, textOffset);
   for (let index = 0; index < lineEls.length; index += 1) {
     const lineLen = lineEls[index].textContent.length;
@@ -1843,9 +1906,7 @@ function getEditorTraceDetail(extra = {}) {
   const selection = window.getSelection();
   const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
   const { start, end } = getEditorSelection();
-  const lineEls = Array.from(
-    elements.editorContent.querySelectorAll(":scope > .editor-line")
-  );
+  const lineEls = Array.from(elements.editorContent.children);
   const lineIndex = getEditorLineIndexAtOffset(start);
   const line = lineEls[lineIndex] ?? null;
   const nextLine = lineEls[lineIndex + 1] ?? null;
@@ -1878,6 +1939,9 @@ function getEditorTraceDetail(extra = {}) {
 }
 
 function traceEditorEvent(message, extra = {}) {
+  // The input handler calls this for every space and Enter, twice. Building the
+  // detail walks the whole document, so only do it when someone can see it.
+  if (!settings.debugPanel) return;
   logDebug("editor", message, getEditorTraceDetail(extra));
 }
 
@@ -2666,13 +2730,80 @@ function showEditorAutocomplete(force = false) {
 // / autocorrect / swipe edit can transiently insert a plain <div>; treating those
 // as lines too keeps text from being dropped and offsets from collapsing to 0.
 function editorLineEls() {
-  return Array.from(elements.editorContent.querySelectorAll(":scope > *"));
+  // .children, not querySelectorAll(":scope > *"): the selector form walks every
+  // DESCENDANT (~18k nodes in a long chapter) to find the direct children, and
+  // this runs several times per keystroke. Same elements, same order.
+  return Array.from(elements.editorContent.children);
+}
+
+// ── Editor DOM change tracking ──────────────────────────────────────────────
+// A MutationObserver records which lines changed behind our back (native typing,
+// IME, mobile keyboards) since the last render. takeRecords() makes it exact and
+// synchronous: nothing has to wait for the observer's callback.
+function trackEditorDom() {
+  const tracker = editorDomTracker;
+  if (!tracker.observer) {
+    tracker.observer = new MutationObserver(noteEditorMutations);
+    tracker.observer.observe(elements.editorContent, { childList: true, subtree: true, characterData: true });
+    tracker.structural = true; // nothing is known until the next render syncs it
+    tracker.text = null;
+  }
+  noteEditorMutations(tracker.observer.takeRecords());
+  return tracker;
+}
+
+function noteEditorMutations(records) {
+  if (!records.length) return;
+  const tracker = editorDomTracker;
+  const root = elements.editorContent;
+  tracker.text = null;
+  for (const record of records) {
+    if (record.target === root) { tracker.structural = true; continue; }
+    let node = record.target;
+    while (node && node.parentNode !== root) node = node.parentNode;
+    if (node) tracker.dirty.add(node);
+    else tracker.structural = true; // detached by now: assume the worst
+  }
+}
+
+// After a render we fully control, the DOM matches the cache exactly. `text` is
+// what getEditorText() would now return, or null if that isn't known.
+function markEditorDomSynced(text) {
+  const tracker = trackEditorDom();
+  tracker.observer.takeRecords(); // our own mutations
+  tracker.dirty.clear();
+  tracker.structural = false;
+  tracker.text = text;
+}
+
+// Index of a line element if every line before it is unchanged since the last
+// render (so the cache's text lengths are exact for them), else -1.
+function cleanLineIndex(lineEl) {
+  const tracker = trackEditorDom();
+  const cache = editorRenderCache;
+  const kids = elements.editorContent.children;
+  if (tracker.structural || !lineEl || kids.length !== cache.els.length) return -1;
+  const index = Array.prototype.indexOf.call(kids, lineEl);
+  if (index < 0 || cache.els[index] !== lineEl) return -1;
+  for (const dirty of tracker.dirty) {
+    const at = Array.prototype.indexOf.call(kids, dirty);
+    if (at < 0 || at < index) return -1;
+  }
+  return index;
 }
 
 function getEditorText() {
-  const lines = editorLineEls();
-  if (lines.length === 0) return "";
-  return lines.map((line) => line.textContent).join("\n");
+  const tracker = trackEditorDom();
+  if (tracker.text !== null) return tracker.text;
+  const lines = elements.editorContent.children;
+  if (lines.length === 0) {
+    tracker.text = "";
+    return "";
+  }
+  const parts = new Array(lines.length);
+  for (let i = 0; i < lines.length; i += 1) parts[i] = lines[i].textContent;
+  tracker.text = parts.join("\n");
+  return tracker.text;
 }
 
 /** Walk text nodes inside `root` counting characters until `targetOffset` is
@@ -2703,6 +2834,23 @@ function findTextNodeAt(root, targetOffset) {
 /** Convert an integer plain-text offset to a { node, offset } DOM position
  *  inside the contenteditable. */
 function textOffsetToDomPosition(textOffset) {
+  // Fast path: nothing changed since the last render, so the cache's line
+  // lengths are exact and no line's textContent needs reading.
+  const tracker = trackEditorDom();
+  const cache = editorRenderCache;
+  const kids = elements.editorContent.children;
+  if (!tracker.structural && tracker.dirty.size === 0 && kids.length > 0 && kids.length === cache.els.length) {
+    let remaining = textOffset;
+    for (let i = 0; i < kids.length; i += 1) {
+      const line = kids[i];
+      const lineLen = cache.texts[i].length;
+      if (remaining <= lineLen) return findTextNodeAt(line, remaining);
+      remaining -= lineLen + 1;
+      if (remaining < 0) return { node: line, offset: line.childNodes.length };
+    }
+    const last = kids[kids.length - 1];
+    return { node: last, offset: last.childNodes.length };
+  }
   const lineEls = editorLineEls();
   let remaining = textOffset;
   for (const line of lineEls) {
@@ -2748,6 +2896,15 @@ function domPositionToTextOffset(container, domOffset) {
   let lineEl = container;
   while (lineEl && lineEl.parentNode !== elements.editorContent) {
     lineEl = lineEl.parentNode;
+  }
+
+  // Fast path: lines before the caret are unchanged since the last render.
+  const cleanIndex = cleanLineIndex(lineEl);
+  if (cleanIndex >= 0) {
+    const texts = editorRenderCache.texts;
+    let offset = 0;
+    for (let i = 0; i < cleanIndex; i += 1) offset += texts[i].length + 1;
+    return offset + getOffsetWithinTextRoot(lineEl, container, domOffset);
   }
 
   const lineEls = editorLineEls();
@@ -2873,16 +3030,36 @@ function applyEditorRender(text, selStart, selEnd) {
 
 /** Push a history snapshot.  Call at logical "checkpoints" (space, enter,
  *  punctuation, paste, indent, drag-drop). */
+// The single changed span between two texts: common prefix and suffix trimmed.
+function diffEditorTexts(before, after) {
+  const max = Math.min(before.length, after.length);
+  let at = 0;
+  while (at < max && before.charCodeAt(at) === after.charCodeAt(at)) at += 1;
+  let tail = 0;
+  while (tail < max - at
+    && before.charCodeAt(before.length - 1 - tail) === after.charCodeAt(after.length - 1 - tail)) {
+    tail += 1;
+  }
+  return {
+    at,
+    removed: before.slice(at, before.length - tail),
+    inserted: after.slice(at, after.length - tail)
+  };
+}
+
 function pushEditorHistoryState(text, start, end) {
   // Trim any forward (redo) entries once a new branch starts.
   editorHistory.stack.splice(editorHistory.index + 1);
   const last = editorHistory.stack[editorHistory.index];
-  if (last && last.text === text && last.start === start && last.end === end) {
+  if (last && editorHistory.text === text && last.start === start && last.end === end) {
     return;
   }
-  editorHistory.stack.push({ text, start, end });
+  const patch = last ? diffEditorTexts(editorHistory.text, text) : null;
+  editorHistory.stack.push({ start, end, patch });
+  editorHistory.text = text;
   if (editorHistory.stack.length > editorHistory.maxSize) {
     editorHistory.stack.shift();
+    editorHistory.stack[0].patch = null; // nothing older to undo into
   }
   editorHistory.index = editorHistory.stack.length - 1;
 }
@@ -2896,8 +3073,9 @@ function clampEditorSelection(text, start, end = start) {
 
 function resetEditorHistory(text, start = 0, end = start) {
   const selection = clampEditorSelection(text, start, end);
-  editorHistory.stack = [{ text, start: selection.start, end: selection.end }];
+  editorHistory.stack = [{ start: selection.start, end: selection.end, patch: null }];
   editorHistory.index = 0;
+  editorHistory.text = text;
   return selection;
 }
 
@@ -2935,10 +3113,15 @@ function pushEditorHistoryCheckpoint() {
 function editorUndo() {
   if (editorHistory.index <= 0) return;
   traceEditorEvent("Undo requested");
+  // Reverse this entry's patch to get the previous text.
+  const { patch } = editorHistory.stack[editorHistory.index];
+  const current = editorHistory.text;
+  const text = current.slice(0, patch.at) + patch.removed + current.slice(patch.at + patch.inserted.length);
   editorHistory.index -= 1;
+  editorHistory.text = text;
   const state = editorHistory.stack[editorHistory.index];
-  applyEditorRender(state.text, state.start, state.end);
-  notifyEditorChanged(state.text);
+  applyEditorRender(text, state.start, state.end);
+  notifyEditorChanged(text);
   traceEditorEvent("Undo applied", { restored: `${state.start}-${state.end}` });
 }
 
@@ -2947,8 +3130,13 @@ function editorRedo() {
   traceEditorEvent("Redo requested");
   editorHistory.index += 1;
   const state = editorHistory.stack[editorHistory.index];
-  applyEditorRender(state.text, state.start, state.end);
-  notifyEditorChanged(state.text);
+  // Replay the next entry's patch.
+  const { patch } = state;
+  const current = editorHistory.text;
+  const text = current.slice(0, patch.at) + patch.inserted + current.slice(patch.at + patch.removed.length);
+  editorHistory.text = text;
+  applyEditorRender(text, state.start, state.end);
+  notifyEditorChanged(text);
   traceEditorEvent("Redo applied", { restored: `${state.start}-${state.end}` });
 }
 
@@ -2993,7 +3181,15 @@ function notifyEditorChanged(text) {
     const parsed = parseUrlDbEntryBody(text);
     nextContent = updateUrlDbEntry(activeFile.content, selectedEntry.entry.id, parsed);
   }
-  controller.updateContent(activeFile.id, nextContent);
+  // The editor DOM already shows this text (every caller renders or reads it
+  // first), so the app-wide render this triggers can catch up a moment later
+  // instead of running synchronously inside the keystroke. See render().
+  typingUpdate = true;
+  try {
+    controller.updateContent(activeFile.id, nextContent);
+  } finally {
+    typingUpdate = false;
+  }
   if (collaboration.isConnected() && workspaceMode === "synced") {
     collaboration.scheduleTextPatch(getPath(controller.getProject(), activeFile.id), activeFile.content, nextContent);
   }
@@ -3383,18 +3579,18 @@ function snapshotProjectKey() {
 // jumps there, so finding "where is my stuff" never means scrolling blindly.
 
 /** Which line a text offset falls on (0-based). */
+// Counting with indexOf rather than text[i]: indexing a CJK string allocates a
+// one-character string per position, tens of thousands per call, per marker.
 function lineIndexForOffset(text, offset) {
   const capped = Math.max(0, Math.min(Number(offset) || 0, text.length));
   let line = 0;
-  for (let i = 0; i < capped; i += 1) {
-    if (text[i] === "\n") line += 1;
-  }
+  for (let at = text.indexOf("\n"); at !== -1 && at < capped; at = text.indexOf("\n", at + 1)) line += 1;
   return line;
 }
 
 /** Vertical position of a line inside the scrollable content, in px. */
 function editorLineTop(lineIndex) {
-  const lines = editorLineEls();
+  const lines = elements.editorContent.children; // not a fresh array per marker
   if (!lines.length) return 0;
   const el = lines[Math.max(0, Math.min(lineIndex, lines.length - 1))];
   return el ? el.offsetTop : 0;
@@ -5214,7 +5410,7 @@ function highlightMtreeChain(chainPart) {
     .join("");
 }
 
-function highlightMtreeSource(value) {
+function highlightMtreeLines(value) {
   const lines = value.replace(/\r\n/g, "\n").split("\n");
 
   return lines.map((rawLine) => {
@@ -5250,10 +5446,14 @@ function highlightMtreeSource(value) {
       : "";
 
     return `<div class="editor-line">${chainHtml}${descriptionHtml}</div>`;
-  }).join("");
+  });
 }
 
-function highlightUrlDbSource(value) {
+function highlightMtreeSource(value) {
+  return highlightMtreeLines(value).join("");
+}
+
+function highlightUrlDbLines(value) {
   const lines = value.replace(/\r\n/g, "\n").split("\n");
 
   return lines.map((rawLine) => {
@@ -5282,7 +5482,11 @@ function highlightUrlDbSource(value) {
     }
 
     return `<div class="editor-line">${escaped}</div>`;
-  }).join("");
+  });
+}
+
+function highlightUrlDbSource(value) {
+  return highlightUrlDbLines(value).join("");
 }
 
 function highlightBmapValue(rawVal) {
@@ -5346,7 +5550,7 @@ function highlightBmapValue(rawVal) {
   return `<span class="token-bmap-value">${escapeEditorHtml(rawVal)}</span>`;
 }
 
-function highlightBmapSource(value) {
+function highlightBmapLines(value) {
   const lines = value.replace(/\r\n/g, "\n").split("\n");
   return lines.map((rawLine) => {
     const trimmed = rawLine.trimStart();
@@ -5379,47 +5583,62 @@ function highlightBmapSource(value) {
     }
 
     return `<div class="editor-line">${escapeEditorHtml(rawLine)}</div>`;
-  }).join("");
+  });
+}
+
+function highlightBmapSource(value) {
+  return highlightBmapLines(value).join("");
+}
+
+// One markdown source line → its editor HTML, given whether it starts inside a
+// ``` fence. Returns the fence state after it. Highlighting is otherwise
+// line-local, which is what lets renderEditorContent memoize it per line.
+function highlightMarkdownLine(rawLine, inFence) {
+  const escaped = escapeEditorHtml(rawLine);
+  const trimmed = rawLine.trimStart();
+
+  if (!trimmed) {
+    return { html: renderWhitespaceOnlyEditorLine(rawLine), inFence };
+  }
+
+  if (trimmed.startsWith("```")) {
+    return { html: `<div class="editor-line"><span class="token-fence">${escaped}</span></div>`, inFence: !inFence };
+  }
+
+  if (inFence) {
+    return { html: `<div class="editor-line"><span class="token-code-block">${escaped}</span></div>`, inFence };
+  }
+
+  if (/^\s*#{1,6}\s/.test(rawLine)) {
+    const [, indent, hashes, space, text] = rawLine.match(/^(\s*)(#{1,6})(\s+)(.*)$/);
+    return { html: `<div class="editor-line">${escapeEditorHtml(indent)}<span class="token-heading-mark">${escapeEditorHtml(hashes)}</span>${escapeEditorHtml(space)}<span class="token-heading-text">${applyInlineHighlighting(escapeEditorHtml(text || ""))}</span></div>`, inFence };
+  }
+
+  if (/^\s*-\s+/.test(rawLine)) {
+    const [, indent, marker, text] = rawLine.match(/^(\s*)(-)\s+(.*)$/);
+    return { html: `<div class="editor-line">${escapeEditorHtml(indent)}<span class="token-list-mark">${marker}</span> ${applyInlineHighlighting(escapeEditorHtml(text || ""))}</div>`, inFence };
+  }
+
+  if (/^\s*>\s?/.test(rawLine)) {
+    const [, indent, marker, text] = rawLine.match(/^(\s*)(>)(\s?.*)$/);
+    return { html: `<div class="editor-line">${escapeEditorHtml(indent)}<span class="token-quote-mark">${marker}</span><span class="token-quote-text">${applyInlineHighlighting(escapeEditorHtml(text || ""))}</span></div>`, inFence };
+  }
+
+  return { html: `<div class="editor-line">${applyInlineHighlighting(escaped)}</div>`, inFence };
+}
+
+function highlightMarkdownLines(value) {
+  const lines = value.replace(/\r\n/g, "\n").split("\n");
+  let inFence = false;
+  return lines.map((rawLine) => {
+    const result = highlightMarkdownLine(rawLine, inFence);
+    inFence = result.inFence;
+    return result.html;
+  });
 }
 
 function highlightMarkdownSource(value) {
-  const lines = value.replace(/\r\n/g, "\n").split("\n");
-  let inFence = false;
-
-  return lines.map((rawLine) => {
-    const escaped = escapeEditorHtml(rawLine);
-    const trimmed = rawLine.trimStart();
-
-    if (!trimmed) {
-      return renderWhitespaceOnlyEditorLine(rawLine);
-    }
-
-    if (trimmed.startsWith("```")) {
-      inFence = !inFence;
-      return `<div class="editor-line"><span class="token-fence">${escaped}</span></div>`;
-    }
-
-    if (inFence) {
-      return `<div class="editor-line"><span class="token-code-block">${escaped}</span></div>`;
-    }
-
-    if (/^\s*#{1,6}\s/.test(rawLine)) {
-      const [, indent, hashes, space, text] = rawLine.match(/^(\s*)(#{1,6})(\s+)(.*)$/);
-      return `<div class="editor-line">${escapeEditorHtml(indent)}<span class="token-heading-mark">${escapeEditorHtml(hashes)}</span>${escapeEditorHtml(space)}<span class="token-heading-text">${applyInlineHighlighting(escapeEditorHtml(text || ""))}</span></div>`;
-    }
-
-    if (/^\s*-\s+/.test(rawLine)) {
-      const [, indent, marker, text] = rawLine.match(/^(\s*)(-)\s+(.*)$/);
-      return `<div class="editor-line">${escapeEditorHtml(indent)}<span class="token-list-mark">${marker}</span> ${applyInlineHighlighting(escapeEditorHtml(text || ""))}</div>`;
-    }
-
-    if (/^\s*>\s?/.test(rawLine)) {
-      const [, indent, marker, text] = rawLine.match(/^(\s*)(>)(\s?.*)$/);
-      return `<div class="editor-line">${escapeEditorHtml(indent)}<span class="token-quote-mark">${marker}</span><span class="token-quote-text">${applyInlineHighlighting(escapeEditorHtml(text || ""))}</span></div>`;
-    }
-
-    return `<div class="editor-line">${applyInlineHighlighting(escaped)}</div>`;
-  }).join("");
+  return highlightMarkdownLines(value).join("");
 }
 
 function getEditorLineHeight() {
@@ -5554,77 +5773,323 @@ function refreshFormatToolbar() {
 
 /** Re-render syntax-highlighted DOM from plain text and rebuild the gutter.
  *  Does NOT modify the selection — callers are responsible for restoring it. */
-function renderEditorContent(text) {
+// ── Incremental editor rendering ────────────────────────────────────────────
+// Every keystroke used to rebuild the whole editor (innerHTML of every line) and
+// then measure every line's height for the gutter. On a novel-length chapter
+// (~90k chars, ~2,400 lines) that discarded and re-laid-out ~18k nodes per key,
+// and every later layout read in the same task — scroll sync, caret, chat panel —
+// paid for a full-document relayout again: ~10 forced layouts per keystroke.
+//
+// Now each line's HTML is computed as before (whole text, so multi-line state
+// like ``` fences stays correct) but only DOM lines whose HTML actually changed
+// are replaced. Unchanged lines keep their element, their layout, and their
+// cached gutter height, so a keystroke re-lays-out one line instead of all.
+//
+// Correctness rests on knowing the DOM still matches the cache. Native edits
+// (and mobile keyboards, which can inject bare <div>s) mutate it behind our back,
+// so a line is reused only if it is the same element we rendered AND its text and
+// child count are still what we rendered. Anything else is re-rendered, and any
+// doubt — new file, different highlighter, stray text nodes, a count mismatch
+// afterwards — falls back to the old full rebuild.
+
+function resetEditorRenderCache() {
+  editorRenderCache.fileId = null;
+  editorRenderCache.kind = null;
+  editorRenderCache.els = [];
+  editorRenderCache.texts = [];
+  editorRenderCache.html = [];
+  editorRenderCache.heights = [];
+  editorRenderCache.gutter = [];
+  editorRenderCache.metricsKey = "";
+  editorRenderCache.gutterEpoch = "";
+  editorRenderCache.textExact = true;
+}
+
+function editorHighlightKind(name) {
+  if (name?.endsWith(".mtree")) return "mtree";
+  if (name?.endsWith(".urldb")) return "urldb";
+  if (isBmapFileName(name ?? "")) return "bmap";
+  return "markdown";
+}
+
+function highlightEditorLines(kind, normalized) {
+  if (kind === "mtree") return highlightMtreeLines(normalized);
+  if (kind === "urldb") return highlightUrlDbLines(normalized);
+  if (kind === "bmap") return highlightBmapLines(normalized);
+  return highlightMarkdownLines(normalized);
+}
+
+// Highlighted HTML per distinct source line. Re-highlighting every line on every
+// keystroke allocated tens of thousands of short-lived strings per key on a
+// long chapter, and the garbage collector's pauses (up to ~200ms) became most
+// of the typing latency. A line's HTML depends only on its text — plus, for
+// markdown, whether it starts inside a ``` fence — so it is computed once.
+const editorLineMemo = { kind: null, maps: [new Map(), new Map()] };
+
+function highlightEditorLinesMemo(kind, lines) {
+  if (editorLineMemo.kind !== kind) {
+    editorLineMemo.kind = kind;
+    editorLineMemo.maps = [new Map(), new Map()];
+  }
+  const maps = editorLineMemo.maps;
+  if (maps[0].size + maps[1].size > Math.max(20000, lines.length * 4)) {
+    maps[0].clear();
+    maps[1].clear();
+  }
+  const out = new Array(lines.length);
+  if (kind === "markdown") {
+    let inFence = false;
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      const map = maps[inFence ? 1 : 0];
+      let hit = map.get(line);
+      if (hit === undefined) {
+        const result = highlightMarkdownLine(line, inFence);
+        hit = { html: result.html, inFence: result.inFence, plain: null };
+        map.set(line, hit);
+      }
+      out[i] = hit;
+      inFence = hit.inFence;
+    }
+  } else {
+    const map = maps[0];
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      let hit = map.get(line);
+      if (hit === undefined) {
+        // The other highlighters are stateless per line.
+        hit = { html: highlightEditorLines(kind, line)[0], inFence: false, plain: null };
+        map.set(line, hit);
+      }
+      out[i] = hit;
+    }
+  }
+  return out;
+}
+
+// Fold the per-line wrap indent and agent decoration into the line's own HTML,
+// so a line's HTML is a pure function of its content and can be compared.
+function decorateEditorLineHtml(html, rawLine, decorated) {
+  const indentCols = getLeadingIndentColumns(rawLine ?? "");
+  if (!indentCols && !decorated) return html;
+  const classes = `editor-line${indentCols > 0 ? " has-wrapped-indent" : ""}${decorated ? " is-agent-pending" : ""}`;
+  const style = indentCols > 0 ? ` style="--wrapped-indent-columns:${indentCols}"` : "";
+  return html.replace('<div class="editor-line"', `<div class="${classes}"${style}`);
+}
+
+// Empty lines need a <br> to render at full height and accept a caret.
+function normalizeEditorLineElement(line) {
+  if (line.childNodes.length === 0 ||
+      (line.childNodes.length === 1 &&
+       line.firstChild?.nodeName !== "BR" &&
+       line.firstChild?.textContent === "")) {
+    line.innerHTML = "<br>";
+  }
+}
+
+function parseEditorLines(htmlList) {
+  const tpl = document.createElement("template");
+  tpl.innerHTML = htmlList.join("");
+  const els = Array.from(tpl.content.children);
+  els.forEach(normalizeEditorLineElement);
+  return { fragment: tpl.content, els };
+}
+
+// Replace DOM lines [from, to) with freshly rendered lines for new indices
+// [from, from + count) and splice the cache to match. Returns the new elements.
+function spliceEditorLines(from, to, htmlSlice, textSlice) {
+  const container = elements.editorContent;
+  const before = container.children[to] ?? null;
+  for (let i = to - 1; i >= from; i -= 1) container.children[i]?.remove();
+  const { fragment, els } = parseEditorLines(htmlSlice);
+  container.insertBefore(fragment, before);
+  const cache = editorRenderCache;
+  const removed = to - from;
+  cache.els.splice(from, removed, ...els);
+  // The DOM's own text for each new line (normally identical to the source).
+  cache.texts.splice(from, removed, ...els.map((el, i) => {
+    const actual = el.textContent;
+    if (actual !== textSlice[i]) cache.textExact = false;
+    return actual;
+  }));
+  cache.html.splice(from, removed, ...htmlSlice);
+  cache.heights.splice(from, removed, ...els.map(() => null)); // measured below
+  return els;
+}
+
+document.fonts?.addEventListener?.("loadingdone", () => {
+  if (!editorRenderCache.els.length) return;
+  editorRenderCache.metricsKey = "";
+  renderEditorContent(getEditorText());
+});
+
+function renderEditorContent(text, { full = false } = {}) {
   refreshFormatToolbar();
   const normalized = text.replace(/\r\n/g, "\n");
   const lines = normalized.split("\n");
   const activeFile = controller.getActiveFile();
-  const highlightMarkup = activeFile?.name.endsWith(".mtree")
-    ? highlightMtreeSource(normalized)
-    : activeFile?.name.endsWith(".urldb")
-      ? highlightUrlDbSource(normalized)
-      : isBmapFileName(activeFile?.name ?? "")
-        ? highlightBmapSource(normalized)
-        : highlightMarkdownSource(normalized);
+  const kind = editorHighlightKind(activeFile?.name);
 
-  elements.editorContent.innerHTML = highlightMarkup;
-
-  // Ensure every empty line has a <br> so the browser renders it at full height
-  // and allows cursor placement.
-  const allLines = Array.from(elements.editorContent.querySelectorAll(":scope > .editor-line"));
-  allLines.forEach((line) => {
-    if (line.childNodes.length === 0 ||
-        (line.childNodes.length === 1 &&
-         line.firstChild?.nodeName !== "BR" &&
-         line.firstChild?.textContent === "")) {
-      line.innerHTML = "<br>";
-    }
-  });
-
-  const renderedLines = allLines.slice(0, Math.max(1, lines.length));
-  const minimumLineHeight = getEditorLineHeight();
-
-  renderedLines.forEach((line, index) => {
-    line.dataset.lineIndex = String(index);
-    const indentCols = getLeadingIndentColumns(lines[index] ?? "");
-    line.style.setProperty("--wrapped-indent-columns", String(indentCols));
-    line.classList.toggle("has-wrapped-indent", indentCols > 0);
-  });
-
-  // Phase 5: apply agent-pending decoration to the relevant lines.
-  const activeFilePath = controller.getActiveFile()
-    ? getPath(controller.getProject(), controller.getActiveFile().id)
-    : null;
+  const activeFilePath = activeFile ? getPath(controller.getProject(), activeFile.id) : null;
   const activeDecoration = activeFilePath ? agentPendingDecorations.get(activeFilePath) : null;
-  if (activeDecoration) {
-    const { lineStart, lineEnd } = activeDecoration;
-    renderedLines.forEach((line, index) => {
-      line.classList.toggle("is-agent-pending", index >= lineStart && index <= lineEnd);
-    });
+  const isDecorated = (index) => Boolean(activeDecoration)
+    && index >= activeDecoration.lineStart && index <= activeDecoration.lineEnd;
+  const lineHtml = highlightEditorLinesMemo(kind, lines).map((hit, index) => {
+    if (isDecorated(index)) return decorateEditorLineHtml(hit.html, lines[index], true);
+    if (hit.plain === null) hit.plain = decorateEditorLineHtml(hit.html, lines[index], false);
+    return hit.plain;
+  });
+
+  const container = elements.editorContent;
+  const cache = editorRenderCache;
+  const tracker = trackEditorDom();
+  const incremental = !full
+    && cache.fileId === (activeFile?.id ?? null)
+    && cache.kind === kind
+    && cache.els.length > 0
+    // Stray text nodes directly under the editor (some mobile edits) aren't
+    // lines we can diff against; rebuild.
+    && container.childNodes.length === container.children.length;
+
+  if (incremental) {
+    const dom = container.children;
+    const domLen = dom.length;
+    const cacheLen = cache.els.length;
+    const newLen = lineHtml.length;
+    // Unchanged leading lines: same element, untouched, same HTML.
+    let prefix = 0;
+    const maxPrefix = Math.min(domLen, cacheLen, newLen);
+    while (prefix < maxPrefix
+      && dom[prefix] === cache.els[prefix]
+      && cache.html[prefix] === lineHtml[prefix]
+      && !tracker.dirty.has(dom[prefix])) {
+      prefix += 1;
+    }
+    // Unchanged trailing lines, matched from each end independently: a native
+    // Enter can add an element the cache has never seen.
+    let suffix = 0;
+    const maxSuffix = Math.min(domLen, cacheLen, newLen) - prefix;
+    while (suffix < maxSuffix) {
+      const d = domLen - 1 - suffix;
+      const c = cacheLen - 1 - suffix;
+      const n = newLen - 1 - suffix;
+      if (dom[d] === cache.els[c] && cache.html[c] === lineHtml[n] && !tracker.dirty.has(dom[d])) {
+        suffix += 1;
+      } else {
+        break;
+      }
+    }
+    // The cache must describe the same leading elements as the DOM for the
+    // splice indices to line up; drop cache entries for DOM-only elements.
+    const domEnd = domLen - suffix;
+    const cacheEnd = cacheLen - suffix;
+    if (domEnd - prefix !== cacheEnd - prefix) {
+      // Native edits added/removed elements in the middle. Re-sync the cache's
+      // middle section to the DOM's actual elements before splicing.
+      const middle = Array.from(dom).slice(prefix, domEnd);
+      cache.els.splice(prefix, cacheEnd - prefix, ...middle);
+      cache.texts.splice(prefix, cacheEnd - prefix, ...middle.map(() => null));
+      cache.html.splice(prefix, cacheEnd - prefix, ...middle.map(() => null));
+      cache.heights.splice(prefix, cacheEnd - prefix, ...middle.map(() => null));
+    }
+    spliceEditorLines(prefix, domEnd, lineHtml.slice(prefix, newLen - suffix), lines.slice(prefix, newLen - suffix));
+    // Safety net: if the DOM and the text disagree on the line count, the diff
+    // assumptions failed somewhere — rebuild rather than show wrong text.
+    if (container.children.length !== newLen) {
+      return renderEditorContent(text, { full: true });
+    }
+  } else {
+    container.innerHTML = lineHtml.join("");
+    const els = Array.from(container.children);
+    els.forEach(normalizeEditorLineElement);
+    cache.fileId = activeFile?.id ?? null;
+    cache.kind = kind;
+    cache.els = els;
+    cache.texts = els.map((el) => el.textContent);
+    cache.textExact = cache.texts.length === lines.length && cache.texts.every((t, i) => t === lines[i]);
+    cache.html = lineHtml.slice(0, els.length);
+    cache.heights = els.map(() => null);
+    cache.gutter = [];
+    cache.metricsKey = "";
   }
 
-  // Rebuild the gutter.
-  // Line comments show a breakpoint-style dot in the gutter; the whole gutter row
-  // is the click target for adding/editing one.
-  const commentByLine = new Map(commentsForActiveFile().map((comment) => [comment.line, comment]));
-  const gutterMarkup = renderedLines.map((line, index) => {
-    const height = Math.max(minimumLineHeight, line.getBoundingClientRect().height);
-    const isDecorated = activeDecoration && index >= activeDecoration.lineStart && index <= activeDecoration.lineEnd;
-    const marker = isDecorated ? `<span class="editor-gutter-agent-mark" aria-hidden="true">◦</span>` : "";
+  // Gutter heights. Reading geometry forces layout, but after an incremental
+  // splice only the replaced lines are dirty, so it is cheap; and only lines
+  // without a cached height are measured. A width change invalidates them all.
+  const metrics = globalThis.getComputedStyle(container);
+  const parsedLineHeight = Number.parseFloat(metrics.lineHeight);
+  const minimumLineHeight = Number.isFinite(parsedLineHeight) ? parsedLineHeight : 20.8;
+  const metricsKey = `${container.clientWidth}|${metrics.lineHeight}|${metrics.fontSize}|${metrics.fontFamily}|${elements.app.dataset.wordWrap ?? ""}`;
+  if (metricsKey !== cache.metricsKey) {
+    cache.heights = cache.els.map(() => null);
+    cache.metricsKey = metricsKey;
+  }
+  const heights = cache.heights;
+  const remeasured = [];
+  for (let i = 0; i < cache.els.length; i += 1) {
+    if (heights[i] == null) {
+      heights[i] = Math.max(minimumLineHeight, cache.els[i].getBoundingClientRect().height);
+      remeasured.push(i);
+    }
+  }
+
+  // Gutter rows, diffed the same way. The gutter is entirely ours (no native
+  // edits), so plain index comparison is enough. A line-count change shifts the
+  // numbers of every following row, which then re-render — rare (Enter/paste).
+  const comments = commentsForActiveFile();
+  const commentByLine = new Map(comments.map((comment) => [comment.line, comment]));
+  // Row strings depend on the row index, its height, comments and the agent
+  // range. A changed line count renumbers every following row, so rebuild all;
+  // otherwise only rows that were just (re)measured can differ.
+  const gutterEpoch = `${cache.els.length}|${activeDecoration ? `${activeDecoration.lineStart}-${activeDecoration.lineEnd}` : ""}|${comments.map((c) => `${c.line}:${c.author ?? ""}:${c.text}`).join("\u0001")}`;
+  const gutterRow = (index) => {
+    const decorated = isDecorated(index);
+    const marker = decorated ? `<span class="editor-gutter-agent-mark" aria-hidden="true">◦</span>` : "";
     const comment = commentByLine.get(index);
     const commentMark = comment
       ? `<span class="editor-gutter-comment-mark" title="${escapeHtmlAttribute(`${comment.author ?? ""}: ${comment.text}`.trim())}" aria-hidden="true">●</span>`
       : "";
-    return `<div class="editor-gutter-line${isDecorated ? " is-agent-pending" : ""}${comment ? " has-comment" : ""}" data-line="${index}" style="height:${height.toFixed(3)}px">${marker}${commentMark}${index + 1}</div>`;
-  }).join("");
-  elements.editorGutter.innerHTML = `<div class="editor-gutter-content">${gutterMarkup}</div>`;
+    return `<div class="editor-gutter-line${decorated ? " is-agent-pending" : ""}${comment ? " has-comment" : ""}" data-line="${index}" style="height:${heights[index].toFixed(3)}px">${marker}${commentMark}${index + 1}</div>`;
+  };
+  let gutterHtml;
+  if (gutterEpoch !== cache.gutterEpoch || cache.gutter.length !== cache.els.length) {
+    gutterHtml = cache.els.map((_, index) => gutterRow(index));
+  } else {
+    gutterHtml = cache.gutter.slice();
+    for (const index of remeasured) gutterHtml[index] = gutterRow(index);
+  }
+  cache.gutterEpoch = gutterEpoch;
+  let gutterContent = elements.editorGutter.firstElementChild;
+  if (!gutterContent || !gutterContent.classList.contains("editor-gutter-content")
+      || gutterContent.children.length !== cache.gutter.length) {
+    elements.editorGutter.innerHTML = `<div class="editor-gutter-content">${gutterHtml.join("")}</div>`;
+  } else {
+    const rows = gutterContent.children;
+    const oldLen = cache.gutter.length;
+    const newLen = gutterHtml.length;
+    let gp = 0;
+    while (gp < oldLen && gp < newLen && cache.gutter[gp] === gutterHtml[gp]) gp += 1;
+    let gs = 0;
+    while (gs < oldLen - gp && gs < newLen - gp && cache.gutter[oldLen - 1 - gs] === gutterHtml[newLen - 1 - gs]) gs += 1;
+    const before = rows[oldLen - gs] ?? null;
+    for (let i = oldLen - gs - 1; i >= gp; i -= 1) rows[i].remove();
+    if (newLen - gs > gp) {
+      const tpl = document.createElement("template");
+      tpl.innerHTML = gutterHtml.slice(gp, newLen - gs).join("");
+      gutterContent.insertBefore(tpl.content, before);
+    }
+  }
+  cache.gutter = gutterHtml;
   scheduleOverviewRuler(); // line geometry just changed
 
   // Sync gutter scroll position.
   syncEditorScroll();
 
   // Keep placeholder visible when content is empty.
-  elements.editorContent.dataset.empty = normalized.length === 0 ? "true" : "false";
+  container.dataset.empty = normalized.length === 0 ? "true" : "false";
+
+  // The DOM now matches the cache; reads can use it until the next mutation.
+  markEditorDomSynced(cache.textExact ? normalized : null);
 
   // Update the floating in-editor agent action bar.
   updateEditorAgentBar();
@@ -5816,6 +6281,23 @@ const linksPanelEl = document.getElementById("links-panel");
 const outgoingLinksListEl = document.getElementById("outgoing-links-list");
 const backlinksListEl = document.getElementById("backlinks-list");
 
+// Links found in each file, reused while its text is unchanged. Backlinks scan
+// every markdown file in the workspace, so this panel re-parsed the inline
+// markdown of the whole project on every render — more work than the preview.
+// File contents are shared between project versions now, so an unchanged file
+// is usually the very same string and the check is free.
+const markdownLinksCache = new Map(); // node id -> { content, links }
+
+function cachedMarkdownLinks(nodeId, content) {
+  const text = content ?? "";
+  const hit = markdownLinksCache.get(nodeId);
+  if (hit && hit.content === text) return hit.links;
+  const links = extractMarkdownLinks(text);
+  if (markdownLinksCache.size > 2000) markdownLinksCache.clear();
+  markdownLinksCache.set(nodeId, { content: text, links });
+  return links;
+}
+
 function renderLinksPanel(project, activeFile) {
   if (!linksPanelEl) return;
   if (!activeFile || !activeFile.name.endsWith(".md")) {
@@ -5829,7 +6311,7 @@ function renderLinksPanel(project, activeFile) {
   activeSegments.pop();
 
   // Outgoing links
-  const outgoingLinks = extractMarkdownLinks(activeFile.content);
+  const outgoingLinks = cachedMarkdownLinks(activeFile.id, activeFile.content);
   outgoingLinksListEl.replaceChildren();
   if (outgoingLinks.length === 0) {
     const empty = document.createElement("div");
@@ -5878,7 +6360,7 @@ function renderLinksPanel(project, activeFile) {
     const nodePath = getPath(project, node.id);
     const nodeSegments = nodePath.split("/").filter(Boolean);
     nodeSegments.pop();
-    const links = extractMarkdownLinks(node.content);
+    const links = cachedMarkdownLinks(node.id, node.content);
     const matchCount = links.filter(({ href }) => {
       if (/^(https?:\/\/|mailto:)/i.test(href)) return false;
       return normalizePath([...nodeSegments, href].join("/")) === activePath;
@@ -6627,10 +7109,20 @@ function moveExplorerNode(nodeId, targetNodeId, placement) {
     return false;
   }
 
+  const oldPath = getPath(project, nodeId);
+  const parentPath = destination.parentId === ROOT_ID ? "" : getPath(project, destination.parentId);
   controller.move(nodeId, destination.parentId, destination.index);
   selectionNodeId = nodeId;
   sourceUrlDbEntry = null;
-  logDebug("action", "Explorer node moved", `${getPath(controller.getProject(), nodeId)} -> ${getPath(controller.getProject(), destination.parentId)}`);
+  // Tell the server. A move used to change only this browser's tree; the server
+  // kept the old path, and the next reconnect's reconcile — which can only add
+  // what the server lacks — uploaded the file again at its new path, leaving
+  // both. As with rename, re-key any queued text patch to the new path first so
+  // a pending edit lands on the moved file instead of the vanished old path.
+  const newPath = getPath(controller.getProject(), nodeId);
+  collaboration.remapPatchPath(oldPath, newPath);
+  publishOperation({ type: "move-node", path: oldPath, parentPath, index: destination.index });
+  logDebug("action", "Explorer node moved", `${oldPath} -> ${newPath}`);
   return true;
 }
 
@@ -7345,7 +7837,31 @@ function renderUrlDbEntryPreview(target, file, entryId) {
   return { shouldTypeset: false, content: "" };
 }
 
+// Inputs of the last markdown/mtree preview render. Those previews are pure
+// functions of the file's text, the project's paths (link resolution) and the
+// connection (asset URLs) — so when none of that changed, the DOM already shows
+// the right thing. Every app render used to rebuild it regardless: a 90k-char
+// chapter is ~11k nodes, rebuilt and re-laid-out for a presence ping, a
+// collaborator's keystroke, or typing in a DIFFERENT file than the one previewed.
+// Any other kind of preview clears the key, so returning to a file re-renders.
+let previewRenderKey = null;
+
+function previewRenderKeyFor(project, file) {
+  const structure = Object.values(project.nodes)
+    .map((node) => `${node.id}/${node.parentId ?? ""}/${node.name}`)
+    .join("|");
+  const token = workspaceMode === "synced" ? (collaboration.getConnectionInfo?.()?.token ?? "") : "";
+  return `${file.id}\u0000${file.name}\u0000${workspaceMode}\u0000${token}\u0000${structure}\u0000${file.content}`;
+}
+
 function renderPreviewContent(target, project, file) {
+  const pureTextPreview = file && !isImageFileName(file.name) && !isUrlDbFileName(file.name)
+    && !isBmapFileName(file.name);
+  const key = pureTextPreview ? previewRenderKeyFor(project, file) : null;
+  if (key !== null && key === previewRenderKey && target.childNodes.length > 0) {
+    return { shouldTypeset: false, content: "" };
+  }
+  previewRenderKey = key;
   target.replaceChildren();
 
   if (!file) {
@@ -8919,13 +9435,72 @@ function scheduleOpfsFlush(project) {
 }
 
 function render(project) {
+  if (typingUpdate) {
+    // A keystroke. The editor has already drawn it; the explorer, tabs, preview,
+    // links, chat and status follow once typing pauses (or every
+    // DEFERRED_RENDER_MAX_MS during a long burst). Doing them synchronously here
+    // cost a full app render plus a whole-project localStorage write per key.
+    scheduleDeferredRender();
+    scheduleRecoverySave(project);
+    scheduleOpfsFlush(project);
+    scheduleAutoSave(project);
+    return;
+  }
+  cancelDeferredRender(); // this full render covers whatever was pending
   explorer.render(project, new Set(agentPendingDecorations.keys()));
   updateStatus(project);
-  try { saveProject(project); }
-  catch (error) { logDebug("response", "Browser recovery save failed", error.message); }
+  scheduleRecoverySave(project);
   scheduleOpfsFlush(project);
   scheduleAutoSave(project);
 }
+
+function scheduleDeferredRender() {
+  const now = performance.now();
+  if (!deferredRenderDeadline) deferredRenderDeadline = now + DEFERRED_RENDER_MAX_MS;
+  if (deferredRenderTimer) clearTimeout(deferredRenderTimer);
+  const delay = Math.max(0, Math.min(DEFERRED_RENDER_IDLE_MS, deferredRenderDeadline - now));
+  deferredRenderTimer = setTimeout(() => {
+    deferredRenderTimer = null;
+    deferredRenderDeadline = 0;
+    render(controller.getProject());
+  }, delay);
+}
+
+function cancelDeferredRender() {
+  if (deferredRenderTimer) clearTimeout(deferredRenderTimer);
+  deferredRenderTimer = null;
+  deferredRenderDeadline = 0;
+}
+
+// The browser-recovery copy in localStorage (the in-browser workspace's only
+// storage, and a crash net for the others). Serialising the whole project used
+// to run on every render — every keystroke, and every collaborator's keystroke.
+// Now it trails edits slightly and is flushed whenever the page may go away.
+function scheduleRecoverySave(project) {
+  recoverySavePending = project;
+  const now = performance.now();
+  if (!recoverySaveDeadline) recoverySaveDeadline = now + RECOVERY_SAVE_MAX_MS;
+  if (recoverySaveTimer) clearTimeout(recoverySaveTimer);
+  const delay = Math.max(0, Math.min(RECOVERY_SAVE_IDLE_MS, recoverySaveDeadline - now));
+  recoverySaveTimer = setTimeout(flushRecoverySave, delay);
+}
+
+function flushRecoverySave() {
+  if (recoverySaveTimer) clearTimeout(recoverySaveTimer);
+  recoverySaveTimer = null;
+  recoverySaveDeadline = 0;
+  const project = recoverySavePending;
+  recoverySavePending = null;
+  if (!project) return;
+  try { saveProject(project); }
+  catch (error) { logDebug("response", "Browser recovery save failed", error.message); }
+}
+
+// Anything that might end the page's life gets the pending copy written now.
+window.addEventListener("pagehide", () => { flushRecoverySave(); });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") flushRecoverySave();
+});
 
 // ---- Auto-save: idle + periodic durable flush for non-real-disk workspaces.
 // Clears the dirty flag (and thus the ● tab dot + beforeunload nag) once content
@@ -9007,8 +9582,21 @@ window.setInterval(() => {
 }, AUTOSAVE_PERIODIC_MS);
 
 if (!storedProject) {
+  const placeholder = controller.getProject();
   void loadTemplateProject()
     .then((project) => {
+      // The template is only a first-run placeholder, fetched file by file. If
+      // anything took over while it loaded — above all a cloud workspace
+      // restoring itself on a fresh device — installing it would put the
+      // template on screen inside a synced session, and the next reconnect's
+      // reconcile would then upload its files into that cloud workspace. Seen
+      // with a slow connection: the welcome files appeared in the workspace.
+      const current = controller.getProject();
+      const edited = Object.values(current.nodes ?? {}).some((node) => node?.dirty);
+      if (workspaceMode === "synced" || current.id !== placeholder.id || edited) {
+        logDebug("action", "Default template not installed", "a workspace or edits arrived first");
+        return;
+      }
       controller.replaceProject(project);
       selectionNodeId = project.activeFileId ?? project.rootId;
       initializePaneState(project);

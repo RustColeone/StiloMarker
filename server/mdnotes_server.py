@@ -59,8 +59,10 @@ APP_VERSION = json.loads((Path(__file__).resolve().parents[1] / "package.json").
 # Refuse clients with an unsafe sync implementation, including old cached tabs.
 # Keep this gate aligned with SYNC_PROTOCOL_VERSION in app/version.js when a
 # compatibility break is necessary; ordinary release bumps do not change it.
+# 115: tabs older than this never send move-node, so a drag left the old path on
+# the server and the next reconnect re-uploaded the file — a duplicate per move.
 
-MIN_CLIENT_VERSION = _read_int_env("MDNOTES_MIN_CLIENT_VERSION", 114, 0, 1_000_000)
+MIN_CLIENT_VERSION = _read_int_env("MDNOTES_MIN_CLIENT_VERSION", 115, 0, 1_000_000)
 
 # A writing "sitting": edits to one file separated by less than this gap belong
 # to the same session. It is the E in the S.E.N version label — snapshots you
@@ -1149,6 +1151,15 @@ class CollaborationBroker:
                     _atomic_write(dest, data)
                     node["content"] = ""
 
+    def _subtree_paths(self, node_id: str) -> list[str]:
+        """Paths of a node and everything beneath it, in the current tree."""
+        out, stack = [], [node_id]
+        while stack:
+            current = stack.pop()
+            out.append(self._path_in(self.project, current))
+            stack.extend(self.project["nodes"].get(current, {}).get("children", []))
+        return out
+
     def _path_in(self, project: dict, node_id: str) -> str:
         segments = []
         current = project["nodes"].get(node_id)
@@ -1442,6 +1453,11 @@ class CollaborationBroker:
             parent = str(operation.get("parentPath", ""))
             name = str(operation.get("name", ""))
             touched.append(f"{parent}/{name}" if parent else name)
+        elif op_type == "move-node":
+            # Every path under the moved node changed, old and new: a text patch
+            # queued against any of them must not rebase across the move.
+            touched.extend(getattr(self, "_moved_paths", []) or [])
+            self._moved_paths = []
         elif op_type == "rename-node":
             touched.append(str(operation.get("path", "")))
             parent = str(operation.get("path", "")).rsplit("/", 1)[0] if "/" in str(operation.get("path", "")) else ""
@@ -1592,6 +1608,70 @@ class CollaborationBroker:
             if sibling and sibling["id"] != node_id:
                 raise ValueError("rename conflict: a file or folder with that name already exists")
             node["name"] = operation["name"]
+            return
+
+        if operation_type == "move-node":
+            # Re-parent (or reorder) a file or folder. There was no such operation:
+            # a drag in the explorer changed only the dragging browser's tree, the
+            # server kept the old path, and the next reconnect's reconcile — which
+            # can only ADD what the server lacks — uploaded the file again at its
+            # new path. Old and new then both existed: the "copies" a drag left.
+            #
+            # Validation and index arithmetic mirror moveNode() in
+            # app/domain/project-model.js exactly, because peers apply this same
+            # broadcast with that function; any difference would order the tree
+            # differently in different browsers. Persistence needs nothing extra:
+            # the directory commit derives every path from the tree and removes
+            # paths that no longer exist, under the redo journal.
+            node_id = self._get_node_id_by_path(operation["path"])
+            if not node_id:
+                raise ValueError(f"Node path not found: {operation['path']}")
+            root_id = self.project["rootId"]
+            if node_id == root_id:
+                raise ValueError("move conflict: the workspace root cannot be moved")
+            parent_path = str(operation.get("parentPath", "") or "")
+            target_id = self._get_node_id_by_path(parent_path) if parent_path else root_id
+            if not target_id:
+                raise ValueError(f"Parent path not found: {parent_path}")
+            nodes = self.project["nodes"]
+            target = nodes[target_id]
+            if target.get("kind") != "folder":
+                raise ValueError("Items can only be moved into folders")
+            ancestor = target_id
+            while ancestor:
+                if ancestor == node_id:
+                    raise ValueError("move conflict: cannot move an item into itself")
+                ancestor = nodes[ancestor].get("parentId")
+            node = nodes[node_id]
+            # Case-insensitive, like the browser's ensureUniqueName().
+            lowered = str(node["name"]).lower()
+            for child_id in target.get("children", []):
+                child = nodes.get(child_id)
+                if child and child_id != node_id and str(child.get("name", "")).lower() == lowered:
+                    raise ValueError("move conflict: a file or folder with that name already exists there")
+            old_paths = self._subtree_paths(node_id)
+            source = nodes[node["parentId"]]
+            source_children = list(source.get("children", []))
+            source_index = source_children.index(node_id) if node_id in source_children else -1
+            # index is a slot in the destination as it is BEFORE the move (see
+            # moveNode): clamp against that length, then account for the removal.
+            same_parent = source["id"] == target_id
+            slots = len(nodes[target_id].get("children", []))
+            raw_index = operation.get("index")
+            if raw_index is None:
+                clamped = slots
+            else:
+                try:
+                    clamped = max(0, min(int(raw_index), slots))
+                except (TypeError, ValueError):
+                    raise ValueError("move-node index must be an integer")
+            if same_parent and 0 <= source_index < clamped:
+                clamped -= 1
+            source["children"] = [child for child in source_children if child != node_id]
+            children = nodes[target_id].setdefault("children", [])
+            children.insert(clamped, node_id)
+            node["parentId"] = target_id
+            self._moved_paths = old_paths + self._subtree_paths(node_id)
             return
 
         if operation_type == "delete-node":

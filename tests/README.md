@@ -42,6 +42,9 @@ node --test tests/       # raw test runner
 | `sync-service.test.mjs` | Collaboration transport against a mock HTTP server. |
 | `agent-collaborator.test.mjs` | Agent proposal round-trips + agent-feature wiring. |
 | `project-structure.test.mjs` | Required files, `index.html` ids, and source-symbol wiring. |
+| `move-node.test.py` / `move-node.test.mjs` | Moves on the server (disk, ordering, refusals, patch barriers) and in the browser; both read `move-node-cases.json` so peers and server order a moved file identically. |
+| `editor-typing-browser.py` | Browser: a long chapter stays correct and incremental while typing (DOM/gutter/caret/highlight per edit, incremental == full render, churn budget, undo/redo, no explorer drift). |
+| `template-race-browser.py` | Browser: the first-run template never replaces a cloud workspace that restored first. |
 
 ## Adding a test
 
