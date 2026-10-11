@@ -210,3 +210,29 @@ keyboard.
 Private deployment backup:
 `/home/laplacengan/backups/stilomarker/20261001T043028Z-v0.1.21`.
 Nine project manifests were validated in the stopped-service data backup.
+
+
+## Verified release: v0.1.22
+
+Deployed on 2026-10-11 at 06:15 UTC. Typing on long documents is incremental
+(only changed editor lines are replaced; secondary views catch up when typing
+pauses), the explorer no longer drifts in Chromium, explorer drags send a
+`move-node` operation instead of leaving a copy after the next reconnect, and the
+first-run template can no longer replace a cloud workspace. App version `0.1.22`;
+sync compatibility raised to `115`, because older tabs never send `move-node`.
+`stilomarker.env` does not override the floor, so the code default applies.
+
+Validation: 140 Node tests, the Python reliability, move-node and MCP suites, the
+backend self-test, and eight browser suites (two new: `editor-typing-browser.py`
+and `template-race-browser.py`, both failing on v0.1.21). The public smoke matched
+10 assets and the `mdnotes-shell-v0.1.22` cache label, and in an ephemeral guest
+workspace passed create, emoji patch, `move-node` (one copy, in the folder) and a
+426 refusal for a v114 client; no persistent writing project was touched. The
+service log showed no errors after the restart.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261011T061517Z-v0.1.22`.
+It holds the pre-release source (`head.tar`, changed files under `checkout/`),
+the unit file, and a stopped-service data copy: nine project manifests, all
+valid, 127/127 files. `stilomarker.env` and `whitelist.json` were not copied;
+the update does not touch ignored files.
+
