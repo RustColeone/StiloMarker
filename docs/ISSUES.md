@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-12 · release `v0.1.25` (deployed; public verification passed)
+Last updated: 2026-10-12 · release `v0.1.26` (deployed; public verification passed)
 
 ---
 
@@ -30,6 +30,16 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.26: the Roleplay tab could be covered by the status badge
+
+Found by the first live test of v0.1.25 with a real model. The live server offers
+two models (so the model picker shows) and a long status text; together they
+squeezed the tab strip and the badge sat on top of the Roleplay tab, so on
+desktop it could not be clicked. The mocked browser test had one model and a
+short status, so it never saw this. The tabs now never shrink (the badge and
+picker ellipsize instead), and `roleplay-browser.py` mocks the live server's
+status and checks that nothing covers a tab.
 
 ### v0.1.25: Roleplay (characters in a group chat)
 
