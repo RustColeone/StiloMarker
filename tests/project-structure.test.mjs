@@ -72,7 +72,7 @@ test("index.html exposes required element ids", async () => {
   ids.forEach((id) => {
     assert.match(page, new RegExp(`id="${id}"`), `Missing element id: ${id}`);
   });
-  assert.match(page, /accept="\.md,\.mtree,\.urldb,\.bmap,\.png,\.jpg,\.jpeg,\.gif,\.svg,\.webp,\.bmp,\.zip"/);
+  assert.match(page, /accept="\.md,\.mtree,\.urldb,\.bmap,\.skill,\.png,\.jpg,\.jpeg,\.gif,\.svg,\.webp,\.bmp,\.zip"/);
   assert.ok(!/id="mtree-generate-button"/.test(page));
 });
 
@@ -84,7 +84,6 @@ test("main.js wires core feature symbols", async () => {
     /scheduleTextPatch/,
     /presenceSummaryText/,
     /generate-module-map/,
-    /buildModuleMapSection/,
     /sourceOpenTabIds/,
     /previewOpenTabIds/,
     /text\/mdnotes-file-id/,
@@ -106,6 +105,16 @@ test("main.js wires core feature symbols", async () => {
     /bmapGenerateScopeSelect/
   ];
   symbols.forEach((pattern) => assert.match(mainSource, pattern));
+});
+
+test("feature modules split out of main.js load on demand", async () => {
+  const mainSource = await readFile(resolveFromRoot("app/main.js"), "utf8");
+  const moduleMap = await readFile(resolveFromRoot("app/features/module-map-tools.js"), "utf8");
+  assert.match(moduleMap, /buildModuleMapSection/);
+  assert.match(mainSource, /import\("\.\/features\/module-map-tools\.js"\)/);
+  assert.match(mainSource, /import\("\.\/ui\/bmap-view\.js"\)/);
+  // Not imported statically any more (that would load them at startup).
+  assert.doesNotMatch(mainSource, /^import .*(bmap-view|module-map-tools|mtree-module-map-service)/m);
 });
 
 test("bmap-view.js wires interaction controls", async () => {
