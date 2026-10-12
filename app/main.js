@@ -812,6 +812,12 @@ function buildTextDiffHunks(oldText, newText) {
 }
 
 function renderProposalDiff(op) {
+  if (op.type === "create-file" && op.generatedImage) {
+    const src = generatedImageUrl(op.generatedImage);
+    const caption = `${op.generatedImage.size ?? ""} · ${op.generatedImage.model ?? "image model"}`;
+    return `<figure class="proposal-image">${src ? `<img src="${escapeHtmlAttribute(src)}" alt="${escapeHtmlAttribute(op.generatedImage.prompt ?? op.name ?? "")}" loading="lazy">` : ""}
+      <figcaption>${escapeHtmlAttribute(op.generatedImage.prompt ?? "")}<span>${escapeHtmlAttribute(caption)}</span></figcaption></figure>`;
+  }
   if (op.type === "create-file") {
     const lines = (op.content ?? "").split("\n").slice(0, 20);
     const more = (op.content ?? "").split("\n").length > 20 ? `<span class="proposal-diff-more">…${(op.content ?? "").split("\n").length - 20} more lines</span>` : "";
@@ -880,9 +886,10 @@ function renderProposalCard(message, isOriginator) {
     const icon = OP_ICONS[opType] ?? "?";
     const opState = op.proposalState ?? state;
     const diffHtml = renderProposalDiff(op);
-    const diffSection = diffHtml
-      ? `<details class="proposal-op-diff"><summary>diff</summary><div class="proposal-op-diff-body">${diffHtml}</div></details>`
-      : "";
+    // A generated picture is shown outright; text changes stay folded away.
+    const diffSection = !diffHtml ? ""
+      : op.generatedImage ? diffHtml
+      : `<details class="proposal-op-diff"><summary>diff</summary><div class="proposal-op-diff-body">${diffHtml}</div></details>`;
 
     if (opState === "stale") {
       return `<div class="proposal-op is-stale" data-proposal-id="${opId}">
@@ -1127,7 +1134,8 @@ function describeAgentActivity(event) {
       rename_node: "Renaming",
       delete_node: "Deleting",
       create_folder: "Creating folder",
-      move_node: "Moving"
+      move_node: "Moving",
+      generate_image: "Describing image"
     };
     const verb = verbs[event.name] || "Working";
     const chars = Number(event.chars) || 0;
@@ -1143,7 +1151,8 @@ function describeAgentActivity(event) {
       rename_node: "Renaming",
       delete_node: "Deleting",
       create_folder: "Creating folder",
-      move_node: "Moving"
+      move_node: "Moving",
+      generate_image: "Generating image (this can take a minute)"
     };
     const verb = verbs[event.name] || event.name || "Working";
     return `${verb}${target}`;
@@ -1234,11 +1243,13 @@ function renderChatPanel(project) {
   if (threadChanged) elements.chatInput.value = activeThread?.draft ?? "";
   chatState.renderedThreadId = activeThread?.id;
   const statusPrefix = chatState.syncError || (chatState.sending ? "Sending…" : chatState.detail);
-  const statusSuffix = chatState.configured && chatState.provider && chatState.model && chatState.models.length <= 1
-    ? ` · ${chatState.provider} ${chatState.model}`
-    : (chatState.configured && chatState.provider ? ` · ${chatState.provider}` : "");
+  // The provider shown is the one serving the selected model.
+  const provider = chatState.modelProviders?.get(chatState.selectedModel) ?? chatState.provider;
+  const statusSuffix = chatState.configured && provider && chatState.model && chatState.models.length <= 1
+    ? ` · ${provider} ${chatState.model}`
+    : (chatState.configured && provider ? ` · ${provider}` : "");
   elements.chatStatusText.textContent = `${statusPrefix}${statusSuffix}`.trim();
-  const badgeError = Boolean(chatState.syncError) || chatState.status === "offline" || chatState.status === "restricted" || chatState.status === "unconfigured";
+  const badgeError = Boolean(chatState.syncError) || ["offline", "restricted", "unconfigured", "signin"].includes(chatState.status);
   elements.chatStatusText.classList.toggle("is-error", badgeError);
 
   // Model picker — only meaningful when the server offers more than one model.
@@ -1247,9 +1258,16 @@ function renderChatPanel(project) {
     elements.chatModelSelect.hidden = !showPicker;
     if (showPicker) {
       const desired = chatState.selectedModel ?? chatState.models[0];
-      const optionsHtml = chatState.models
-        .map((name) => `<option value="${escapeHtmlAttribute(name)}"${name === desired ? " selected" : ""}>${escapeHtmlAttribute(name)}</option>`)
-        .join("");
+      const option = (name) => `<option value="${escapeHtmlAttribute(name)}"${name === desired ? " selected" : ""}>${escapeHtmlAttribute(name)}</option>`;
+      // Group by provider when the server offers more than one (DeepSeek, OpenAI).
+      const groups = new Map();
+      for (const name of chatState.models) {
+        const group = chatState.modelProviders?.get(name) ?? "";
+        groups.set(group, [...(groups.get(group) ?? []), name]);
+      }
+      const optionsHtml = groups.size > 1
+        ? [...groups].map(([group, names]) => `<optgroup label="${escapeHtmlAttribute(group || "Other")}">${names.map(option).join("")}</optgroup>`).join("")
+        : chatState.models.map(option).join("");
       if (elements.chatModelSelect.innerHTML !== optionsHtml) {
         elements.chatModelSelect.innerHTML = optionsHtml;
       }
@@ -1454,6 +1472,7 @@ function loadRoleplay() {
         model: chatState.selectedModel ?? undefined,
         contextFiles: resolveChatContextFiles(project, { contextPaths }),
         project: buildAgentProjectSnapshot(project),
+        accountToken: syncState.account?.token,
         ...agentRequestOverride()
       }),
       sendChatRequest: (payload, onProgress, signal) => sendChatRequest(settings.serverUrl, payload, onProgress, signal),
@@ -1605,6 +1624,8 @@ function applyAgentSettingsStatus() {
   } else if (chatState.configured) {
     text = `Ready — ${chatState.provider ?? "server"}${chatState.model ? " · " + chatState.model : ""}.`;
     ok = true;
+  } else if (chatState.status === "signin") {
+    text = "Sign in with your account (Settings → Collaboration) to use this server's agent, or switch to “My own API key”.";
   } else if (chatState.status === "offline") {
     text = "Server unreachable — can't check the agent.";
   } else {
@@ -1637,19 +1658,27 @@ async function refreshChatStatus({ silent = false } = {}) {
       chatState.status = "ready";
       chatState.detail = "Using your own API key.";
     } else {
+      // A server with accounts only lets signed-in users spend its keys.
+      const needsSignIn = Boolean(status.requiresAccount) && !syncState.account;
+      chatState.configured = Boolean(status.configured) && !needsSignIn;
       chatState.provider = status.provider ?? null;
       chatState.model = status.model ?? null;
       chatState.models = Array.isArray(status.models) && status.models.length
         ? status.models
         : (status.model ? [status.model] : []);
+      chatState.modelProviders = new Map((Array.isArray(status.modelInfo) ? status.modelInfo : [])
+        .map((row) => [row.id, row.provider]));
+      chatState.imageGeneration = Boolean(status.imageGeneration);
       // Keep the user's saved choice if the server still offers it, else default.
       chatState.selectedModel = chatState.models.includes(settings.chatModel)
         ? settings.chatModel
         : (status.model ?? chatState.models[0] ?? null);
-      chatState.status = chatState.configured ? "ready" : "unconfigured";
+      chatState.status = chatState.configured ? "ready" : (needsSignIn && status.configured ? "signin" : "unconfigured");
       chatState.detail = chatState.configured
-        ? (status.message ?? "Chat is ready.")
-        : "Agent needs a key — click to open Settings → Agent and use your own, or set one on the server.";
+        ? "Ready"
+        : chatState.status === "signin"
+          ? "Sign in to use the agent"
+          : "Agent needs a key — click to open Settings → Agent and use your own, or set one on the server.";
     }
   } catch (error) {
     // The status check failed (server unreachable, etc). Own-key mode is still
@@ -1779,6 +1808,7 @@ async function runAgentTurn(thread, project) {
       contextFiles,
       project: buildAgentProjectSnapshot(project),
       ...mcpControls.getRequest(),
+      accountToken: syncState.account?.token,
       // Own-key mode: pass the user's key/url/model so the proxy uses them.
       ...agentRequestOverride()
     }, (event) => {
@@ -8869,6 +8899,28 @@ async function autoApplyProposals(message, guard) {
   renderChatPanel(controller.getProject());
 }
 
+/** URL of an image the agent generated (kept on the server for 14 days). */
+function generatedImageUrl(image) {
+  const token = syncState.account?.token;
+  if (!token || !image?.id) return "";
+  return `${normalizeServerUrl(settings.serverUrl)}/api/generated?token=${encodeURIComponent(token)}&id=${encodeURIComponent(image.id)}`;
+}
+
+/** Bytes of a generated image as a data: URL, the form image files take. */
+async function fetchGeneratedImage(image) {
+  const url = generatedImageUrl(image);
+  if (!url) throw new Error("Sign in to save generated images.");
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(response.status === 404 ? "The generated image has expired." : `Image download failed (${response.status}).`);
+  const blob = await response.blob();
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read the generated image."));
+    reader.readAsDataURL(blob);
+  });
+}
+
 async function acceptAgentOperations(ops, message, guard) {
   if (message.batchId) captureAgentCheckpoint(message.batchId, message.baseRevision);
   let revision = guard.baseRevision;
@@ -8879,7 +8931,10 @@ async function acceptAgentOperations(ops, message, guard) {
     }
     const project = controller.getProject();
     const name = op.name ?? op.path?.split("/").pop() ?? "";
-    if ((op.type === "update-file" || op.type === "create-file") && isImageFileName(name)) {
+    // The agent cannot write image bytes itself; a generated image is fetched
+    // from the server and saved like any image the user adds.
+    const generated = op.type === "create-file" && op.generatedImage?.id && isImageFileName(name);
+    if ((op.type === "update-file" || op.type === "create-file") && isImageFileName(name) && !generated) {
       op.proposalState = "stale"; continue;
     }
     const nodeId = op.path ? getNodeIdByPath(project, op.path) : null;
@@ -8887,9 +8942,18 @@ async function acceptAgentOperations(ops, message, guard) {
     if (op.type === "update-file" && project.nodes[nodeId]?.content !== op.preImage) {
       op.proposalState = "stale"; continue;
     }
-    const { proposalId, preImage, proposalState, ...cleanOp } = op;
+    const { proposalId, preImage, proposalState, generatedImage, ...cleanOp } = op;
     try {
+      if (generated) {
+        cleanOp.content = await fetchGeneratedImage(generatedImage);
+        if (!guard.current()) return;
+      }
       if (collaboration.isConnected() && workspaceMode === "synced") {
+        if (generated && collaboration.isDirectoryBacked?.()) {
+          // Cloud workspaces keep image bytes on disk, not in the operation log.
+          await collaboration.uploadAsset([cleanOp.parentPath, cleanOp.name].filter(Boolean).join("/"), cleanOp.content);
+          cleanOp.content = "";
+        }
         const result = await collaboration.publishOperation({ ...cleanOp, baseRevision: revision, expectedRevision: revision }, { optimistic: false });
         if (!result) throw new Error("Workspace connection changed");
         revision = result.revision;
@@ -10231,7 +10295,8 @@ async function quickGenerateBmapFile(bmapFileId, request) {
       subject,
       contextFiles: Array.isArray(request?.contextFiles) ? request.contextFiles : [],
       bmapOverview: String(request?.bmapOverview ?? ""),
-      projectName: project.name ?? "Workspace"
+      projectName: project.name ?? "Workspace",
+      accountToken: syncState.account?.token
     });
     const content = String(result?.content ?? "").trim();
     logDebug("response", "Quick Generate response received", `model=${result?.model ?? "?"} provider=${result?.provider ?? "?"} length=${content.length} chars`);
@@ -11986,11 +12051,16 @@ elements.chatModelSelect?.addEventListener("change", (event) => {
   settings.chatModel = event.target.value;
   saveSettings(settings);
   logDebug("action", "Agent model changed", settings.chatModel);
+  renderChatPanel(controller.getProject()); // the badge names the model's provider
 });
 
 // The status badge doubles as a shortcut: open settings when the agent isn't
 // usable, otherwise just re-check the backend.
 elements.chatStatusText.addEventListener("click", () => {
+  if (chatState.status === "signin") {
+    openSettingsDialog("collaboration"); // the Account sign-in lives there
+    return;
+  }
   if (chatState.status !== "ready") {
     // The agent is separate from login — send them straight to the Agent tab.
     openSettingsDialog("agent");
@@ -13465,6 +13535,7 @@ async function performLogin(username, password, { silent = false, isCurrent = ()
   if (!silent) flashStatusPanel("success", elements.accountSection);
   renderAccountControls();
   render(controller.getProject());
+  void refreshChatStatus({ silent: true }); // signing in unlocks the agent
 }
 
 async function handleAccountLogin() {
@@ -13509,6 +13580,7 @@ function handleAccountLogout() {
   logDebug("action", "Account logged out");
   renderAccountControls();
   render(controller.getProject());
+  void refreshChatStatus({ silent: true }); // the server's agent needs an account
 }
 
 elements.accountLoginButton?.addEventListener("click", () => { void handleAccountLogin(); });

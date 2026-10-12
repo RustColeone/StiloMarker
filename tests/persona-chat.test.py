@@ -136,7 +136,11 @@ class PersonaTurnTests(unittest.TestCase):
                 'message': 'ok', 'contextPaths': [], 'proposedOperations': []},
         })()
         handler.client_address = ('127.0.0.1', 0)
-        handler._read_json = lambda: {'mode': 'persona', 'persona': PERSONA, 'cast': CAST,
+        handler.registry = type('Registry', (), {
+            'accounts': type('Accounts', (), {'enabled': True})(),
+            'account_for_token': lambda self, token: {'username': 'leo', 'teams': []} if token == 'acct' else None,
+        })()
+        handler._read_json = lambda: {'mode': 'persona', 'persona': PERSONA, 'cast': CAST, 'accountToken': 'acct',
                                       'messages': [{'name': 'Leo', 'content': 'hi', 'self': False}]}
         handler.send_response = handler.send_header = handler.end_headers = lambda *a: None
         handler._send_cors_headers = lambda: None
@@ -147,6 +151,7 @@ class PersonaTurnTests(unittest.TestCase):
         self.assertEqual(calls[0]['persona']['name'], 'Aria')
         self.assertEqual(calls[0]['cast'], CAST)
         self.assertEqual(calls[0]['mcp_configs'], [])
+        self.assertEqual(calls[0]['identity'], {'username': 'leo', 'teams': []})
         self.assertIn(b'"type": "result"', b''.join(written))
 
     def test_stale_tabs_are_refused(self):

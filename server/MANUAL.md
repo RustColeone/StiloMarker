@@ -516,6 +516,22 @@ When a collaboration session is active, the entire chat workspace (all threads a
 
 Chat threads are stored in browser `localStorage` under the key `mdnotes.chat.v1`. When a collaboration session is active, they are also persisted in the server's in-memory state for the duration of the session.
 
+### Models and signing in
+
+On a server with accounts, the agent, Roleplay characters and Quick Generate need you to be signed in (Settings → Collaboration → Account), because they spend the server's API credit. With **My own API key** (Settings → Agent) no sign-in is needed. When the server has more than one provider, the model picker in the chat toolbar groups the models by provider (DeepSeek, OpenAI); DeepSeek is the default.
+
+### Generating images
+
+When the server has an OpenAI key with an image model, the agent can make pictures — concept art, character portraits, maps, scene sketches — and save them to the workspace as image files (`.png`, `.jpg` or `.webp`). Ask for one in the chat ("draw Mara at the lamp, ink wash style"). The picture appears in the edit card for review; **Keep** saves it, **Drop** discards it. At most two images are made per request, at medium quality.
+
+When the user asks you (the agent) for an image:
+
+1. Read the relevant files first, so the picture matches the writing (appearance, setting, period, mood).
+2. Call `generate_image` with a detailed visual prompt: subject, setting, composition, lighting, mood and art style. Pick `portrait` for a person, `landscape` for a scene or map, `square` otherwise.
+3. Name the file after its subject (e.g. `mara-portrait.png`) and save it next to the notes it belongs with, or in an existing images folder.
+4. If the image illustrates a note or a character, also update that note with a relative image link, e.g. `![Mara at the lamp](../art/mara-portrait.png)`, or set `avatar:` in the character's `.persona.skill` header.
+5. Make only the number of images the user asked for: each one costs money.
+
 ### Roleplay tab (characters)
 
 The panel has two tabs: **Agent** (this assistant) and **Roleplay**, a group chat with characters the user has written. It is for any kind of writing: talking to a story's characters, rehearsing a script, running a game scene, practising a conversation.

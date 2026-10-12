@@ -31,6 +31,7 @@ _mcp_module_dir = str(Path(__file__).resolve().parent)
 if _mcp_module_dir not in sys.path:
     sys.path.insert(0, _mcp_module_dir)
 from mcp_client import MCPManager, MCPTurn
+from openai_support import IMAGE_FORMATS, IMAGE_SIZES, GeneratedImages, OpenAIProvider, is_openai_model, uses_fixed_temperature
 
 
 def _log(tag: str, message: str, **fields):
@@ -176,6 +177,10 @@ class ChatProxy:
         self.reasoning_effort = os.environ.get("DEEPSEEK_REASONING_EFFORT", "high").strip().lower() or "high"
         self.enable_thinking = _truthy(os.environ.get("DEEPSEEK_ENABLE_THINKING"))
         self.mcp = MCPManager(static_root=Path(__file__).resolve().parents[1])
+        # A second provider: GPT chat models (picked from the account's model
+        # catalog, see start_providers) and image generation for the agent.
+        self.openai = OpenAIProvider()
+        self.generated = None  # GeneratedImages, wired in build_server when there is a data dir
         self.broker = None  # wired in build_server after construction
         # Per-request key/URL override (a client bringing its own key). Stored on a
         # thread-local because each request runs on its own ThreadingHTTPServer
@@ -191,15 +196,54 @@ class ChatProxy:
             self.manual_content = ""
 
     def is_configured(self) -> bool:
-        return bool(self.api_key and self.model and self.api_url)
+        return bool(self.api_key and self.model and self.api_url) or bool(self.openai.configured and self.openai.models)
+
+    def start_providers(self) -> None:
+        """Begin reading the OpenAI model catalog (no-op without a key)."""
+        self.openai.start(_log)
 
     # Effective key/URL for the request in flight: a client-supplied key (own-key
-    # mode) takes precedence over the server's own credentials.
+    # mode) takes precedence, then the provider of the selected model.
     def _eff_key(self) -> str:
-        return getattr(self._req, "api_key", "") or self.api_key
+        return getattr(self._req, "api_key", "") or getattr(self._req, "route_key", "") or self.api_key
 
     def _eff_url(self) -> str:
-        return getattr(self._req, "api_url", "") or self.api_url
+        return getattr(self._req, "api_url", "") or getattr(self._req, "route_url", "") or self.api_url
+
+    def all_models(self) -> list[str]:
+        """DeepSeek models first (the default), then GPT models when configured."""
+        extra = self.openai.models if self.openai.configured else []
+        return list(dict.fromkeys([*self.models, *extra]))
+
+    def _route(self, model, own_key: bool, own_model: str) -> str:
+        """Pick the model for this request and point the request at its provider."""
+        self._req.route_key = ""
+        self._req.route_url = ""
+        self._req.provider_label = self.provider_label
+        if own_key:
+            return own_model or model or self.model
+        if model and self.openai.configured and model in self.openai.models:
+            self._req.route_key = self.openai.api_key
+            self._req.route_url = self.openai.chat_url
+            self._req.provider_label = self.openai.label
+            return model
+        return model if (model and model in self.models) else self.model
+
+    def _model_options(self, payload: dict) -> dict:
+        """Provider-specific request options for the chosen model."""
+        model = payload.get("model", "")
+        if self.enable_thinking and not is_openai_model(model):
+            payload["thinking"] = {"type": "enabled"}
+            payload["reasoning_effort"] = self.reasoning_effort
+        if uses_fixed_temperature(model):
+            payload.pop("temperature", None)
+        return payload
+
+    def images_available(self) -> bool:
+        """Image generation is offered only to a signed-in request (it always
+        spends the server's OpenAI key, even in own-key mode)."""
+        return (self.openai.images_ready and self.generated is not None
+                and bool(getattr(self._req, "identity", None)))
 
     def public_status(self) -> dict:
         if not self.is_configured():
@@ -208,11 +252,15 @@ class ChatProxy:
             message = "Chat proxy is configured for this server."
         else:
             message = "Chat proxy is configured for local browser sessions on this machine."
+        models = self.all_models()
         return {
             "configured": self.is_configured(),
             "provider": self.provider_label,
-            "model": self.model or None,
-            "models": list(self.models),
+            "model": self.model or (models[0] if models else None),
+            "models": models,
+            "modelInfo": [{"id": m, "provider": self.openai.label if m in self.openai.models and m not in self.models
+                           else self.provider_label} for m in models],
+            "imageGeneration": self.openai.images_ready,
             "localOnly": not self.allow_remote,
             "message": message,
         }
@@ -555,6 +603,72 @@ class ChatProxy:
         target = str(args.get("path", "") or args.get("name", "") or args.get("parentPath", "")).strip()
         return {"name": name, "target": target}
 
+    @staticmethod
+    def _image_tool_schema() -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": "generate_image",
+                "description": (
+                    "Generate a picture with an image model and propose saving it to the workspace as a "
+                    "new image file. Use it only when the user asks for an image, illustration, concept "
+                    "art, portrait, map or similar. Each image costs money; make at most the number the "
+                    "user asked for."),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string", "description": (
+                            "A detailed visual description: subject, setting, composition, lighting, mood "
+                            "and art style. Draw details from the workspace files when relevant.")},
+                        "name": {"type": "string", "description": "File name ending in .png, .jpg or .webp, e.g. 'mara-portrait.png'."},
+                        "parentPath": {"type": "string", "description": "Folder to save into; empty string for root."},
+                        "orientation": {"type": "string", "enum": ["square", "portrait", "landscape"],
+                                        "description": "Shape of the image (default square)."},
+                    },
+                    "required": ["prompt", "name"],
+                },
+            },
+        }
+
+    def _generate_image(self, args: dict, proposed_operations: list, proposal_id: str) -> dict:
+        if not self.images_available():
+            return {"error": "Image generation is not available."}
+        made = getattr(self._req, "images_made", 0)
+        if made >= self.openai.max_images_per_turn:
+            return {"error": f"Image limit reached ({self.openai.max_images_per_turn} per request). Ask the user before making more."}
+        prompt = str(args.get("prompt", "")).strip()[:4000]
+        name = str(args.get("name", "")).strip().replace("\\", "/").split("/")[-1]
+        if not prompt:
+            return {"error": "A prompt is required."}
+        stem, dot, extension = name.rpartition(".")
+        extension = f".{extension.lower()}" if dot else ""
+        if extension not in IMAGE_FORMATS or not stem:
+            stem = stem or name or "image"
+            name, extension = f"{stem}.png", ".png"
+        output_format, mime = IMAGE_FORMATS[extension]
+        size = IMAGE_SIZES.get(str(args.get("orientation", "square")), IMAGE_SIZES["square"])
+        self._req.images_made = made + 1  # counts attempts: a failure also costs a slot
+        try:
+            data = self.openai.generate_image(prompt, size, output_format)
+        except RuntimeError as error:
+            return {"error": str(error)}
+        identity = self._req.identity
+        image_id = self.generated.store(data, mime, extension, identity["username"], prompt)
+        parent_path = str(args.get("parentPath", "")).strip().strip("/")
+        proposed_operations.append({
+            "proposalId": proposal_id,
+            "type": "create-file",
+            "parentPath": parent_path,
+            "name": name,
+            "content": "",
+            "generatedImage": {"id": image_id, "mime": mime, "size": size,
+                               "model": self.openai.image_model, "prompt": prompt[:300]},
+        })
+        path = f"{parent_path}/{name}" if parent_path else name
+        return {"status": "proposed", "proposalId": proposal_id, "path": path,
+                "note": "The image is saved when the user keeps the edit. To show it in a note, link it "
+                        "with a relative Markdown image link."}
+
     def _execute_tool_call(self, tc: dict, project_snapshot: dict, proposed_operations: list,
                            read_only: bool = False) -> dict:
         """
@@ -596,6 +710,9 @@ class ChatProxy:
             return {"content": node.get("content", "")}
 
         # --- Write tools — collected as proposals, never applied here ---
+        if name == "generate_image":
+            return self._generate_image(args, proposed_operations, proposal_id)
+
         if name == "create_file":
             proposed_operations.append({
                 "proposalId": proposal_id,
@@ -698,7 +815,7 @@ class ChatProxy:
     def chat(self, messages: list[dict], context_files: list[dict], project_name: str,
              client_project: dict | None = None, progress=None, model: str | None = None,
              override: dict | None = None, mcp_configs=None, cancelled=None,
-             persona: dict | None = None, cast: list | None = None) -> dict:
+             persona: dict | None = None, cast: list | None = None, identity: dict | None = None) -> dict:
         # A client bringing its own key overrides the server's for THIS request
         # only (thread-local, cleared in finally). When own-key mode is used the
         # client also picks the model freely (its key, its allowlist).
@@ -711,6 +828,8 @@ class ChatProxy:
         self._req.mcp_configs = mcp_configs or []
         self._req.mcp_turn = None
         self._req.cancelled = cancelled or (lambda: False)
+        self._req.identity = identity
+        self._req.images_made = 0
         try:
             if persona is not None:
                 return self._persona_inner(messages, context_files, project_name, client_project,
@@ -725,18 +844,17 @@ class ChatProxy:
             self._req.cancelled = lambda: False
             self._req.api_key = ""
             self._req.api_url = ""
+            self._req.route_key = ""
+            self._req.route_url = ""
+            self._req.identity = None
 
     def _chat_inner(self, messages, context_files, project_name, client_project,
                     progress, model, own_key: bool, own_model: str) -> dict:
+        # Own-key mode trusts the client's model choice; server mode validates
+        # against the server's allowlist and routes to that model's provider.
+        active_model = self._route(model, own_key, own_model)
         if not (self._eff_key() and self._eff_url()):
             raise ValueError("Chat is not configured. Add your API key in Settings → Agent, or set DEEPSEEK_API_KEY on the server.")
-
-        # Own-key mode trusts the client's model choice; server mode validates
-        # against the server's allowlist.
-        if own_key:
-            active_model = own_model or model or self.model
-        else:
-            active_model = model if (model and model in self.models) else self.model
 
         # Resolve the project the agent reasons about.
         # Prefer the client-supplied project (the workspace the user is actually
@@ -820,20 +938,24 @@ class ChatProxy:
         if context_text:
             system_sections.append("Workspace context:\n" + context_text)
 
-        base_payload: dict = {
+        base_payload: dict = self._model_options({
             "model": active_model,
             "temperature": 0.2,
             "messages": [
                 {"role": "system", "content": "\n\n".join(system_sections)},
                 *safe_messages,
             ],
-        }
-        if self.enable_thinking:
-            base_payload["thinking"] = {"type": "enabled"}
-            base_payload["reasoning_effort"] = self.reasoning_effort
+        })
 
         # Attach tool schemas when the broker is available (subtask 1.3).
         tools = self._get_tool_schemas() if project_snapshot is not None else []
+        if tools and self.images_available():
+            tools.append(self._image_tool_schema())
+            base_payload["messages"][0]["content"] += (
+                f"\n\nYou can make pictures with generate_image (at most {self.openai.max_images_per_turn} "
+                "per request, and only when asked). Name the file after its subject, save it next to the "
+                "notes it belongs with (or in an existing images folder), and when it illustrates a note, "
+                "also add a relative Markdown image link to that note.")
         if getattr(self._req, "mcp_configs", None):
             self._req.mcp_turn = MCPTurn(self._req.mcp_configs, progress=progress, cancelled=self._req.cancelled)
             tools.extend(self._req.mcp_turn.tools)
@@ -940,7 +1062,7 @@ class ChatProxy:
         return {
             "message": reply,
             "model": active_model,
-            "provider": self.provider_label,
+            "provider": getattr(self._req, "provider_label", self.provider_label),
             "contextPaths": used_paths,
             "proposedOperations": proposed_operations,
             "batchId": batch_id if proposed_operations else None,
@@ -1004,8 +1126,6 @@ class ChatProxy:
 
     def _persona_inner(self, messages, context_files, project_name, client_project,
                        progress, model, own_key: bool, own_model: str, persona, cast) -> dict:
-        if not (self._eff_key() and self._eff_url()):
-            raise ValueError("Chat is not configured. Add your API key in Settings → Agent, or set DEEPSEEK_API_KEY on the server.")
         if not isinstance(persona, dict):
             raise ValueError("Persona must be an object.")
         name = self._clean_text(persona.get("name"), 80)
@@ -1013,10 +1133,9 @@ class ChatProxy:
         path = self._clean_text(persona.get("path"), 512)
         if not name:
             raise ValueError("The character needs a name.")
-        if own_key:
-            active_model = own_model or model or self.model
-        else:
-            active_model = model if (model and model in self.models) else self.model
+        active_model = self._route(model, own_key, own_model)
+        if not (self._eff_key() and self._eff_url()):
+            raise ValueError("Chat is not configured. Add your API key in Settings → Agent, or set DEEPSEEK_API_KEY on the server.")
 
         project_snapshot = None
         if isinstance(client_project, dict) and client_project.get("nodes"):
@@ -1067,14 +1186,11 @@ class ChatProxy:
         if context_text:
             system_sections.append("Files the author attached to this message:\n" + context_text)
 
-        payload: dict = {
+        payload: dict = self._model_options({
             "model": active_model,
             "temperature": self._persona_temperature(persona.get("temperature")),
             "messages": [{"role": "system", "content": "\n\n".join(system_sections)}, *turns],
-        }
-        if self.enable_thinking:
-            payload["thinking"] = {"type": "enabled"}
-            payload["reasoning_effort"] = self.reasoning_effort
+        })
         if project_snapshot is not None:
             payload["tools"] = [tool for tool in self._get_tool_schemas()
                                 if tool["function"]["name"] in self.READ_TOOLS]
@@ -1130,7 +1246,7 @@ class ChatProxy:
         return {
             "message": reply,
             "model": active_model,
-            "provider": self.provider_label,
+            "provider": getattr(self._req, "provider_label", self.provider_label),
             "contextPaths": used_paths,
             "proposedOperations": [],
             "batchId": None,
@@ -3985,6 +4101,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_export_project(parsed)
         if parsed.path == "/api/workspaces/asset":
             return self._handle_asset(parsed)
+        if parsed.path == "/api/generated":
+            return self._handle_generated(parsed)
         if parsed.path == "/api/events/stream":
             return self._handle_event_stream(parsed)
         return self._serve_static(parsed.path)
@@ -4168,6 +4286,36 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(data)
+
+    def _handle_generated(self, parsed):
+        """A generated image, to the account that asked for it."""
+        try:
+            identity = self.registry._require_account(self._extract_token(parsed))
+        except PermissionError:
+            return self._write_json(HTTPStatus.FORBIDDEN, {"message": "Sign in to see generated images."})
+        store = self.chat_proxy.generated
+        image_id = parse_qs(parsed.query).get("id", [""])[0]
+        found = store.load(image_id, identity["username"]) if store is not None else None
+        if found is None:
+            return self._write_json(HTTPStatus.NOT_FOUND, {"message": "Image not found (generated images are kept for 14 days)."})
+        data, content_type = found
+        self.send_response(HTTPStatus.OK)
+        self._send_cors_headers()
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "private, max-age=86400")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _chat_identity(self, token: str, own_key: bool):
+        """The account behind an agent request. When this server has accounts,
+        spending its keys needs a signed-in account; a user's own key does not.
+        Returns the identity (or None) and raises PermissionError when refused."""
+        identity = self.registry.account_for_token(token) if token else None
+        if not own_key and self.registry.accounts.enabled and identity is None:
+            raise PermissionError("Sign in to use the agent (Settings → Collaboration → Account). "
+                                  "If you are signed in, reload the page.")
+        return identity
 
     def _handle_create_workspace(self, parsed):
         try:
@@ -4521,7 +4669,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         # Status is public info (no key leaves the server). Report it even to
         # remote clients — they combine `localOnly` with their own-key setting to
         # decide availability, instead of getting an opaque 403.
-        self._write_json(HTTPStatus.OK, self.chat_proxy.public_status())
+        self._write_json(HTTPStatus.OK, {**self.chat_proxy.public_status(),
+                                         "requiresAccount": self.registry.accounts.enabled})
         self._log_request(200, "chat status")
 
     def _handle_mcp(self):
@@ -4565,6 +4714,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
                 "apiUrl": str(payload.get("apiUrl") or "").strip(),
                 "model": str(payload.get("apiModel") or "").strip(),
             }
+            identity = self._chat_identity(str(payload.get("accountToken") or ""), bool(override["apiKey"]))
             if not override["apiKey"]:
                 self.chat_proxy.authorize_client(self.client_address[0])
             messages = payload.get("messages")
@@ -4647,7 +4797,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             response = self.chat_proxy.chat(
                 messages, context_files, project_name, client_project,
                 progress=write_event, model=requested_model, override=override,
-                mcp_configs=mcp_configs, cancelled=closed.is_set, persona=persona, cast=cast
+                mcp_configs=mcp_configs, cancelled=closed.is_set, persona=persona, cast=cast,
+                identity=identity
             )
             write_event({"type": "result", "response": response})
             self._log_request(200, f"chat messages={len(messages)} context={len(response['contextPaths'])} (stream)")
@@ -4670,8 +4821,9 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
 
     def _handle_generate(self):
         try:
-            self.chat_proxy.authorize_client(self.client_address[0])
             payload = self._read_json()
+            self._chat_identity(str(payload.get("accountToken") or ""), own_key=False)
+            self.chat_proxy.authorize_client(self.client_address[0])
             subject = str(payload.get("subject", ""))
             instructions = str(payload.get("instructions", ""))
             context_files = payload.get("contextFiles") or []
@@ -4973,6 +5125,8 @@ def build_server(host: str, port: int, pin: str, static_root: Path, state_file: 
     # Chat context falls back to the default workspace's project when the client
     # doesn't supply one — same behaviour as the pre-registry single broker.
     chat_proxy.broker = registry.default_broker
+    if data_dir is not None and chat_proxy.generated is None:
+        chat_proxy.generated = GeneratedImages(Path(data_dir) / "_generated")
     handler = partial(MDNotesRequestHandler, registry=registry, static_root=static_root, chat_proxy=chat_proxy)
 
     class QuietThreadingHTTPServer(ThreadingHTTPServer):
@@ -5686,7 +5840,10 @@ def main():
         print(f"Chat access: {'local browser only' if not chat_proxy.allow_remote else 'remote clients allowed'}")
     else:
         print("Set DEEPSEEK_API_KEY or MDNOTES_CHAT_API_KEY in the server environment to enable chat.")
+    print(f"OpenAI: {'key found — reading its model list' if chat_proxy.openai.configured else 'not configured (OPENAI_API_KEY)'}")
+    print(f"Agent access: {'signed-in accounts only (or a user’s own key)' if accounts_enabled else 'no accounts on this server'}")
     print("─" * 60)
+    chat_proxy.start_providers()
     # systemd stops the service with SIGTERM, which by default kills Python on
     # the spot and skips server_close(), so the shutdown backup sweep never ran.
     # Treat it like Ctrl+C. Every write is already journaled and atomic.
