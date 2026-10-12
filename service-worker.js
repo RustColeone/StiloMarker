@@ -43,7 +43,11 @@ const APP_SHELL = [
   "./app/features/cloud-browser.js",
   "./app/features/file-actions.js",
   "./app/features/panes.js",
-  "./app/ui/layout.js"
+  "./app/ui/layout.js",
+  "./app/editor/highlight.js",
+  "./app/editor/find-replace.js",
+  "./app/editor/autocomplete.js",
+  "./app/editor/links.js"
 ];
 
 self.addEventListener("install", (event) => {
