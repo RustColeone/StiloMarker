@@ -257,16 +257,7 @@ const elements = {
   findReplaceMenuButton: query("#find-replace-menu-button"),
   createSnapshotButton: query("#create-snapshot-button"),
   snapshotsButton: query("#snapshots-button"),
-  snapshotsDialog: query("#snapshots-dialog"),
-  snapshotsList: query("#snapshots-list"),
-  snapshotsEmpty: query("#snapshots-empty"),
-  snapshotsCreateButton: query("#snapshots-create-button"),
-  snapshotsFileSelect: query("#snapshots-file-select"),
-  snapshotsSelectionLabel: query("#snapshots-selection-label"),
-  snapshotsCompareBtn: query("#snapshots-compare-btn"),
-  snapshotsRestoreBtn: query("#snapshots-restore-btn"),
   workspaceHistoryButton: query("#workspace-history-button"),
-  snapshotsDeleteBtn: query("#snapshots-delete-btn"),
   previewDiffView: query("#preview-diff-view"),
   diffBody: query("#diff-body"),
   diffRuler: query("#diff-ruler"),
@@ -3737,11 +3728,6 @@ function toggleFindOption(key, buttonEl) {
 // editor has active, so it behaves like any other preview tab.
 const DIFF_TAB_ID = "__diff__";
 const diffState = { active: false, fileId: null, path: null, versionId: null, oldText: "", createdAt: 0, blocks: [], currentChange: -1 };
-let snapshotsViewPath = null;
-// Snapshots dialog (File-Manager-style select + footer actions): the versions
-// currently listed and which one the user has highlighted.
-let snapshotsVersions = [];
-let snapshotsSelectedId = null;
 
 // A stable-enough key to group snapshots by project: the cloud workspace id when
 // synced, otherwise the local project id.
@@ -4391,136 +4377,28 @@ async function openWorkspaceHistory() {
   }
 }
 
+let snapshotsDialog = null;
+let snapshotsDialogLoading = null;
+
+// The Snapshots dialog lives in app/features/snapshots-dialog.js and loads on first use.
 async function openSnapshotsDialog() {
-  if (!elements.snapshotsDialog) return;
-  const project = controller.getProject();
-  const activeFile = controller.getActiveFile();
-  const activePath = activeFile ? getPath(project, activeFile.id) : null;
-  let paths = [];
-  try {
-    const migrated = await ensureSnapshotsMigrated();
-    if (migrated) showToast(`Uploaded ${migrated} earlier snapshot${migrated === 1 ? "" : "s"} to the server`);
-    const listing = await snapshotStore().paths();
-    paths = listing.paths ?? [];
-    setSnapshotBaselines(listing.baselines);
-  } catch { paths = []; }
-  // Show a set of files that have history, plus the active file even if it has none.
-  const options = Array.from(new Set([...(activePath ? [activePath] : []), ...paths]));
-  if (elements.snapshotsFileSelect) {
-    elements.snapshotsFileSelect.replaceChildren(...options.map((p) => {
-      const opt = document.createElement("option");
-      opt.value = p;
-      opt.textContent = p;
-      return opt;
-    }));
-    snapshotsViewPath = options.includes(activePath) ? activePath : (options[0] ?? null);
-    if (snapshotsViewPath) elements.snapshotsFileSelect.value = snapshotsViewPath;
-    elements.snapshotsFileSelect.disabled = options.length === 0;
-  }
-  snapshotsSelectedId = null; // fresh selection each open
-  await renderFileHistory();
-  if (!elements.snapshotsDialog.open) elements.snapshotsDialog.showModal();
-}
-
-async function renderFileHistory() {
-  const list = elements.snapshotsList;
-  if (!list) return;
-  const path = snapshotsViewPath;
-  try {
-    snapshotsVersions = path ? await snapshotStore().versions(path) : [];
-  } catch { snapshotsVersions = []; }
-  // Keep the highlight only if the selected version still exists.
-  if (!snapshotsVersions.some((v) => v.id === snapshotsSelectedId)) snapshotsSelectedId = null;
-  list.replaceChildren();
-  if (elements.snapshotsEmpty) {
-    elements.snapshotsEmpty.hidden = snapshotsVersions.length > 0;
-    elements.snapshotsEmpty.textContent = path
-      ? "No snapshots yet for this file. Press Ctrl+S (or Create Snapshot) to make one."
-      : "No snapshots yet for this project.";
-  }
-  for (const v of snapshotsVersions) {
-    const item = document.createElement("li");
-    item.className = `snapshot-item${v.id === snapshotsSelectedId ? " is-selected" : ""}`;
-    item.setAttribute("role", "option");
-    item.setAttribute("aria-selected", String(v.id === snapshotsSelectedId));
-    item.tabIndex = -1;
-
-    const meta = document.createElement("div");
-    meta.className = "snapshot-meta";
-    const time = document.createElement("span");
-    time.className = "snapshot-time";
-    time.textContent = formatSnapshotTime(v.createdAt);
-    const info = document.createElement("span");
-    info.className = "snapshot-count subtle-label";
-    info.textContent = `${formatBytes(v.byteSize)}${v.label ? ` · ${v.label}` : ""}`;
-    meta.append(time, info);
-
-    item.append(meta);
-    // Single-click toggles selection; double-click compares that version.
-    item.addEventListener("click", () => selectSnapshot(v.id));
-    item.addEventListener("dblclick", () => { compareSnapshotVersion(v.id); });
-    list.append(item);
-  }
-  renderSnapshotsActionbar();
-}
-
-function selectSnapshot(versionId) {
-  // Tapping the highlighted row again clears the selection.
-  snapshotsSelectedId = snapshotsSelectedId === versionId ? null : versionId;
-  // Repaint selection state in place (rows are in snapshotsVersions order).
-  const rows = elements.snapshotsList?.children ?? [];
-  snapshotsVersions.forEach((v, i) => {
-    const li = rows[i];
-    if (!li) return;
-    const on = v.id === snapshotsSelectedId;
-    li.classList.toggle("is-selected", on);
-    li.setAttribute("aria-selected", String(on));
+  snapshotsDialogLoading ??= import("./features/snapshots-dialog.js").then(({ createSnapshotsDialog }) => {
+    snapshotsDialog = createSnapshotsDialog({
+      controller, collaboration, getPath, getWorkspaceMode: () => workspaceMode, snapshotStore, ensureSnapshotsMigrated,
+      setSnapshotBaselines, refreshSnapshotBaselines, createSnapshotNow, showFileDiff, showToast, notify,
+      confirmAction, formatSnapshotTime, formatBytes, projectPaths, writeAtPathOperations,
+      applyHistoryOperations, isTextFileName, applyEditorEdit, publishOperation
+    });
+    return snapshotsDialog;
+  }).catch((error) => {
+    snapshotsDialogLoading = null;
+    throw error;
   });
-  renderSnapshotsActionbar();
-}
-
-// Whether a diff can be shown for the viewed file: it must be the file that's
-// currently open in the editor (the diff compares against live content).
-function snapshotsCanCompare() {
-  const project = controller.getProject();
-  const activeFile = controller.getActiveFile();
-  const activePath = activeFile ? getPath(project, activeFile.id) : null;
-  return activePath != null && activePath === snapshotsViewPath;
-}
-
-function renderSnapshotsActionbar() {
-  const selected = snapshotsVersions.find((v) => v.id === snapshotsSelectedId) || null;
-  const canCompare = !!selected && snapshotsCanCompare();
-  if (elements.snapshotsCompareBtn) {
-    elements.snapshotsCompareBtn.disabled = !canCompare;
-    elements.snapshotsCompareBtn.title = selected && !canCompare
-      ? "Open this file in the editor to compare it"
-      : "Compare the current file with this version";
+  try {
+    await (await snapshotsDialogLoading).open();
+  } catch (error) {
+    notify(`Snapshots could not load: ${error.message}`);
   }
-  if (elements.snapshotsRestoreBtn) elements.snapshotsRestoreBtn.disabled = !selected;
-  if (elements.snapshotsDeleteBtn) elements.snapshotsDeleteBtn.disabled = !selected;
-  if (elements.snapshotsSelectionLabel) {
-    elements.snapshotsSelectionLabel.textContent = selected
-      ? `Selected: ${formatSnapshotTime(selected.createdAt)}`
-      : snapshotsVersions.length
-        ? "Select a version"
-        : "";
-  }
-}
-
-// Compare a specific version with the current file (used by double-click, which
-// must ignore the intervening select/deselect toggles). Returns true if it ran.
-function compareSnapshotVersion(versionId) {
-  const v = snapshotsVersions.find((x) => x.id === versionId);
-  if (!v || !snapshotsCanCompare()) return false;
-  elements.snapshotsDialog?.close();
-  void showFileDiff(snapshotsViewPath, v.id, v.createdAt);
-  return true;
-}
-
-// Compare the highlighted snapshot with the current file (the Compare button).
-function compareSelectedSnapshot() {
-  return compareSnapshotVersion(snapshotsSelectedId);
 }
 
 // Compare the ACTIVE file's current content with one of its stored versions,
@@ -4544,39 +4422,6 @@ async function showFileDiff(path, versionId, createdAt) {
   updateStatus(project); // renders the tab strip + shows the diff pane
   renderDiff(); // immediate full render so blocks are fresh (updateStatus may have debounced)
   if (diffState.blocks.length) gotoChange(1); // jump to the first change
-}
-
-async function restoreVersion(path, versionId, createdAt) {
-  const project = controller.getProject();
-  const node = Object.values(project.nodes).find((n) => n.kind === "file" && getPath(project, n.id) === path);
-  const content = await snapshotStore().content(versionId);
-  if (content == null) { showToast("That version is no longer available"); return; }
-  if (!node) {
-    // The file was deleted since. Snapshots outlive their file, so recreate it
-    // (and any missing folders) instead of refusing.
-    const ok = await confirmAction(`"${path.split("/").pop()}" no longer exists. Bring it back from its ${formatSnapshotTime(createdAt)} snapshot?`);
-    if (!ok) return;
-    const ops = writeAtPathOperations(path, content, projectPaths(project).folders);
-    try {
-      if (collaboration.isConnected() && workspaceMode === "synced") await applyHistoryOperations(ops);
-      else for (const op of ops) controller.applySyncOperation(op);
-      showToast(`Restored ${path.split("/").pop()}`);
-    } catch (error) {
-      notify(`Could not restore: ${error.message}`);
-    }
-    return;
-  }
-  if (content === String(node.content ?? "")) { showToast("Already matches this version"); return; }
-  const ok = await confirmAction(`Restore "${path.split("/").pop()}" to its ${formatSnapshotTime(createdAt)} snapshot? Current content is replaced (you can snapshot first to keep it).`);
-  if (!ok) return;
-  if (project.activeFileId === node.id && isTextFileName(node.name)) {
-    // Active file: route through the editor so undo history + caret stay sane.
-    applyEditorEdit(content, 0, 0);
-  } else {
-    controller.updateContent(node.id, content);
-  }
-  publishOperation({ type: "update-file", path, content });
-  showToast(`Restored ${path.split("/").pop()}`);
 }
 
 // Tear down the diff tab's state + hide the overlay WITHOUT re-rendering (safe to
@@ -10736,33 +10581,6 @@ elements.findReplaceMenuButton?.addEventListener("click", () => openFindBar(true
 elements.createSnapshotButton?.addEventListener("click", () => void createSnapshotNow());
 elements.snapshotsButton?.addEventListener("click", () => void openSnapshotsDialog());
 elements.workspaceHistoryButton?.addEventListener("click", () => void openWorkspaceHistory());
-elements.snapshotsCreateButton?.addEventListener("click", async () => {
-  await createSnapshotNow();
-  // Rebuild the dialog so a newly-tracked file appears and the active file (the
-  // one we just snapshotted) is reselected in the dropdown.
-  await openSnapshotsDialog();
-});
-elements.snapshotsFileSelect?.addEventListener("change", (event) => {
-  snapshotsViewPath = event.target.value || null;
-  snapshotsSelectedId = null; // switching files clears the highlight
-  void renderFileHistory();
-});
-elements.snapshotsCompareBtn?.addEventListener("click", () => { compareSelectedSnapshot(); });
-elements.snapshotsRestoreBtn?.addEventListener("click", async () => {
-  const selected = snapshotsVersions.find((v) => v.id === snapshotsSelectedId);
-  if (!selected) return;
-  await restoreVersion(snapshotsViewPath, selected.id, selected.createdAt);
-});
-elements.snapshotsDeleteBtn?.addEventListener("click", async () => {
-  const selected = snapshotsVersions.find((v) => v.id === snapshotsSelectedId);
-  if (!selected) return;
-  const ok = await confirmAction(`Delete the ${formatSnapshotTime(selected.createdAt)} snapshot of "${(snapshotsViewPath || "").split("/").pop()}"? This can't be undone.`);
-  if (!ok) return;
-  await snapshotStore().remove(selected.id);
-  snapshotsSelectedId = null;
-  void refreshSnapshotBaselines();  // S dropped by one
-  await renderFileHistory();
-});
 // Click a gutter line number to add/edit that line's comment (breakpoint-style).
 elements.editorGutter?.addEventListener("click", (event) => {
   const row = event.target.closest?.(".editor-gutter-line");
