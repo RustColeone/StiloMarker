@@ -41,7 +41,8 @@ const APP_SHELL = [
   "./app/features/snapshots-dialog.js",
   "./app/features/chat-panel.js",
   "./app/features/cloud-browser.js",
-  "./app/features/file-actions.js"
+  "./app/features/file-actions.js",
+  "./app/features/panes.js"
 ];
 
 self.addEventListener("install", (event) => {
