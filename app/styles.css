@@ -817,6 +817,7 @@ p {
 }
 
 .tree-icon.is-md,
+.tree-icon.is-persona,
 .tree-icon.is-mtree,
 .tree-icon.is-urldb,
 .tree-icon.is-remote-image,
@@ -843,6 +844,7 @@ p {
 }
 
 .tree-icon.is-md::before,
+.tree-icon.is-persona::before,
 .tree-icon.is-mtree::before,
 .tree-icon.is-urldb::before,
 .tree-icon.is-remote-image::before,
@@ -861,6 +863,7 @@ p {
 }
 
 .tree-icon.is-md::after,
+.tree-icon.is-persona::after,
 .tree-icon.is-mtree::after,
 .tree-icon.is-urldb::after,
 .tree-icon.is-bmap::after,
@@ -894,6 +897,16 @@ p {
   content: "IMG";
   color: var(--accent-strong);
   font-size: 6px;
+}
+
+.tree-icon.is-persona {
+  border-color: #d08a3a;
+  background: rgba(208, 138, 58, 0.15);
+}
+
+.tree-icon.is-persona::after {
+  content: "PC";
+  color: #c07a2a;
 }
 
 .tree-icon.is-bmap {
@@ -5430,17 +5443,42 @@ menu {
   flex-grow: 0;
 }
 
-.chat-toolbar-title {
+/* Agent | Roleplay tabs, where the panel title used to be. */
+.chat-tabs {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+
+.chat-tab {
+  padding: 0 6px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-dim);
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-dim);
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-tab:hover {
+  color: var(--text);
+}
+
+.chat-tab[aria-selected="true"] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.chat-panel.is-roleplay #chat-mcp-summary {
+  display: none;
 }
 
 .chat-model-badge {
@@ -6547,7 +6585,10 @@ pre.proposal-diff-block {
   .chat-compose-shell { padding-bottom: env(safe-area-inset-bottom, 0px); }
   .chat-compose-drop-hint { display: none; }
   .chat-message-list { overscroll-behavior: contain; overflow-wrap: anywhere; }
-  .chat-toolbar-title { display: none; }
+  .chat-tab { min-height: 44px; padding: 0 8px; }
+  .chat-tabs { flex: 0 1 auto; }
+  .rp-member, .rp-add { min-height: 44px; }
+  .rp-item { min-height: 44px; }
   .chat-model-badge { flex: 1; max-width: none; min-height: 44px; }
   .chat-model-select { max-width: 38vw; }
 }
@@ -6603,4 +6644,235 @@ pre.proposal-diff-block {
 #chat-mcp-summary { padding: 4px 8px; overflow-wrap: anywhere; }
 @media (max-width: 900px) {
   #mcp-load-button, .mcp-connection button, .mcp-connection label { min-height: 44px; }
+}
+
+/* ─ Roleplay ────────────────────────────────────────────────────────── */
+
+.persona-avatar {
+  --persona-color: var(--accent);
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--persona-color);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  user-select: none;
+}
+
+.persona-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.persona-avatar.is-missing {
+  background: var(--surface-2);
+  color: var(--text-dim);
+  border: 1px dashed var(--border-strong);
+}
+
+.rp-cast {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  max-height: 30%;
+  overflow-y: auto;
+}
+
+.rp-cast[hidden] {
+  display: none;
+}
+
+.rp-member,
+.rp-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 2px 8px 2px 2px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-0);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.rp-add {
+  padding: 2px 8px;
+  color: var(--text-dim);
+  border-style: dashed;
+}
+
+.rp-member:hover,
+.rp-add:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.rp-add:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.rp-member.is-missing .rp-member-name {
+  color: var(--text-dim);
+  text-decoration: line-through;
+}
+
+.rp-member-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp-message {
+  border-left-color: var(--persona-color);
+}
+
+.rp-message .rp-speaker {
+  color: var(--persona-color);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.rp-message-avatar {
+  width: 18px;
+  height: 18px;
+}
+
+.rp-typing,
+.rp-next {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.rp-mention {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.rp-popover {
+  position: absolute;
+  z-index: 40;
+  width: max-content;
+  min-width: 180px;
+  max-width: min(320px, calc(100% - 8px));
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--menu);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.30);
+}
+
+.rp-popover[hidden] {
+  display: none;
+}
+
+.rp-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 8px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.rp-item.is-active,
+.rp-item:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.rp-item:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.rp-item-avatar {
+  width: 18px;
+  height: 18px;
+}
+
+.rp-item-icon {
+  flex: 0 0 18px;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+.rp-item-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rp-item-detail {
+  margin-left: auto;
+  padding-left: 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rp-item-empty {
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* Character sheet preview header. */
+.persona-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--persona-color);
+  border-radius: 6px;
+  background: var(--surface-0);
+}
+
+.persona-card-avatar {
+  width: 56px;
+  height: 56px;
+  font-size: 20px;
+}
+
+.persona-card-text {
+  min-width: 0;
+}
+
+.persona-card-name {
+  font-size: 1.3em;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.persona-card-meta {
+  font-size: 12px;
+  color: var(--text-dim);
 }

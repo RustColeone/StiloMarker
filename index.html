@@ -57,6 +57,7 @@
               <button id="new-mtree-button" type="button">New MTREE</button>
               <button id="new-urldb-button" type="button">New URL Album</button>
               <button id="new-bmap-button" type="button">New Diagram</button>
+              <button id="new-persona-button" type="button">New Character</button>
               <button id="create-snapshot-button" type="button">Create Snapshot</button>
             </div>
           </div>
@@ -279,10 +280,13 @@
 
         <div id="chat-splitter" class="panel-splitter chat-splitter" role="separator" aria-orientation="vertical" aria-label="Resize chat"></div>
 
-        <aside id="chat-panel" class="chat-panel" aria-label="Agent chat panel">
+        <aside id="chat-panel" class="chat-panel" aria-label="Chat panel">
           <!-- Toolbar -->
           <header class="chat-toolbar">
-            <span class="chat-toolbar-title">Stilo Marker</span>
+            <div id="chat-tabs" class="chat-tabs" role="tablist" aria-label="Chat mode">
+              <button class="chat-tab" type="button" role="tab" data-chat-tab="agent" aria-selected="true" title="The workspace agent: asks, edits and organizes files">Agent</button>
+              <button class="chat-tab" type="button" role="tab" data-chat-tab="roleplay" aria-selected="false" title="Group chat with your characters (.persona.skill files)">Roleplay</button>
+            </div>
             <button id="chat-status-text" class="chat-model-badge" type="button"
               title="Agent status — click to open settings / retry">Checking…</button>
             <select id="chat-model-select" class="chat-model-select" aria-label="Agent model" hidden></select>
@@ -297,6 +301,9 @@
           <div id="chat-history-pane" class="chat-history-pane" hidden>
             <div id="chat-thread-list" class="chat-thread-list"></div>
           </div>
+
+          <!-- Roleplay cast: the group chat's characters -->
+          <div id="chat-cast-bar" class="rp-cast" aria-label="Characters in this chat" hidden></div>
 
           <!-- Conversation -->
           <div id="chat-message-list" class="chat-message-list" role="log" aria-label="Chat conversation" aria-live="polite"></div>
@@ -954,6 +961,7 @@
             <option value="mtree">MTREE (.mtree)</option>
             <option value="urldb">URL Album (.urldb)</option>
             <option value="bmap">Diagram (.bmap)</option>
+            <option value="persona">Character (.persona.skill)</option>
           </select>
         </label>
         <label>

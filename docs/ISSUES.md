@@ -31,6 +31,37 @@ one. Affects only pre-existing local history.
 
 ## Fixed
 
+### v0.1.25: Roleplay (characters in a group chat)
+
+The AI panel only offered an assistant that edits files. Writers, scriptwriters
+and game masters also want to ask a *character* how they would react, in that
+character's voice. The panel now has two tabs: **Agent** (unchanged) and
+**Roleplay**, a group chat with characters the user writes as files.
+
+- A character is `name.persona.skill`: Markdown with an optional `---` header
+  (`name`, `avatar`, `color`, `temperature`); the rest is the character sheet,
+  sent to the model as written. The file name gives the `@handle`. The sheet is
+  re-read before every reply, so editing it changes the character from then on.
+  The preview shows a character card; **Create → New Character** and the
+  explorer's **New Character** start from a template.
+- `@aria …` asks one character; `@all` asks everyone, in cast order, each seeing
+  the replies before theirs. A message with no mention is narration and gets no
+  reply. Characters never trigger each other, so there are no reply loops.
+  **Stop** cancels the current reply and the rest of the queue.
+- Characters can read the whole workspace (`list_files`, `read_file`) plus any
+  attached files, but cannot change anything: write tools are not offered, and
+  the server refuses them if a model calls one anyway. No MCP connections.
+- Group chats sync to collaborators like agent threads, so several people can
+  play in one shared workspace; each person's messages carry their name.
+- The agent's manual documents the format, so "make a character file for X
+  from my chapter" works with the existing agent.
+- The Roleplay code is its own module, loaded the first time the tab opens,
+  so it adds nothing to page start-up.
+
+Sync compatibility moved to `116`: older tabs would drop the new chat fields
+(`kind`, `members`, `speaker`) when saving the shared chat, so they are asked
+to reload.
+
 ### v0.1.24: workspace backups (Workspace History)
 
 There was no way back from "everything was deleted": per-file Snapshots are

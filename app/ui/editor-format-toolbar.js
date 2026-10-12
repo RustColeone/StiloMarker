@@ -13,7 +13,7 @@
 //   { kind: "block",  snippet, caret }             multi-line block insert
 //   { kind: "table" }                              opens the table grid-picker
 
-import { isBmapFileName, isTextFileName, isUrlDbFileName } from "../domain/project-model.js";
+import { isBmapFileName, isMarkdownFileName, isTextFileName, isUrlDbFileName } from "../domain/project-model.js";
 
 /** Map a file name to its toolbar format, or null when no toolbar applies. */
 function getEditorToolbarFormat(fileName) {
@@ -22,7 +22,7 @@ function getEditorToolbarFormat(fileName) {
   if (isBmapFileName(name)) return "bmap";
   if (isUrlDbFileName(name)) return "urldb";
   if (name.toLowerCase().endsWith(".mtree")) return "mtree";
-  if (name.toLowerCase().endsWith(".md")) return "markdown";
+  if (isMarkdownFileName(name)) return "markdown";
   return null;
 }
 

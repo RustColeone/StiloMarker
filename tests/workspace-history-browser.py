@@ -31,7 +31,7 @@ S = {"serverUrl": "", "accountUsername": "tester", "accountPassword": "pw", "acc
      "lastWorkspace": {"team": "qa", "path": WS}, "syncedProjectId": f"qa/{WS}"}
 def api(method, path, body=None, token=None):
     url = f"{BASE}{path}" + (("&" if "?" in path else "?") + f"token={token}" if token else "")
-    if isinstance(body, dict): body = {**body, "version": 115}
+    if isinstance(body, dict): body = {**body, "version": 116}
     req = urllib.request.Request(url, method=method, data=json.dumps(body).encode() if body is not None else None, headers={"content-type": "application/json"})
     with urllib.request.urlopen(req, timeout=30) as r: return json.loads(r.read())
 def server_files(tok):

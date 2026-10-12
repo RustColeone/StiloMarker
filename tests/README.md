@@ -46,6 +46,9 @@ node --test tests/       # raw test runner
 | `static-compression.test.py` | Static files are gzipped only when accepted (q=0 honoured), small/binary files untouched, `Vary` sent, never stale after a file changes. |
 | `workspace-backups.test.py` | Workspace backups: a backup only on days the workspace changed, one per day refreshed to its latest state, a safety copy before deletes/replacements (a burst shares one), retention with blob cleanup, images, permissions, and a final backup on shutdown. |
 | `workspace-history-browser.py` | Browser + real backend (throwaway server): back up, delete everything from another account, restore one file, restore everything (backing up first), recover a deleted file via Snapshots. |
+| `persona-service.test.mjs` | Roleplay character files: header parsing (quotes, comments, CRLF, bad colour/temperature), handles, @mentions (order, `@all`, e-mails, unknown names), summaries, the template. |
+| `persona-chat.test.py` | Roleplay replies on the server: prompt holds the sheet and the other characters (not the app manual), read-only tools with writes refused, transcript mapping/merging and size budget, temperature limits, stale tabs refused. |
+| `roleplay-browser.py` | Browser: Roleplay tab with a mocked model: add characters, avatars, @mention autocomplete, no reply without a mention, `@all` in order, Stop cancels the queue, agent tab never shows group chats, moves/deletes of character files, reload, character preview card, phone width. |
 | `editor-typing-browser.py` | Browser: a long chapter stays correct and incremental while typing (DOM/gutter/caret/highlight per edit, incremental == full render, churn budget, undo/redo, no explorer drift). |
 | `template-race-browser.py` | Browser: the first-run template never replaces a cloud workspace that restored first. |
 
