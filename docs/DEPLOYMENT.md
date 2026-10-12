@@ -331,3 +331,23 @@ and the updated `roleplay-browser.py`, which fails without the fix.
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261012T062420Z-v0.1.26`.
 Nine project manifests valid, 153/153 files.
 
+
+## Verified release: v0.1.27
+
+Deployed on 2026-10-12 at 18:38 UTC. Adds OpenAI as a second chat provider,
+agent image generation, and the sign-in requirement for the server's keys.
+App version `0.1.27`; sync compatibility unchanged at `116`.
+
+The restart loaded `OPENAI_API_KEY`; the catalog read picked `gpt-5.5` and
+`gpt-5.4-mini` for chat and `gpt-image-2` for images (journal:
+`[OPENAI] Models ready`). Public checks: ping, `/api/chat/status` listing both
+providers with `imageGeneration` and `requiresAccount` true, three assets
+byte-identical, `/api/chat` and `/api/generated` refusing a signed-out request
+with 403. No real GPT or image request has been made yet (that needs a
+signed-in account). Validation: 154 Node tests, the Python suites including the
+new `openai-images.test.py`, the backend self-test, and eleven browser suites
+including the new `agent-images-browser.py`.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261012T183821Z-v0.1.27`.
+Nine project manifests valid, 153/153 files.
+
