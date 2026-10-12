@@ -9,13 +9,13 @@ import { supportsOpfs, listOpfsDir, mkdirOpfs, createProjectOpfs, getOpfsDirecto
 import { createCollaborationRuntime } from "./services/collaboration-service.js";
 import { sendGenerationRequest } from "./services/chat-api-service.js";
 import { extractMarkdownLinks, renderMarkdown } from "./services/markdown-service.js";
-import { PERSONA_SUFFIX, parsePersona, personaAvatarHtml, personaTemplate } from "./services/persona-service.js";
+import { PERSONA_SUFFIX, parsePersona, personaTemplate } from "./services/persona-service.js";
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
 import { applyEditorFont, applyTheme, clampSourceFontSize, loadSettings, patchStoredSettings, saveSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
 import { createFileSnapshot, deleteVersion, diffLines, getVersionContent, listFileVersions, listSnapshotPaths } from "./services/snapshot-service.js";
 import { clearViewStates, loadViewStates, saveViewStates } from "./services/view-state-service.js";
-import { browseServer, createProjectServer, createServerSnapshot, deleteComment, deleteServer, deleteServerSnapshot, exportProjectServer, getServerSnapshotContent, importProjectServer, listComments, listServerSnapshotPaths, listServerSnapshotVersions, mkdirServer, normalizeServerUrl, reanchorComments, saveComment, saveUserState } from "./services/sync-service.js";
+import { browseServer, createProjectServer, createServerSnapshot, deleteComment, deleteServer, deleteServerSnapshot, exportProjectServer, getServerSnapshotContent, importProjectServer, listComments, listServerSnapshotPaths, listServerSnapshotVersions, mkdirServer, normalizeServerUrl, reanchorComments, saveComment } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { formatUrlDbEntryBody, parseUrlDb, parseUrlDbEntryBody, updateUrlDbEntry } from "./services/urldb-service.js";
 import { query } from "./ui/dom.js";
@@ -25,6 +25,7 @@ import { createTableGridPicker } from "./ui/table-grid-picker.js";
 import { createDefaultBmap } from "./services/bmap-service.js";
 import { createCloudBrowser } from "./features/cloud-browser.js";
 import { createFileActions } from "./features/file-actions.js";
+import { createPanes } from "./features/panes.js";
 
 document.querySelectorAll("[data-app-version]").forEach((label) => { label.textContent = `v${APP_VERSION}`; });
 
@@ -5511,281 +5512,90 @@ function handleEditorKeydown(event) {
 
   handleIndentKeydown(event);
 }
-
-function hasMathMarkup(value) {
-  return /\$\$[\s\S]+?\$\$|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\]|\$(?!\s)[^$\n]+\$/.test(value);
+// ---- Tabs, panes and preview (./features/panes.js) ----
+// Created on first use. The module reads main's shared values through this
+// context, so it always sees their current values.
+let panesInstance = null;
+function panes() {
+  return (panesInstance ??= createPanes({
+    get DIFF_TAB_ID() { return DIFF_TAB_ID; },
+    get agentPendingDecorations() { return agentPendingDecorations; },
+    get bmapViewModule() { return bmapViewModule; },
+    get captureViewState() { return captureViewState; },
+    get closeDiff() { return closeDiff; },
+    get collaboration() { return collaboration; },
+    get controller() { return controller; },
+    get diffState() { return diffState; },
+    get draggingTabState() { return draggingTabState; },
+    set draggingTabState(value) { draggingTabState = value; },
+    get elements() { return elements; },
+    get escapeEditorHtml() { return escapeEditorHtml; },
+    get escapeHtmlAttribute() { return escapeHtmlAttribute; },
+    get formatSnapshotTime() { return formatSnapshotTime; },
+    get getRelativeProjectPath() { return getRelativeProjectPath; },
+    get getUrlDbEntries() { return getUrlDbEntries; },
+    get getUrlDbEntryById() { return getUrlDbEntryById; },
+    get getViewState() { return getViewState; },
+    get imageSrcFor() { return imageSrcFor; },
+    get isPreviewableFileName() { return isPreviewableFileName; },
+    get loadBmapView() { return loadBmapView; },
+    get logDebug() { return logDebug; },
+    get mathJaxLoadPromise() { return mathJaxLoadPromise; },
+    set mathJaxLoadPromise(value) { mathJaxLoadPromise = value; },
+    get normalizePath() { return normalizePath; },
+    get notify() { return notify; },
+    get personaAvatarSrc() { return personaAvatarSrc; },
+    get previewBmapView() { return previewBmapView; },
+    set previewBmapView(value) { previewBmapView = value; },
+    get previewFileId() { return previewFileId; },
+    set previewFileId(value) { previewFileId = value; },
+    get previewOpenTabIds() { return previewOpenTabIds; },
+    set previewOpenTabIds(value) { previewOpenTabIds = value; },
+    get previewUrlDbEntry() { return previewUrlDbEntry; },
+    set previewUrlDbEntry(value) { previewUrlDbEntry = value; },
+    get quickGenerateBmapFile() { return quickGenerateBmapFile; },
+    get render() { return render; },
+    get resolveProjectAssetUrl() { return resolveProjectAssetUrl; },
+    get selectionNodeId() { return selectionNodeId; },
+    set selectionNodeId(value) { selectionNodeId = value; },
+    get setMobileExplorerOpen() { return setMobileExplorerOpen; },
+    get settings() { return settings; },
+    get showToast() { return showToast; },
+    get sourceOpenTabIds() { return sourceOpenTabIds; },
+    set sourceOpenTabIds(value) { sourceOpenTabIds = value; },
+    get sourceUrlDbEntry() { return sourceUrlDbEntry; },
+    set sourceUrlDbEntry(value) { sourceUrlDbEntry = value; },
+    get syncState() { return syncState; },
+    get togglePreview() { return togglePreview; },
+    get updateFileContentFromPreview() { return updateFileContentFromPreview; },
+    get updateStatus() { return updateStatus; },
+    get workspaceMode() { return workspaceMode; }
+  }));
 }
+function bindPaneDropTarget(...args) { return panes().bindPaneDropTarget(...args); }
+function bindTabStripReorderTarget(...args) { return panes().bindTabStripReorderTarget(...args); }
+function cacheWorkspaceView(...args) { return panes().cacheWorkspaceView(...args); }
+function cachedWorkspaceView(...args) { return panes().cachedWorkspaceView(...args); }
+function clearPaneDropState(...args) { return panes().clearPaneDropState(...args); }
+function closeTabOverflowMenu(...args) { return panes().closeTabOverflowMenu(...args); }
+function currentWorkspaceView(...args) { return panes().currentWorkspaceView(...args); }
+function ensureOpenTabs(...args) { return panes().ensureOpenTabs(...args); }
+function openDroppedFileInPane(...args) { return panes().openDroppedFileInPane(...args); }
+function openFileFromExplorer(...args) { return panes().openFileFromExplorer(...args); }
+function openPreviewTab(...args) { return panes().openPreviewTab(...args); }
+function openSourceTab(...args) { return panes().openSourceTab(...args); }
+function openTabOverflowMenu(...args) { return panes().openTabOverflowMenu(...args); }
+function printPreviewAsPdf(...args) { return panes().printPreviewAsPdf(...args); }
+function renderPreviewContent(...args) { return panes().renderPreviewContent(...args); }
+function renderTabs(...args) { return panes().renderTabs(...args); }
+function restoreResumeState(...args) { return panes().restoreResumeState(...args); }
+function setActiveSourceFile(...args) { return panes().setActiveSourceFile(...args); }
+function setActiveSourceUrlDbEntry(...args) { return panes().setActiveSourceUrlDbEntry(...args); }
+function setPreviewFile(...args) { return panes().setPreviewFile(...args); }
+function showResumedFile(...args) { return panes().showResumedFile(...args); }
+function tabOverflowButton(...args) { return panes().tabOverflowButton(...args); }
+async function typesetPreview(...args) { return panes().typesetPreview(...args); }
 
-function ensureMathJax() {
-  if (globalThis.MathJax?.typesetPromise) {
-    return Promise.resolve(globalThis.MathJax);
-  }
-
-  if (mathJaxLoadPromise) {
-    return mathJaxLoadPromise;
-  }
-
-  globalThis.MathJax = globalThis.MathJax ?? {
-    tex: {
-      inlineMath: [["$", "$"], ["\\(", "\\)"]],
-      displayMath: [["$$", "$$"], ["\\[", "\\]"]]
-    },
-    svg: { fontCache: "global" },
-    startup: { typeset: false }
-  };
-
-  mathJaxLoadPromise = new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js";
-    script.async = true;
-    script.onload = () => resolve(globalThis.MathJax);
-    script.onerror = () => reject(new Error("MathJax failed to load."));
-    document.head.append(script);
-  });
-
-  return mathJaxLoadPromise;
-}
-
-async function typesetPreview(content, target = elements.preview) {
-  if (!hasMathMarkup(content)) {
-    return;
-  }
-
-  try {
-    const mathJax = await ensureMathJax();
-    if (mathJax?.typesetClear) {
-      mathJax.typesetClear([target]);
-    }
-    if (mathJax?.typesetPromise) {
-      await mathJax.typesetPromise([target]);
-    }
-  } catch {
-    // Preview still works without MathJax when offline or blocked.
-  }
-}
-
-function ensureOpenTabs(project) {
-  sourceOpenTabIds = sourceOpenTabIds.filter((fileId) => {
-    const node = project.nodes[fileId];
-    return node?.kind === "file";
-  });
-
-  previewOpenTabIds = previewOpenTabIds.filter((fileId) => {
-    const node = project.nodes[fileId];
-    return node?.kind === "file";
-  });
-
-  if (project.activeFileId && !sourceOpenTabIds.includes(project.activeFileId)) {
-    sourceOpenTabIds.push(project.activeFileId);
-  }
-
-  if (!project.activeFileId && sourceOpenTabIds.length > 0) {
-    sourceOpenTabIds = [];
-  }
-
-  // The diff tab is a valid preview target but not a project file — leave it be.
-  if (previewFileId === DIFF_TAB_ID) {
-    if (!diffState.active) {
-      previewFileId = previewOpenTabIds[previewOpenTabIds.length - 1] ?? null;
-    }
-  } else if (previewFileId) {
-    const previewNode = project.nodes[previewFileId];
-    if (previewNode?.kind !== "file") {
-      previewFileId = null;
-    }
-  }
-
-  if (previewFileId && previewFileId !== DIFF_TAB_ID && !previewOpenTabIds.includes(previewFileId)) {
-    previewOpenTabIds.push(previewFileId);
-  }
-
-  if (!previewFileId && previewOpenTabIds.length > 0) {
-    previewFileId = previewOpenTabIds[previewOpenTabIds.length - 1] ?? null;
-  }
-}
-
-function openSourceTab(fileId) {
-  const project = controller.getProject();
-  const node = project.nodes[fileId];
-  if (!node || node.kind !== "file") {
-    return;
-  }
-
-  if (!sourceOpenTabIds.includes(fileId)) {
-    sourceOpenTabIds.push(fileId);
-  }
-}
-
-function openPreviewTab(fileId) {
-  const project = controller.getProject();
-  const node = project.nodes[fileId];
-  if (!node || node.kind !== "file") {
-    return;
-  }
-
-  if (!previewOpenTabIds.includes(fileId)) {
-    previewOpenTabIds.push(fileId);
-  }
-}
-
-function setActiveSourceFile(fileId) {
-  captureViewState(); // resume-position: snapshot the outgoing document first
-  selectionNodeId = fileId;
-  sourceUrlDbEntry = null;
-  openSourceTab(fileId);
-  controller.setActiveFile(fileId);
-  scheduleSaveUserState();
-}
-
-// ---- Per-user resume: persist which files are open in a cloud workspace so
-// they can be restored on the next open/reconnect. Server-side, per account.
-function currentWorkspaceView() {
-  const project = controller.getProject();
-  const pathFor = id => project.nodes[id]?.kind === "file" ? getPath(project, id) : null;
-  return { openFiles: sourceOpenTabIds.map(pathFor).filter(Boolean), activeFile: pathFor(project.activeFileId) };
-}
-function cacheWorkspaceView() {
-  if (workspaceMode !== "synced" || !settings.syncedProjectId) return;
-  try {
-    localStorage.setItem("mdnotes.workspaceView.v1", JSON.stringify({
-      server: normalizeServerUrl(settings.serverUrl), workspace: settings.syncedProjectId,
-      ...currentWorkspaceView()
-    }));
-  } catch (error) { logDebug("response", "Resume cache failed", error.message); }
-}
-function cachedWorkspaceView(workspace) {
-  try {
-    const saved = JSON.parse(localStorage.getItem("mdnotes.workspaceView.v1"));
-    return saved?.server === normalizeServerUrl(settings.serverUrl) && saved.workspace === workspace ? saved : null;
-  } catch { return null; }
-}
-function showResumedFile(resume) {
-  restoreResumeState(resume);
-  if (!controller.getActiveFile()) {
-    const first = Object.values(controller.getProject().nodes).find(node => node.kind === "file");
-    if (first) setActiveSourceFile(first.id);
-  }
-}
-
-let saveUserStateTimer = null;
-function scheduleSaveUserState() {
-  cacheWorkspaceView();
-  if (workspaceMode !== "synced" || !syncState.account) return;
-  const ws = settings.lastWorkspace;
-  if (!ws?.team || ws.path == null) return;
-  if (saveUserStateTimer) clearTimeout(saveUserStateTimer);
-  saveUserStateTimer = setTimeout(() => {
-    saveUserStateTimer = null;
-    const project = controller.getProject();
-    const openFiles = sourceOpenTabIds
-      .map((id) => (project.nodes[id]?.kind === "file" ? getPath(project, id) : null))
-      .filter(Boolean);
-    const activeId = project.activeFileId;
-    const activeFile = activeId && project.nodes[activeId]?.kind === "file"
-      ? getPath(project, activeId)
-      : null;
-    saveUserState(settings.serverUrl, syncState.account.token, ws.team, ws.path, openFiles, activeFile)
-      .catch((error) => logDebug("response", "Save resume state failed", error.message));
-  }, 1200);
-}
-
-// Restore the tabs the user had open here last time (from the open response's
-// `resume`). Paths are resolved back to node ids in the freshly-pulled project.
-function restoreResumeState(resume) {
-  if (!resume || (!resume.openFiles?.length && !resume.activeFile)) return;
-  const project = controller.getProject();
-  const pathToId = new Map();
-  for (const node of Object.values(project.nodes)) {
-    if (node.kind === "file") pathToId.set(getPath(project, node.id), node.id);
-  }
-  const openIds = (resume.openFiles ?? [])
-    .map((path) => pathToId.get(path))
-    .filter(Boolean);
-  for (const id of openIds) openSourceTab(id);
-  const activeId = resume.activeFile ? pathToId.get(resume.activeFile) : null;
-  if (activeId) {
-    setActiveSourceFile(activeId);
-  } else if (openIds.length) {
-    setActiveSourceFile(openIds[0]);
-  }
-  if (openIds.length) {
-    render(controller.getProject());
-    logDebug("action", "Restored resume state", `${openIds.length} file(s)`);
-  }
-}
-
-function setActiveSourceUrlDbEntry(fileId, entryId) {
-  selectionNodeId = fileId;
-  sourceUrlDbEntry = { fileId, entryId };
-  openSourceTab(fileId);
-  controller.setActiveFile(fileId);
-}
-
-function setPreviewFile(fileId) {
-  const project = controller.getProject();
-  if (fileId === DIFF_TAB_ID) {
-    if (!diffState.active) return;
-    captureViewState();
-    previewFileId = DIFF_TAB_ID;
-    updateStatus(project);
-    return;
-  }
-  const node = project.nodes[fileId];
-  if (!node || node.kind !== "file") {
-    return;
-  }
-  captureViewState(); // resume-position: snapshot the outgoing preview first
-  openPreviewTab(fileId);
-  previewFileId = fileId;
-  previewUrlDbEntry = null;
-  updateStatus(project);
-}
-
-function openFileFromExplorer(fileId) {
-  const project = controller.getProject();
-  const node = project.nodes[fileId];
-  if (!node || node.kind !== "file") {
-    return;
-  }
-  logDebug("action", "File opened", getPath(project, fileId));
-  setActiveSourceFile(fileId);
-  showToast(`Opened ${node.name}`);
-  // On mobile the explorer is a flyout overlay — close it so the opened file
-  // is visible without an extra tap.
-  setMobileExplorerOpen(false);
-  if (isBmapFileName(node.name)) {
-    setPreviewFile(fileId);
-    if (settings.preview === "hidden") {
-      togglePreview();
-    }
-  } else if (previewFileId === null && isPreviewableFileName(node.name)) {
-    setPreviewFile(fileId);
-  }
-}
-
-function canOpenFileInPane(fileId, pane) {
-  const project = controller.getProject();
-  const node = project.nodes[fileId];
-  if (!node || node.kind !== "file") {
-    return false;
-  }
-
-  if (pane === "preview") {
-    return isPreviewableFileName(node.name);
-  }
-
-  return true;
-}
-
-function setPaneDropActive(pane, isActive) {
-  const target = pane === "preview" ? elements.previewPane : elements.sourcePane;
-  target.classList.toggle("is-drop-active", isActive);
-}
-
-function clearPaneDropState() {
-  elements.sourcePane.classList.remove("is-drop-active");
-  elements.previewPane.classList.remove("is-drop-active");
-}
 // ---- Explorer and file actions (./features/file-actions.js) ----
 // Created on first use. The module reads main's shared values through this
 // context, so it always sees their current values.
@@ -5981,38 +5791,6 @@ function bindExplorerDropTarget() {
   });
 }
 
-function openDroppedFileInPane(fileId, pane) {
-  if (!canOpenFileInPane(fileId, pane)) {
-    return;
-  }
-  if (pane === "preview") {
-    setPreviewFile(fileId);
-    logDebug("action", "File dropped into preview pane", getPath(controller.getProject(), fileId));
-    return;
-  }
-  setActiveSourceFile(fileId);
-  logDebug("action", "File dropped into source pane", getPath(controller.getProject(), fileId));
-}
-
-function openUrlDbEntryInPane(fileId, entryId, pane) {
-  const project = controller.getProject();
-  const file = project.nodes[fileId];
-  if (!file || file.kind !== "file" || !isUrlDbFileName(file.name)) {
-    return;
-  }
-
-  if (pane === "preview") {
-    openPreviewTab(fileId);
-    previewFileId = fileId;
-    previewUrlDbEntry = entryId;
-    updateStatus(project);
-    return;
-  }
-
-  setActiveSourceUrlDbEntry(fileId, entryId);
-  logDebug("action", "Bookmark entry dropped into source pane", `${getPath(project, fileId)} :: ${entryId}`);
-}
-
 async function saveActiveWorkspaceFile() {
   const saved = snapshotProject(controller.getProject());
   const scope = snapshotProjectKey();
@@ -6049,201 +5827,6 @@ async function handleSaveCommand() {
   await createSnapshotNow();
 }
 
-function bindPaneDropTarget(target, pane) {
-  // dragover: getData() is blocked by spec during dragover for security — use types instead.
-  target.addEventListener("dragover", (event) => {
-    const types = event.dataTransfer?.types ?? [];
-    const hasFile = types.includes("text/mdnotes-file-id");
-    const hasEntry = types.includes("text/mdnotes-urldb-entry");
-    if (!hasFile && !hasEntry) {
-      setPaneDropActive(pane, false);
-      return;
-    }
-    event.preventDefault();
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = "copy";
-    }
-    setPaneDropActive(pane, true);
-  });
-
-  target.addEventListener("dragleave", (event) => {
-    if (event.currentTarget?.contains(event.relatedTarget)) {
-      return;
-    }
-    setPaneDropActive(pane, false);
-  });
-
-  target.addEventListener("drop", (event) => {
-    setPaneDropActive(pane, false);
-    const fileId = event.dataTransfer?.getData("text/mdnotes-file-id");
-    const urlDbPayload = event.dataTransfer?.getData("text/mdnotes-urldb-entry");
-    logDebug("action", `Drop on ${pane} pane`, fileId ? `file=${fileId}` : `entry=${urlDbPayload}`);
-    if ((!fileId || !canOpenFileInPane(fileId, pane)) && !urlDbPayload) {
-      logDebug("response", `Drop on ${pane} pane rejected`, fileId ? `canOpen=${canOpenFileInPane(fileId, pane)}` : "no payload");
-      return;
-    }
-    event.preventDefault();
-    if (fileId && canOpenFileInPane(fileId, pane)) {
-      openDroppedFileInPane(fileId, pane);
-      return;
-    }
-
-    try {
-      const parsed = JSON.parse(urlDbPayload);
-      openUrlDbEntryInPane(parsed.fileId, parsed.entryId, pane);
-    } catch {
-      logDebug("response", `Drop on ${pane} pane: malformed urldb payload`);
-    }
-  });
-}
-
-function closeSourceTab(fileId) {
-  const project = controller.getProject();
-  const wasActive = project.activeFileId === fileId;
-  sourceOpenTabIds = sourceOpenTabIds.filter((tabId) => tabId !== fileId);
-  scheduleSaveUserState();
-
-  if (!wasActive) {
-    updateStatus(project);
-    return;
-  }
-
-  const fallbackId = sourceOpenTabIds[sourceOpenTabIds.length - 1] ?? null;
-  if (fallbackId) {
-    selectionNodeId = fallbackId;
-    controller.setActiveFile(fallbackId);
-    return;
-  }
-
-  const nextProject = structuredClone(project);
-  nextProject.activeFileId = null;
-  controller.replaceProject(nextProject);
-}
-
-function closePreviewTab(fileId) {
-  previewOpenTabIds = previewOpenTabIds.filter((tabId) => tabId !== fileId);
-  if (previewFileId === fileId) {
-    previewFileId = previewOpenTabIds[previewOpenTabIds.length - 1] ?? null;
-  }
-  updateStatus(controller.getProject());
-}
-
-function moveTabWithinList(tabIds, draggedFileId, targetFileId, placeAfter = false) {
-  const next = tabIds.filter((tabId) => tabId !== draggedFileId);
-  const targetIndex = next.indexOf(targetFileId);
-  if (targetIndex < 0) {
-    next.push(draggedFileId);
-    return next;
-  }
-
-  next.splice(targetIndex + (placeAfter ? 1 : 0), 0, draggedFileId);
-  return next;
-}
-
-function reorderPaneTabs(pane, draggedFileId, targetFileId, placeAfter = false) {
-  if (pane === "source") {
-    sourceOpenTabIds = moveTabWithinList(sourceOpenTabIds, draggedFileId, targetFileId, placeAfter);
-  } else {
-    previewOpenTabIds = moveTabWithinList(previewOpenTabIds, draggedFileId, targetFileId, placeAfter);
-  }
-
-  renderTabs(controller.getProject());
-}
-
-// The tab strips scroll instead of squeezing tabs down to unreadable slivers, so
-// a "⋯" button at the end lists EVERY open tab (activate or close from there).
-// renderTabStrip records what it drew here so the menu can rebuild the same list.
-const tabStripState = { source: null, preview: null };
-
-function tabOverflowButton(pane) {
-  return pane === "source" ? elements.sourceTabOverflow : elements.previewTabOverflow;
-}
-
-function closeTabOverflowMenu() {
-  const menu = elements.tabOverflowMenu;
-  if (menu) menu.hidden = true;
-  for (const pane of ["source", "preview"]) {
-    const btn = tabOverflowButton(pane);
-    btn?.classList.remove("is-open");
-    btn?.setAttribute("aria-expanded", "false");
-  }
-}
-
-// Build the "all open tabs" list for one pane from the last render's descriptor.
-function openTabOverflowMenu(pane) {
-  const menu = elements.tabOverflowMenu;
-  const button = tabOverflowButton(pane);
-  const state = tabStripState[pane];
-  if (!menu || !button || !state) return;
-
-  const rows = [];
-  for (const fileId of state.tabIds) {
-    const node = state.project?.nodes?.[fileId];
-    if (!node || node.kind !== "file") continue;
-    rows.push({
-      label: node.name,
-      title: getPath(state.project, fileId),
-      active: state.activeFileId === fileId,
-      activate: () => state.onActivate(fileId),
-      close: () => state.onClose(fileId)
-    });
-  }
-  for (const spec of state.extraTabs ?? []) {
-    rows.push({
-      label: spec.label,
-      title: spec.title || spec.label,
-      active: state.activeFileId === spec.id,
-      activate: () => spec.onActivate(),
-      close: () => spec.onClose()
-    });
-  }
-  if (!rows.length) {
-    closeTabOverflowMenu();
-    return;
-  }
-
-  menu.replaceChildren(...rows.map((row) => {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.setAttribute("role", "menuitem");
-    item.className = `tab-overflow-row${row.active ? " is-active" : ""}`;
-    item.title = row.title;
-
-    const name = document.createElement("span");
-    name.className = "tab-overflow-name";
-    name.textContent = row.label;
-
-    const close = document.createElement("span");
-    close.className = "tab-overflow-close";
-    close.textContent = "\u00d7";
-    close.setAttribute("aria-hidden", "true");
-
-    item.append(name, close);
-    item.addEventListener("click", (event) => {
-      if (event.target === close) {
-        event.stopPropagation();
-        row.close();
-        renderTabs(controller.getProject());
-        openTabOverflowMenu(pane); // keep the list open so several can be closed
-        return;
-      }
-      row.activate();
-      closeTabOverflowMenu();
-    });
-    return item;
-  }));
-
-  // Anchor under the button, right-aligned, clamped to the viewport.
-  menu.hidden = false;
-  const rect = button.getBoundingClientRect();
-  const width = menu.offsetWidth || 240;
-  const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
-  menu.style.left = `${left}px`;
-  menu.style.top = `${rect.bottom + 4}px`;
-  button.classList.add("is-open");
-  button.setAttribute("aria-expanded", "true");
-}
-
 for (const pane of ["source", "preview"]) {
   tabOverflowButton(pane)?.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -6261,533 +5844,6 @@ document.addEventListener("click", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !elements.tabOverflowMenu?.hidden) closeTabOverflowMenu();
 });
-
-function renderTabStrip({ strip, pane, project, tabIds, activeFileId, emptyText, onActivate, onClose, allowReorder = false, extraTabs = [] }) {
-  strip.replaceChildren();
-
-  // Record what we're drawing so the "⋯" overflow menu can list the same tabs,
-  // and show that button only when this pane actually has tabs.
-  tabStripState[pane] = { project, tabIds, activeFileId, onActivate, onClose, extraTabs };
-  const overflowBtn = tabOverflowButton(pane);
-  if (overflowBtn) overflowBtn.hidden = (tabIds.length + extraTabs.length) === 0;
-
-  if (tabIds.length === 0 && extraTabs.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "editor-tab is-empty";
-    empty.textContent = emptyText;
-    strip.append(empty);
-    return;
-  }
-
-  tabIds.forEach((fileId) => {
-    const file = project.nodes[fileId];
-    if (!file || file.kind !== "file") {
-      return;
-    }
-
-    const tab = document.createElement("button");
-    tab.type = "button";
-    tab.className = `editor-tab${activeFileId === fileId ? " is-active" : ""}`;
-    tab.dataset.fileId = fileId;
-    tab.title = getPath(project, fileId);
-    tab.draggable = allowReorder;
-
-    const icon = document.createElement("span");
-    icon.className = "tab-file-icon";
-    icon.setAttribute("aria-hidden", "true");
-
-    const title = document.createElement("span");
-    title.className = "tab-title";
-    title.textContent = file.name;
-
-    const dirty = document.createElement("span");
-    dirty.className = `tab-dirty${file.dirty ? " is-dirty" : ""}`;
-    dirty.textContent = file.dirty ? "●" : "";
-
-    const close = document.createElement("span");
-    close.className = "tab-close";
-    close.textContent = "×";
-    close.setAttribute("aria-hidden", "true");
-
-    const filePath = getPath(project, fileId);
-    if (agentPendingDecorations.has(filePath)) {
-      const badge = document.createElement("span");
-      badge.className = "tab-agent-badge";
-      badge.title = "Pending agent edit — review in chat";
-      tab.append(icon, title, badge, dirty, close);
-    } else {
-      tab.append(icon, title, dirty, close);
-    }
-    tab.addEventListener("click", () => onActivate(fileId));
-    if (allowReorder) {
-      tab.addEventListener("dragstart", (event) => {
-        draggingTabState = { pane, fileId };
-        event.dataTransfer?.setData("text/mdnotes-tab", JSON.stringify(draggingTabState));
-        if (event.dataTransfer) {
-          event.dataTransfer.effectAllowed = "move";
-        }
-      });
-      tab.addEventListener("dragend", () => {
-        draggingTabState = null;
-      });
-      tab.addEventListener("dragover", (event) => {
-        if (draggingTabState?.pane !== pane || draggingTabState.fileId === fileId) {
-          return;
-        }
-        event.preventDefault();
-      });
-      tab.addEventListener("drop", (event) => {
-        if (draggingTabState?.pane !== pane || draggingTabState.fileId === fileId) {
-          return;
-        }
-        event.preventDefault();
-        const rect = tab.getBoundingClientRect();
-        const placeAfter = event.clientX > rect.left + (rect.width / 2);
-        reorderPaneTabs(pane, draggingTabState.fileId, fileId, placeAfter);
-      });
-    }
-    close.addEventListener("click", (event) => {
-      event.stopPropagation();
-      onClose(fileId);
-    });
-    strip.append(tab);
-  });
-
-  // Special (non-file) tabs — e.g. the preview diff view. Rendered after the file
-  // tabs; not draggable/reorderable, but activate + close like any other tab.
-  extraTabs.forEach((spec) => {
-    const tab = document.createElement("button");
-    tab.type = "button";
-    tab.className = `editor-tab${activeFileId === spec.id ? " is-active" : ""}`;
-    tab.dataset.tabId = spec.id;
-    tab.title = spec.title || spec.label;
-
-    const icon = document.createElement("span");
-    icon.className = `tab-file-icon ${spec.iconClass || ""}`.trim();
-    icon.setAttribute("aria-hidden", "true");
-    if (spec.iconText) icon.textContent = spec.iconText;
-
-    const title = document.createElement("span");
-    title.className = "tab-title";
-    title.textContent = spec.label;
-
-    const close = document.createElement("span");
-    close.className = "tab-close";
-    close.textContent = "×";
-    close.setAttribute("aria-hidden", "true");
-
-    tab.append(icon, title, close);
-    tab.addEventListener("click", () => spec.onActivate());
-    close.addEventListener("click", (event) => {
-      event.stopPropagation();
-      spec.onClose();
-    });
-    strip.append(tab);
-  });
-
-  // The strip scrolls now, so the active tab can sit off-screen after a switch.
-  // Nudge it into view without disturbing any other scroll container.
-  const activeTab = strip.querySelector(".editor-tab.is-active");
-  if (activeTab) {
-    const left = activeTab.offsetLeft;
-    const right = left + activeTab.offsetWidth;
-    if (left < strip.scrollLeft) {
-      strip.scrollLeft = left;
-    } else if (right > strip.scrollLeft + strip.clientWidth) {
-      strip.scrollLeft = right - strip.clientWidth;
-    }
-  }
-}
-
-function renderTabs(project) {
-  renderTabStrip({
-    strip: elements.sourceTabStrip,
-    pane: "source",
-    project,
-    tabIds: sourceOpenTabIds,
-    activeFileId: project.activeFileId,
-    emptyText: "No source file selected",
-    onActivate: setActiveSourceFile,
-    onClose: closeSourceTab,
-    allowReorder: true
-  });
-
-  const previewExtraTabs = diffState.active
-    ? [{
-        id: DIFF_TAB_ID,
-        label: diffState.path.split("/").pop(),
-        title: `Diff: ${diffState.path} — current vs ${formatSnapshotTime(diffState.createdAt)}`,
-        iconText: "±",
-        iconClass: "tab-diff-icon",
-        onActivate: () => setPreviewFile(DIFF_TAB_ID),
-        onClose: closeDiff
-      }]
-    : [];
-  renderTabStrip({
-    strip: elements.previewTabStrip,
-    pane: "preview",
-    project,
-    tabIds: previewOpenTabIds,
-    activeFileId: previewFileId,
-    emptyText: "No preview file selected",
-    onActivate: setPreviewFile,
-    onClose: closePreviewTab,
-    allowReorder: true,
-    extraTabs: previewExtraTabs
-  });
-}
-
-function bindTabStripReorderTarget(strip, pane) {
-  strip.addEventListener("dragover", (event) => {
-    if (draggingTabState?.pane !== pane) {
-      return;
-    }
-    event.preventDefault();
-  });
-
-  strip.addEventListener("drop", (event) => {
-    if (draggingTabState?.pane !== pane) {
-      return;
-    }
-    const targetTab = event.target.closest(".editor-tab[data-file-id]");
-    if (targetTab) {
-      return;
-    }
-
-    event.preventDefault();
-    const targetList = pane === "source" ? sourceOpenTabIds : previewOpenTabIds;
-    const draggedId = draggingTabState.fileId;
-    const next = targetList.filter((tabId) => tabId !== draggedId);
-    next.push(draggedId);
-    if (pane === "source") {
-      sourceOpenTabIds = next;
-    } else {
-      previewOpenTabIds = next;
-    }
-    renderTabs(controller.getProject());
-  });
-}
-
-function renderUrlDbTable(target, file) {
-  const entries = getUrlDbEntries(file.content);
-  const frame = document.createElement("div");
-  frame.className = "urldb-preview";
-
-  if (entries.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "editor-readonly-note";
-    empty.textContent = "No valid bookmark entries yet. Add sections like [Name] and url = https://...";
-    frame.append(empty);
-    target.append(frame);
-    return { shouldTypeset: false, content: "" };
-  }
-
-  const table = document.createElement("table");
-  table.className = "urldb-table";
-  table.innerHTML = "<thead><tr><th>Preview</th><th>Name</th><th>URL</th><th>Description</th></tr></thead>";
-  const body = document.createElement("tbody");
-
-  entries.forEach((entry) => {
-    const row = document.createElement("tr");
-    row.innerHTML = `<td><img src="${escapeHtmlAttribute(entry.url)}" alt="${escapeHtmlAttribute(entry.name)}"></td><td>${escapeEditorHtml(entry.name)}</td><td><a href="${escapeHtmlAttribute(entry.url)}" target="_blank" rel="noreferrer">${escapeEditorHtml(entry.url)}</a></td><td>${escapeEditorHtml(entry.description || "")}</td>`;
-    body.append(row);
-  });
-
-  table.append(body);
-  frame.append(table);
-  target.append(frame);
-  return { shouldTypeset: false, content: "" };
-}
-
-function renderUrlDbEntryPreview(target, file, entryId) {
-  const entry = getUrlDbEntryById(file.content, entryId);
-  if (!entry) {
-    previewUrlDbEntry = null;
-    return renderUrlDbTable(target, file);
-  }
-
-  const frame = document.createElement("div");
-  frame.className = "asset-preview remote-asset-preview";
-
-  const image = document.createElement("img");
-  image.src = entry.url;
-  image.alt = entry.name;
-  frame.append(image);
-
-  const meta = document.createElement("div");
-  meta.className = "remote-asset-meta";
-  meta.innerHTML = `<strong>${escapeEditorHtml(entry.name)}</strong><span>${escapeEditorHtml(entry.description || entry.url)}</span>`;
-  frame.append(meta);
-
-  target.append(frame);
-  return { shouldTypeset: false, content: "" };
-}
-
-// Inputs of the last markdown/mtree preview render. Those previews are pure
-// functions of the file's text, the project's paths (link resolution) and the
-// connection (asset URLs) — so when none of that changed, the DOM already shows
-// the right thing. Every app render used to rebuild it regardless: a 90k-char
-// chapter is ~11k nodes, rebuilt and re-laid-out for a presence ping, a
-// collaborator's keystroke, or typing in a DIFFERENT file than the one previewed.
-// Any other kind of preview clears the key, so returning to a file re-renders.
-let previewRenderKey = null;
-
-function previewRenderKeyFor(project, file) {
-  const structure = Object.values(project.nodes)
-    .map((node) => `${node.id}/${node.parentId ?? ""}/${node.name}`)
-    .join("|");
-  const token = workspaceMode === "synced" ? (collaboration.getConnectionInfo?.()?.token ?? "") : "";
-  return `${file.id}\u0000${file.name}\u0000${workspaceMode}\u0000${token}\u0000${structure}\u0000${file.content}`;
-}
-
-function renderPreviewContent(target, project, file) {
-  const pureTextPreview = file && !isImageFileName(file.name) && !isUrlDbFileName(file.name)
-    && !isBmapFileName(file.name);
-  const key = pureTextPreview ? previewRenderKeyFor(project, file) : null;
-  if (key !== null && key === previewRenderKey && target.childNodes.length > 0) {
-    return { shouldTypeset: false, content: "" };
-  }
-  previewRenderKey = key;
-  target.replaceChildren();
-
-  if (!file) {
-    return { shouldTypeset: false, content: "" };
-  }
-
-  if (isImageFileName(file.name)) {
-    const frame = document.createElement("div");
-    frame.className = "asset-preview";
-    const image = document.createElement("img");
-    image.src = imageSrcFor(project, file);
-    image.alt = file.name;
-    frame.append(image);
-    target.append(frame);
-    return { shouldTypeset: false, content: "" };
-  }
-
-  if (isUrlDbFileName(file.name)) {
-    if (previewUrlDbEntry && previewFileId === file.id) {
-      return renderUrlDbEntryPreview(target, file, previewUrlDbEntry);
-    }
-    return renderUrlDbTable(target, file);
-  }
-
-  if (file.name.endsWith(".mtree")) {
-    target.innerHTML = `<pre><code>${escapeEditorHtml(file.content)}</code></pre>`;
-    return { shouldTypeset: false, content: "" };
-  }
-
-  if (isBmapFileName(file.name)) {
-    if (!bmapViewModule) {
-      target.innerHTML = `<div class="preview-loading">Loading diagram…</div>`;
-      loadBmapView().then(() => {
-        if (previewFileId === file.id) render(controller.getProject());
-      }).catch((error) => {
-        if (previewFileId !== file.id) return;
-        target.innerHTML = `<div class="preview-loading">The diagram editor could not load. Check your connection, then reopen the file.</div>`;
-        logDebug("error", "Diagram editor failed to load", error.message);
-      });
-      return { shouldTypeset: false, content: "" };
-    }
-    if (!previewBmapView) {
-      previewBmapView = bmapViewModule.createBmapView({ container: target });
-    }
-    const basePath = getPath(project, file.id);
-    previewBmapView.render({
-      documentKey: file.id,
-      source: file.content,
-      initialView: getViewState(file.id)?.bmap ?? null,
-      onOpenLinkedFile(filePath) {
-        const baseSegments = basePath.split("/").filter(Boolean);
-        baseSegments.pop();
-        const resolvedPath = normalizePath([...baseSegments, filePath].join("/"));
-        const nodeId = getNodeIdByPath(project, resolvedPath);
-        if (nodeId) {
-          openFileFromExplorer(nodeId);
-        }
-      },
-      resolveFileContent(filePath) {
-        const baseSegments = basePath.split("/").filter(Boolean);
-        baseSegments.pop();
-        const resolvedPath = normalizePath([...baseSegments, filePath].join("/"));
-        const nodeId = getNodeIdByPath(project, resolvedPath);
-        if (!nodeId) {
-          return null;
-        }
-        const node = project.nodes[nodeId];
-        return node?.kind === "file" ? (node.content ?? null) : null;
-      },
-      listProjectFiles() {
-        return Object.values(project.nodes)
-          .filter((node) => node?.kind === "file" && node.id !== file.id)
-          .map((node) => {
-            const path = getPath(project, node.id);
-            return {
-              fileId: node.id,
-              kind: isImageFileName(node.name) ? "image" : "file",
-              label: path,
-              path: getRelativeProjectPath(basePath, path)
-            };
-          })
-          .sort((left, right) => left.label.localeCompare(right.label));
-      },
-      resolveRelativeFilePath(targetFileId) {
-        const targetNode = project.nodes[targetFileId];
-        if (!targetNode || targetNode.kind !== "file" || targetNode.id === file.id) {
-          return null;
-        }
-        return getRelativeProjectPath(basePath, getPath(project, targetNode.id));
-      },
-      onCommit(nextSource, detail) {
-        updateFileContentFromPreview(file.id, nextSource, detail?.reason ?? "bmap preview edit");
-      },
-      generateScope: settings.bmapGenerateScope,
-      autoPan: settings.bmapAutoPan,
-      onQuickGenerate(request) {
-        return quickGenerateBmapFile(file.id, request);
-      },
-      logDebug,
-    });
-    return { shouldTypeset: false, content: "" };
-  }
-
-  // A character sheet previews as a card (avatar, name, @handle) over its body,
-  // instead of showing the raw header lines as text.
-  const persona = isPersonaFileName(file.name) ? parsePersona(file.content, getPath(project, file.id)) : null;
-  const personaCard = persona
-    ? `<div class="persona-card" style="--persona-color:${escapeHtmlAttribute(persona.color)}">
-        ${personaAvatarHtml(persona, personaAvatarSrc(project, file.id, persona.avatar), "persona-avatar persona-card-avatar")}
-        <div class="persona-card-text">
-          <div class="persona-card-name">${escapeHtmlAttribute(persona.name)}</div>
-          <div class="persona-card-meta">@${escapeHtmlAttribute(persona.handle)} · Character for the Roleplay chat</div>
-        </div>
-      </div>`
-    : "";
-  target.innerHTML = personaCard + renderMarkdown(persona ? persona.body : file.content, {
-    resolveUrl(url) {
-      return resolveProjectAssetUrl(project, file.id, url);
-    },
-    resolveLink(token) {
-      const url = token.href;
-      if (token.type === "image") {
-        return resolveProjectAssetUrl(project, file.id, url);
-      }
-      if (/^(https?:\/\/|mailto:|data:|blob:)/i.test(url)) {
-        return { href: url, external: true };
-      }
-      if (url.startsWith("#")) {
-        return { href: url, external: false };
-      }
-      const basePath = getPath(project, file.id);
-      const baseSegments = basePath.split("/").filter(Boolean);
-      baseSegments.pop();
-      const resolvedPath = normalizePath([...baseSegments, url].join("/"));
-      const nodeId = getNodeIdByPath(project, resolvedPath);
-      if (nodeId) {
-        return { href: "#", external: false, attributes: { "data-open-file-id": nodeId } };
-      }
-      return { href: "#", external: false, attributes: { "data-unresolved-link": url } };
-    }
-  });
-
-  return { shouldTypeset: true, content: file.content };
-}
-
-function printPreviewAsPdf() {
-  const project = controller.getProject();
-  const previewFile = previewFileId ? project.nodes[previewFileId] : null;
-  if (!previewFile) {
-    notify("Open a markdown or image file before exporting PDF.");
-    return;
-  }
-
-  const printFrame = document.createElement("iframe");
-  printFrame.setAttribute("aria-hidden", "true");
-  printFrame.style.position = "fixed";
-  printFrame.style.right = "0";
-  printFrame.style.bottom = "0";
-  printFrame.style.width = "0";
-  printFrame.style.height = "0";
-  printFrame.style.border = "0";
-  printFrame.style.opacity = "0";
-  printFrame.style.pointerEvents = "none";
-  document.body.append(printFrame);
-
-  const printWindow = printFrame.contentWindow;
-  if (!printWindow) {
-    printFrame.remove();
-    notify("Unable to prepare PDF export in this browser.");
-    return;
-  }
-
-  const previewHtml = isImageFileName(previewFile.name)
-    ? `<div class="asset-preview"><img src="${escapeHtmlAttribute(previewFile.content)}" alt="${escapeHtmlAttribute(previewFile.name)}"></div>`
-    : isUrlDbFileName(previewFile.name)
-      ? elements.preview.innerHTML
-    : previewFile.name.endsWith(".mtree")
-      ? `<pre><code>${escapeEditorHtml(previewFile.content)}</code></pre>`
-    : renderMarkdown(previewFile.content, {
-      resolveUrl(url) {
-        return resolveProjectAssetUrl(project, previewFile.id, url);
-      }
-    });
-  const title = previewFile.name.replace(/\.md$/i, "") || "MDNotes";
-  const includeMath = isMarkdownFileName(previewFile.name) && hasMathMarkup(previewFile.content);
-
-  const cleanupPrintFrame = () => {
-    globalThis.setTimeout(() => {
-      printFrame.remove();
-    }, 250);
-  };
-
-  printWindow.document.write(`<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <title>${title}</title>
-    <style>
-      body { font-family: "Segoe UI", sans-serif; margin: 32px; color: #1f1f1f; line-height: 1.6; }
-      pre, code { font-family: "Cascadia Code", Consolas, monospace; }
-      pre { padding: 12px; background: #f5f5f5; border: 1px solid #ddd; overflow: auto; }
-      code { background: #f5f5f5; padding: 1px 4px; }
-      blockquote { margin: 0; padding-left: 12px; border-left: 3px solid #0e639c; color: #555; }
-      table { width: 100%; border-collapse: collapse; }
-      th, td { padding: 6px 8px; border: 1px solid #ddd; }
-      img { display: block; max-width: 100%; height: auto; }
-      mjx-container { break-inside: avoid; page-break-inside: avoid; }
-      mjx-container[jax="SVG"] { overflow: visible; }
-      mjx-container[jax="SVG"] > svg { max-width: 100%; }
-      @page { size: A4; margin: 14mm; }
-    </style>
-    ${includeMath ? '<script>window.MathJax={tex:{inlineMath:[["$","$"],["\\(","\\)"]],displayMath:[["$$","$$"],["\\[","\\]"]]},svg:{fontCache:"global"},startup:{typeset:false}};<\/script><script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"><\/script>' : ""}
-  </head>
-  <body>
-    <main id="print-root">${previewHtml}</main>
-  </body>
-</html>`);
-  printWindow.document.close();
-
-  const finalizePrint = () => {
-    printWindow.addEventListener("afterprint", cleanupPrintFrame, { once: true });
-    printWindow.focus();
-    printWindow.print();
-    globalThis.setTimeout(cleanupPrintFrame, 1500);
-  };
-
-  if (includeMath) {
-    const waitForMath = () => {
-      if (printWindow.MathJax?.typesetPromise) {
-        printWindow.MathJax.typesetPromise([printWindow.document.getElementById("print-root")]).finally(finalizePrint);
-        return;
-      }
-      printWindow.setTimeout(waitForMath, 120);
-    };
-    printWindow.setTimeout(waitForMath, 120);
-    return;
-  }
-
-  printWindow.setTimeout(finalizePrint, 80);
-}
 
 // ── Collapsible sidebar sections (Linked Notes / Session) ───────────────────
 // Collapsed state is per-panel and persisted. Until the user has touched one,
