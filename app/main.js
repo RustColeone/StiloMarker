@@ -8,7 +8,7 @@ import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandl
 import { supportsOpfs, listOpfsDir, mkdirOpfs, createProjectOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs, deleteOpfsEntry, exportProjectModelOpfs, importProjectModelOpfs } from "./services/opfs-service.js";
 import { createCollaborationRuntime } from "./services/collaboration-service.js";
 import { sendGenerationRequest } from "./services/chat-api-service.js";
-import { extractMarkdownLinks, renderMarkdown } from "./services/markdown-service.js";
+import { renderMarkdown } from "./services/markdown-service.js";
 import { PERSONA_SUFFIX, parsePersona, personaTemplate } from "./services/persona-service.js";
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
 import { applyEditorFont, applyTheme, clampSourceFontSize, loadSettings, patchStoredSettings, saveSettings } from "./services/settings-service.js";
@@ -27,6 +27,10 @@ import { createCloudBrowser } from "./features/cloud-browser.js";
 import { createFileActions } from "./features/file-actions.js";
 import { createPanes } from "./features/panes.js";
 import { createLayout } from "./ui/layout.js";
+import { createHighlighter } from "./editor/highlight.js";
+import { createFindReplace } from "./editor/find-replace.js";
+import { createAutocomplete } from "./editor/autocomplete.js";
+import { createLinks } from "./editor/links.js";
 
 document.querySelectorAll("[data-app-version]").forEach((label) => { label.textContent = `v${APP_VERSION}`; });
 
@@ -1385,472 +1389,29 @@ function getRelativePath(fromPath, toPath) {
   const relative = [...upSegments, ...downSegments].join("/");
   return relative || "./";
 }
-
-function buildProjectFileSuggestions(project, activeFileId, kind = "path") {
-  const activePath = activeFileId ? getPath(project, activeFileId) : "";
-  return Object.values(project.nodes)
-    .filter((node) => node.kind === "file")
-    .filter((node) => node.id !== activeFileId)
-    .filter((node) => {
-      if (kind === "image") {
-        return isImageFileName(node.name);
-      }
-      return true;
-    })
-    .map((node) => {
-      const fullPath = getPath(project, node.id);
-      return {
-        fileId: node.id,
-        fullPath,
-        insertText: getRelativePath(activePath, fullPath),
-        label: node.name,
-        detail: fullPath,
-        kind: isImageFileName(node.name) ? "image" : (node.name.endsWith(".md") ? "note" : "file")
-      };
-    })
-    .sort((left, right) => left.detail.localeCompare(right.detail));
+// ---- Source autocomplete (./editor/autocomplete.js) ----
+// Created on first use. The module reads main's shared values through this
+// context, so it always sees their current values. `var`: a forwarding
+// function can run during startup, before this line is reached.
+var autocompleteInstance;
+function autocomplete() {
+  return (autocompleteInstance ??= createAutocomplete({
+    get autocompleteState() { return autocompleteState; },
+    get controller() { return controller; },
+    get elements() { return elements; },
+    get escapeEditorHtml() { return escapeEditorHtml; },
+    get getEditorSelection() { return getEditorSelection; },
+    get getEditorText() { return getEditorText; },
+    get getRelativePath() { return getRelativePath; },
+    get logDebug() { return logDebug; },
+    get replaceEditorRange() { return replaceEditorRange; }
+  }));
 }
+function acceptEditorAutocomplete(...args) { return autocomplete().acceptEditorAutocomplete(...args); }
+function hideEditorAutocomplete(...args) { return autocomplete().hideEditorAutocomplete(...args); }
+function renderEditorAutocomplete(...args) { return autocomplete().renderEditorAutocomplete(...args); }
+function showEditorAutocomplete(...args) { return autocomplete().showEditorAutocomplete(...args); }
 
-/** General word completion: suggest words already present in the document that
- *  share the typed prefix, ranked by frequency. Makes the popup useful beyond
- *  link/path contexts, like an editor's basic word-based IntelliSense. */
-function buildWordSuggestions(text, token) {
-  const prefix = token.toLowerCase();
-  const counts = new Map();
-  const wordPattern = /[A-Za-z][A-Za-z0-9_-]{2,}/g;
-  let match;
-  while ((match = wordPattern.exec(text)) !== null) {
-    const word = match[0];
-    const lower = word.toLowerCase();
-    if (lower === prefix || !lower.startsWith(prefix)) continue;
-    counts.set(word, (counts.get(word) ?? 0) + 1);
-  }
-  return Array.from(counts.entries())
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-    .slice(0, 10)
-    .map(([word, count]) => ({
-      insertText: word,
-      label: word,
-      detail: count > 1 ? `${count}×` : "word",
-      kind: "word"
-    }));
-}
-
-// ── .bmap autocomplete helpers ──────────────────────────────────────────────
-
-/** Determine block depth and type at a given cursor position in a .bmap source. */
-function findBmapBlockContext(before) {
-  let depth = 0;
-  let currentBlockType = null;
-  const re = /\.(node|connect)\s*\{|\{|\}/g;
-  let m;
-  while ((m = re.exec(before)) !== null) {
-    if (m[1]) {
-      if (depth === 0) currentBlockType = m[1];
-      depth++;
-    } else if (m[0] === "{") {
-      depth++;
-    } else {
-      depth--;
-      if (depth <= 0) { depth = 0; currentBlockType = null; }
-    }
-  }
-  return { depth, blockType: currentBlockType, inStylesBlock: depth >= 2 };
-}
-
-/** Build an autocomplete context object for .bmap files. */
-function findBmapAutocompleteContext(force) {
-  const value = getEditorText();
-  const cursor = getEditorSelection().start;
-  const before = value.slice(0, cursor);
-  const lineStart = before.lastIndexOf("\n") + 1;
-  const linePrefix = before.slice(lineStart);
-  const trimmedPrefix = linePrefix.trimStart();
-  const { depth, blockType, inStylesBlock } = findBmapBlockContext(before);
-
-  // Inside styles sub-block (depth >= 2)
-  if (inStylesBlock) {
-    const styleKvMatch = linePrefix.match(/^\s*([\w-]+)\s*:\s*(\w*)$/);
-    if (styleKvMatch) {
-      const key = styleKvMatch[1].toLowerCase();
-      const token = styleKvMatch[2];
-      if (key === "mode")   return { kind: "bmap-mode-value",   token, start: cursor - token.length, end: cursor };
-      if (key === "arrow")  return { kind: "bmap-arrow-value",  token, start: cursor - token.length, end: cursor };
-      if (key === "dashed") return { kind: "bmap-dashed-value", token, start: cursor - token.length, end: cursor };
-    }
-    const propKeyMatch = linePrefix.match(/^\s*([\w-]*)$/);
-    if (propKeyMatch && (propKeyMatch[1] || force)) {
-      const token = propKeyMatch[1];
-      return { kind: "bmap-style-prop", token, start: cursor - token.length, end: cursor };
-    }
-    return null;
-  }
-
-  // Inside a .node or .connect block (depth === 1)
-  if (depth === 1 && blockType) {
-    if (blockType === "connect") {
-      const sideIdxMatch = linePrefix.match(/^\s*(from|to)\s*:\s*\S+\.side\.(\d*)$/);
-      if (sideIdxMatch) {
-        const token = sideIdxMatch[2];
-        return { kind: "bmap-side-index", token, start: cursor - token.length, end: cursor };
-      }
-      const sideKeyMatch = linePrefix.match(/^\s*(from|to)\s*:\s*\S+\.(\w*)$/);
-      if (sideKeyMatch) {
-        const token = sideKeyMatch[2];
-        return { kind: "bmap-side-key", token, start: cursor - token.length, end: cursor };
-      }
-      const endpointMatch = linePrefix.match(/^\s*(from|to)\s*:\s*([A-Za-z0-9_-]*)$/);
-      if (endpointMatch) {
-        const token = endpointMatch[2];
-        return { kind: "bmap-endpoint-node", token, start: cursor - token.length, end: cursor };
-      }
-    }
-    const shapeMatch = linePrefix.match(/^\s*shape\s*:\s*(\w*)$/);
-    if (shapeMatch) {
-      const token = shapeMatch[1];
-      return { kind: "bmap-shape-value", token, start: cursor - token.length, end: cursor };
-    }
-    if (blockType === "node") {
-      const fileMatch = linePrefix.match(/^\s*file\s*:\s*(.*)$/);
-      if (fileMatch) {
-        const token = fileMatch[1];
-        return { kind: "bmap-file-value", token, start: cursor - token.length, end: cursor };
-      }
-    }
-    const propKeyMatch = linePrefix.match(/^\s*([\w-]*)$/);
-    if (propKeyMatch && (propKeyMatch[1] || force)) {
-      const token = propKeyMatch[1];
-      const kind = blockType === "node" ? "bmap-node-prop" : "bmap-connect-prop";
-      return { kind, token, start: cursor - token.length, end: cursor };
-    }
-    return null;
-  }
-
-  // Top level (depth === 0): suggest block types after a leading "."
-  if (depth === 0) {
-    const blockTypeMatch = linePrefix.match(/^\s*\.(\w*)$/);
-    if (blockTypeMatch) {
-      const token = blockTypeMatch[1];
-      return { kind: "bmap-block-type", token, start: cursor - token.length, end: cursor };
-    }
-    if (force && !trimmedPrefix) {
-      return { kind: "bmap-block-type", token: "", start: cursor, end: cursor };
-    }
-  }
-
-  return null;
-}
-
-const BMAP_AUTOCOMPLETE_LABELS = {
-  "bmap-block-type":    "Block type",
-  "bmap-node-prop":     "Node properties",
-  "bmap-connect-prop":  "Connect properties",
-  "bmap-style-prop":    "Style properties",
-  "bmap-shape-value":   "Shape",
-  "bmap-mode-value":    "Connector mode",
-  "bmap-arrow-value":   "Arrow style",
-  "bmap-dashed-value":  "Dashed line",
-  "bmap-side-key":      "Side segment",
-  "bmap-side-index":    "Side — 0 top · 1 right · 2 bottom · 3 left",
-  "bmap-endpoint-node": "Node ID",
-  "bmap-file-value":    "Project files",
-};
-
-function getBmapAutocompleteItems(context, project, activeFile) {
-  const token = context.token.toLowerCase();
-  const filter = (items) =>
-    items.filter((item) => !token || item.label.toLowerCase().startsWith(token) || item.insertText.toLowerCase().startsWith(token));
-
-  switch (context.kind) {
-    case "bmap-block-type":
-      return filter([
-        { label: "node",    detail: "Diagram node — id, name, pos, shape, file, styles", insertText: "node {\n  id: \n  name: \n  pos: {x: 0, y: 0}\n}" },
-        { label: "connect", detail: "Connector between two nodes",                        insertText: "connect {\n  from: .side.1\n  to: .side.3\n}" },
-      ]);
-
-    case "bmap-node-prop":
-      return filter([
-        { label: "id:",     detail: "Unique node identifier",                        insertText: "id: " },
-        { label: "name:",   detail: "Display label shown in the node header",        insertText: "name: " },
-        { label: "text:",   detail: "Secondary description text in the node body",   insertText: "text: " },
-        { label: "shape:",  detail: "Node shape: rect or circle",                    insertText: "shape: " },
-        { label: "pos:",    detail: "Position as {x: N, y: N}",                      insertText: "pos: {x: 0, y: 0}" },
-        { label: "file:",   detail: "Link to a project file (shown via ⊞ preview)", insertText: "file: " },
-        { label: "styles:", detail: "CSS style overrides block",                     insertText: "styles: {\n  \n}" },
-      ]);
-
-    case "bmap-connect-prop":
-      return filter([
-        { label: "from:",   detail: "Source endpoint — nodeId.side.N", insertText: "from: " },
-        { label: "to:",     detail: "Target endpoint — nodeId.side.N", insertText: "to: " },
-        { label: "styles:", detail: "Connector appearance block",       insertText: "styles: {\n  \n}" },
-      ]);
-
-    case "bmap-style-prop":
-      return filter([
-        { label: "background:",   detail: "Fill color, e.g. #fff8dc",           insertText: "background: " },
-        { label: "border:",       detail: "Border shorthand, e.g. 1px solid #aaa", insertText: "border: " },
-        { label: "border-radius:", detail: "Corner radius",                      insertText: "border-radius: " },
-        { label: "color:",        detail: "Text or stroke color",                insertText: "color: " },
-        { label: "font-size:",    detail: "Font size, e.g. 12px",               insertText: "font-size: " },
-        { label: "font-weight:",  detail: "Font weight: bold or normal",        insertText: "font-weight: " },
-        { label: "width:",        detail: "Node width in px",                   insertText: "width: " },
-        { label: "opacity:",      detail: "Opacity 0–1",                        insertText: "opacity: " },
-        { label: "mode:",         detail: "bezier or straight",                 insertText: "mode: " },
-        { label: "arrow:",        detail: "end, start, both, or none",          insertText: "arrow: " },
-        { label: "dashed:",       detail: "true or false",                      insertText: "dashed: " },
-        { label: "thickness:",    detail: "Stroke width in px",                 insertText: "thickness: " },
-      ]);
-
-    case "bmap-shape-value":
-      return filter([
-        { label: "rect",   detail: "Rounded rectangle (default)", insertText: "rect" },
-        { label: "circle", detail: "Circle / oval",               insertText: "circle" },
-      ]);
-
-    case "bmap-mode-value":
-      return filter([
-        { label: "bezier",   detail: "Curved connector (default)", insertText: "bezier" },
-        { label: "straight", detail: "Straight line connector",    insertText: "straight" },
-      ]);
-
-    case "bmap-arrow-value":
-      return filter([
-        { label: "end",   detail: "Arrow at destination (default)", insertText: "end" },
-        { label: "start", detail: "Arrow at source",                insertText: "start" },
-        { label: "both",  detail: "Arrows at both ends",            insertText: "both" },
-        { label: "none",  detail: "No arrowheads",                  insertText: "none" },
-      ]);
-
-    case "bmap-dashed-value":
-      return filter([
-        { label: "false", detail: "Solid line (default)", insertText: "false" },
-        { label: "true",  detail: "Dashed line",          insertText: "true" },
-      ]);
-
-    case "bmap-side-key":
-      return [{ label: "side", detail: "Side segment — follow with .N (0=top 1=right 2=bottom 3=left)", insertText: "side" }];
-
-    case "bmap-side-index":
-      return filter([
-        { label: "0", detail: "Top",    insertText: "0" },
-        { label: "1", detail: "Right",  insertText: "1" },
-        { label: "2", detail: "Bottom", insertText: "2" },
-        { label: "3", detail: "Left",   insertText: "3" },
-      ]);
-
-    case "bmap-endpoint-node": {
-      const content = activeFile?.content ?? "";
-      const nodeIds = [...content.matchAll(/^\s*id\s*:\s*(\S+)/gm)].map((nm) => nm[1]);
-      return filter(nodeIds.map((id) => ({
-        label: id,
-        detail: "Node ID — follow with .side.N",
-        insertText: id,
-      })));
-    }
-
-    case "bmap-file-value":
-      return buildProjectFileSuggestions(project, activeFile?.id ?? null, "path")
-        .filter((item) => !token || item.insertText.toLowerCase().includes(token) || item.label.toLowerCase().includes(token));
-
-    default:
-      return [];
-  }
-}
-
-// ── end .bmap autocomplete helpers ──────────────────────────────────────────
-
-function findAutocompleteContext(force = false) {
-  const activeFile = controller.getActiveFile();
-  if (!activeFile || !isTextFileName(activeFile.name)) {
-    return null;
-  }
-  if (isBmapFileName(activeFile.name)) {
-    return findBmapAutocompleteContext(force);
-  }
-
-  const value = getEditorText();
-  const cursor = getEditorSelection().start;
-  const before = value.slice(0, cursor);
-  const lineStart = before.lastIndexOf("\n") + 1;
-  const linePrefix = before.slice(lineStart);
-
-  if (isMarkdownFileName(activeFile.name)) {
-    const imageMatch = linePrefix.match(/!\[[^\]]*\]\(([^)]*)$/);
-    if (imageMatch) {
-      const token = imageMatch[1];
-      return {
-        kind: "image",
-        token,
-        start: cursor - token.length,
-        end: cursor
-      };
-    }
-
-    const linkMatch = linePrefix.match(/\[[^\]]*\]\(([^)]*)$/);
-    if (linkMatch) {
-      const token = linkMatch[1];
-      return {
-        kind: "path",
-        token,
-        start: cursor - token.length,
-        end: cursor
-      };
-    }
-  }
-
-  const genericMatch = linePrefix.match(/([./A-Za-z0-9_-][./A-Za-z0-9_\-/]*)$/);
-  if (genericMatch && (force || genericMatch[1].includes("/") || genericMatch[1].startsWith("."))) {
-    const token = genericMatch[1];
-    return {
-      kind: "path",
-      token,
-      start: cursor - token.length,
-      end: cursor
-    };
-  }
-
-  // General word completion: trigger automatically once a plain word reaches a
-  // few characters, so the popup is useful for prose, not just links/paths.
-  const wordMatch = linePrefix.match(/([A-Za-z][A-Za-z0-9_-]*)$/);
-  if (wordMatch && (force || wordMatch[1].length >= 3)) {
-    const token = wordMatch[1];
-    return {
-      kind: "word",
-      token,
-      start: cursor - token.length,
-      end: cursor
-    };
-  }
-
-  if (!force) {
-    return null;
-  }
-
-  return {
-    kind: "path",
-    token: "",
-    start: cursor,
-    end: cursor
-  };
-}
-
-function hideEditorAutocomplete() {
-  autocompleteState.items = [];
-  autocompleteState.activeIndex = 0;
-  autocompleteState.userChose = false;
-  autocompleteState.range = null;
-  autocompleteState.kind = "";
-  elements.editorAutocomplete.hidden = true;
-  elements.editorAutocompleteList.replaceChildren();
-}
-
-function renderEditorAutocomplete() {
-  elements.editorAutocompleteList.replaceChildren();
-
-  autocompleteState.items.forEach((item, index) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `editor-autocomplete-item${index === autocompleteState.activeIndex ? " is-active" : ""}`;
-    button.innerHTML = `<span class="editor-autocomplete-item-title">${escapeEditorHtml(item.label)}</span><span class="editor-autocomplete-item-detail">${escapeEditorHtml(item.detail)}</span>`;
-    button.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-      acceptEditorAutocomplete(index);
-    });
-    elements.editorAutocompleteList.append(button);
-  });
-
-  elements.editorAutocomplete.hidden = autocompleteState.items.length === 0;
-  if (!elements.editorAutocomplete.hidden) {
-    positionEditorAutocompleteAtCaret();
-    // Keep the active row scrolled into view during keyboard navigation.
-    elements.editorAutocompleteList
-      .querySelector(".editor-autocomplete-item.is-active")
-      ?.scrollIntoView({ block: "nearest" });
-  }
-}
-
-/** Anchor the completion popup directly under the text caret (VSCode-style),
- *  flipping above the caret when it would overflow the editor surface. */
-function positionEditorAutocompleteAtCaret() {
-  const surface = elements.editorContent.closest(".editor-surface");
-  if (!surface) return;
-
-  const selection = globalThis.getSelection?.();
-  let caretRect = null;
-  if (selection && selection.rangeCount > 0) {
-    const range = selection.getRangeAt(0).cloneRange();
-    range.collapse(true);
-    const rects = range.getClientRects();
-    if (rects.length > 0) {
-      caretRect = rects[0];
-    } else {
-      const bounding = range.getBoundingClientRect();
-      if (bounding && (bounding.width || bounding.height || bounding.top)) {
-        caretRect = bounding;
-      }
-    }
-    if (!caretRect) {
-      // Collapsed caret on an empty line yields no rect — fall back to the line.
-      const anchor = selection.anchorNode;
-      const anchorEl = anchor?.nodeType === Node.ELEMENT_NODE ? anchor : anchor?.parentElement;
-      const lineEl = anchorEl?.closest?.(".editor-line");
-      if (lineEl) caretRect = lineEl.getBoundingClientRect();
-    }
-  }
-  if (!caretRect) return;
-
-  const base = surface.getBoundingClientRect();
-  const popup = elements.editorAutocomplete;
-  const left = Math.max(0, Math.min(caretRect.left - base.left, base.width - popup.offsetWidth - 4));
-  popup.style.bottom = "auto";
-  popup.style.left = `${left}px`;
-  popup.style.top = `${caretRect.bottom - base.top + 2}px`;
-
-  // Flip above the caret if the popup would spill below the editor surface.
-  const popupHeight = popup.offsetHeight;
-  const caretTop = caretRect.top - base.top;
-  if (caretRect.bottom - base.top + 2 + popupHeight > base.height && caretTop > popupHeight) {
-    popup.style.top = `${caretTop - popupHeight - 2}px`;
-  }
-}
-
-function showEditorAutocomplete(force = false) {
-  const context = findAutocompleteContext(force);
-  if (!context) {
-    hideEditorAutocomplete();
-    return;
-  }
-
-  const activeFile = controller.getActiveFile();
-  const project = controller.getProject();
-  const tokenLower = context.token.toLowerCase();
-
-  let items;
-  if (context.kind.startsWith("bmap-")) {
-    items = getBmapAutocompleteItems(context, project, activeFile);
-  } else if (context.kind === "word") {
-    items = buildWordSuggestions(getEditorText(), context.token);
-  } else {
-    items = buildProjectFileSuggestions(project, activeFile?.id ?? null, context.kind)
-      .filter((item) => !tokenLower || item.insertText.toLowerCase().includes(tokenLower) || item.detail.toLowerCase().includes(tokenLower));
-  }
-
-  if (items.length === 0) {
-    hideEditorAutocomplete();
-    return;
-  }
-
-  autocompleteState.items = items.slice(0, 12);
-  autocompleteState.activeIndex = 0;
-  autocompleteState.userChose = false;
-  autocompleteState.range = { start: context.start, end: context.end };
-  autocompleteState.kind = context.kind;
-  elements.editorAutocompleteLabel.textContent = context.kind.startsWith("bmap-")
-    ? (BMAP_AUTOCOMPLETE_LABELS[context.kind] ?? "bmap")
-    : context.kind === "image" ? "Image paths" : "Project paths";
-  renderEditorAutocomplete();
-}
 
 // ---------------------------------------------------------------------------
 // Contenteditable editor core API
@@ -2472,208 +2033,38 @@ const searchState = {
   matches: [],      // [{ start, end }] plain-text offsets into the active file
   currentIndex: -1,
 };
-
-// Build the RegExp for the current query + toggles, or null on empty/invalid.
-function buildSearchRegex() {
-  const raw = elements.findInput?.value ?? "";
-  if (!raw) return null;
-  let source = searchState.regex ? raw : raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  if (searchState.wholeWord) source = `\\b(?:${source})\\b`;
-  const flags = "g" + (searchState.caseSensitive ? "" : "i");
-  try {
-    return new RegExp(source, flags);
-  } catch {
-    return null; // invalid regex — caller shows the error state
-  }
+// ---- Find and replace (./editor/find-replace.js) ----
+// Created on first use. The module reads main's shared values through this
+// context, so it always sees their current values. `var`: a forwarding
+// function can run during startup, before this line is reached.
+var findReplaceInstance;
+function findReplace() {
+  return (findReplaceInstance ??= createFindReplace({
+    get applyEditorEdit() { return applyEditorEdit; },
+    get caretIntoView() { return caretIntoView; },
+    get controller() { return controller; },
+    get elements() { return elements; },
+    get getEditorLineHeight() { return getEditorLineHeight; },
+    get getEditorSelection() { return getEditorSelection; },
+    get getEditorText() { return getEditorText; },
+    get scheduleOverviewRuler() { return scheduleOverviewRuler; },
+    get searchState() { return searchState; },
+    get setEditorSelection() { return setEditorSelection; },
+    get showToast() { return showToast; },
+    get textOffsetToDomPosition() { return textOffsetToDomPosition; }
+  }));
 }
+function closeFindBar(...args) { return findReplace().closeFindBar(...args); }
+function computeSearchMatches(...args) { return findReplace().computeSearchMatches(...args); }
+function findNext(...args) { return findReplace().findNext(...args); }
+function findPrev(...args) { return findReplace().findPrev(...args); }
+function gotoMatch(...args) { return findReplace().gotoMatch(...args); }
+function openFindBar(...args) { return findReplace().openFindBar(...args); }
+function renderSearchHighlights(...args) { return findReplace().renderSearchHighlights(...args); }
+function replaceAllMatches(...args) { return findReplace().replaceAllMatches(...args); }
+function replaceCurrent(...args) { return findReplace().replaceCurrent(...args); }
+function toggleFindOption(...args) { return findReplace().toggleFindOption(...args); }
 
-// Scan the active file's text for all matches. Preserves the current match near
-// the caret when possible so re-computing (e.g. after an edit) doesn't jump.
-function computeSearchMatches({ keepCaret = false } = {}) {
-  const activeFile = controller.getActiveFile();
-  const canSearch = Boolean(activeFile && isTextFileName(activeFile.name));
-  const regex = canSearch ? buildSearchRegex() : null;
-  const invalid = canSearch && searchState.regex && Boolean(elements.findInput?.value) && !regex;
-  elements.findInput?.classList.toggle("is-error", invalid);
-  searchState.matches = [];
-  if (regex) {
-    const text = getEditorText();
-    let m;
-    let guard = 0;
-    while ((m = regex.exec(text)) !== null) {
-      const start = m.index;
-      const end = start + m[0].length;
-      searchState.matches.push({ start, end });
-      if (m[0].length === 0) regex.lastIndex += 1; // avoid an infinite loop on zero-width
-      if (++guard > 20000) break;                  // sanity cap on pathological patterns
-    }
-  }
-  if (searchState.matches.length === 0) {
-    searchState.currentIndex = -1;
-  } else if (keepCaret) {
-    const caret = getEditorSelection().start;
-    const idx = searchState.matches.findIndex((mm) => mm.start >= caret);
-    searchState.currentIndex = idx >= 0 ? idx : 0;
-  } else if (searchState.currentIndex < 0 || searchState.currentIndex >= searchState.matches.length) {
-    searchState.currentIndex = 0;
-  }
-  updateFindCount();
-  renderSearchHighlights();
-}
-
-function updateFindCount() {
-  if (!elements.findCount) return;
-  const total = searchState.matches.length;
-  if (elements.findInput && !elements.findInput.value) {
-    elements.findCount.textContent = "No results";
-  } else if (total === 0) {
-    elements.findCount.textContent = elements.findInput?.classList.contains("is-error") ? "Bad pattern" : "No results";
-  } else {
-    elements.findCount.textContent = `${searchState.currentIndex + 1} of ${total}`;
-  }
-}
-
-// Draw a highlight box (one per visual line) over each match, reusing the remote-
-// cursor rect technique. Positioned relative to #editor-scroll so it tracks the
-// content as #editor-content scrolls.
-function renderSearchHighlights() {
-  const layer = elements.editorSearchHighlights;
-  if (!layer) return;
-  layer.textContent = "";
-  if (!searchState.open || !searchState.matches.length) return;
-  const scrollRect = elements.editorScroll.getBoundingClientRect();
-  const MAX = 500;
-  searchState.matches.slice(0, MAX).forEach((match, index) => {
-    try {
-      const s = textOffsetToDomPosition(match.start);
-      const e = textOffsetToDomPosition(match.end);
-      const range = document.createRange();
-      range.setStart(s.node, s.offset);
-      range.setEnd(e.node, e.offset);
-      const rects = Array.from(range.getClientRects()).filter((r) => r.width > 0 && r.height > 0);
-      const isCurrent = index === searchState.currentIndex;
-      for (const rect of rects) {
-        // Skip rects entirely outside the visible band (cheap virtualization).
-        if (rect.bottom < scrollRect.top - 40 || rect.top > scrollRect.bottom + 40) continue;
-        const box = document.createElement("div");
-        box.className = `search-match${isCurrent ? " is-current" : ""}`;
-        box.style.left = `${rect.left - scrollRect.left}px`;
-        box.style.top = `${rect.top - scrollRect.top}px`;
-        box.style.width = `${rect.width}px`;
-        box.style.height = `${rect.height}px`;
-        layer.append(box);
-      }
-    } catch { /* offset transiently out of range during a re-render */ }
-  });
-  scheduleOverviewRuler(); // search hits are ruler markers too
-}
-
-function gotoMatch(index) {
-  if (!searchState.matches.length) return;
-  // A match that runs past the end of the current text is a leftover from a
-  // document we are no longer showing; re-search before moving the caret rather
-  // than selecting a phantom range.
-  const textLength = getEditorText().length;
-  if (searchState.matches.some((m) => m.end > textLength)) {
-    searchState.currentIndex = -1;
-    computeSearchMatches();
-    if (!searchState.matches.length) return;
-  }
-  const total = searchState.matches.length;
-  searchState.currentIndex = ((index % total) + total) % total;
-  const match = searchState.matches[searchState.currentIndex];
-  // Select the match IN the editor even though the find box has focus, then
-  // scroll it into view. Focusing the editor briefly is what lets the selection
-  // land; we return focus to the find input so the user keeps typing.
-  elements.editorContent.focus({ preventScroll: true });
-  setEditorSelection(match.start, match.end);
-  caretIntoView(getEditorLineHeight() * 2);
-  elements.findInput?.focus();
-  updateFindCount();
-  renderSearchHighlights();
-}
-
-function findNext() {
-  if (!searchState.matches.length) { computeSearchMatches(); }
-  if (searchState.matches.length) gotoMatch(searchState.currentIndex + 1);
-}
-
-function findPrev() {
-  if (!searchState.matches.length) { computeSearchMatches(); }
-  if (searchState.matches.length) gotoMatch(searchState.currentIndex - 1);
-}
-
-// The replacement text for one match (regex mode honors $1, $&, … via a scoped
-// re-run of the pattern on just that match).
-function replacementFor(matchText) {
-  const replaceRaw = elements.replaceInput?.value ?? "";
-  if (!searchState.regex) return replaceRaw;
-  const single = buildSearchRegex();
-  if (!single) return replaceRaw;
-  // matchText is exactly one match, so a single replace applies the templates.
-  return matchText.replace(new RegExp(single.source, single.flags.replace("g", "")), replaceRaw);
-}
-
-function replaceCurrent() {
-  if (searchState.currentIndex < 0 || !searchState.matches.length) { findNext(); return; }
-  const match = searchState.matches[searchState.currentIndex];
-  const text = getEditorText();
-  const matchText = text.slice(match.start, match.end);
-  const replacement = replacementFor(matchText);
-  const newText = text.slice(0, match.start) + replacement + text.slice(match.end);
-  const caret = match.start + replacement.length;
-  applyEditorEdit(newText, caret, caret);
-  computeSearchMatches();
-  // Move to the next match at/after where we just replaced.
-  const nextIdx = searchState.matches.findIndex((mm) => mm.start >= caret);
-  if (searchState.matches.length) gotoMatch(nextIdx >= 0 ? nextIdx : 0);
-  elements.findInput?.focus();
-}
-
-function replaceAllMatches() {
-  const regex = buildSearchRegex();
-  if (!regex || !searchState.matches.length) return;
-  const text = getEditorText();
-  const replaceRaw = elements.replaceInput?.value ?? "";
-  const count = searchState.matches.length;
-  // String.replace with a global regex applies $1/$& templates in regex mode;
-  // in plain mode the pattern is escaped so it's a literal replace.
-  const newText = text.replace(regex, replaceRaw);
-  applyEditorEdit(newText, 0, 0);
-  computeSearchMatches();
-  showToast(`Replaced ${count} occurrence${count === 1 ? "" : "s"}`);
-  elements.findInput?.focus();
-}
-
-function openFindBar(replaceMode = false) {
-  if (!elements.editorFindBar) return;
-  searchState.open = true;
-  searchState.replaceMode = replaceMode;
-  elements.editorFindBar.hidden = false;
-  if (elements.findReplaceRow) elements.findReplaceRow.hidden = !replaceMode;
-  // Seed the find box with the current selection (VS Code behaviour).
-  const sel = getEditorSelection();
-  if (sel.end > sel.start) {
-    const selected = getEditorText().slice(sel.start, sel.end);
-    if (!selected.includes("\n")) elements.findInput.value = selected;
-  }
-  computeSearchMatches({ keepCaret: true });
-  elements.findInput?.focus();
-  elements.findInput?.select();
-}
-
-function closeFindBar() {
-  searchState.open = false;
-  if (elements.editorFindBar) elements.editorFindBar.hidden = true;
-  if (elements.editorSearchHighlights) elements.editorSearchHighlights.textContent = "";
-  elements.editorContent?.focus({ preventScroll: true });
-}
-
-function toggleFindOption(key, buttonEl) {
-  searchState[key] = !searchState[key];
-  buttonEl?.setAttribute("aria-pressed", String(searchState[key]));
-  computeSearchMatches({ keepCaret: true });
-}
 
 // ============================ Snapshots + Diff ==============================
 // Per-file, content-addressed history (see snapshot-service). Diff state caches
@@ -3620,19 +3011,6 @@ function replaceTextareaRange(textarea, start, end, nextText, nextSelectionStart
   dispatchTextareaInput(textarea, start === end ? "insertText" : "insertReplacementText");
 }
 
-
-function acceptEditorAutocomplete(index = autocompleteState.activeIndex) {
-  const item = autocompleteState.items[index];
-  const range = autocompleteState.range;
-  if (!item || !range) {
-    hideEditorAutocomplete();
-    return;
-  }
-  replaceEditorRange(range.start, range.end, item.insertText);
-  logDebug("action", "Autocomplete accepted", item.detail);
-  hideEditorAutocomplete();
-}
-
 // ── Markdown formatting toolbar ──────────────────────────────────────────────
 
 /** Wrap the current selection (or a placeholder) with inline markers and leave
@@ -4195,274 +3573,21 @@ async function openMtreeToolsDialog(fileId) {
     notify(`Module map tools could not load: ${error.message}`);
   }
 }
-
-function escapeEditorHtml(value) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+// ---- Source highlighting (./editor/highlight.js) ----
+// Created on first use. The module reads main's shared values through this
+// context, so it always sees their current values. `var`: a forwarding
+// function can run during startup, before this line is reached.
+var highlighterInstance;
+function highlighter() {
+  return (highlighterInstance ??= createHighlighter({
+    get escapeHtmlAttribute() { return escapeHtmlAttribute; }
+  }));
 }
+function editorHighlightKind(...args) { return highlighter().editorHighlightKind(...args); }
+function escapeEditorHtml(...args) { return highlighter().escapeEditorHtml(...args); }
+function highlightEditorLinesMemo(...args) { return highlighter().highlightEditorLinesMemo(...args); }
+function highlightMarkdownSource(...args) { return highlighter().highlightMarkdownSource(...args); }
 
-function applyInlineHighlighting(value) {
-  return value
-    .replace(/(`[^`]*`)/g, '<span class="token-inline-code">$1</span>')
-    .replace(/\[([^\]]*)\]\(([^)]*)\)/g, (_, text, href) => {
-      const attrHref = href.replace(/"/g, '&quot;');
-      return `<span class="token-link" data-href="${attrHref}">[${text}](${href})</span>`;
-    })
-    .replace(/(\*\*[^*]+\*\*)/g, '<span class="token-strong">$1</span>')
-    .replace(/(^|[^*])(\*[^*]+\*)/g, '$1<span class="token-emphasis">$2</span>');
-}
-
-function renderWhitespaceOnlyEditorLine(rawLine) {
-  if (rawLine.length === 0) {
-    return '<div class="editor-line"></div>';
-  }
-  return `<div class="editor-line">${escapeEditorHtml(rawLine)}</div>`;
-}
-
-/** Highlight an mtree chain ("Parent -> Child", indentation, or a single name).
- *  Splits on the literal "->" arrows and tokenises each segment separately so we
- *  never run name-matching regexes over already-inserted span markup. */
-function highlightMtreeChain(chainPart) {
-  const segments = chainPart.split("->");
-  return segments
-    .map((segment, index) => {
-      const leading = segment.match(/^\s*/)[0];
-      const trailing = segment.match(/\s*$/)[0];
-      const core = segment.slice(leading.length, segment.length - trailing.length);
-      let coreHtml = "";
-      if (core === "...") {
-        coreHtml = '<span class="token-mtree-continuation">...</span>';
-      } else if (core) {
-        coreHtml = `<span class="token-mtree-name">${escapeEditorHtml(core)}</span>`;
-      }
-      const arrow = index < segments.length - 1
-        ? '<span class="token-mtree-chain-arrow">-&gt;</span>'
-        : "";
-      return `${escapeEditorHtml(leading)}${coreHtml}${escapeEditorHtml(trailing)}${arrow}`;
-    })
-    .join("");
-}
-
-function highlightMtreeLines(value) {
-  const lines = value.replace(/\r\n/g, "\n").split("\n");
-
-  return lines.map((rawLine) => {
-    const escaped = escapeEditorHtml(rawLine);
-    const trimmed = rawLine.trimStart();
-
-    if (!trimmed) {
-      return renderWhitespaceOnlyEditorLine(rawLine);
-    }
-
-    if (trimmed.startsWith("#")) {
-      return `<div class="editor-line"><span class="token-mtree-comment">${escaped}</span></div>`;
-    }
-
-    if (/^\[[^\]]+\]$/.test(trimmed)) {
-      const [, name] = trimmed.match(/^\[([^\]]+)\]$/);
-      const indent = escapeEditorHtml(rawLine.slice(0, rawLine.indexOf("[")));
-      return `<div class="editor-line">${indent}<span class="token-mtree-section-mark">[</span><span class="token-mtree-section-name">${escapeEditorHtml(name)}</span><span class="token-mtree-section-mark">]</span></div>`;
-    }
-
-    if (trimmed.startsWith("|")) {
-      const indent = escapeEditorHtml(rawLine.slice(0, rawLine.indexOf("|")));
-      return `<div class="editor-line">${indent}<span class="token-mtree-continuation">|</span><span class="token-mtree-description">${escapeEditorHtml(trimmed.slice(1))}</span></div>`;
-    }
-
-    const semicolonIndex = rawLine.indexOf(";");
-    const chainPart = semicolonIndex >= 0 ? rawLine.slice(0, semicolonIndex) : rawLine;
-    const descriptionPart = semicolonIndex >= 0 ? rawLine.slice(semicolonIndex + 1) : "";
-    const chainHtml = highlightMtreeChain(chainPart);
-
-    const descriptionHtml = semicolonIndex >= 0
-      ? `<span class="token-mtree-section-mark">;</span><span class="token-mtree-description">${escapeEditorHtml(descriptionPart)}</span>`
-      : "";
-
-    return `<div class="editor-line">${chainHtml}${descriptionHtml}</div>`;
-  });
-}
-
-function highlightUrlDbLines(value) {
-  const lines = value.replace(/\r\n/g, "\n").split("\n");
-
-  return lines.map((rawLine) => {
-    const escaped = escapeEditorHtml(rawLine);
-    const trimmed = rawLine.trimStart();
-
-    if (!trimmed) {
-      return renderWhitespaceOnlyEditorLine(rawLine);
-    }
-
-    if (trimmed.startsWith("#")) {
-      return `<div class="editor-line"><span class="token-mtree-comment">${escaped}</span></div>`;
-    }
-
-    if (/^\[[^\]]+\]$/.test(trimmed)) {
-      const [, name] = trimmed.match(/^\[([^\]]+)\]$/);
-      const indent = escapeEditorHtml(rawLine.slice(0, rawLine.indexOf("[")));
-      return `<div class="editor-line">${indent}<span class="token-urldb-bracket">[</span><span class="token-urldb-name">${escapeEditorHtml(name)}</span><span class="token-urldb-bracket">]</span></div>`;
-    }
-
-    const keyValueMatch = rawLine.match(/^(\s*)(url|description)(\s*=\s*)(.*)$/i);
-    if (keyValueMatch) {
-      const [, indent, key, separator, valuePart] = keyValueMatch;
-      const valueClass = key.toLowerCase() === "url" ? "token-link" : "token-urldb-description";
-      return `<div class="editor-line">${escapeEditorHtml(indent)}<span class="token-urldb-key">${escapeEditorHtml(key)}</span><span class="token-urldb-separator">${escapeEditorHtml(separator)}</span><span class="${valueClass}">${escapeEditorHtml(valuePart)}</span></div>`;
-    }
-
-    return `<div class="editor-line">${escaped}</div>`;
-  });
-}
-
-function highlightBmapValue(rawVal) {
-  const trimmed = rawVal.trim();
-  if (!trimmed) return "";
-
-  // Opening brace for styles: { sub-block
-  if (trimmed === "{") {
-    return `<span class="token-bmap-brace">${escapeEditorHtml(rawVal)}</span>`;
-  }
-
-  // Inline object: {x: 120, y: 80}
-  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-    const leading = escapeEditorHtml(rawVal.slice(0, rawVal.indexOf("{")));
-    const inner = trimmed.slice(1, -1);
-    const highlightedInner = inner.replace(/([a-zA-Z]\w*)(\s*:\s*)(-?\d+\.?\d*)/g, (m, k, sep, v) =>
-      `<span class="token-bmap-style-key">${escapeEditorHtml(k)}</span><span class="token-bmap-sep">${escapeEditorHtml(sep)}</span><span class="token-bmap-number">${escapeEditorHtml(v)}</span>`
-    );
-    return `${leading}<span class="token-bmap-brace">{</span>${highlightedInner}<span class="token-bmap-brace">}</span>`;
-  }
-
-  // Keywords
-  const BMAP_KEYWORDS = new Set(["rect", "circle", "bezier", "straight", "end", "start", "both", "none", "true", "false"]);
-  if (BMAP_KEYWORDS.has(trimmed)) {
-    return `<span class="token-bmap-keyword">${escapeEditorHtml(rawVal)}</span>`;
-  }
-
-  // Connector endpoint: nodeId.side.N
-  const endpointMatch = trimmed.match(/^(\S+?)\.side\.([0-3])$/);
-  if (endpointMatch) {
-    const [, nodeId, idx] = endpointMatch;
-    const leading = escapeEditorHtml(rawVal.slice(0, rawVal.indexOf(nodeId)));
-    return `${leading}<span class="token-bmap-endpoint-node">${escapeEditorHtml(nodeId)}</span><span class="token-bmap-sep">.side.</span><span class="token-bmap-endpoint-side">${escapeEditorHtml(idx)}</span>`;
-  }
-
-  // Scan for hex color values (may appear mid-string, e.g., "1px solid #aaa")
-  const colorPattern = /#([0-9a-fA-F]{3,8})\b/g;
-  const parts = [];
-  let lastIdx = 0;
-  let m;
-  while ((m = colorPattern.exec(rawVal)) !== null) {
-    if (m.index > lastIdx) {
-      parts.push(`<span class="token-bmap-value">${escapeEditorHtml(rawVal.slice(lastIdx, m.index))}</span>`);
-    }
-    const hex = m[0];
-    parts.push(`<span class="token-color-swatch" style="background:${escapeHtmlAttribute(hex)}"></span><span class="token-bmap-color">${escapeEditorHtml(hex)}</span>`);
-    lastIdx = m.index + hex.length;
-  }
-  if (parts.length > 0) {
-    if (lastIdx < rawVal.length) {
-      parts.push(`<span class="token-bmap-value">${escapeEditorHtml(rawVal.slice(lastIdx))}</span>`);
-    }
-    return parts.join("");
-  }
-
-  // Plain number (with optional unit)
-  if (/^\s*-?\d+(\.\d+)?(px|em|rem|%|pt)?\s*$/.test(rawVal)) {
-    return `<span class="token-bmap-number">${escapeEditorHtml(rawVal)}</span>`;
-  }
-
-  return `<span class="token-bmap-value">${escapeEditorHtml(rawVal)}</span>`;
-}
-
-function highlightBmapLines(value) {
-  const lines = value.replace(/\r\n/g, "\n").split("\n");
-  return lines.map((rawLine) => {
-    const trimmed = rawLine.trimStart();
-    const indent = escapeEditorHtml(rawLine.slice(0, rawLine.length - trimmed.length));
-
-    if (!trimmed) return renderWhitespaceOnlyEditorLine(rawLine);
-
-    // Comment
-    if (trimmed.startsWith("//")) {
-      return `<div class="editor-line"><span class="token-bmap-comment">${escapeEditorHtml(rawLine)}</span></div>`;
-    }
-
-    // Block opener: .node { or .connect {
-    const blockOpenMatch = trimmed.match(/^(\.(node|connect))(\s*\{.*)$/);
-    if (blockOpenMatch) {
-      const [, selector, , rest] = blockOpenMatch;
-      return `<div class="editor-line">${indent}<span class="token-bmap-selector">${escapeEditorHtml(selector)}</span><span class="token-bmap-brace">${escapeEditorHtml(rest)}</span></div>`;
-    }
-
-    // Closing brace
-    if (trimmed === "}") {
-      return `<div class="editor-line">${indent}<span class="token-bmap-brace">}</span></div>`;
-    }
-
-    // Key: value line
-    const kvMatch = trimmed.match(/^([a-zA-Z][\w-]*)(\s*:\s*)(.*)$/);
-    if (kvMatch) {
-      const [, key, sep, val] = kvMatch;
-      return `<div class="editor-line">${indent}<span class="token-bmap-key">${escapeEditorHtml(key)}</span><span class="token-bmap-sep">${escapeEditorHtml(sep)}</span>${highlightBmapValue(val)}</div>`;
-    }
-
-    return `<div class="editor-line">${escapeEditorHtml(rawLine)}</div>`;
-  });
-}
-
-// One markdown source line → its editor HTML, given whether it starts inside a
-// ``` fence. Returns the fence state after it. Highlighting is otherwise
-// line-local, which is what lets renderEditorContent memoize it per line.
-function highlightMarkdownLine(rawLine, inFence) {
-  const escaped = escapeEditorHtml(rawLine);
-  const trimmed = rawLine.trimStart();
-
-  if (!trimmed) {
-    return { html: renderWhitespaceOnlyEditorLine(rawLine), inFence };
-  }
-
-  if (trimmed.startsWith("```")) {
-    return { html: `<div class="editor-line"><span class="token-fence">${escaped}</span></div>`, inFence: !inFence };
-  }
-
-  if (inFence) {
-    return { html: `<div class="editor-line"><span class="token-code-block">${escaped}</span></div>`, inFence };
-  }
-
-  if (/^\s*#{1,6}\s/.test(rawLine)) {
-    const [, indent, hashes, space, text] = rawLine.match(/^(\s*)(#{1,6})(\s+)(.*)$/);
-    return { html: `<div class="editor-line">${escapeEditorHtml(indent)}<span class="token-heading-mark">${escapeEditorHtml(hashes)}</span>${escapeEditorHtml(space)}<span class="token-heading-text">${applyInlineHighlighting(escapeEditorHtml(text || ""))}</span></div>`, inFence };
-  }
-
-  if (/^\s*-\s+/.test(rawLine)) {
-    const [, indent, marker, text] = rawLine.match(/^(\s*)(-)\s+(.*)$/);
-    return { html: `<div class="editor-line">${escapeEditorHtml(indent)}<span class="token-list-mark">${marker}</span> ${applyInlineHighlighting(escapeEditorHtml(text || ""))}</div>`, inFence };
-  }
-
-  if (/^\s*>\s?/.test(rawLine)) {
-    const [, indent, marker, text] = rawLine.match(/^(\s*)(>)(\s?.*)$/);
-    return { html: `<div class="editor-line">${escapeEditorHtml(indent)}<span class="token-quote-mark">${marker}</span><span class="token-quote-text">${applyInlineHighlighting(escapeEditorHtml(text || ""))}</span></div>`, inFence };
-  }
-
-  return { html: `<div class="editor-line">${applyInlineHighlighting(escaped)}</div>`, inFence };
-}
-
-function highlightMarkdownLines(value) {
-  const lines = value.replace(/\r\n/g, "\n").split("\n");
-  let inFence = false;
-  return lines.map((rawLine) => {
-    const result = highlightMarkdownLine(rawLine, inFence);
-    inFence = result.inFence;
-    return result.html;
-  });
-}
-
-function highlightMarkdownSource(value) {
-  return highlightMarkdownLines(value).join("");
-}
 
 function getEditorLineHeight() {
   const lineHeight = Number.parseFloat(globalThis.getComputedStyle(elements.editorContent).lineHeight);
@@ -4588,89 +3713,6 @@ function refreshFormatToolbar() {
     return;
   }
   renderEditorFormatToolbar(toolbar, format, { onAction: applyToolbarAction });
-}
-
-/** Re-render syntax-highlighted DOM from plain text and rebuild the gutter.
- *  Does NOT modify the selection — callers are responsible for restoring it. */
-// ── Incremental editor rendering ────────────────────────────────────────────
-// Every keystroke used to rebuild the whole editor (innerHTML of every line) and
-// then measure every line's height for the gutter. On a novel-length chapter
-// (~90k chars, ~2,400 lines) that discarded and re-laid-out ~18k nodes per key,
-// and every later layout read in the same task — scroll sync, caret, chat panel —
-// paid for a full-document relayout again: ~10 forced layouts per keystroke.
-//
-// Now each line's HTML is computed as before (whole text, so multi-line state
-// like ``` fences stays correct) but only DOM lines whose HTML actually changed
-// are replaced. Unchanged lines keep their element, their layout, and their
-// cached gutter height, so a keystroke re-lays-out one line instead of all.
-//
-// Correctness rests on knowing the DOM still matches the cache. Native edits
-// (and mobile keyboards, which can inject bare <div>s) mutate it behind our back,
-// so a line is reused only if it is the same element we rendered AND its text and
-// child count are still what we rendered. Anything else is re-rendered, and any
-// doubt — new file, different highlighter, stray text nodes, a count mismatch
-// afterwards — falls back to the old full rebuild.
-
-function editorHighlightKind(name) {
-  if (name?.endsWith(".mtree")) return "mtree";
-  if (name?.endsWith(".urldb")) return "urldb";
-  if (isBmapFileName(name ?? "")) return "bmap";
-  return "markdown";
-}
-
-function highlightEditorLines(kind, normalized) {
-  if (kind === "mtree") return highlightMtreeLines(normalized);
-  if (kind === "urldb") return highlightUrlDbLines(normalized);
-  if (kind === "bmap") return highlightBmapLines(normalized);
-  return highlightMarkdownLines(normalized);
-}
-
-// Highlighted HTML per distinct source line. Re-highlighting every line on every
-// keystroke allocated tens of thousands of short-lived strings per key on a
-// long chapter, and the garbage collector's pauses (up to ~200ms) became most
-// of the typing latency. A line's HTML depends only on its text — plus, for
-// markdown, whether it starts inside a ``` fence — so it is computed once.
-const editorLineMemo = { kind: null, maps: [new Map(), new Map()] };
-
-function highlightEditorLinesMemo(kind, lines) {
-  if (editorLineMemo.kind !== kind) {
-    editorLineMemo.kind = kind;
-    editorLineMemo.maps = [new Map(), new Map()];
-  }
-  const maps = editorLineMemo.maps;
-  if (maps[0].size + maps[1].size > Math.max(20000, lines.length * 4)) {
-    maps[0].clear();
-    maps[1].clear();
-  }
-  const out = new Array(lines.length);
-  if (kind === "markdown") {
-    let inFence = false;
-    for (let i = 0; i < lines.length; i += 1) {
-      const line = lines[i];
-      const map = maps[inFence ? 1 : 0];
-      let hit = map.get(line);
-      if (hit === undefined) {
-        const result = highlightMarkdownLine(line, inFence);
-        hit = { html: result.html, inFence: result.inFence, plain: null };
-        map.set(line, hit);
-      }
-      out[i] = hit;
-      inFence = hit.inFence;
-    }
-  } else {
-    const map = maps[0];
-    for (let i = 0; i < lines.length; i += 1) {
-      const line = lines[i];
-      let hit = map.get(line);
-      if (hit === undefined) {
-        // The other highlighters are stateless per line.
-        hit = { html: highlightEditorLines(kind, line)[0], inFence: false, plain: null };
-        map.set(line, hit);
-      }
-      out[i] = hit;
-    }
-  }
-  return out;
 }
 
 // Fold the per-line wrap indent and agent decoration into the line's own HTML,
@@ -4928,150 +3970,33 @@ const editorLinkTooltip = (() => {
   document.body.append(el);
   return { el, nameEl, hintEl, previewEl };
 })();
-
-let _linkTooltipTimer = null;
-let _linkTooltipHideTimer = null;
-let _linkTooltipCurrentHref = null;
-let _lastHoveredLinkEl = null;
-
-function resolveEditorLinkHref(href) {
-  const project = controller.getProject();
-  const activeFile = controller.getActiveFile();
-  if (!activeFile || !href) return null;
-  if (/^(https?:\/\/|mailto:|data:|blob:|#|\/)/i.test(href)) return null;
-  const basePath = getPath(project, activeFile.id);
-  const baseSegments = basePath.split("/").filter(Boolean);
-  baseSegments.pop();
-  const resolvedPath = normalizePath([...baseSegments, href].join("/"));
-  const nodeId = getNodeIdByPath(project, resolvedPath);
-  const node = nodeId ? project.nodes[nodeId] : null;
-  return node?.kind === "file" ? { nodeId, node, path: resolvedPath } : null;
+// ---- Links: editor tooltip and Linked Notes (./editor/links.js) ----
+// Created on first use. The module reads main's shared values through this
+// context, so it always sees their current values. `var`: a forwarding
+// function can run during startup, before this line is reached.
+var linksInstance;
+function links() {
+  return (linksInstance ??= createLinks({
+    get backlinksListEl() { return backlinksListEl; },
+    get controller() { return controller; },
+    get editorLinkTooltip() { return editorLinkTooltip; },
+    get escapeEditorHtml() { return escapeEditorHtml; },
+    get escapeHtmlAttribute() { return escapeHtmlAttribute; },
+    get imageSrcFor() { return imageSrcFor; },
+    get linksPanelEl() { return linksPanelEl; },
+    get normalizePath() { return normalizePath; },
+    get notify() { return notify; },
+    get openFileFromExplorer() { return openFileFromExplorer; },
+    get outgoingLinksListEl() { return outgoingLinksListEl; },
+    get resolveProjectAssetUrl() { return resolveProjectAssetUrl; }
+  }));
 }
+function handleEditorLinkHover(...args) { return links().handleEditorLinkHover(...args); }
+function handleEditorMouseLeave(...args) { return links().handleEditorMouseLeave(...args); }
+function hideLinkTooltip(...args) { return links().hideLinkTooltip(...args); }
+function openLinkFromEditor(...args) { return links().openLinkFromEditor(...args); }
+function renderLinksPanel(...args) { return links().renderLinksPanel(...args); }
 
-function openLinkFromEditor(href) {
-  if (!href) return;
-  if (/^https?:\/\//i.test(href)) {
-    window.open(href, "_blank", "noreferrer");
-    return;
-  }
-  const resolved = resolveEditorLinkHref(href);
-  if (!resolved) {
-    notify(`Cannot resolve link: ${href}`);
-    return;
-  }
-  openFileFromExplorer(resolved.nodeId);
-}
-
-function showLinkTooltipContent(linkEl) {
-  const href = linkEl.dataset.href ?? "";
-  _linkTooltipCurrentHref = href;
-
-  const project = controller.getProject();
-  const resolved = resolveEditorLinkHref(href);
-
-  if (!resolved) {
-    editorLinkTooltip.nameEl.textContent = href || "(empty link)";
-    if (/^https?:\/\//i.test(href)) {
-      editorLinkTooltip.nameEl.className = "editor-link-tooltip-name";
-      editorLinkTooltip.hintEl.textContent = "External — Ctrl+Click to open in browser";
-      if (/\.(png|jpe?g|gif|webp|svg|bmp)(\?.*)?$/i.test(href)) {
-        editorLinkTooltip.previewEl.innerHTML = `<img src="${escapeHtmlAttribute(href)}" alt="" style="max-width:100%;height:auto">`;
-        editorLinkTooltip.previewEl.hidden = false;
-      } else {
-        editorLinkTooltip.previewEl.innerHTML = "";
-        editorLinkTooltip.previewEl.hidden = true;
-      }
-    } else {
-      editorLinkTooltip.nameEl.className = "editor-link-tooltip-name is-unresolved";
-      editorLinkTooltip.hintEl.textContent = "File not found in project";
-      editorLinkTooltip.previewEl.innerHTML = "";
-      editorLinkTooltip.previewEl.hidden = true;
-    }
-    return;
-  }
-
-  const { node, nodeId } = resolved;
-  editorLinkTooltip.nameEl.textContent = resolved.path;
-  editorLinkTooltip.nameEl.className = "editor-link-tooltip-name";
-  editorLinkTooltip.hintEl.textContent = "Follow Link (Ctrl+Click)";
-  editorLinkTooltip.previewEl.hidden = false;
-
-  if (isMarkdownFileName(node.name)) {
-    editorLinkTooltip.previewEl.innerHTML = renderMarkdown(node.content, {
-      resolveUrl(url) { return resolveProjectAssetUrl(project, nodeId, url); }
-    });
-  } else if (isImageFileName(node.name)) {
-    editorLinkTooltip.previewEl.innerHTML = `<img src="${escapeHtmlAttribute(imageSrcFor(project, node))}" alt="${escapeHtmlAttribute(node.name)}" style="max-width:100%;height:auto">`;
-  } else {
-    editorLinkTooltip.previewEl.innerHTML = `<pre><code>${escapeEditorHtml(node.content ?? "")}</code></pre>`;
-  }
-}
-
-function positionLinkTooltip(clientX, clientY) {
-  const el = editorLinkTooltip.el;
-  const vpW = window.innerWidth;
-  const vpH = window.innerHeight;
-  const ttW = 380;
-  const ttMaxH = 320;
-  let left = clientX + 14;
-  let top = clientY + 18;
-  if (left + ttW > vpW - 8) left = clientX - ttW - 14;
-  if (top + ttMaxH > vpH - 8) top = Math.max(8, clientY - ttMaxH - 8);
-  el.style.left = `${Math.max(4, left)}px`;
-  el.style.top = `${Math.max(4, top)}px`;
-}
-
-function showLinkTooltip(linkEl, clientX, clientY) {
-  clearTimeout(_linkTooltipTimer);
-  clearTimeout(_linkTooltipHideTimer);
-  const href = linkEl.dataset.href ?? "";
-  if (!href) return;
-  _linkTooltipTimer = setTimeout(() => {
-    if (_lastHoveredLinkEl !== linkEl) return;
-    showLinkTooltipContent(linkEl);
-    editorLinkTooltip.el.hidden = false;
-    positionLinkTooltip(clientX, clientY);
-  }, 400);
-}
-
-function hideLinkTooltip(immediate = false) {
-  clearTimeout(_linkTooltipTimer);
-  if (immediate) {
-    editorLinkTooltip.el.hidden = true;
-    _linkTooltipCurrentHref = null;
-    return;
-  }
-  clearTimeout(_linkTooltipHideTimer);
-  _linkTooltipHideTimer = setTimeout(() => {
-    if (!editorLinkTooltip.el.matches(":hover")) {
-      editorLinkTooltip.el.hidden = true;
-      _linkTooltipCurrentHref = null;
-    }
-  }, 120);
-}
-
-function handleEditorLinkHover(event) {
-  const activeFile = controller.getActiveFile();
-  if (!isMarkdownFileName(activeFile?.name ?? "")) {
-    if (!editorLinkTooltip.el.hidden) hideLinkTooltip(true);
-    _lastHoveredLinkEl = null;
-    return;
-  }
-  const linkEl = event.target?.closest?.(".token-link[data-href]") ?? null;
-  if (linkEl !== _lastHoveredLinkEl) {
-    _lastHoveredLinkEl = linkEl;
-    if (linkEl) {
-      showLinkTooltip(linkEl, event.clientX, event.clientY);
-    } else if (!editorLinkTooltip.el.matches(":hover")) {
-      hideLinkTooltip();
-    }
-  }
-}
-
-function handleEditorMouseLeave() {
-  _lastHoveredLinkEl = null;
-  hideLinkTooltip();
-}
 
 editorLinkTooltip.el.addEventListener("mouseleave", () => hideLinkTooltip(true));
 
@@ -5080,117 +4005,6 @@ editorLinkTooltip.el.addEventListener("mouseleave", () => hideLinkTooltip(true))
 const linksPanelEl = document.getElementById("links-panel");
 const outgoingLinksListEl = document.getElementById("outgoing-links-list");
 const backlinksListEl = document.getElementById("backlinks-list");
-
-// Links found in each file, reused while its text is unchanged. Backlinks scan
-// every markdown file in the workspace, so this panel re-parsed the inline
-// markdown of the whole project on every render — more work than the preview.
-// File contents are shared between project versions now, so an unchanged file
-// is usually the very same string and the check is free.
-const markdownLinksCache = new Map(); // node id -> { content, links }
-
-function cachedMarkdownLinks(nodeId, content) {
-  const text = content ?? "";
-  const hit = markdownLinksCache.get(nodeId);
-  if (hit && hit.content === text) return hit.links;
-  const links = extractMarkdownLinks(text);
-  if (markdownLinksCache.size > 2000) markdownLinksCache.clear();
-  markdownLinksCache.set(nodeId, { content: text, links });
-  return links;
-}
-
-function renderLinksPanel(project, activeFile) {
-  if (!linksPanelEl) return;
-  if (!activeFile || !isMarkdownFileName(activeFile.name)) {
-    linksPanelEl.hidden = true;
-    return;
-  }
-  linksPanelEl.hidden = false;
-
-  const activePath = getPath(project, activeFile.id);
-  const activeSegments = activePath.split("/").filter(Boolean);
-  activeSegments.pop();
-
-  // Outgoing links
-  const outgoingLinks = cachedMarkdownLinks(activeFile.id, activeFile.content);
-  outgoingLinksListEl.replaceChildren();
-  if (outgoingLinks.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "links-item links-item-empty";
-    empty.textContent = "No outgoing links";
-    outgoingLinksListEl.append(empty);
-  } else {
-    outgoingLinks.forEach(({ label, href }) => {
-      const item = document.createElement("div");
-      item.className = "links-item";
-      const isExternal = /^(https?:\/\/|mailto:)/i.test(href);
-      let resolvedId = null;
-      if (!isExternal) {
-        const resolvedPath = normalizePath([...activeSegments, href].join("/"));
-        resolvedId = getNodeIdByPath(project, resolvedPath);
-      }
-      const missing = !isExternal && !resolvedId;
-      item.classList.toggle("links-item-unresolved", missing);
-
-      const labelEl = document.createElement("span");
-      labelEl.className = "links-item-label";
-      labelEl.textContent = label !== href ? label : "";
-
-      const hrefEl = document.createElement("span");
-      hrefEl.className = "links-item-href";
-      hrefEl.textContent = href;
-
-      item.append(labelEl, hrefEl);
-
-      if (resolvedId) {
-        item.title = getPath(project, resolvedId);
-        item.classList.add("links-item-clickable");
-        item.addEventListener("click", () => openFileFromExplorer(resolvedId));
-      } else if (isExternal) {
-        item.classList.add("links-item-clickable");
-        item.addEventListener("click", () => window.open(href, "_blank", "noreferrer"));
-      }
-      outgoingLinksListEl.append(item);
-    });
-  }
-
-  // Backlinks — scan all .md files for links pointing to the active file
-  const backlinks = [];
-  Object.values(project.nodes).forEach((node) => {
-    if (node.kind !== "file" || !isMarkdownFileName(node.name) || node.id === activeFile.id) return;
-    const nodePath = getPath(project, node.id);
-    const nodeSegments = nodePath.split("/").filter(Boolean);
-    nodeSegments.pop();
-    const links = cachedMarkdownLinks(node.id, node.content);
-    const matchCount = links.filter(({ href }) => {
-      if (/^(https?:\/\/|mailto:)/i.test(href)) return false;
-      return normalizePath([...nodeSegments, href].join("/")) === activePath;
-    }).length;
-    if (matchCount > 0) backlinks.push({ node, nodePath, matchCount });
-  });
-
-  backlinksListEl.replaceChildren();
-  if (backlinks.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "links-item links-item-empty";
-    empty.textContent = "No backlinks";
-    backlinksListEl.append(empty);
-  } else {
-    backlinks.forEach(({ node, nodePath, matchCount }) => {
-      const item = document.createElement("div");
-      item.className = "links-item links-item-clickable";
-      item.title = nodePath;
-      const labelEl = document.createElement("span");
-      labelEl.className = "links-item-label";
-      labelEl.textContent = node.name;
-      const countEl = document.createElement("span");
-      countEl.className = "links-item-count";
-      countEl.textContent = matchCount > 1 ? `${matchCount}×` : "";
-      item.append(labelEl, countEl);
-      item.addEventListener("click", () => openFileFromExplorer(node.id));
-      backlinksListEl.append(item);
-    });
-  }
-}
 
 function syncEditorScroll() {
   const scrollTop = elements.editorContent.scrollTop;
