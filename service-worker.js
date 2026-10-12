@@ -37,7 +37,8 @@ const APP_SHELL = [
   "./app/ui/explorer-view.js",
   "./app/ui/roleplay-view.js",
   "./app/features/module-map-tools.js",
-  "./app/features/workspace-history.js"
+  "./app/features/workspace-history.js",
+  "./app/features/snapshots-dialog.js"
 ];
 
 self.addEventListener("install", (event) => {
