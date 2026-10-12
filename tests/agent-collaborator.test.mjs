@@ -39,7 +39,10 @@ test("backend: agentic tool loop + proposal symbols present", async () => {
 });
 
 test("client: agent decoration, checkpoint, and proposal symbols present", async () => {
-  const mainSource = await readFile(resolveFromRoot("app/main.js"), "utf8");
+  // Editor-side decorations and checkpoints stay in main.js; the chat panel
+  // (proposal cards, applying edits) is its own module.
+  const mainSource = await readFile(resolveFromRoot("app/main.js"), "utf8")
+    + await readFile(resolveFromRoot("app/features/chat-panel.js"), "utf8");
   assert.match(mainSource, /agentPendingDecorations/);
   assert.match(mainSource, /computeChangedLineRange/);
   assert.match(mainSource, /registerAgentDecorations/);

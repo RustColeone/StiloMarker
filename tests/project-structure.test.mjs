@@ -117,6 +117,26 @@ test("feature modules split out of main.js load on demand", async () => {
   assert.doesNotMatch(mainSource, /^import .*(bmap-view|module-map-tools|mtree-module-map-service)/m);
 });
 
+test("every on-demand import points at a file that exists", async () => {
+  // Modules split out of main.js load with import("..."); a wrong relative path
+  // only fails when that feature is first opened, so check them all here.
+  const { readdir } = await import("node:fs/promises");
+  const { dirname, join } = await import("node:path");
+  const walk = async (dir) => (await Promise.all((await readdir(resolveFromRoot(dir), { withFileTypes: true }))
+    .map((entry) => entry.isDirectory() ? walk(`${dir}/${entry.name}`) : [`${dir}/${entry.name}`]))).flat();
+  const files = (await walk("app")).filter((file) => file.endsWith(".js"));
+  let checked = 0;
+  for (const file of files) {
+    const source = await readFile(resolveFromRoot(file), "utf8");
+    for (const [, target] of source.matchAll(/\bimport\(\s*["']([^"']+)["']\s*\)/g)) {
+      const resolved = join(dirname(file), target);
+      assert.equal(existsSync(resolveFromRoot(resolved)), true, `${file}: import("${target}") → missing ${resolved}`);
+      checked += 1;
+    }
+  }
+  assert.ok(checked >= 6, `expected the on-demand modules, found ${checked}`);
+});
+
 test("bmap-view.js wires interaction controls", async () => {
   const bmapViewSource = await readFile(resolveFromRoot("app/ui/bmap-view.js"), "utf8");
   assert.match(bmapViewSource, /const MIN_SNAP_STEP = 10/);

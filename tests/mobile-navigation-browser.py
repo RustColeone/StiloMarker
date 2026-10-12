@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from playwright.async_api import async_playwright
+from helpers.chat_hook import CHAT_HOOK, WAIT_LOADED, inject_chat_internals
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get('STILO_TEST_URL', 'https://stilomarker.ngantech.net')
 
@@ -54,9 +55,9 @@ async def main():
                 await route.fulfill(status=200, content_type='application/json', body=json.dumps(payload)); return
             file = ROOT / (path.lstrip('/') or 'index.html')
             if file.is_file():
-                body = file.read_bytes()
+                body = inject_chat_internals(path, file.read_bytes())
                 if path == '/app/main.js':
-                    body += b'\nwindow.__chatTest = {chatState, controller, renderChatPanel, setActiveChatThread, createNewChatConversation, getActiveChatThread, collaboration, setChatConnection: connection => { workspaceMode = connection ? "synced" : "private"; collaboration.getConnectionInfo = () => connection; }, receiveChat: workspace => chatSynchronizer.receive(workspace)};\n'
+                    body += b'\nwindow.__chatTest = {controller, renderChatPanel, collaboration, setChatConnection: connection => { workspaceMode = connection ? "synced" : "private"; collaboration.getConnectionInfo = () => connection; }, ' + CHAT_HOOK.encode() + b'};\n'
                 await route.fulfill(status=200, content_type=mimetypes.guess_type(str(file))[0] or 'application/octet-stream', body=body)
             else: await route.continue_()
         await context.route('**/*', route_request)
@@ -195,6 +196,7 @@ async def main():
         await assert_pane('source')
         assert await page.evaluate('localStorage.getItem("mdnotes.settings.v1")') == before
         await page.locator('#mobile-chat-toggle').click()
+        await page.wait_for_function(WAIT_LOADED)  # the chat panel loads on demand
         await page.set_viewport_size({'width':1200,'height':844})
         assert await page.locator('#chat-panel').is_hidden(), 'mobile state leaked into hidden desktop chat'
         await page.set_viewport_size({'width':390,'height':350})

@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from playwright.async_api import async_playwright
+from helpers.chat_hook import CHAT_HOOK, WAIT_LOADED, inject_chat_internals
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get('STILO_TEST_URL', 'http://127.0.0.1:8765')
@@ -75,9 +76,9 @@ async def main():
                 await route.fulfill(status=200, content_type='application/json', body=json.dumps(payload)); return
             file = ROOT / (path.lstrip('/') or 'index.html')
             if file.is_file():
-                body = file.read_bytes()
+                body = inject_chat_internals(path, file.read_bytes())
                 if path == '/app/main.js':
-                    body += b'\nwindow.__imgTest = {chatState, controller, performLogin, syncState};\n'
+                    body += b'\nwindow.__imgTest = {controller, performLogin, syncState, ' + CHAT_HOOK.encode() + b'};\n'
                 await route.fulfill(status=200, content_type=mimetypes.guess_type(str(file))[0] or 'application/octet-stream', body=body)
             else:
                 await route.continue_()
@@ -87,6 +88,7 @@ async def main():
         await page.wait_for_function('Boolean(window.__imgTest)')
         if await page.locator('#chat-panel').is_hidden():
             await page.locator('#chat-toggle-activity-button').click()
+        await page.wait_for_function(WAIT_LOADED)  # the chat panel loads on demand
 
         # Signed out: the server's agent asks for a sign-in and sends nothing.
         await page.wait_for_function('window.__imgTest.chatState.status === "signin"')

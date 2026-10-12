@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
+from helpers.chat_hook import CHAT_HOOK, WAIT_LOADED, inject_chat_internals
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get('STILO_TEST_URL', 'http://127.0.0.1:8765')
@@ -70,10 +71,9 @@ async def open_page(browser, requests, viewport, hold=None, init_project=True, *
             return
         file = ROOT / (path.lstrip('/') or 'index.html')
         if file.is_file():
-            body = file.read_bytes()
+            body = inject_chat_internals(path, file.read_bytes())
             if path == '/app/main.js':
-                body += (b'\nwindow.__rpTest = {chatState, controller, moveExplorerNode, getActiveChatThread,'
-                         b' get roleplay() { return roleplay; }, setChatTab, setPreviewFile};\n')
+                body += (b'\nwindow.__rpTest = {controller, moveExplorerNode, setPreviewFile, ' + CHAT_HOOK.encode() + b'};\n')
             await route.fulfill(status=200, content_type=mimetypes.guess_type(str(file))[0] or 'application/octet-stream', body=body)
         else:
             await route.continue_()
@@ -111,6 +111,7 @@ async def main():
         # Open the chat and switch to Roleplay; the module loads on demand.
         if await page.locator('#chat-panel').is_hidden():
             await page.locator('#chat-toggle-activity-button').click()
+        await page.wait_for_function(WAIT_LOADED)  # the chat panel loads on demand
         assert await page.locator('#chat-cast-bar').is_hidden()
         await page.wait_for_function('window.__rpTest.chatState.status === "ready"')
         await assert_tabs_clickable(page)
@@ -245,6 +246,7 @@ async def main():
         context, page, errors = await open_page(browser, phone_requests, {'width': 375, 'height': 760},
                                                 is_mobile=True, has_touch=True, device_scale_factor=1)
         await page.locator('#mobile-chat-toggle').click()
+        await page.wait_for_function(WAIT_LOADED)  # the chat panel loads on demand
         await page.wait_for_function('window.__rpTest.chatState.status === "ready"')
         await assert_tabs_clickable(page)
         await page.locator('[data-chat-tab="roleplay"]').click()

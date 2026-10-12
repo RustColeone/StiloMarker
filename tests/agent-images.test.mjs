@@ -5,9 +5,9 @@ import { readFile } from 'node:fs/promises';
 // Applying an agent's generated image: the bytes come from /api/generated, then
 // the file is created like any image (data: URL locally; uploaded bytes plus an
 // empty-content create-file in a directory-backed cloud workspace).
-const source = await readFile(new URL('../app/main.js', import.meta.url), 'utf8');
+const source = await readFile(new URL('../app/features/chat-panel.js', import.meta.url), 'utf8');
 const slice = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
-const applySource = slice('function generatedImageUrl(', '\ndocument.addEventListener("click"');
+const applySource = slice('function generatedImageUrl(', '\n  document.addEventListener("click"');
 
 const PNG = Uint8Array.from([137, 80, 78, 71, 1, 2, 3]);
 const dataUrl = `data:image/png;base64,${Buffer.from(PNG).toString('base64')}`;
@@ -44,7 +44,7 @@ function harness({ synced = false, directory = false, account = { token: 'acct' 
       uploadAsset: async (path, content) => uploads.push({ path, content }),
       publishOperation: async (op) => { published.push(op); return { revision: op.baseRevision + 1 }; }
     },
-    workspaceMode: synced ? 'synced' : 'private',
+    deps: { workspaceMode: synced ? 'synced' : 'private' },
     showToast: (message) => toasts.push(message),
     registerAgentDecorations: () => {}
   };
