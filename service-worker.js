@@ -42,7 +42,8 @@ const APP_SHELL = [
   "./app/features/chat-panel.js",
   "./app/features/cloud-browser.js",
   "./app/features/file-actions.js",
-  "./app/features/panes.js"
+  "./app/features/panes.js",
+  "./app/ui/layout.js"
 ];
 
 self.addEventListener("install", (event) => {

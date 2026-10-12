@@ -121,6 +121,15 @@ test("feature modules split out of main.js load on demand", async () => {
   assert.doesNotMatch(mainSource, /^import .*(bmap-view|module-map-tools|mtree-module-map-service)/m);
 });
 
+test("module instances created on first use are declared with var", async () => {
+  // main.js forwards calls to split-out modules through functions that create
+  // the module on first use. Those functions are hoisted and can run during
+  // startup, before the line holding the instance — a \`let\` there throws.
+  const mainSource = await readFile(resolveFromRoot("app/main.js"), "utf8");
+  assert.doesNotMatch(mainSource, /^(let|const) \w+Instance\b/m);
+  assert.ok((mainSource.match(/^var \w+Instance;/gm) ?? []).length >= 4);
+});
+
 test("every on-demand import points at a file that exists", async () => {
   // Modules split out of main.js load with import("..."); a wrong relative path
   // only fails when that feature is first opened, so check them all here.

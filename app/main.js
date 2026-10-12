@@ -26,6 +26,7 @@ import { createDefaultBmap } from "./services/bmap-service.js";
 import { createCloudBrowser } from "./features/cloud-browser.js";
 import { createFileActions } from "./features/file-actions.js";
 import { createPanes } from "./features/panes.js";
+import { createLayout } from "./ui/layout.js";
 
 document.querySelectorAll("[data-app-version]").forEach((label) => { label.textContent = `v${APP_VERSION}`; });
 
@@ -5514,8 +5515,9 @@ function handleEditorKeydown(event) {
 }
 // ---- Tabs, panes and preview (./features/panes.js) ----
 // Created on first use. The module reads main's shared values through this
-// context, so it always sees their current values.
-let panesInstance = null;
+// context, so it always sees their current values. `var`: a forwarding
+// function can run during startup, before this line is reached.
+var panesInstance;
 function panes() {
   return (panesInstance ??= createPanes({
     get DIFF_TAB_ID() { return DIFF_TAB_ID; },
@@ -5598,8 +5600,9 @@ async function typesetPreview(...args) { return panes().typesetPreview(...args);
 
 // ---- Explorer and file actions (./features/file-actions.js) ----
 // Created on first use. The module reads main's shared values through this
-// context, so it always sees their current values.
-let fileActionsInstance = null;
+// context, so it always sees their current values. `var`: a forwarding
+// function can run during startup, before this line is reached.
+var fileActionsInstance;
 function fileActions() {
   return (fileActionsInstance ??= createFileActions({
     get addFileState() { return addFileState; },
@@ -7366,166 +7369,64 @@ document.addEventListener("drop", () => {
   clearExplorerDropState();
   clearEditorDropCaret();
 });
-
-function toggleExplorer() {
-  if (isMobileLayout()) { toggleMobileExplorer(); return; }
-  settings.explorer = settings.explorer === "collapsed" ? "expanded" : "collapsed";
-  elements.explorerSelect.value = settings.explorer;
-  persistSettings();
-  logDebug("action", "Explorer toggled", settings.explorer);
+// ---- Layout: panels, mobile panes and touch gestures (./ui/layout.js) ----
+// Created on first use. The module reads main's shared values through this
+// context, so it always sees their current values. `var`: a forwarding
+// function can run during startup, before this line is reached.
+var layoutInstance;
+function layout() {
+  return (layoutInstance ??= createLayout({
+    get DIFF_TAB_ID() { return DIFF_TAB_ID; },
+    get DIRECTION_BIAS() { return DIRECTION_BIAS; },
+    get EDGE_ZONE() { return EDGE_ZONE; },
+    get FLICK_VELOCITY() { return FLICK_VELOCITY; },
+    get PANE_ORDER() { return PANE_ORDER; },
+    get SLOP() { return SLOP; },
+    get SNAP_FRACTION() { return SNAP_FRACTION; },
+    get chat() { return chat; },
+    get closeMenus() { return closeMenus; },
+    get controller() { return controller; },
+    get currentMobileFileId() { return currentMobileFileId; },
+    get diffState() { return diffState; },
+    get drawerWidth() { return drawerWidth; },
+    set drawerWidth(value) { drawerWidth = value; },
+    get elements() { return elements; },
+    get gesture() { return gesture; },
+    set gesture(value) { gesture = value; },
+    get isMobileLayout() { return isMobileLayout; },
+    get isPreviewableFileName() { return isPreviewableFileName; },
+    get logDebug() { return logDebug; },
+    get mobileView() { return mobileView; },
+    set mobileView(value) { mobileView = value; },
+    get paneDrag() { return paneDrag; },
+    set paneDrag(value) { paneDrag = value; },
+    get persistSettings() { return persistSettings; },
+    get previewFileId() { return previewFileId; },
+    get refreshChatStatus() { return refreshChatStatus; },
+    get renderChatPanel() { return renderChatPanel; },
+    get setPreviewFile() { return setPreviewFile; },
+    get settings() { return settings; }
+  }));
 }
+function applyMobileViewState(...args) { return layout().applyMobileViewState(...args); }
+function cancelMobileGesture(...args) { return layout().cancelMobileGesture(...args); }
+function handleFloatingExplorerOutsidePress(...args) { return layout().handleFloatingExplorerOutsidePress(...args); }
+function onGestureEnd(...args) { return layout().onGestureEnd(...args); }
+function onGestureMove(...args) { return layout().onGestureMove(...args); }
+function onGestureStart(...args) { return layout().onGestureStart(...args); }
+function renderMobilePaneCaption(...args) { return layout().renderMobilePaneCaption(...args); }
+function selectMobilePane(...args) { return layout().selectMobilePane(...args); }
+function setExplorerAnchor(...args) { return layout().setExplorerAnchor(...args); }
+function setMobileExplorerOpen(...args) { return layout().setMobileExplorerOpen(...args); }
+function setMobileMenuOpen(...args) { return layout().setMobileMenuOpen(...args); }
+function toggleChat(...args) { return layout().toggleChat(...args); }
+function toggleExplorer(...args) { return layout().toggleExplorer(...args); }
+function toggleExplorerAnchor(...args) { return layout().toggleExplorerAnchor(...args); }
+function toggleMobileExplorer(...args) { return layout().toggleMobileExplorer(...args); }
+function toggleMobileMenu(...args) { return layout().toggleMobileMenu(...args); }
+function togglePreview(...args) { return layout().togglePreview(...args); }
+function toggleSource(...args) { return layout().toggleSource(...args); }
 
-function setExplorerAnchor(mode) {
-  const next = mode === "floating" ? "floating" : "docked";
-  if (settings.explorerAnchor === next) return;
-  settings.explorerAnchor = next;
-  if (elements.explorerAnchorSelect) elements.explorerAnchorSelect.value = next;
-  persistSettings();
-  logDebug("action", "Explorer anchor changed", next);
-}
-
-function toggleExplorerAnchor() {
-  setExplorerAnchor(settings.explorerAnchor === "floating" ? "docked" : "floating");
-}
-
-// In floating mode the explorer overlays the editor; a press outside it (that
-// isn't the toggle/pin controls or the explorer's own popovers) collapses it.
-function handleFloatingExplorerOutsidePress(event) {
-  if (settings.explorerAnchor !== "floating" || settings.explorer !== "expanded") return;
-  const target = event.target;
-  if (elements.explorerPanel?.contains(target)) return;
-  if (elements.explorerToggleButton?.contains(target)) return;
-  if (elements.explorerContextMenu?.contains(target)) return;
-  settings.explorer = "collapsed";
-  if (elements.explorerSelect) elements.explorerSelect.value = settings.explorer;
-  persistSettings();
-}
-
-function togglePreview() {
-  if (isMobileLayout()) { selectMobilePane(mobileView === "preview" ? "source" : "preview"); return; }
-  settings.preview = settings.preview === "hidden" ? "shown" : "hidden";
-  // Never collapse both panes.
-  if (settings.preview === "hidden" && settings.source === "hidden") {
-    settings.source = "shown";
-  }
-  elements.previewSelect.value = settings.preview;
-  persistSettings();
-  logDebug("action", "Preview toggled", settings.preview);
-}
-
-function toggleSource() {
-  if (isMobileLayout()) { selectMobilePane(mobileView === "source" ? "preview" : "source"); return; }
-  settings.source = settings.source === "hidden" ? "shown" : "hidden";
-  // Collapsing the source is a reading-focused mode — keep the preview visible.
-  if (settings.source === "hidden" && settings.preview === "hidden") {
-    settings.preview = "shown";
-    elements.previewSelect.value = "shown";
-  }
-  persistSettings();
-  logDebug("action", "Source toggled", settings.source);
-}
-
-function toggleChat() {
-  if (isMobileLayout()) {
-    selectMobilePane(mobileView === "chat" ? "source" : "chat");
-    return;
-  }
-  settings.chatPanel = settings.chatPanel === "hidden" ? "shown" : "hidden";
-  persistSettings();
-  if (settings.chatPanel === "shown") {
-    void refreshChatStatus({ silent: true });
-    if (chat) chat.chatState.shouldScrollToBottom = true;
-    renderChatPanel(controller.getProject());
-  }
-  logDebug("action", "Chat toggled", settings.chatPanel);
-}
-
-// ── Mobile view state ──────────────────────────────────────────────────────
-// On narrow screens the source/preview/chat panes share one slot; #app's
-// data-mobile-view picks which is visible. These helpers are inert on desktop
-// (the mobile CSS is gated behind a media query) but keep the button state and
-// ARIA in sync everywhere.
-function applyMobileViewState() {
-  elements.app.dataset.mobileView = mobileView;
-  // The chat panel is normally gated by the global `[hidden] { display:none
-  // !important }` rule (driven by settings.chatPanel). In the mobile chat view
-  // it must win over that, so drop the attribute and let the cascade decide per
-  // viewport. A desktop window may retain a previous mobile pane selection;
-  // only the active mobile layout can override the saved chat preference.
-  if (elements.chatPanel) {
-    elements.chatPanel.hidden = settings.chatPanel === "hidden" && !(isMobileLayout() && mobileView === "chat");
-  }
-  renderMobilePaneButtons(mobileView);
-  renderMobilePaneCaption();
-}
-
-// Topbar caption (replaces the per-pane header on mobile): SOURCE/PREVIEW plus
-// the file name, truncated by CSS. This depends on which FILE is showing, not
-// just which view, so updateStatus refreshes it on every render — otherwise
-// switching files left a stale name in the mobile topbar.
-// Highlight = "this is the pane you are looking at". Takes the view explicitly
-// so a committed swipe can light the target up as it slides in, instead of the
-// button catching up only after the settle animation ends.
-function renderMobilePaneButtons(view) {
-  for (const button of [elements.mobileSourceToggle, elements.mobilePreviewToggle, elements.mobileChatToggle]) {
-    if (!button) continue;
-    const active = button.dataset.pane === view;
-    button.classList.toggle("is-active", active);
-    button.setAttribute("aria-pressed", String(active));
-  }
-}
-
-function renderMobilePaneCaption() {
-  if (elements.mobilePaneCaption) {
-    let caption = "";
-    if (mobileView === "chat") {
-      caption = "CHAT";
-    } else if (mobileView === "preview") {
-      const name = previewFileId === DIFF_TAB_ID
-        ? (diffState.active ? `${diffState.path.split("/").pop()} (diff)` : null)
-        : controller.getProject()?.nodes?.[previewFileId]?.name;
-      caption = name ? `PREVIEW — ${name}` : "PREVIEW";
-    } else {
-      const name = controller.getActiveFile()?.name;
-      caption = name ? `SOURCE — ${name}` : "SOURCE";
-    }
-    elements.mobilePaneCaption.textContent = caption;
-  }
-  // The pen (rename) button only makes sense when a real file is on screen.
-  if (elements.mobileRenameButton) {
-    elements.mobileRenameButton.hidden = currentMobileFileId() == null;
-  }
-}
-
-function setMobileView(view) {
-  cancelMobileGesture();
-  mobileView = view;
-  if (view === "preview") {
-    // Mobile has a single pane toggle, so the preview should mirror the file
-    // you're editing rather than a stale/independent preview target.
-    const activeFile = controller.getActiveFile();
-    if (activeFile && isPreviewableFileName(activeFile.name) && previewFileId !== activeFile.id) {
-      setPreviewFile(activeFile.id);
-    }
-  }
-  applyMobileViewState();
-}
-
-// Each topbar button selects its own pane. Tapping the one already showing is
-// a no-op rather than a toggle: with three dedicated buttons the highlight has
-// to mean "this is what you are looking at", and toggling would contradict it.
-function selectMobilePane(view) {
-  if (!PANE_ORDER.includes(view)) return;
-  if (view === mobileView) { cancelMobileGesture(); return; }
-  setMobileView(view);
-  if (view === "chat") openMobileChatView();
-}
-
-function openMobileChatView() {
-  void refreshChatStatus({ silent: true });
-  if (chat) chat.chatState.shouldScrollToBottom = true;
-  renderChatPanel(controller.getProject());
-}
 
 // ── Touch gestures: explorer drawer + pane carousel ─────────────────────────
 // One dispatcher owns every horizontal drag so the two gestures can never fight
@@ -7541,261 +7442,6 @@ function openMobileChatView() {
 
 function isMobileLayout() {
   return window.matchMedia(`(max-width: ${MOBILE_MAX_WIDTH}px)`).matches;
-}
-
-function setDrawerProgress(progress) {
-  const clamped = Math.min(1, Math.max(0, progress));
-  elements.app.style.setProperty("--drawer-progress", String(clamped));
-}
-
-function paneElement(view) {
-  if (view === "source") return elements.sourcePane;
-  if (view === "preview") return document.querySelector(".preview-pane");
-  return elements.chatPanel;
-}
-
-// A drag must not steal a scroll that belongs to content — a wide table or a
-// code block in the preview, the horizontal tab strip, a range input.
-function claimsHorizontalScroll(target) {
-  let node = target;
-  while (node && node !== document.body) {
-    if (node.nodeType === 1) {
-      if (node.closest?.(".tab-strip, input[type='range'], .cm-editor")) return true;
-      const style = window.getComputedStyle(node);
-      const scrolls = /(auto|scroll)/.test(style.overflowX);
-      if (scrolls && node.scrollWidth > node.clientWidth + 1) return true;
-    }
-    node = node.parentNode;
-  }
-  return false;
-}
-
-function onGestureStart(event) {
-  if (event.touches.length !== 1) { cancelMobileGesture(); return; }
-  if (!isMobileLayout() || paneDrag) return;
-  gesture = null;
-  // Editing, canvas interaction, menus, and horizontal content own their drags.
-  // Check before the edge gesture too, so a table at the left edge can scroll.
-  if (event.target.closest?.("dialog, .menu-bar, .explorer-context-menu, .tab-overflow-menu, input, textarea, select, button, a, [contenteditable], .bmap-editor, .cm-editor")) return;
-  if (claimsHorizontalScroll(event.target) || window.getSelection()?.isCollapsed === false) return;
-
-  const touch = event.touches[0];
-  const drawerOpen = elements.app.dataset.mobileExplorer === "open";
-  gesture = {
-    startX: touch.clientX,
-    startY: touch.clientY,
-    lastX: touch.clientX,
-    lastT: event.timeStamp,
-    velocity: 0,
-    kind: null,           // "drawer" | "pane", decided on first qualifying move
-    claimed: false,
-    drawerOpen,
-    fromEdge: touch.clientX <= EDGE_ZONE,
-    allowPane: !drawerOpen && !claimsHorizontalScroll(event.target)
-  };
-}
-
-function onGestureMove(event) {
-  if (event.touches.length !== 1) { cancelMobileGesture(); return; }
-  if (!gesture) return;
-  const touch = event.touches[0];
-  const dx = touch.clientX - gesture.startX;
-  const dy = touch.clientY - gesture.startY;
-
-  if (!gesture.claimed) {
-    if (Math.abs(dx) < SLOP || Math.abs(dx) < Math.abs(dy) * DIRECTION_BIAS) {
-      // Vertical or not yet decisive — let the page have it, and stop looking
-      // once it is clearly a scroll so we don't fight it later in the gesture.
-      if (Math.abs(dy) > SLOP * 2) gesture = null;
-      return;
-    }
-    if (gesture.drawerOpen && dx < 0) gesture.kind = "drawer";
-    else if (!gesture.drawerOpen && gesture.fromEdge && dx > 0) gesture.kind = "drawer";
-    else if (gesture.allowPane) gesture.kind = "pane";
-    if (!gesture.kind) { gesture = null; return; }
-    gesture.claimed = true;
-    if (gesture.kind === "drawer") beginDrawerDrag();
-    else if (!beginPaneDrag(dx)) { gesture = null; return; }
-  }
-
-  const dt = Math.max(1, event.timeStamp - gesture.lastT);
-  gesture.velocity = (touch.clientX - gesture.lastX) / dt;
-  gesture.lastX = touch.clientX;
-  gesture.lastT = event.timeStamp;
-
-  event.preventDefault();  // we own it now — suppress scroll/selection
-  if (gesture.kind === "drawer") updateDrawerDrag(dx);
-  else updatePaneDrag(dx);
-}
-
-function onGestureEnd(event) {
-  if (event.type === "touchcancel") { cancelMobileGesture(); return; }
-  if (!gesture) return;
-  const g = gesture;
-  gesture = null;
-  if (!g.claimed) return;
-  if (g.kind === "drawer") endDrawerDrag(g);
-  else endPaneDrag(g);
-}
-
-// Cancelled touches, rotation, and button navigation must restore the original
-// pane immediately, without a delayed animation switching it back afterward.
-function cancelMobileGesture() {
-  gesture = null;
-  delete elements.app.dataset.drawerDrag;
-  setDrawerProgress(elements.app.dataset.mobileExplorer === "open" ? 1 : 0);
-  const drag = paneDrag;
-  if (!drag) return;
-  paneDrag = null;
-  drag.cancelSettle?.();
-  for (const el of [drag.current, drag.incoming]) {
-    el.classList.remove("pane-swipe-layer");
-    el.style.transform = "";
-  }
-  drag.incoming.hidden = drag.incomingWasHidden;
-  delete elements.app.dataset.paneDrag;
-  delete elements.app.dataset.paneSettling;
-  applyMobileViewState();
-}
-
-// ---- Drawer ----------------------------------------------------------------
-
-function beginDrawerDrag() {
-  const sidebar = elements.explorerPanel ?? document.querySelector(".workspace-shell > .sidebar");
-  drawerWidth = Math.max(1, sidebar?.offsetWidth ?? 1);
-  elements.app.dataset.drawerDrag = "1";
-}
-
-function updateDrawerDrag(dx) {
-  const base = gesture.drawerOpen ? drawerWidth : 0;
-  setDrawerProgress((base + dx) / drawerWidth);
-}
-
-function endDrawerDrag(g) {
-  delete elements.app.dataset.drawerDrag;
-  const dx = g.lastX - g.startX;
-  const progress = ((g.drawerOpen ? drawerWidth : 0) + dx) / drawerWidth;
-  const flicked = Math.abs(g.velocity) > FLICK_VELOCITY;
-  const open = flicked
-    ? g.velocity > 0
-    : progress > (g.drawerOpen ? 1 - SNAP_FRACTION : SNAP_FRACTION);
-  setMobileExplorerOpen(open);
-}
-
-// ---- Pane carousel ---------------------------------------------------------
-
-function beginPaneDrag(dx) {
-  const index = PANE_ORDER.indexOf(mobileView);
-  const nextIndex = index + (dx < 0 ? 1 : -1);
-  if (nextIndex < 0 || nextIndex >= PANE_ORDER.length) return false;  // at an end
-  const current = paneElement(mobileView);
-  const incoming = paneElement(PANE_ORDER[nextIndex]);
-  if (!current || !incoming) return false;
-
-  // The incoming pane is normally display:none and, for chat, also [hidden].
-  // Lift both into the grid cell as layers the drag can translate.
-  paneDrag = {
-    index,
-    nextIndex,
-    current,
-    incoming,
-    incomingWasHidden: incoming.hidden,
-    width: Math.max(1, current.offsetWidth || window.innerWidth)
-  };
-  incoming.hidden = false;
-  current.classList.add("pane-swipe-layer");
-  incoming.classList.add("pane-swipe-layer");
-  elements.app.dataset.paneDrag = "1";
-  updatePaneDrag(dx);
-  return true;
-}
-
-function updatePaneDrag(dx) {
-  if (!paneDrag) return;
-  const direction = paneDrag.nextIndex > paneDrag.index ? -1 : 1;
-  const limited = direction * Math.max(0, Math.min(paneDrag.width, dx * direction));
-  const offset = -direction * paneDrag.width;
-  paneDrag.current.style.transform = `translateX(${limited}px)`;
-  paneDrag.incoming.style.transform = `translateX(${offset + limited}px)`;
-}
-
-function endPaneDrag(g) {
-  if (!paneDrag) return;
-  const drag = paneDrag;
-  const dx = g.lastX - g.startX;
-  const flicked = Math.abs(g.velocity) > FLICK_VELOCITY
-    && Math.sign(g.velocity) === Math.sign(dx);
-  const direction = drag.nextIndex > drag.index ? -1 : 1;
-  const commit = Math.sign(dx) === direction && (flicked || Math.abs(dx) > drag.width * SNAP_FRACTION);
-  const settleTo = commit ? direction * drag.width : 0;
-
-  if (commit) renderMobilePaneButtons(PANE_ORDER[drag.nextIndex]);
-  elements.app.dataset.paneSettling = "1";
-  drag.current.style.transform = `translateX(${settleTo}px)`;
-  drag.incoming.style.transform = `translateX(${settleTo - direction * drag.width}px)`;
-
-  const finish = () => {
-    if (paneDrag !== drag) return;
-    paneDrag = null;
-    for (const el of [drag.current, drag.incoming]) {
-      el.classList.remove("pane-swipe-layer");
-      el.style.transform = "";
-    }
-    delete elements.app.dataset.paneDrag;
-    delete elements.app.dataset.paneSettling;
-    if (commit) {
-      setMobileView(PANE_ORDER[drag.nextIndex]);
-      if (PANE_ORDER[drag.nextIndex] === "chat") openMobileChatView();
-    } else {
-      // Restore whatever [hidden] state the incoming pane had before the drag.
-      drag.incoming.hidden = drag.incomingWasHidden;
-      applyMobileViewState();
-    }
-    paneDrag = null;
-  };
-  // Settle on transitionend, with a timer as the backstop for a cancelled or
-  // zero-duration transition (reduced motion), so panes can never stay stuck.
-  let done = false;
-  let timer;
-  const once = (event) => {
-    if (event && (event.target !== drag.current || event.propertyName !== "transform")) return;
-    if (done) return;
-    drag.cancelSettle();
-    finish();
-  };
-  drag.cancelSettle = () => {
-    done = true;
-    clearTimeout(timer);
-    drag.current.removeEventListener("transitionend", once);
-  };
-  drag.current.addEventListener("transitionend", once);
-  timer = setTimeout(once, 320);
-}
-
-function setMobileExplorerOpen(open) {
-  cancelMobileGesture();
-  if (open) setMobileMenuOpen(false);
-  elements.app.dataset.mobileExplorer = open ? "open" : "closed";
-  elements.mobileExplorerButton?.classList.toggle("is-active", open);
-  elements.mobileExplorerButton?.setAttribute("aria-expanded", String(open));
-  setDrawerProgress(open ? 1 : 0);
-}
-
-function toggleMobileExplorer() {
-  setMobileExplorerOpen(elements.app.dataset.mobileExplorer !== "open");
-}
-
-function setMobileMenuOpen(open) {
-  cancelMobileGesture();
-  if (open) setMobileExplorerOpen(false);
-  elements.app.dataset.mobileMenu = open ? "open" : "closed";
-  elements.mobileMenuButton?.classList.toggle("is-active", open);
-  elements.mobileMenuButton?.setAttribute("aria-expanded", String(open));
-  if (!open) closeMenus();
-}
-
-function toggleMobileMenu() {
-  setMobileMenuOpen(elements.app.dataset.mobileMenu !== "open");
 }function toggleLogPanel() {
   settings.debugPanel = !settings.debugPanel;
   persistSettings();
@@ -8358,8 +8004,9 @@ elements.autoReconnectInput?.addEventListener("change", (event) => {
 });
 // ---- Cloud file browser, accounts and hosting (./features/cloud-browser.js) ----
 // Created on first use. The module reads main's shared values through this
-// context, so it always sees their current values.
-let cloudBrowserInstance = null;
+// context, so it always sees their current values. `var`: a forwarding
+// function can run during startup, before this line is reached.
+var cloudBrowserInstance;
 function cloudBrowser() {
   return (cloudBrowserInstance ??= createCloudBrowser({
     get browserState() { return browserState; },
