@@ -39,7 +39,8 @@ const APP_SHELL = [
   "./app/features/module-map-tools.js",
   "./app/features/workspace-history.js",
   "./app/features/snapshots-dialog.js",
-  "./app/features/chat-panel.js"
+  "./app/features/chat-panel.js",
+  "./app/features/cloud-browser.js"
 ];
 
 self.addEventListener("install", (event) => {
