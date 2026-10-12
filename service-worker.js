@@ -35,7 +35,8 @@ const APP_SHELL = [
   "./app/ui/bmap-view.js",
   "./app/ui/dom.js",
   "./app/ui/explorer-view.js",
-  "./app/ui/roleplay-view.js"
+  "./app/ui/roleplay-view.js",
+  "./app/features/module-map-tools.js"
 ];
 
 self.addEventListener("install", (event) => {

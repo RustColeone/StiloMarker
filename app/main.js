@@ -14,7 +14,6 @@ import { createChatMessage, createChatThread, deriveChatTitle, loadChatWorkspace
 import { dataUrlToBlob, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent } from "./services/file-content-service.js";
 import { extractMarkdownLinks, renderMarkdown } from "./services/markdown-service.js";
 import { PERSONA_SUFFIX, parsePersona, personaAvatarHtml, personaFileName, personaTemplate } from "./services/persona-service.js";
-import { buildModuleMapSection, replaceOrAppendModuleMap } from "./services/mtree-module-map-service.js";
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
 import { applyEditorFont, applyTheme, clampSourceFontSize, loadSettings, patchStoredSettings, saveSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
@@ -91,26 +90,6 @@ const elements = {
   editorAutocompleteLabel: query("#editor-autocomplete-label"),
   editorAutocompleteList: query("#editor-autocomplete-list"),
   preview: query("#preview-output"),
-  mtreeToolsDialog: query("#mtree-tools-dialog"),
-  mtreeSourceText: query("#mtree-source-text"),
-  mtreeSimplifyInput: query("#mtree-simplify-input"),
-  mtreeContinuationInput: query("#mtree-continuation-input"),
-  mtreeIncludeNavigationInput: query("#mtree-include-navigation-input"),
-  mtreeIncludeModulesInput: query("#mtree-include-modules-input"),
-  mtreeIncludeParentsInput: query("#mtree-include-parents-input"),
-  mtreeIncludeChildrenInput: query("#mtree-include-children-input"),
-  mtreeIncludeDescriptionsInput: query("#mtree-include-descriptions-input"),
-  mtreeIncludeEmptyInput: query("#mtree-include-empty-input"),
-  mtreeTargetFileSelect: query("#mtree-target-file-select"),
-  mtreeOutputNameInput: query("#mtree-output-name-input"),
-  mtreeQualityText: query("#mtree-quality-text"),
-  mtreeWarningList: query("#mtree-warning-list"),
-  mtreeOutputHighlight: query("#mtree-output-highlight"),
-  mtreeOutputText: query("#mtree-output-text"),
-  mtreeRenderPreview: query("#mtree-render-preview"),
-  mtreeCreateButton: query("#mtree-create-button"),
-  mtreeKeepButton: query("#mtree-keep-button"),
-  mtreeUndoButton: query("#mtree-undo-button"),
   addFileDialog: query("#add-file-dialog"),
   addFileTargetText: query("#add-file-target-text"),
   addFileUrlInput: query("#add-file-url-input"),
@@ -534,15 +513,6 @@ let mobileView = "source";         // source | preview | chat
 let privateProjectSnapshot = null;
 // Forward declaration — assigned after `collaboration` is created.
 let switchWorkspaceMode;
-
-const mtreeToolState = {
-  sourceFileId: null,
-  generatedSection: "",
-  draftSection: "",
-  warnings: [],
-  quality: null,
-  selectedTargetFileId: "__new__"
-};
 
 const addFileState = {
   parentId: null,
@@ -5649,269 +5619,31 @@ const menuPairs = [
   [elements.settingsMenuButton, elements.settingsMenu]
 ];
 
-function getDefaultModuleMapName(fileName) {
-  const baseName = fileName.replace(/\.mtree$/i, "") || "module-map";
-  return `${baseName}.module-map.md`;
-}
+// Module map tools (.mtree → Markdown) load the first time their dialog opens.
+let moduleMapTools = null;
+let moduleMapToolsLoading = null;
 
-function renderMtreeWarnings(warnings) {
-  elements.mtreeWarningList.replaceChildren();
-
-  if (warnings.length === 0) {
-    const empty = document.createElement("span");
-    empty.className = "subtle-label";
-    empty.textContent = "No warnings.";
-    elements.mtreeWarningList.append(empty);
-    return;
-  }
-
-  warnings.forEach((warning) => {
-    const row = document.createElement("div");
-    row.className = "subtle-label";
-    row.textContent = warning;
-    elements.mtreeWarningList.append(row);
-  });
-}
-
-function renderMtreeQuality(quality) {
-  if (!quality) {
-    elements.mtreeQualityText.textContent = "No module map generated yet.";
-    return;
-  }
-
-  const warningCount = quality.missingDescriptionModules.length + quality.recursionModules.length;
-  const passedCount = Math.max(0, quality.totalModules - warningCount);
-  elements.mtreeQualityText.textContent = `${passedCount}/${quality.totalModules} modules passed checks.`;
-}
-
-function listMarkdownTargets(project) {
-  return Object.values(project.nodes)
-    .filter((node) => node.kind === "file" && node.name.endsWith(".md"))
-    .sort((left, right) => getPath(project, left.id).localeCompare(getPath(project, right.id)));
-}
-
-function populateMtreeTargetPicker(selectedFileId = "__new__") {
-  const project = controller.getProject();
-  const markdownFiles = listMarkdownTargets(project);
-  elements.mtreeTargetFileSelect.replaceChildren();
-
-  const createNewOption = document.createElement("option");
-  createNewOption.value = "__new__";
-  createNewOption.textContent = "Create new markdown file";
-  elements.mtreeTargetFileSelect.append(createNewOption);
-
-  markdownFiles.forEach((file) => {
-    const option = document.createElement("option");
-    option.value = file.id;
-    option.textContent = getPath(project, file.id);
-    elements.mtreeTargetFileSelect.append(option);
-  });
-
-  const nextValue = markdownFiles.some((file) => file.id === selectedFileId) ? selectedFileId : "__new__";
-  mtreeToolState.selectedTargetFileId = nextValue;
-  elements.mtreeTargetFileSelect.value = nextValue;
-  elements.mtreeOutputNameInput.disabled = nextValue !== "__new__";
-}
-
-function refreshMtreeDraftPresentation() {
-  const draft = mtreeToolState.draftSection || "";
-  syncMtreeViewportMetrics();
-  elements.mtreeOutputHighlight.innerHTML = `${highlightMarkdownSource(draft)}<div class="editor-line"> </div>`;
-  elements.mtreeRenderPreview.innerHTML = renderMarkdown(draft);
-  void typesetPreview(draft, elements.mtreeRenderPreview);
-  syncMtreeOutputScroll();
-  elements.mtreeKeepButton.disabled = draft === mtreeToolState.generatedSection;
-  elements.mtreeUndoButton.disabled = draft === mtreeToolState.generatedSection;
-}
-
-function renderMtreeDraft() {
-  const draft = mtreeToolState.draftSection || "";
-  elements.mtreeOutputText.value = draft;
-  refreshMtreeDraftPresentation();
-}
-
-function syncMtreeViewportMetrics() {
-  const scrollbarWidth = Math.max(0, elements.mtreeOutputText.offsetWidth - elements.mtreeOutputText.clientWidth);
-  elements.mtreeOutputText.style.setProperty("--mtree-scrollbar-width", `${scrollbarWidth}px`);
-}
-
-function syncMtreeOutputScroll() {
-  const scrollTop = elements.mtreeOutputText.scrollTop;
-  const scrollLeft = elements.mtreeOutputText.scrollLeft;
-  elements.mtreeOutputHighlight.style.transform = `translate(${-scrollLeft}px, ${-scrollTop}px)`;
-}
-
-function keepMtreeDraft() {
-  mtreeToolState.generatedSection = mtreeToolState.draftSection;
-  renderMtreeDraft();
-}
-
-function undoMtreeDraft() {
-  mtreeToolState.draftSection = mtreeToolState.generatedSection;
-  renderMtreeDraft();
-}
-
-function ensureMtreeOutputName(fileName) {
-  const currentValue = elements.mtreeOutputNameInput.value.trim();
-  if (currentValue) {
-    return currentValue.toLowerCase().endsWith(".md") ? currentValue : `${currentValue}.md`;
-  }
-  const suggested = getDefaultModuleMapName(fileName);
-  elements.mtreeOutputNameInput.value = suggested;
-  return suggested;
-}
-
-function generateModuleMap() {
-  const project = controller.getProject();
-  const sourceFile = mtreeToolState.sourceFileId ? project.nodes[mtreeToolState.sourceFileId] : null;
-  if (!sourceFile || sourceFile.kind !== "file" || !sourceFile.name.endsWith(".mtree")) {
-    throw new Error("Select a .mtree file before generating a module map.");
-  }
-
-  const result = buildModuleMapSection(sourceFile.content, {
-    simplify: elements.mtreeSimplifyInput.checked,
-    splitContinuationTrees: elements.mtreeContinuationInput.checked,
-    includeNavigation: elements.mtreeIncludeNavigationInput.checked,
-    includeModules: elements.mtreeIncludeModulesInput.checked,
-    includeParents: elements.mtreeIncludeParentsInput.checked,
-    includeChildren: elements.mtreeIncludeChildrenInput.checked,
-    includeDescriptions: elements.mtreeIncludeDescriptionsInput.checked,
-    includeEmptySections: elements.mtreeIncludeEmptyInput.checked
-  });
-
-  mtreeToolState.generatedSection = result.section;
-  mtreeToolState.draftSection = result.section;
-  mtreeToolState.warnings = result.warnings;
-  mtreeToolState.quality = result.quality;
-
-  renderMtreeWarnings(result.warnings);
-  renderMtreeQuality(result.quality);
-  renderMtreeDraft();
-  ensureMtreeOutputName(sourceFile.name);
-
-  return result;
-}
-
-function openMtreeToolsDialog(fileId) {
-  const project = controller.getProject();
-  const file = project.nodes[fileId];
-  if (!file || file.kind !== "file" || !file.name.endsWith(".mtree")) {
-    notify("Module map tools are only available for .mtree files.");
-    return;
-  }
-
-  mtreeToolState.sourceFileId = fileId;
-  mtreeToolState.generatedSection = "";
-  mtreeToolState.draftSection = "";
-  mtreeToolState.warnings = [];
-  mtreeToolState.quality = null;
-  mtreeToolState.selectedTargetFileId = "__new__";
-
-  elements.mtreeSourceText.textContent = `Generate a module map from ${getPath(project, fileId) || file.name}.`;
-  elements.mtreeOutputNameInput.value = getDefaultModuleMapName(file.name);
-  populateMtreeTargetPicker();
-  renderMtreeWarnings([]);
-  renderMtreeQuality(null);
-  renderMtreeDraft();
-  elements.mtreeToolsDialog.showModal();
-
-  try {
-    generateModuleMap();
-  } catch (error) {
-    notify(error.message);
-  }
-}
-
-function regenerateModuleMapWithNotification() {
-  if (!elements.mtreeToolsDialog.open || !mtreeToolState.sourceFileId) {
-    return;
-  }
-  try {
-    generateModuleMap();
-  } catch (error) {
-    notify(error.message);
-  }
-}
-
-function upsertModuleMapMarkdown() {
-  const project = controller.getProject();
-  const sourceFile = mtreeToolState.sourceFileId ? project.nodes[mtreeToolState.sourceFileId] : null;
-  if (!sourceFile || sourceFile.kind !== "file" || !sourceFile.name.endsWith(".mtree")) {
-    notify("Module map source file is no longer available.");
-    return;
-  }
-
-  if (!mtreeToolState.generatedSection) {
-    try {
-      generateModuleMap();
-    } catch (error) {
-      notify(error.message);
-      return;
-    }
-  }
-
-  const draftSection = elements.mtreeOutputText.value;
-  mtreeToolState.draftSection = draftSection;
-  const parentId = getNode(project, sourceFile.id).parentId;
-  const selectedTargetFileId = elements.mtreeTargetFileSelect.value;
-
-  if (selectedTargetFileId !== "__new__") {
-    const targetFile = project.nodes[selectedTargetFileId];
-    if (!targetFile || targetFile.kind !== "file" || !targetFile.name.endsWith(".md")) {
-      notify("Selected target markdown file is no longer available.");
-      populateMtreeTargetPicker();
-      return;
-    }
-
-    const nextContent = replaceOrAppendModuleMap(targetFile.content, draftSection);
-    controller.updateContent(targetFile.id, nextContent);
-    publishOperation({ type: "update-file", path: getPath(project, targetFile.id), content: nextContent });
-    setActiveSourceFile(targetFile.id);
-    setPreviewFile(targetFile.id);
-    elements.mtreeToolsDialog.close();
-    notify(`Updated ${targetFile.name} with the generated module map.`);
-    return;
-  }
-
-  const outputName = ensureMtreeOutputName(sourceFile.name);
-  const sibling = findChildByName(project, parentId, outputName);
-
-  if (sibling && sibling.kind !== "file") {
-    notify(`Cannot write module map to ${outputName} because a folder already uses that name.`);
-    return;
-  }
-
-  if (sibling && !sibling.name.endsWith(".md")) {
-    notify("Module map output must be a .md file.");
-    return;
-  }
-
-  if (sibling) {
-    const nextContent = replaceOrAppendModuleMap(sibling.content, draftSection);
-    controller.updateContent(sibling.id, nextContent);
-    publishOperation({ type: "update-file", path: getPath(project, sibling.id), content: nextContent });
-    setActiveSourceFile(sibling.id);
-    setPreviewFile(sibling.id);
-    elements.mtreeToolsDialog.close();
-    notify(`Updated ${outputName} with the generated module map.`);
-    return;
-  }
-
-  controller.createFile(parentId, outputName, replaceOrAppendModuleMap("", draftSection));
-  const nextProject = controller.getProject();
-  const createdFile = findChildByName(nextProject, parentId, outputName);
-  if (createdFile) {
-    publishOperation({
-      type: "create-file",
-      parentPath: parentId === nextProject.rootId ? "" : getPath(nextProject, parentId),
-      name: outputName,
-      content: createdFile.content
+function loadModuleMapTools() {
+  moduleMapToolsLoading ??= import("./features/module-map-tools.js").then(({ createModuleMapTools }) => {
+    moduleMapTools = createModuleMapTools({
+      controller, getPath, getNode, findChildByName, notify, publishOperation,
+      setActiveSourceFile, setPreviewFile, highlightMarkdownSource, renderMarkdown,
+      typesetPreview, handleIndentKeydown
     });
-    setActiveSourceFile(createdFile.id);
-    setPreviewFile(createdFile.id);
+    return moduleMapTools;
+  }).catch((error) => {
+    moduleMapToolsLoading = null;
+    throw error;
+  });
+  return moduleMapToolsLoading;
+}
+
+async function openMtreeToolsDialog(fileId) {
+  try {
+    (await loadModuleMapTools()).open(fileId);
+  } catch (error) {
+    notify(`Module map tools could not load: ${error.message}`);
   }
-  elements.mtreeToolsDialog.close();
-  notify(`Created ${outputName} from ${sourceFile.name}.`);
 }
 
 function escapeEditorHtml(value) {
@@ -7864,9 +7596,9 @@ async function saveActiveWorkspaceFile() {
 }
 
 async function handleSaveCommand() {
-  if (elements.mtreeToolsDialog.open && elements.mtreeToolsDialog.contains(document.activeElement)) {
+  if (moduleMapTools?.isOpen() && moduleMapTools.contains(document.activeElement)) {
     logDebug("action", "Module map written to target");
-    upsertModuleMapMarkdown();
+    moduleMapTools.write();
     return;
   }
 
@@ -11379,39 +11111,6 @@ elements.addFileDialog.addEventListener("close", () => {
   elements.addFileDropzone.classList.remove("is-active");
   resetAddFileState();
 });
-elements.mtreeTargetFileSelect.addEventListener("change", (event) => {
-  mtreeToolState.selectedTargetFileId = event.target.value;
-  elements.mtreeOutputNameInput.disabled = event.target.value !== "__new__";
-});
-elements.mtreeOutputText.addEventListener("input", (event) => {
-  mtreeToolState.draftSection = event.target.value;
-  refreshMtreeDraftPresentation();
-});
-elements.mtreeOutputText.addEventListener("scroll", syncMtreeOutputScroll);
-elements.mtreeOutputText.addEventListener("keydown", handleIndentKeydown);
-if (typeof ResizeObserver === "function") {
-  new ResizeObserver(() => {
-    syncMtreeViewportMetrics();
-    syncMtreeOutputScroll();
-  }).observe(elements.mtreeOutputText);
-}
-elements.mtreeKeepButton.addEventListener("click", keepMtreeDraft);
-elements.mtreeUndoButton.addEventListener("click", undoMtreeDraft);
-elements.mtreeCreateButton.addEventListener("click", upsertModuleMapMarkdown);
-
-[
-  elements.mtreeSimplifyInput,
-  elements.mtreeContinuationInput,
-  elements.mtreeIncludeNavigationInput,
-  elements.mtreeIncludeModulesInput,
-  elements.mtreeIncludeParentsInput,
-  elements.mtreeIncludeChildrenInput,
-  elements.mtreeIncludeDescriptionsInput,
-  elements.mtreeIncludeEmptyInput
-].forEach((input) => {
-  input.addEventListener("change", regenerateModuleMapWithNotification);
-});
-
 document.addEventListener("keydown", (event) => {
   if (event.key.toLowerCase() !== "s" || (!event.ctrlKey && !event.metaKey) || event.altKey) {
     return;
