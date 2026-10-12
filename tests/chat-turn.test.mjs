@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-const source = await readFile(new URL('../app/main.js', import.meta.url), 'utf8');
+// The chat panel's code lives in its own module (loaded on demand).
+const source = await readFile(new URL('../app/features/chat-panel.js', import.meta.url), 'utf8');
 const slice = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
-const turnSource = slice('async function runAgentTurn(', '\nfunction isPreviewableFileName(');
-const proposalSource = slice('async function autoApplyProposals(', '\nasync function acceptAgentOperations(');
-const cancelSource = slice('function cancelChatForWorkspaceChange(', '\nfunction ensureChatWorkspaceLoaded(');
+const turnSource = slice('async function runAgentTurn(', '\n  // Proposal card click handlers');
+const proposalSource = slice('async function autoApplyProposals(', '\n  /** URL of an image the agent generated');
+const cancelSource = slice('function cancelChatForWorkspaceChange(', '\n  function ensureChatWorkspaceLoaded(');
 const deferred = () => { let resolve; const promise = new Promise(r => resolve = r); return { resolve, promise }; };
 function harness() {
   let project = { id:'A', name:'A', content:'base' }, progress, payload, token='token-A';
