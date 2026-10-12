@@ -77,7 +77,11 @@ test("index.html exposes required element ids", async () => {
 });
 
 test("main.js wires core feature symbols", async () => {
-  const mainSource = await readFile(resolveFromRoot("app/main.js"), "utf8");
+  // Features split out of main.js live in app/features/; the wiring may be in either.
+  const { readdir } = await import("node:fs/promises");
+  const featureFiles = (await readdir(resolveFromRoot("app/features"))).filter((name) => name.endsWith(".js"));
+  const mainSource = [await readFile(resolveFromRoot("app/main.js"), "utf8"),
+    ...await Promise.all(featureFiles.map((name) => readFile(resolveFromRoot(`app/features/${name}`), "utf8")))].join("\n");
   const symbols = [
     /registerOfflineShell\(\)/,
     /createCollaborationRuntime/,

@@ -40,7 +40,8 @@ const APP_SHELL = [
   "./app/features/workspace-history.js",
   "./app/features/snapshots-dialog.js",
   "./app/features/chat-panel.js",
-  "./app/features/cloud-browser.js"
+  "./app/features/cloud-browser.js",
+  "./app/features/file-actions.js"
 ];
 
 self.addEventListener("install", (event) => {

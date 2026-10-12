@@ -2,13 +2,12 @@ import { rememberedWorkspace, createSessionRecovery } from "./services/session-r
 import { installMobileViewport } from "./services/chat-ui-service.js";
 import { snapshotProject, savedFileIds } from "./services/project-save-service.js";
 import { APP_VERSION } from "./version.js";
-import { ROOT_ID, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isAllowedFileName, isBmapFileName, isImageFileName, isMarkdownFileName, isPersonaFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
+import { ROOT_ID, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isBmapFileName, isImageFileName, isMarkdownFileName, isPersonaFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
 import { createProjectController, seedDefaultProject } from "./domain/project-service.js";
 import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
 import { supportsOpfs, listOpfsDir, mkdirOpfs, createProjectOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs, deleteOpfsEntry, exportProjectModelOpfs, importProjectModelOpfs } from "./services/opfs-service.js";
 import { createCollaborationRuntime } from "./services/collaboration-service.js";
 import { sendGenerationRequest } from "./services/chat-api-service.js";
-import { dataUrlToBlob, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent } from "./services/file-content-service.js";
 import { extractMarkdownLinks, renderMarkdown } from "./services/markdown-service.js";
 import { PERSONA_SUFFIX, parsePersona, personaAvatarHtml, personaTemplate } from "./services/persona-service.js";
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
@@ -18,14 +17,14 @@ import { createFileSnapshot, deleteVersion, diffLines, getVersionContent, listFi
 import { clearViewStates, loadViewStates, saveViewStates } from "./services/view-state-service.js";
 import { browseServer, createProjectServer, createServerSnapshot, deleteComment, deleteServer, deleteServerSnapshot, exportProjectServer, getServerSnapshotContent, importProjectServer, listComments, listServerSnapshotPaths, listServerSnapshotVersions, mkdirServer, normalizeServerUrl, reanchorComments, saveComment, saveUserState } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
-import { appendUrlDbEntry, formatUrlDbEntryBody, moveUrlDbEntry, moveUrlDbEntryBetweenFiles, parseUrlDb, parseUrlDbEntryBody, removeUrlDbEntry, serializeUrlDb, updateUrlDbEntry } from "./services/urldb-service.js";
-import { createZip, downloadBlob } from "./services/zip-service.js";
+import { formatUrlDbEntryBody, parseUrlDb, parseUrlDbEntryBody, updateUrlDbEntry } from "./services/urldb-service.js";
 import { query } from "./ui/dom.js";
 import { createExplorerView } from "./ui/explorer-view.js";
 import { buildTableSnippet, getEditorToolbarFormat, renderEditorFormatToolbar } from "./ui/editor-format-toolbar.js";
 import { createTableGridPicker } from "./ui/table-grid-picker.js";
-import { createDefaultBmap, normalizeBmapAst, parseBmap } from "./services/bmap-service.js";
+import { createDefaultBmap } from "./services/bmap-service.js";
 import { createCloudBrowser } from "./features/cloud-browser.js";
+import { createFileActions } from "./features/file-actions.js";
 
 document.querySelectorAll("[data-app-version]").forEach((label) => { label.textContent = `v${APP_VERSION}`; });
 
@@ -5787,144 +5786,101 @@ function clearPaneDropState() {
   elements.sourcePane.classList.remove("is-drop-active");
   elements.previewPane.classList.remove("is-drop-active");
 }
-
-function clearExplorerDropState() {
-  elements.explorerTree.classList.remove("is-drop-into-root");
-  elements.explorerTree.querySelectorAll(".is-drop-before, .is-drop-after, .is-drop-into").forEach((row) => {
-    row.classList.remove("is-drop-before", "is-drop-after", "is-drop-into");
-  });
+// ---- Explorer and file actions (./features/file-actions.js) ----
+// Created on first use. The module reads main's shared values through this
+// context, so it always sees their current values.
+let fileActionsInstance = null;
+function fileActions() {
+  return (fileActionsInstance ??= createFileActions({
+    get addFileState() { return addFileState; },
+    get applyEditorEdit() { return applyEditorEdit; },
+    get applyFileContentUpdates() { return applyFileContentUpdates; },
+    get clearEditorDropCaret() { return clearEditorDropCaret; },
+    get collaboration() { return collaboration; },
+    get confirmAction() { return confirmAction; },
+    get controller() { return controller; },
+    get createMarkdownImageReference() { return createMarkdownImageReference; },
+    get createMarkdownReference() { return createMarkdownReference; },
+    get editorDragState() { return editorDragState; },
+    get elements() { return elements; },
+    get explorerClipboard() { return explorerClipboard; },
+    get fileExtensionForKind() { return fileExtensionForKind; },
+    get fileExtensionOf() { return fileExtensionOf; },
+    get getEditorSelection() { return getEditorSelection; },
+    get getEditorText() { return getEditorText; },
+    get getEditorTextOffsetFromPoint() { return getEditorTextOffsetFromPoint; },
+    get getNextDefaultFileName() { return getNextDefaultFileName; },
+    get getNextDefaultFolderName() { return getNextDefaultFolderName; },
+    get getNextUrlDbEntryName() { return getNextUrlDbEntryName; },
+    get getUrlDbEntries() { return getUrlDbEntries; },
+    get getUrlDbEntryById() { return getUrlDbEntryById; },
+    get inferNameFromUrl() { return inferNameFromUrl; },
+    get initialContentForKind() { return initialContentForKind; },
+    get isPreviewableFileName() { return isPreviewableFileName; },
+    get loadBmapView() { return loadBmapView; },
+    get logDebug() { return logDebug; },
+    get looksLikeUrl() { return looksLikeUrl; },
+    get notify() { return notify; },
+    get openAccessEditor() { return openAccessEditor; },
+    get openDroppedFileInPane() { return openDroppedFileInPane; },
+    get openMtreeToolsDialog() { return openMtreeToolsDialog; },
+    get openPreviewTab() { return openPreviewTab; },
+    get persistSettings() { return persistSettings; },
+    get previewFileId() { return previewFileId; },
+    set previewFileId(value) { previewFileId = value; },
+    get previewUrlDbEntry() { return previewUrlDbEntry; },
+    set previewUrlDbEntry(value) { previewUrlDbEntry = value; },
+    get promptForName() { return promptForName; },
+    get publishOperation() { return publishOperation; },
+    get publishSnapshot() { return publishSnapshot; },
+    get remapPersonaPaths() { return remapPersonaPaths; },
+    get render() { return render; },
+    get replaceEditorRange() { return replaceEditorRange; },
+    get replaceFileTargetId() { return replaceFileTargetId; },
+    set replaceFileTargetId(value) { replaceFileTargetId = value; },
+    get selectionNodeId() { return selectionNodeId; },
+    set selectionNodeId(value) { selectionNodeId = value; },
+    get setActiveSourceFile() { return setActiveSourceFile; },
+    get setActiveSourceUrlDbEntry() { return setActiveSourceUrlDbEntry; },
+    get setEditorSelection() { return setEditorSelection; },
+    get setPreviewFile() { return setPreviewFile; },
+    get settings() { return settings; },
+    get showBookmarkEntryDialog() { return showBookmarkEntryDialog; },
+    get showToast() { return showToast; },
+    get sourceUrlDbEntry() { return sourceUrlDbEntry; },
+    set sourceUrlDbEntry(value) { sourceUrlDbEntry = value; },
+    get suggestUniqueFileName() { return suggestUniqueFileName; },
+    get suggestUniqueFolderName() { return suggestUniqueFolderName; },
+    get suggestUniqueUrlDbEntryName() { return suggestUniqueUrlDbEntryName; }
+  }));
 }
+function canPasteIntoExplorerTarget(...args) { return fileActions().canPasteIntoExplorerTarget(...args); }
+function clearExplorerDropState(...args) { return fileActions().clearExplorerDropState(...args); }
+function createFileInFolder(...args) { return fileActions().createFileInFolder(...args); }
+function createItem(...args) { return fileActions().createItem(...args); }
+async function deleteSelected(...args) { return fileActions().deleteSelected(...args); }
+function exportNode(...args) { return fileActions().exportNode(...args); }
+function getExplorerDropPayloadKind(...args) { return fileActions().getExplorerDropPayloadKind(...args); }
+function getExplorerDropPlacement(...args) { return fileActions().getExplorerDropPlacement(...args); }
+function getSelectedNode(...args) { return fileActions().getSelectedNode(...args); }
+function getSelectedParent(...args) { return fileActions().getSelectedParent(...args); }
+function getSelectedUrlDbEntry(...args) { return fileActions().getSelectedUrlDbEntry(...args); }
+async function handleAddFileTransfer(...args) { return fileActions().handleAddFileTransfer(...args); }
+async function handleEditorDrop(...args) { return fileActions().handleEditorDrop(...args); }
+async function handleExplorerAction(...args) { return fileActions().handleExplorerAction(...args); }
+function handleNewFileSubmit(...args) { return fileActions().handleNewFileSubmit(...args); }
+function moveExplorerNode(...args) { return fileActions().moveExplorerNode(...args); }
+function moveExplorerUrlDbEntry(...args) { return fileActions().moveExplorerUrlDbEntry(...args); }
+function openNewFileDialog(...args) { return fileActions().openNewFileDialog(...args); }
+async function renameFileById(...args) { return fileActions().renameFileById(...args); }
+async function renameSelected(...args) { return fileActions().renameSelected(...args); }
+async function replaceImageFile(...args) { return fileActions().replaceImageFile(...args); }
+function resetAddFileState(...args) { return fileActions().resetAddFileState(...args); }
+function setAddFileStatus(...args) { return fileActions().setAddFileStatus(...args); }
+function setExplorerDropState(...args) { return fileActions().setExplorerDropState(...args); }
+async function stageAddFileFromLocalFile(...args) { return fileActions().stageAddFileFromLocalFile(...args); }
+async function submitAddFile(...args) { return fileActions().submitAddFile(...args); }
 
-function setExplorerDropState(row, placement) {
-  clearExplorerDropState();
-  if (!placement) {
-    return;
-  }
-  if (!row) {
-    elements.explorerTree.classList.add("is-drop-into-root");
-    return;
-  }
-  row.classList.add(`is-drop-${placement}`);
-}
-
-function getExplorerDropPayloadKind(types) {
-  if (types.includes("text/mdnotes-node-id")) {
-    return "node";
-  }
-  if (types.includes("text/mdnotes-file-id")) {
-    return "file";
-  }
-  if (types.includes("text/mdnotes-urldb-entry")) {
-    return "urldb-entry";
-  }
-  return null;
-}
-
-function getExplorerDropPlacement(row, node, entryId, payloadKind, event) {
-  if (payloadKind === "urldb-entry") {
-    if (entryId) {
-      const rect = row.getBoundingClientRect();
-      return event.clientY < rect.top + (rect.height / 2) ? "before" : "after";
-    }
-    return node.kind === "file" && isUrlDbFileName(node.name) ? "into" : null;
-  }
-
-  if (payloadKind !== "file" && payloadKind !== "node") {
-    return null;
-  }
-
-  const rect = row.getBoundingClientRect();
-  if (node.kind === "folder") {
-    const topEdge = rect.top + (rect.height * 0.25);
-    const bottomEdge = rect.bottom - (rect.height * 0.25);
-    if (event.clientY < topEdge) {
-      return "before";
-    }
-    if (event.clientY > bottomEdge) {
-      return "after";
-    }
-    return "into";
-  }
-
-  return event.clientY < rect.top + (rect.height / 2) ? "before" : "after";
-}
-
-function resolveNodeDropLocation(project, targetNodeId, placement) {
-  if (!targetNodeId) {
-    const root = project.nodes[ROOT_ID];
-    return { parentId: ROOT_ID, index: root?.children.length ?? 0 };
-  }
-
-  const targetNode = project.nodes[targetNodeId];
-  if (!targetNode) {
-    return null;
-  }
-
-  if (placement === "into") {
-    if (targetNode.kind !== "folder") {
-      return null;
-    }
-    return { parentId: targetNode.id, index: targetNode.children.length };
-  }
-
-  const parent = project.nodes[targetNode.parentId];
-  if (!parent || parent.kind !== "folder") {
-    return null;
-  }
-
-  const targetIndex = parent.children.indexOf(targetNode.id);
-  if (targetIndex < 0) {
-    return null;
-  }
-
-  return {
-    parentId: parent.id,
-    index: placement === "after" ? targetIndex + 1 : targetIndex
-  };
-}
-
-function moveExplorerNode(nodeId, targetNodeId, placement) {
-  const project = controller.getProject();
-  const draggedNode = project.nodes[nodeId];
-  if (!draggedNode || (draggedNode.kind !== "file" && draggedNode.kind !== "folder")) {
-    return false;
-  }
-
-  const destination = resolveNodeDropLocation(project, targetNodeId, placement);
-  if (!destination) {
-    return false;
-  }
-
-  const sourceParent = project.nodes[draggedNode.parentId];
-  const sourceIndex = sourceParent?.children.indexOf(nodeId) ?? -1;
-  if (sourceIndex < 0) {
-    return false;
-  }
-
-  const normalizedIndex = sourceParent?.id === destination.parentId && sourceIndex < destination.index
-    ? destination.index - 1
-    : destination.index;
-  if (draggedNode.parentId === destination.parentId && sourceIndex === normalizedIndex) {
-    return false;
-  }
-
-  const oldPath = getPath(project, nodeId);
-  const parentPath = destination.parentId === ROOT_ID ? "" : getPath(project, destination.parentId);
-  controller.move(nodeId, destination.parentId, destination.index);
-  selectionNodeId = nodeId;
-  sourceUrlDbEntry = null;
-  // Tell the server. A move used to change only this browser's tree; the server
-  // kept the old path, and the next reconnect's reconcile — which can only add
-  // what the server lacks — uploaded the file again at its new path, leaving
-  // both. As with rename, re-key any queued text patch to the new path first so
-  // a pending edit lands on the moved file instead of the vanished old path.
-  const newPath = getPath(controller.getProject(), nodeId);
-  collaboration.remapPatchPath(oldPath, newPath);
-  remapPersonaPaths(oldPath, newPath);
-  publishOperation({ type: "move-node", path: oldPath, parentPath, index: destination.index });
-  logDebug("action", "Explorer node moved", `${oldPath} -> ${newPath}`);
-  return true;
-}
 
 function applyFileContentUpdates(updates) {
   const nextProject = structuredClone(controller.getProject());
@@ -5937,76 +5893,6 @@ function applyFileContentUpdates(updates) {
     file.dirty = true;
   });
   controller.replaceProject(nextProject);
-}
-
-function moveExplorerUrlDbEntry(sourceFileId, sourceEntryId, targetNodeId, targetEntryId, placement) {
-  const project = controller.getProject();
-  const sourceFile = project.nodes[sourceFileId];
-  const targetFile = targetNodeId ? project.nodes[targetNodeId] : null;
-  if (!sourceFile || sourceFile.kind !== "file" || !isUrlDbFileName(sourceFile.name)) {
-    return false;
-  }
-  if (!targetFile || targetFile.kind !== "file" || !isUrlDbFileName(targetFile.name)) {
-    return false;
-  }
-
-  const sourceEntry = getUrlDbEntryById(sourceFile.content, sourceEntryId);
-  if (!sourceEntry) {
-    return false;
-  }
-
-  const targetEntries = getUrlDbEntries(targetFile.content);
-  const targetIndex = targetEntryId
-    ? (() => {
-      const index = targetEntries.findIndex((entry) => entry.id === targetEntryId);
-      if (index < 0) {
-        return null;
-      }
-      return placement === "after" ? index + 1 : index;
-    })()
-    : targetEntries.length;
-
-  if (targetIndex === null) {
-    return false;
-  }
-
-  let nextTargetContent = targetFile.content;
-  if (sourceFileId === targetNodeId) {
-    const sourceEntries = getUrlDbEntries(sourceFile.content);
-    const sourceIndex = sourceEntries.findIndex((entry) => entry.id === sourceEntryId);
-    if (sourceIndex < 0) {
-      return false;
-    }
-    const normalizedIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
-    if (sourceIndex === normalizedIndex) {
-      return false;
-    }
-    nextTargetContent = moveUrlDbEntry(sourceFile.content, sourceEntryId, normalizedIndex);
-    applyFileContentUpdates([{ fileId: sourceFileId, content: nextTargetContent }]);
-  } else {
-    const moved = moveUrlDbEntryBetweenFiles(sourceFile.content, sourceEntryId, targetFile.content, targetIndex);
-    nextTargetContent = moved.targetContent;
-    applyFileContentUpdates([
-      { fileId: sourceFileId, content: moved.sourceContent },
-      { fileId: targetNodeId, content: moved.targetContent }
-    ]);
-  }
-
-  const nextTargetEntries = getUrlDbEntries(nextTargetContent);
-  const movedEntry = nextTargetEntries.find((entry) => entry.name === sourceEntry.name);
-  if (movedEntry) {
-    setActiveSourceUrlDbEntry(targetNodeId, movedEntry.id);
-  } else {
-    selectionNodeId = targetNodeId;
-    sourceUrlDbEntry = null;
-    controller.setActiveFile(targetNodeId);
-  }
-  if (previewFileId === sourceFileId || previewFileId === targetNodeId) {
-    previewFileId = targetNodeId;
-    previewUrlDbEntry = movedEntry?.id ?? null;
-  }
-  logDebug("action", "Bookmark entry moved", `${getPath(controller.getProject(), targetNodeId)} :: ${sourceEntry.name}`);
-  return true;
 }
 
 function bindExplorerDropTarget() {
@@ -7180,557 +7066,6 @@ function persistSettings() {
 
 applyWorkspaceSettings();
 
-function getSelectedNode(project) {
-  return project.nodes[selectionNodeId] ?? (project.activeFileId ? project.nodes[project.activeFileId] : project.nodes[project.rootId]);
-}
-
-function getSelectedUrlDbEntry(project) {
-  if (!sourceUrlDbEntry) {
-    return null;
-  }
-
-  const file = project.nodes[sourceUrlDbEntry.fileId];
-  if (!file || file.kind !== "file" || !isUrlDbFileName(file.name)) {
-    return null;
-  }
-
-  const entry = getUrlDbEntryById(file.content, sourceUrlDbEntry.entryId);
-  if (!entry) {
-    return null;
-  }
-
-  return { file, entry };
-}
-
-function getSelectedParent(project) {
-  const selectedNode = getSelectedNode(project);
-  if (!selectedNode) {
-    return project.nodes[project.rootId];
-  }
-  if (selectedNode.kind === "folder") {
-    return selectedNode;
-  }
-  return project.nodes[selectedNode.parentId];
-}
-
-function getPasteTargetParent(project, targetNodeId) {
-  const node = project.nodes[targetNodeId] ?? project.nodes[project.rootId];
-  if (!node) {
-    return null;
-  }
-  if (node.kind === "folder") {
-    return node;
-  }
-  return project.nodes[node.parentId] ?? null;
-}
-
-function canPasteIntoExplorerTarget(target) {
-  const payload = explorerClipboard.payload;
-  if (!payload) {
-    return false;
-  }
-
-  const project = controller.getProject();
-  const node = project.nodes[target?.nodeId] ?? project.nodes[project.rootId];
-  if (!node) {
-    return false;
-  }
-
-  if (payload.kind === "node") {
-    return !target?.entryId && node.kind === "folder";
-  }
-
-  if (payload.kind === "urldb-entry") {
-    return node.kind === "file" && isUrlDbFileName(node.name);
-  }
-
-  return false;
-}
-
-function copyExplorerTarget(target) {
-  const project = controller.getProject();
-  if (target.entryId) {
-    const file = project.nodes[target.nodeId];
-    const entry = file?.kind === "file" ? getUrlDbEntryById(file.content, target.entryId) : null;
-    if (!entry) {
-      return false;
-    }
-    explorerClipboard.payload = {
-      kind: "urldb-entry",
-      fileId: target.nodeId,
-      entryId: target.entryId,
-      entry: structuredClone(entry)
-    };
-    logDebug("action", "Explorer copied bookmark", `${getPath(project, target.nodeId)} :: ${entry.name}`);
-    return true;
-  }
-
-  const node = project.nodes[target.nodeId];
-  if (!node || node.id === project.rootId) {
-    return false;
-  }
-  explorerClipboard.payload = {
-    kind: "node",
-    nodeId: node.id
-  };
-  logDebug("action", "Explorer copied item", getPath(project, node.id));
-  return true;
-}
-
-function duplicateNodeTree(sourceProject, sourceNodeId, targetParentId) {
-  const sourceNode = sourceProject.nodes[sourceNodeId];
-  if (!sourceNode) {
-    throw new Error("Copied item no longer exists.");
-  }
-
-  if (sourceNode.kind === "file") {
-    const before = controller.getProject();
-    const fileName = suggestUniqueFileName(before, targetParentId, sourceNode.name);
-    controller.createFile(targetParentId, fileName, sourceNode.content);
-    return findChildByName(controller.getProject(), targetParentId, fileName)?.id ?? null;
-  }
-
-  const before = controller.getProject();
-  const folderName = suggestUniqueFolderName(before, targetParentId, sourceNode.name);
-  controller.createFolder(targetParentId, folderName);
-  const createdFolder = findChildByName(controller.getProject(), targetParentId, folderName);
-  if (!createdFolder || createdFolder.kind !== "folder") {
-    return null;
-  }
-
-  sourceNode.children.forEach((childId) => {
-    duplicateNodeTree(sourceProject, childId, createdFolder.id);
-  });
-  return createdFolder.id;
-}
-
-function pasteNodeClipboard(target) {
-  const payload = explorerClipboard.payload;
-  if (!payload || payload.kind !== "node") {
-    return false;
-  }
-
-  const sourceProject = controller.getProject();
-  const parent = getPasteTargetParent(sourceProject, target.nodeId);
-  if (!parent) {
-    return false;
-  }
-
-  const createdId = duplicateNodeTree(sourceProject, payload.nodeId, parent.id);
-  if (!createdId) {
-    return false;
-  }
-
-  selectionNodeId = createdId;
-  sourceUrlDbEntry = null;
-  const createdNode = controller.getProject().nodes[createdId];
-  if (createdNode?.kind === "file") {
-    setActiveSourceFile(createdId);
-    if (isPreviewableFileName(createdNode.name)) {
-      setPreviewFile(createdId);
-    }
-  }
-  publishSnapshot();
-  logDebug("action", "Explorer pasted item", getPath(controller.getProject(), createdId));
-  return true;
-}
-
-function pasteUrlDbEntryClipboard(target) {
-  const payload = explorerClipboard.payload;
-  if (!payload || payload.kind !== "urldb-entry") {
-    return false;
-  }
-
-  const project = controller.getProject();
-  const targetFile = project.nodes[target.nodeId];
-  if (!targetFile || targetFile.kind !== "file" || !isUrlDbFileName(targetFile.name)) {
-    return false;
-  }
-
-  const entries = getUrlDbEntries(targetFile.content);
-  const insertionIndex = target.entryId
-    ? (() => {
-      const index = entries.findIndex((entry) => entry.id === target.entryId);
-      return index < 0 ? entries.length : index + 1;
-    })()
-    : entries.length;
-  const entryDraft = {
-    ...payload.entry,
-    name: suggestUniqueUrlDbEntryName(entries, payload.entry.name)
-  };
-  const nextEntries = [...entries];
-  nextEntries.splice(insertionIndex, 0, entryDraft);
-  const nextContent = serializeUrlDb(nextEntries);
-  controller.updateContent(targetFile.id, nextContent);
-  publishOperation({ type: "update-file", path: getPath(project, targetFile.id), content: nextContent });
-  const pastedEntry = getUrlDbEntries(nextContent).find((entry) => entry.name === entryDraft.name);
-  if (pastedEntry) {
-    setActiveSourceUrlDbEntry(targetFile.id, pastedEntry.id);
-    previewFileId = targetFile.id;
-    previewUrlDbEntry = pastedEntry.id;
-  }
-  logDebug("action", "Explorer pasted bookmark", `${getPath(controller.getProject(), targetFile.id)} :: ${entryDraft.name}`);
-  return true;
-}
-
-function pasteExplorerClipboard(target) {
-  if (!canPasteIntoExplorerTarget(target)) {
-    return false;
-  }
-
-  if (explorerClipboard.payload?.kind === "node") {
-    return pasteNodeClipboard(target);
-  }
-
-  if (explorerClipboard.payload?.kind === "urldb-entry") {
-    return pasteUrlDbEntryClipboard(target);
-  }
-
-  return false;
-}
-
-function setAddFileStatus(message) {
-  elements.addFileStatusText.textContent = message;
-}
-
-function resetAddFileState() {
-  addFileState.fileName = "";
-  addFileState.content = null;
-  addFileState.sourceLabel = "";
-  elements.addFileUrlInput.value = "";
-  elements.addFileNameInput.value = "";
-  elements.addFileSourceText.textContent = "No staged file yet.";
-  setAddFileStatus("Supported: .md, .mtree, .urldb, .png, .jpg, .jpeg, .gif, .svg, .webp, .bmp.");
-}
-
-function stageAddFileContent({ name, content, sourceLabel }) {
-  addFileState.fileName = name;
-  addFileState.content = content;
-  addFileState.sourceLabel = sourceLabel;
-  elements.addFileNameInput.value = name;
-  elements.addFileSourceText.textContent = sourceLabel;
-  setAddFileStatus(`Ready to add ${name}.`);
-}
-
-async function stageAddFileFromLocalFile(file) {
-  if (!isAllowedFileName(file.name)) {
-    throw new Error("Only markdown, mtree, urldb, and supported image files can be added.");
-  }
-
-  const content = await readFileAsProjectContent(file, file.name);
-  stageAddFileContent({
-    name: file.name,
-    content,
-    sourceLabel: `Staged from local file: ${file.name}`
-  });
-}
-
-async function stageAddFileFromUrl() {
-  const url = elements.addFileUrlInput.value.trim();
-  if (!url) {
-    throw new Error("Enter a file URL first.");
-  }
-
-  const suggestedName = elements.addFileNameInput.value.trim() || inferNameFromUrl(url);
-  if (!isAllowedFileName(suggestedName)) {
-    throw new Error("The fetched file name must end with a supported extension.");
-  }
-
-  let response;
-  try {
-    response = await fetch(url);
-  } catch {
-    if (isImageFileName(suggestedName)) {
-      throw new Error("Remote image download was blocked by the source host or browser policy. Add that URL to a .urldb album instead.");
-    }
-    throw new Error("Unable to fetch file from URL.");
-  }
-  if (!response.ok) {
-    throw new Error(`Unable to fetch file from URL (${response.status}).`);
-  }
-
-  const blob = await response.blob();
-  const file = new File([blob], suggestedName, { type: blob.type });
-  const content = await readFileAsProjectContent(file, suggestedName);
-  stageAddFileContent({
-    name: suggestedName,
-    content,
-    sourceLabel: `Fetched from ${url}`
-  });
-}
-
-async function handleAddFileTransfer(transfer) {
-  const directFile = transfer.files?.[0];
-  if (directFile) {
-    await stageAddFileFromLocalFile(directFile);
-    return;
-  }
-
-  const itemFile = Array.from(transfer.items ?? [])
-    .map((item) => item.kind === "file" ? item.getAsFile() : null)
-    .find(Boolean);
-  if (itemFile) {
-    await stageAddFileFromLocalFile(itemFile);
-    return;
-  }
-
-  const uri = transfer.getData("text/uri-list")?.trim();
-  const text = transfer.getData("text/plain")?.trim();
-
-  if (uri || looksLikeUrl(text || "")) {
-    elements.addFileUrlInput.value = uri || text;
-    setAddFileStatus("URL staged. Use Add File to fetch it.");
-    return;
-  }
-
-  if (text) {
-    const suggestedName = elements.addFileNameInput.value.trim() || "pasted-note.md";
-    const finalName = /\.(md|mtree)$/i.test(suggestedName) ? suggestedName : `${suggestedName}.md`;
-    stageAddFileContent({
-      name: finalName,
-      content: text,
-      sourceLabel: "Staged from pasted text"
-    });
-  }
-}
-
-async function addDroppedImageAndInsert(file) {
-  const activeFile = controller.getActiveFile();
-  if (!activeFile || !isMarkdownFileName(activeFile.name)) {
-    return false;
-  }
-
-  if (!await confirmAction(`Add ${file.name} to the current folder and insert a markdown image reference?`)) {
-    return false;
-  }
-
-  const project = controller.getProject();
-  const parentId = project.nodes[activeFile.id].parentId;
-  const parentPath = parentId === project.rootId ? "" : getPath(project, parentId);
-  const content = await readFileAsProjectContent(file, file.name);
-  const fileName = suggestUniqueFileName(project, parentId, file.name);
-  controller.createFile(parentId, fileName, content);
-  publishOperation({ type: "create-file", parentPath, name: fileName, content });
-
-  const nextProject = controller.getProject();
-  const createdFile = findChildByName(nextProject, parentId, fileName);
-  if (!createdFile || createdFile.kind !== "file") {
-    return false;
-  }
-
-  const dropOffset = editorDragState.dropOffset ?? getEditorSelection().start;
-  elements.editorContent.focus();
-  const ref = createMarkdownReference(activeFile, createdFile);
-  replaceEditorRange(dropOffset, dropOffset, ref, dropOffset + ref.length, dropOffset + ref.length);
-  logDebug("action", "Dropped image inserted", fileName);
-  return true;
-}
-
-function moveOrInsertDraggedSelection(payload, insertOffset) {
-  const value = getEditorText();
-  const sourceStart = Number(payload.start);
-  const sourceEnd = Number(payload.end);
-  const text = String(payload.text ?? "");
-  if (!Number.isInteger(sourceStart) || !Number.isInteger(sourceEnd) || sourceStart < 0 || sourceEnd < sourceStart) {
-    return false;
-  }
-  if (value.slice(sourceStart, sourceEnd) !== text) {
-    replaceEditorRange(insertOffset, insertOffset, text, insertOffset + text.length, insertOffset + text.length);
-    return true;
-  }
-  if (insertOffset >= sourceStart && insertOffset <= sourceEnd) {
-    setEditorSelection(sourceStart, sourceEnd);
-    return false;
-  }
-
-  const withoutSelection = `${value.slice(0, sourceStart)}${value.slice(sourceEnd)}`;
-  const adjustedOffset = insertOffset > sourceEnd ? insertOffset - (sourceEnd - sourceStart) : insertOffset;
-  const nextValue = `${withoutSelection.slice(0, adjustedOffset)}${text}${withoutSelection.slice(adjustedOffset)}`;
-  const nextCursor = adjustedOffset + text.length;
-  applyEditorEdit(nextValue, nextCursor, nextCursor);
-  return true;
-}
-
-function insertEditorTextAtDrop(text, event) {
-  const insertOffset = editorDragState.dropOffset ?? getEditorTextOffsetFromPoint(event.clientX, event.clientY);
-  replaceEditorRange(insertOffset, insertOffset, text, insertOffset + text.length, insertOffset + text.length);
-}
-
-async function handleEditorDrop(event) {
-  clearEditorDropCaret();
-  const internalFileId = event.dataTransfer?.getData("text/mdnotes-file-id");
-  if (internalFileId) {
-    openDroppedFileInPane(internalFileId, "source");
-    return;
-  }
-
-  const activeFile = controller.getActiveFile();
-  if (!activeFile || !isTextFileName(activeFile.name)) {
-    return;
-  }
-
-  const draggedSelection = event.dataTransfer?.getData("text/mdnotes-editor-selection");
-  if (draggedSelection) {
-    try {
-      moveOrInsertDraggedSelection(JSON.parse(draggedSelection), editorDragState.dropOffset ?? getEditorTextOffsetFromPoint(event.clientX, event.clientY));
-    } catch {
-      // Ignore malformed editor drag payloads.
-    }
-    return;
-  }
-
-  const urlDbPayload = event.dataTransfer?.getData("text/mdnotes-urldb-entry");
-  if (urlDbPayload && isMarkdownFileName(activeFile.name)) {
-    try {
-      const parsed = JSON.parse(urlDbPayload);
-      const project = controller.getProject();
-      const sourceFile = project.nodes[parsed.fileId];
-      const entry = sourceFile?.kind === "file" ? getUrlDbEntryById(sourceFile.content, parsed.entryId) : null;
-      if (entry) {
-        insertEditorTextAtDrop(createMarkdownImageReference(entry.name, entry.url), event);
-        logDebug("action", "Bookmark image inserted", `${entry.name} :: ${entry.url}`);
-      }
-    } catch {
-      // Ignore malformed bookmark payloads.
-    }
-    return;
-  }
-
-  const droppedText = event.dataTransfer?.getData("text/plain");
-  if (droppedText) {
-    insertEditorTextAtDrop(droppedText, event);
-    return;
-  }
-
-  const file = event.dataTransfer?.files?.[0];
-  if (file && isImageFileName(file.name) && isMarkdownFileName(activeFile.name)) {
-    await addDroppedImageAndInsert(file);
-  }
-}
-
-async function replaceImageFile(targetFileId, file) {
-  const project = controller.getProject();
-  const targetFile = project.nodes[targetFileId];
-  if (!targetFile || targetFile.kind !== "file" || !isImageFileName(targetFile.name)) {
-    throw new Error("Replace File is only available for image assets.");
-  }
-
-  const targetExtension = targetFile.name.slice(targetFile.name.lastIndexOf(".")).toLowerCase();
-  const sourceExtension = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
-  if (targetExtension !== sourceExtension) {
-    throw new Error(`Replacement file must also be ${targetExtension}.`);
-  }
-
-  const content = await readFileAsProjectContent(file, targetFile.name);
-  controller.updateContent(targetFile.id, content);
-  publishOperation({ type: "update-file", path: getPath(project, targetFile.id), content });
-  logDebug("action", "Image file replaced", getPath(project, targetFile.id));
-}
-
-function openAddFileDialog(nodeId = selectionNodeId) {
-  const project = controller.getProject();
-  const node = project.nodes[nodeId] ?? project.nodes[project.rootId];
-  const parent = node.kind === "folder" ? node : project.nodes[node.parentId];
-
-  addFileState.parentId = parent.id;
-  resetAddFileState();
-  const targetPath = parent.id === project.rootId ? project.name : getPath(project, parent.id);
-  elements.addFileTargetText.textContent = `Add a markdown, mtree, urldb, or image file into ${targetPath}.`;
-  elements.addFileDialog.showModal();
-}
-
-async function promptAndAddUrlDbEntry(fileId) {
-  const project = controller.getProject();
-  const file = project.nodes[fileId];
-  if (!file || file.kind !== "file" || !isUrlDbFileName(file.name)) {
-    notify("Bookmark entries can only be added to .urldb files.");
-    return;
-  }
-
-  const entryDraft = await showBookmarkEntryDialog({
-    name: getNextUrlDbEntryName(file.content),
-    url: "https://example.com/image.jpg",
-    description: ""
-  });
-
-  if (!entryDraft) {
-    return;
-  }
-
-  if (!entryDraft.name) {
-    notify("Bookmark entries require a name.");
-    return;
-  }
-
-  if (!entryDraft.url || !looksLikeUrl(entryDraft.url)) {
-    notify("Bookmark entries require a valid URL.");
-    return;
-  }
-
-  try {
-    const nextContent = appendUrlDbEntry(file.content, entryDraft);
-    controller.updateContent(file.id, nextContent);
-    publishOperation({ type: "update-file", path: getPath(project, file.id), content: nextContent });
-    const nextEntry = getUrlDbEntries(nextContent).find((entry) => entry.name === entryDraft.name);
-    if (nextEntry) {
-      setActiveSourceUrlDbEntry(file.id, nextEntry.id);
-    } else {
-      setActiveSourceFile(file.id);
-    }
-    openPreviewTab(file.id);
-    previewFileId = file.id;
-    previewUrlDbEntry = null;
-    logDebug("action", "Bookmark added", `${getPath(project, file.id)} :: ${entryDraft.name}`);
-  } catch (error) {
-    notify(error.message);
-  }
-}
-
-async function submitAddFile() {
-  try {
-    if (!addFileState.content) {
-      await stageAddFileFromUrl();
-    }
-
-    const fileName = (elements.addFileNameInput.value.trim() || addFileState.fileName).trim();
-    if (!fileName) {
-      throw new Error("Provide a file name before adding the file.");
-    }
-    if (!isAllowedFileName(fileName)) {
-      throw new Error("Only markdown, mtree, urldb, and supported image files can be added.");
-    }
-    if (typeof addFileState.content === "string" && addFileState.content.startsWith("data:image/") && !isImageFileName(fileName)) {
-      throw new Error("Image assets must keep an image file extension.");
-    }
-    if (typeof addFileState.content === "string" && !addFileState.content.startsWith("data:image/") && isImageFileName(fileName)) {
-      throw new Error("Image file extensions can only be used with image content.");
-    }
-
-    const project = controller.getProject();
-    const parent = project.nodes[addFileState.parentId] ?? getSelectedParent(project);
-    const parentPath = parent.id === project.rootId ? "" : getPath(project, parent.id);
-    controller.createFile(parent.id, fileName, addFileState.content);
-    publishOperation({ type: "create-file", parentPath, name: fileName, content: addFileState.content });
-    logDebug("action", "File added", `${parentPath}/${fileName}`.replace(/^\//, ""));
-
-    const nextProject = controller.getProject();
-    const createdFile = findChildByName(nextProject, parent.id, fileName);
-    if (createdFile?.kind === "file") {
-      selectionNodeId = createdFile.id;
-      setActiveSourceFile(createdFile.id);
-      if (isPreviewableFileName(createdFile.name)) {
-        setPreviewFile(createdFile.id);
-      }
-    }
-
-    elements.addFileDialog.close();
-    resetAddFileState();
-  } catch (error) {
-    notify(error.message);
-    setAddFileStatus(error.message);
-  }
-}
-
 function createPresenceChip(entry) {
   const chip = document.createElement("div");
   chip.className = "presence-chip";
@@ -8404,471 +7739,12 @@ async function quickGenerateBmapFile(bmapFileId, request) {
   }
 }
 
-function createItem(kind) {
-  const project = controller.getProject();
-  const parent = getSelectedParent(project);
-  const parentPath = parent.id === project.rootId ? "" : getPath(project, parent.id);
-
-  try {
-    if (kind === "folder") {
-      const name = getNextDefaultFolderName(project, parent.id);
-      controller.createFolder(parent.id, name);
-      publishOperation({ type: "create-folder", parentPath, name });
-      // Select the new folder so the next create/rename targets it; keep the
-      // explorer open so the user can rename or add inside it right away.
-      const created = findChildByName(controller.getProject(), parent.id, name);
-      if (created) selectionNodeId = created.id;
-      render(controller.getProject());
-      showToast(`Created folder ${name}`);
-      return;
-    }
-
-    const name = getNextDefaultFileName(project, parent.id, kind);
-    const content = initialContentForKind(kind, name);
-    controller.createFile(parent.id, name, content);
-    publishOperation({ type: "create-file", parentPath, name, content });
-    // Open the new file as the active document (so it's what you're editing) but
-    // leave the explorer open so it can be renamed/managed without reopening it.
-    const created = findChildByName(controller.getProject(), parent.id, name);
-    if (created) {
-      selectionNodeId = created.id;
-      setActiveSourceFile(created.id);
-    }
-    showToast(`Created ${name}`);
-  } catch (error) {
-    notify(error.message);
-  }
-}
-
-// Rename a specific file by id (used by the mobile pane's pen button so the user
-// can rename the doc they're viewing without opening the explorer).
-async function renameFileById(fileId) {
-  const project = controller.getProject();
-  const node = project.nodes[fileId];
-  if (!node || node.id === project.rootId || node.kind !== "file") {
-    showToast("No file to rename");
-    return;
-  }
-  const currentPath = getPath(project, node.id);
-  const name = await promptForName("Rename file", node.name, { extension: fileExtensionOf(node.name) });
-  if (!name || name === node.name) {
-    return;
-  }
-  try {
-    controller.rename(node.id, name);
-    // Re-key any queued text patch from the old path to the new one BEFORE
-    // publishing the rename, so a pending edit isn't sent against the old path
-    // (which the server just renamed → 400 → disconnect / "server unreachable").
-    collaboration.remapPatchPath(currentPath, getPath(controller.getProject(), node.id));
-    remapPersonaPaths(currentPath, getPath(controller.getProject(), node.id));
-    publishOperation({ type: "rename-node", path: currentPath, name });
-    showToast(`Renamed to ${name}`);
-  } catch (error) {
-    notify(error.message);
-  }
-}
-
 // The file the mobile pane's pen button should act on: the previewed file in
 // preview view, otherwise the active source file. Null in chat view.
 function currentMobileFileId() {
   if (mobileView === "chat") return null;
   if (mobileView === "preview") return previewFileId === DIFF_TAB_ID ? null : previewFileId;
   return controller.getActiveFile()?.id ?? null;
-}
-
-// Every folder in the project as {id, label} for the New File destination picker
-// (root first, then nested by path).
-function listProjectFolders(project) {
-  const out = [{ id: project.rootId, label: project.name || "Workspace" }];
-  const walk = (nodeId) => {
-    const node = project.nodes[nodeId];
-    for (const childId of node?.children ?? []) {
-      const child = project.nodes[childId];
-      if (child?.kind === "folder") {
-        out.push({ id: child.id, label: getPath(project, child.id) });
-        walk(child.id);
-      }
-    }
-  };
-  walk(project.rootId);
-  return out;
-}
-
-// Create a file of `kind` in `parentId` with a chosen base name (extension is
-// appended by kind), then open it. Shared by the New File dialog.
-function createFileInFolder(kind, parentId, baseName) {
-  const project = controller.getProject();
-  const parent = project.nodes[parentId] ?? project.nodes[project.rootId];
-  const parentPath = parent.id === project.rootId ? "" : getPath(project, parent.id);
-  const ext = fileExtensionForKind(kind);
-  let name = String(baseName || "").trim();
-  if (!name) name = getNextDefaultFileName(project, parent.id, kind);
-  else if (!name.toLowerCase().endsWith(ext)) name = `${name}${ext}`;
-  const content = initialContentForKind(kind, name);
-  controller.createFile(parent.id, name, content);
-  publishOperation({ type: "create-file", parentPath, name, content });
-  const created = findChildByName(controller.getProject(), parent.id, name);
-  if (created) {
-    selectionNodeId = created.id;
-    setActiveSourceFile(created.id);
-  }
-  showToast(`Created ${name}`);
-  return created;
-}
-
-function openNewFileDialog() {
-  if (!elements.newFileDialog) return;
-  const project = controller.getProject();
-  const folders = listProjectFolders(project);
-  elements.newFileFolder.replaceChildren(...folders.map(({ id, label }) => {
-    const option = document.createElement("option");
-    option.value = id;
-    option.textContent = label;
-    return option;
-  }));
-  // Default the destination to the currently selected folder (or its parent).
-  elements.newFileFolder.value = getSelectedParent(project).id;
-  elements.newFileName.value = "";
-  if (elements.newFileStatus) elements.newFileStatus.hidden = true;
-  elements.newFileDialog.showModal();
-  elements.newFileName.focus();
-}
-
-function handleNewFileSubmit(event) {
-  event.preventDefault();
-  try {
-    createFileInFolder(
-      elements.newFileType.value,
-      elements.newFileFolder.value,
-      elements.newFileName.value.trim()
-    );
-    elements.newFileDialog.close();
-  } catch (error) {
-    if (elements.newFileStatus) {
-      elements.newFileStatus.textContent = error.message || "Could not create the file.";
-      elements.newFileStatus.hidden = false;
-    }
-  }
-}
-
-async function renameSelected() {
-  const project = controller.getProject();
-  const selectedEntry = getSelectedUrlDbEntry(project);
-  if (selectedEntry) {
-    const nextName = await promptForName("Rename bookmark", selectedEntry.entry.name);
-    if (!nextName) {
-      return;
-    }
-
-    try {
-      const nextContent = updateUrlDbEntry(selectedEntry.file.content, selectedEntry.entry.id, { name: nextName });
-      controller.updateContent(selectedEntry.file.id, nextContent);
-      publishOperation({ type: "update-file", path: getPath(project, selectedEntry.file.id), content: nextContent });
-      const nextEntry = getUrlDbEntries(nextContent).find((entry) => entry.name === nextName);
-      if (nextEntry) {
-        setActiveSourceUrlDbEntry(selectedEntry.file.id, nextEntry.id);
-      }
-    } catch (error) {
-      notify(error.message);
-    }
-    return;
-  }
-
-  const node = getSelectedNode(project);
-  if (!node || node.id === project.rootId) {
-    return;
-  }
-  const currentPath = getPath(project, node.id);
-  // Folders have no extension → the auto-extension toggle is hidden for them.
-  const name = await promptForName("Rename item", node.name, {
-    extension: node.kind === "file" ? fileExtensionOf(node.name) : ""
-  });
-  if (!name) {
-    return;
-  }
-
-  try {
-    controller.rename(node.id, name);
-    // Re-key any queued text patch from the old path to the new one BEFORE
-    // publishing the rename, so a pending edit isn't sent against the old path
-    // (which the server just renamed → 400 → disconnect / "server unreachable").
-    collaboration.remapPatchPath(currentPath, getPath(controller.getProject(), node.id));
-    remapPersonaPaths(currentPath, getPath(controller.getProject(), node.id));
-    publishOperation({ type: "rename-node", path: currentPath, name });
-    showToast(`Renamed to ${name}`);
-  } catch (error) {
-    notify(error.message);
-  }
-}
-
-async function deleteSelected() {
-  const project = controller.getProject();
-  const selectedEntry = getSelectedUrlDbEntry(project);
-  if (selectedEntry) {
-    if (!await confirmAction(`Delete ${selectedEntry.entry.name}?`)) {
-      return;
-    }
-
-    try {
-      const nextContent = removeUrlDbEntry(selectedEntry.file.content, selectedEntry.entry.id);
-      controller.updateContent(selectedEntry.file.id, nextContent);
-      publishOperation({ type: "update-file", path: getPath(project, selectedEntry.file.id), content: nextContent });
-      sourceUrlDbEntry = null;
-      previewUrlDbEntry = null;
-      setActiveSourceFile(selectedEntry.file.id);
-    } catch (error) {
-      notify(error.message);
-    }
-    return;
-  }
-
-  const node = getSelectedNode(project);
-  if (!node || node.id === project.rootId) {
-    return;
-  }
-  const path = getPath(project, node.id);
-  if (!await confirmAction(`Delete ${node.name}?`)) {
-    return;
-  }
-  const removedName = node.name;
-  controller.remove(node.id);
-  // Drop any queued patch for the deleted file/folder so it isn't sent against a
-  // path the server just removed (→ 400 → disconnect).
-  collaboration.dropPatchPath(path);
-  publishOperation({ type: "delete-node", path });
-  showToast(`Deleted ${removedName}`);
-}
-
-function collectFileEntries(project, nodeId) {
-  const node = project.nodes[nodeId];
-  if (!node) {
-    return [];
-  }
-
-  if (node.kind === "file") {
-    return [{ path: node.name, bytes: getExportBytes(node.name, node.content) }];
-  }
-
-  const entries = [];
-  function walk(currentId, prefix = "") {
-    const current = project.nodes[currentId];
-    if (current.kind === "file") {
-      entries.push({ path: `${prefix}${current.name}`, bytes: getExportBytes(current.name, current.content) });
-      return;
-    }
-    current.children.forEach((childId) => {
-      const child = project.nodes[childId];
-      const nextPrefix = child.kind === "folder" ? `${prefix}${child.name}/` : prefix;
-      walk(childId, nextPrefix);
-    });
-  }
-  walk(nodeId, nodeId === project.rootId ? "" : `${node.name}/`);
-  return entries;
-}
-
-function exportNode(nodeId) {
-  const project = controller.getProject();
-  const node = project.nodes[nodeId] ?? project.nodes[project.rootId];
-  if (node.kind === "file") {
-    const blob = isImageFileName(node.name)
-      ? dataUrlToBlob(node.content)
-      : new Blob([node.content], { type: getMimeTypeForFileName(node.name) });
-    downloadBlob(blob, node.name);
-    return;
-  }
-  downloadBlob(createZip(collectFileEntries(project, node.id)), `${node.name || project.name}.zip`);
-}
-
-/** Rasterize an SVG string to a PNG/JPG Blob. `background` (e.g. white) is
- *  painted first for opaque formats; omit it to keep PNG transparency. */
-function rasterizeSvgToBlob(svgString, { type, background = null, scale = 2 }) {
-  return new Promise((resolve, reject) => {
-    const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(svgBlob);
-    const image = new Image();
-    image.onload = () => {
-      try {
-        const width = image.naturalWidth || image.width;
-        const height = image.naturalHeight || image.height;
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.round(width * scale));
-        canvas.height = Math.max(1, Math.round(height * scale));
-        const ctx = canvas.getContext("2d");
-        if (background) {
-          ctx.fillStyle = background;
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-        }
-        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob(
-          (blob) => (blob ? resolve(blob) : reject(new Error("Canvas export produced no data."))),
-          type,
-          0.92
-        );
-      } catch (error) {
-        reject(error);
-      } finally {
-        URL.revokeObjectURL(url);
-      }
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("Failed to render the diagram for export."));
-    };
-    image.src = url;
-  });
-}
-
-/** Export a .bmap file as PNG (transparent), JPG (white background), or SVG. */
-async function exportBmapAs(nodeId, format) {
-  const project = controller.getProject();
-  const node = project.nodes[nodeId];
-  if (!node || node.kind !== "file" || !isBmapFileName(node.name)) {
-    notify("Export As is only available for .bmap diagrams.");
-    return;
-  }
-  try {
-    const ast = normalizeBmapAst(parseBmap(node.content ?? ""));
-    if (!ast.nodes.length) {
-      notify("This diagram has no nodes to export.");
-      return;
-    }
-    const { renderBmapToSvg } = await loadBmapView();
-    const svgString = renderBmapToSvg(ast);
-    const baseName = node.name.replace(/\.bmap$/i, "");
-
-    if (format === "svg") {
-      downloadBlob(new Blob([svgString], { type: "image/svg+xml" }), `${baseName}.svg`);
-    } else if (format === "png") {
-      const blob = await rasterizeSvgToBlob(svgString, { type: "image/png" });
-      downloadBlob(blob, `${baseName}.png`);
-    } else if (format === "jpg") {
-      const blob = await rasterizeSvgToBlob(svgString, { type: "image/jpeg", background: "#ffffff" });
-      downloadBlob(blob, `${baseName}.jpg`);
-    }
-    logDebug("action", "Bmap exported", `${node.name} → ${format}`);
-  } catch (error) {
-    notify(error instanceof Error ? error.message : String(error));
-    logDebug("error", "Bmap export failed", error instanceof Error ? error.message : String(error));
-  }
-}
-
-async function handleExplorerAction(action, target, options = {}) {
-  if (options.dryRun) {
-    return false;
-  }
-
-  const nodeId = target.nodeId;
-  selectionNodeId = nodeId;
-  sourceUrlDbEntry = target.entryId ? { fileId: nodeId, entryId: target.entryId } : null;
-  logDebug("action", "Explorer action", action);
-  if (action === "open-source") {
-    setActiveSourceFile(nodeId);
-    showToast(`Opened ${controller.getProject().nodes[nodeId]?.name ?? "file"}`);
-    return;
-  }
-  if (action === "open-preview") {
-    setPreviewFile(nodeId);
-    showToast(`Preview: ${controller.getProject().nodes[nodeId]?.name ?? "file"}`);
-    return;
-  }
-  if (action.startsWith("filter-")) {
-    settings.explorerFilter = action.replace("filter-", "");
-    persistSettings();
-    render(controller.getProject());
-    return;
-  }
-  if (action === "copy") {
-    copyExplorerTarget(target);
-    showToast(`Copied ${controller.getProject().nodes[nodeId]?.name ?? "item"}`);
-    return;
-  }
-  if (action === "paste") {
-    if (!pasteExplorerClipboard(target)) {
-      notify("Nothing valid to paste here.");
-    }
-    return;
-  }
-  if (action === "new-folder") {
-    createItem("folder");
-    return;
-  }
-  if (action === "new-md") {
-    createItem("md");
-    return;
-  }
-  if (action === "new-mtree") {
-    createItem("mtree");
-    return;
-  }
-  if (action === "new-urldb") {
-    createItem("urldb");
-    return;
-  }
-  if (action === "new-bmap") {
-    createItem("bmap");
-    return;
-  }
-  if (action === "new-persona") {
-    createItem("persona");
-    return;
-  }
-  if (action === "add-file") {
-    openAddFileDialog(nodeId);
-    return;
-  }
-  if (action === "add-bookmark-entry") {
-    await promptAndAddUrlDbEntry(nodeId);
-    return;
-  }
-  if (action === "rename-entry") {
-    await renameSelected();
-    return;
-  }
-  if (action === "delete-entry") {
-    await deleteSelected();
-    return;
-  }
-  if (action === "generate-module-map") {
-    openMtreeToolsDialog(nodeId);
-    return;
-  }
-  if (action === "replace-file") {
-    replaceFileTargetId = nodeId;
-    elements.replaceFileInput.click();
-    return;
-  }
-  if (action === "rename") {
-    await renameSelected();
-    return;
-  }
-  if (action === "delete") {
-    await deleteSelected();
-    return;
-  }
-  if (action === "manage-preview") {
-    const ws = settings.lastWorkspace;
-    if (ws?.team && ws?.path != null) {
-      await openAccessEditor(ws.team, ws.path, controller.getProject().name);
-    } else {
-      notify("Open a server workspace to manage its preview access.");
-    }
-    return;
-  }
-  if (action === "export") {
-    exportNode(nodeId);
-    return;
-  }
-  if (action === "export-bmap-png") {
-    await exportBmapAs(nodeId, "png");
-    return;
-  }
-  if (action === "export-bmap-jpg") {
-    await exportBmapAs(nodeId, "jpg");
-    return;
-  }
-  if (action === "export-bmap-svg") {
-    await exportBmapAs(nodeId, "svg");
-  }
 }
 
 elements.editorContent.addEventListener("compositionstart", () => {
