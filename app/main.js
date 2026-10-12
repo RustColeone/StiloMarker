@@ -27,7 +27,6 @@ import { appendUrlDbEntry, formatUrlDbEntryBody, moveUrlDbEntry, moveUrlDbEntryB
 import { createZip, downloadBlob } from "./services/zip-service.js";
 import { query } from "./ui/dom.js";
 import { createExplorerView } from "./ui/explorer-view.js";
-import { createBmapView, renderBmapToSvg } from "./ui/bmap-view.js";
 import { buildTableSnippet, getEditorToolbarFormat, renderEditorFormatToolbar } from "./ui/editor-format-toolbar.js";
 import { createTableGridPicker } from "./ui/table-grid-picker.js";
 import { createDefaultBmap, normalizeBmapAst, parseBmap } from "./services/bmap-service.js";
@@ -492,6 +491,17 @@ function rememberEditorSelection() {
 }
 let mathJaxLoadPromise = null;
 let previewBmapView = null;
+// The diagram editor is the largest module (~150KB) and most sessions never
+// open a diagram, so it loads the first time one is previewed or exported.
+let bmapViewModule = null;
+let bmapViewLoading = null;
+
+function loadBmapView() {
+  bmapViewLoading ??= import("./ui/bmap-view.js")
+    .then((module) => (bmapViewModule = module))
+    .catch((error) => { bmapViewLoading = null; throw error; });
+  return bmapViewLoading;
+}
 
 let selectionNodeId = controller.getProject().activeFileId ?? controller.getProject().rootId;
 const syncState = {
@@ -8401,8 +8411,19 @@ function renderPreviewContent(target, project, file) {
   }
 
   if (isBmapFileName(file.name)) {
+    if (!bmapViewModule) {
+      target.innerHTML = `<div class="preview-loading">Loading diagram…</div>`;
+      loadBmapView().then(() => {
+        if (previewFileId === file.id) render(controller.getProject());
+      }).catch((error) => {
+        if (previewFileId !== file.id) return;
+        target.innerHTML = `<div class="preview-loading">The diagram editor could not load. Check your connection, then reopen the file.</div>`;
+        logDebug("error", "Diagram editor failed to load", error.message);
+      });
+      return { shouldTypeset: false, content: "" };
+    }
     if (!previewBmapView) {
-      previewBmapView = createBmapView({ container: target });
+      previewBmapView = bmapViewModule.createBmapView({ container: target });
     }
     const basePath = getPath(project, file.id);
     previewBmapView.render({
@@ -10652,6 +10673,7 @@ async function exportBmapAs(nodeId, format) {
       notify("This diagram has no nodes to export.");
       return;
     }
+    const { renderBmapToSvg } = await loadBmapView();
     const svgString = renderBmapToSvg(ast);
     const baseName = node.name.replace(/\.bmap$/i, "");
 
