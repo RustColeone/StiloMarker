@@ -6907,3 +6907,11 @@ pre.proposal-diff-block {
 .proposal-image figcaption span {
   font-size: 10px;
 }
+
+/* Shown while a lazily loaded preview (e.g. the diagram editor) arrives. */
+.preview-loading {
+  padding: 24px 16px;
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: center;
+}
