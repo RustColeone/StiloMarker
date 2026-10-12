@@ -283,3 +283,28 @@ new real-backend `workspace-history-browser.py`. Service log clean.
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261011T072212Z-v0.1.24`.
 Nine project manifests valid, 127/127 files.
 
+
+## Verified release: v0.1.25
+
+Deployed on 2026-10-12 at 06:03 UTC. Adds the **Roleplay** tab: a group chat
+with characters written as `name.persona.skill` files (`@handle` asks one,
+`@all` asks everyone in turn, no mention = narration). Characters read the
+workspace but cannot change it. App version `0.1.25`; sync compatibility
+raised to `116`, because older tabs drop the new chat fields when they save.
+
+Public checks: ping (`0.1.25` / `116`), seven assets byte-identical (six
+gzipped; `app/version.js` is under the 1KB threshold) including the new
+`app/ui/roleplay-view.js` and `app/services/persona-service.js`, the
+`mdnotes-shell-v0.1.25` cache label, the Roleplay tab in the served page, a
+persona-mode `/api/chat` request rejected for a blank name before any model
+call, and a guest session that saved a group chat (kind, members, speaker
+kept), refused the same save from a version-115 tab with 426, and closed
+cleanly. No real model call was made. Validation: 149 Node tests, the Python
+reliability, move-node, static-compression, workspace-backup, persona-chat and
+MCP suites, the backend self-test, and ten browser suites including the new
+`roleplay-browser.py`. Service log clean.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261012T060223Z-v0.1.25`.
+Nine project manifests valid, 153/153 files (the count now includes
+`server/data/_backups`).
+
