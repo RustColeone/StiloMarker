@@ -5444,13 +5444,15 @@ menu {
 }
 
 /* Agent | Roleplay tabs, where the panel title used to be. */
+/* The tabs never shrink: the status badge and model picker give up space
+   first (they ellipsize), so a long server status can't cover a tab. */
 .chat-tabs {
   display: flex;
   align-items: stretch;
   align-self: stretch;
-  flex: 1;
-  min-width: 0;
+  flex: 0 0 auto;
   gap: 2px;
+  margin-right: auto;
 }
 
 .chat-tab {
@@ -5492,6 +5494,7 @@ menu {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 140px;
+  min-width: 0;
   flex-shrink: 1;
   font-family: inherit;
   cursor: pointer;
@@ -5515,6 +5518,7 @@ menu {
   border: 1px solid var(--border);
   border-radius: 3px;
   max-width: 130px;
+  min-width: 0;
   flex-shrink: 1;
 }
 
@@ -6586,7 +6590,6 @@ pre.proposal-diff-block {
   .chat-compose-drop-hint { display: none; }
   .chat-message-list { overscroll-behavior: contain; overflow-wrap: anywhere; }
   .chat-tab { min-height: 44px; padding: 0 8px; }
-  .chat-tabs { flex: 0 1 auto; }
   .rp-member, .rp-add { min-height: 44px; }
   .rp-item { min-height: 44px; }
   .chat-model-badge { flex: 1; max-width: none; min-height: 44px; }

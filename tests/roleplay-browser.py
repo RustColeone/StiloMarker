@@ -46,7 +46,11 @@ async def open_page(browser, requests, viewport, hold=None, init_project=True, *
         path = parsed.path
         if path.startswith('/api/'):
             if path == '/api/chat/status':
-                payload = {'configured': True, 'provider': 'Test', 'model': 'test-model', 'models': ['test-model'], 'localOnly': False}
+                # Like the live server: two models (so the picker shows) and a long
+                # status message, which once squeezed the tabs under the badge.
+                payload = {'configured': True, 'provider': 'DeepSeek', 'model': 'deepseek-flash',
+                           'models': ['deepseek-flash', 'deepseek-v4-pro'], 'localOnly': False,
+                           'message': 'Chat proxy is configured for this server.'}
             elif path == '/api/chat':
                 body = route.request.post_data_json
                 requests.append(body)
@@ -80,6 +84,15 @@ async def open_page(browser, requests, viewport, hold=None, init_project=True, *
     return context, page, errors
 
 
+async def assert_tabs_clickable(page):
+    """Each tab is the element actually under its own centre (nothing covers it)."""
+    covered = await page.evaluate('''() => [...document.querySelectorAll('.chat-tab')].filter(tab => {
+        const r = tab.getBoundingClientRect();
+        return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) !== tab;
+    }).map(tab => tab.textContent)''')
+    assert not covered, f'tabs covered: {covered}'
+
+
 async def send(page, text):
     await page.locator('#chat-input').fill(text)
     await page.locator('#chat-input').press('Enter')
@@ -99,6 +112,8 @@ async def main():
         if await page.locator('#chat-panel').is_hidden():
             await page.locator('#chat-toggle-activity-button').click()
         assert await page.locator('#chat-cast-bar').is_hidden()
+        await page.wait_for_function('document.querySelector("#chat-status-text").textContent.includes("configured")')
+        await assert_tabs_clickable(page)
         await page.locator('[data-chat-tab="roleplay"]').click()
         await page.wait_for_function('Boolean(window.__rpTest.roleplay)')
         assert await page.locator('[data-chat-tab="roleplay"]').get_attribute('aria-selected') == 'true'
@@ -230,6 +245,8 @@ async def main():
         context, page, errors = await open_page(browser, phone_requests, {'width': 375, 'height': 760},
                                                 is_mobile=True, has_touch=True, device_scale_factor=1)
         await page.locator('#mobile-chat-toggle').click()
+        await page.wait_for_function('document.querySelector("#chat-status-text").textContent.includes("configured")')
+        await assert_tabs_clickable(page)
         await page.locator('[data-chat-tab="roleplay"]').click()
         await page.wait_for_function('Boolean(window.__rpTest.roleplay)')
         await page.locator('[data-rp-add]').click()
