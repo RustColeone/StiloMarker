@@ -1,5 +1,5 @@
 const ROOT_ID = "root";
-const TEXT_FILE_EXTENSIONS = [".md", ".mtree", ".urldb", ".bmap"];
+const TEXT_FILE_EXTENSIONS = [".md", ".mtree", ".urldb", ".bmap", ".skill"];
 const IMAGE_FILE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"];
 const ALLOWED_FILE_EXTENSIONS = [...TEXT_FILE_EXTENSIONS, ...IMAGE_FILE_EXTENSIONS];
 
@@ -32,6 +32,17 @@ function isImageFileName(name) {
   return IMAGE_FILE_EXTENSIONS.includes(getExtension(name));
 }
 
+// Persona files (`aria.persona.skill`) are Markdown with a short header; they
+// edit and preview exactly like notes.
+function isMarkdownFileName(name) {
+  const extension = getExtension(name);
+  return extension === ".md" || extension === ".skill";
+}
+
+function isPersonaFileName(name) {
+  return String(name ?? "").toLowerCase().endsWith(".persona.skill");
+}
+
 function createFolder(name, parentId = ROOT_ID) {
   return {
     id: createId("folder"),
@@ -45,7 +56,7 @@ function createFolder(name, parentId = ROOT_ID) {
 
 function createFile(name, parentId = ROOT_ID, content = "") {
   if (!isAllowedFileName(name)) {
-    throw new Error("Only .md, .mtree, .urldb, and supported image files are allowed.");
+    throw new Error("Only .md, .mtree, .urldb, .bmap, .skill, and supported image files are allowed.");
   }
 
   return {
@@ -276,7 +287,7 @@ function renameNode(project, nodeId, name) {
   const next = cloneProject(project);
   const node = getNode(next, nodeId);
   if (node.kind === "file" && !isAllowedFileName(name)) {
-    throw new Error("Only .md, .mtree, .urldb, and supported image files are allowed.");
+    throw new Error("Only .md, .mtree, .urldb, .bmap, .skill, and supported image files are allowed.");
   }
 
   ensureUniqueName(next, node.parentId, name, node.id);
@@ -517,6 +528,8 @@ export {
   getPath,
   isImageFileName,
   isAllowedFileName,
+  isMarkdownFileName,
+  isPersonaFileName,
   isBmapFileName,
   isTextFileName,
   isUrlDbFileName,

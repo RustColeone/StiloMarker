@@ -1,8 +1,10 @@
 const CHAT_STORAGE_KEY = "mdnotes.chat.v1";
+const MAX_GROUP_MEMBERS = 8;
 
-function createChatThread(title = "New Chat") {
+function createChatThread(title = "New Chat", extra = {}) {
   const now = Date.now();
   return {
+    ...extra,
     id: globalThis.crypto?.randomUUID?.() ?? `thread-${Math.random().toString(36).slice(2, 10)}`,
     title,
     createdAt: now,
@@ -61,6 +63,11 @@ function normalizeChatMessage(value) {
   if (typeof value.reasoning === "string") msg.reasoning = value.reasoning;
   if (Number.isFinite(value.reasoningMs)) msg.reasoningMs = value.reasoningMs;
   if (value.interrupted) msg.interrupted = true;
+  // Roleplay: which character spoke (persona path + the name it had then), and
+  // which person wrote a user message in a shared group chat.
+  if (typeof value.speaker === "string" && value.speaker) msg.speaker = value.speaker;
+  if (typeof value.speakerName === "string" && value.speakerName) msg.speakerName = value.speakerName;
+  if (typeof value.authorName === "string" && value.authorName) msg.authorName = value.authorName;
   return msg;
 }
 
@@ -74,7 +81,7 @@ function normalizeChatThread(value) {
   const contextPaths = Array.isArray(value.contextPaths)
     ? value.contextPaths.map((path) => String(path ?? "").trim()).filter(Boolean)
     : [];
-  return {
+  const thread = {
     id: String(value.id ?? globalThis.crypto?.randomUUID?.() ?? `thread-${Math.random().toString(36).slice(2, 10)}`),
     title: String(value.title ?? "New Chat").trim() || "New Chat",
     createdAt: Number.isFinite(Number(value.createdAt)) ? Number(value.createdAt) : Date.now(),
@@ -83,6 +90,13 @@ function normalizeChatThread(value) {
     messages,
     draft: String(value.draft ?? "")
   };
+  // A Roleplay group chat; agent threads carry neither field.
+  if (value.kind === "group") {
+    thread.kind = "group";
+    thread.members = Array.from(new Set((Array.isArray(value.members) ? value.members : [])
+      .map((path) => String(path ?? "").trim()).filter(Boolean))).slice(0, MAX_GROUP_MEMBERS);
+  }
+  return thread;
 }
 
 function createDefaultChatWorkspace() {
@@ -96,9 +110,13 @@ function normalizeChatWorkspace(value) {
   const threads = Array.isArray(value?.threads)
     ? value.threads.map(normalizeChatThread).filter(Boolean).sort((left, right) => right.updatedAt - left.updatedAt)
     : [];
-  const activeThreadId = String(value?.activeThreadId ?? "").trim() || threads[0]?.id || null;
+  // Each chat tab remembers its own open conversation.
+  const agentThreads = threads.filter((thread) => thread.kind !== "group");
+  const activeThreadId = String(value?.activeThreadId ?? "").trim();
+  const activeGroupThreadId = String(value?.activeGroupThreadId ?? "").trim();
   return {
-    activeThreadId: threads.some((thread) => thread.id === activeThreadId) ? activeThreadId : (threads[0]?.id ?? null),
+    activeThreadId: agentThreads.some((thread) => thread.id === activeThreadId) ? activeThreadId : (agentThreads[0]?.id ?? null),
+    ...(threads.some((thread) => thread.id === activeGroupThreadId && thread.kind === "group") ? { activeGroupThreadId } : {}),
     threads,
     ...(value?.syncBase ? { syncBase: structuredClone(value.syncBase) } : {})
   };
@@ -146,6 +164,7 @@ function deriveChatTitle(content) {
 }
 
 export {
+  MAX_GROUP_MEMBERS,
   createChatMessage,
   createChatThread,
   createDefaultChatWorkspace,

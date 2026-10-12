@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v0.1.24";
+const CACHE_NAME = "mdnotes-shell-v0.1.25";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -23,6 +23,7 @@ const APP_SHELL = [
   "./app/services/mtree-module-map-service.js",
   "./app/services/offline-service.js",
   "./app/services/opfs-service.js",
+  "./app/services/persona-service.js",
   "./app/services/settings-service.js",
   "./app/services/storage-service.js",
   "./app/services/snapshot-service.js",
@@ -33,7 +34,8 @@ const APP_SHELL = [
   "./app/services/zip-service.js",
   "./app/ui/bmap-view.js",
   "./app/ui/dom.js",
-  "./app/ui/explorer-view.js"
+  "./app/ui/explorer-view.js",
+  "./app/ui/roleplay-view.js"
 ];
 
 self.addEventListener("install", (event) => {

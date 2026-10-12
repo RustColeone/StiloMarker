@@ -516,6 +516,52 @@ When a collaboration session is active, the entire chat workspace (all threads a
 
 Chat threads are stored in browser `localStorage` under the key `mdnotes.chat.v1`. When a collaboration session is active, they are also persisted in the server's in-memory state for the duration of the session.
 
+### Roleplay tab (characters)
+
+The panel has two tabs: **Agent** (this assistant) and **Roleplay**, a group chat with characters the user has written. It is for any kind of writing: talking to a story's characters, rehearsing a script, running a game scene, practising a conversation.
+
+- **+ Add** in the Roleplay tab adds a character to the chat; **New character…** creates one.
+- The user writes `@handle` to ask a character to reply, and `@all` for everyone in turn. A message without a mention is narration and gets no reply.
+- Characters can read every file in the workspace and any attached files, but cannot change anything.
+- A character's file is read again before each reply, so editing it changes how the character speaks from then on.
+
+### Character files (.persona.skill)
+
+A character is a Markdown file whose name ends in `.persona.skill`, e.g. `Characters/aria.persona.skill`. The file name gives the mention handle: `aria.persona.skill` → `@aria` (lower case, spaces become `-`). The optional header between `---` lines sets display details; everything after it is the character sheet, sent to the model as written.
+
+```
+---
+name: Captain Aria Voss
+avatar: portraits/aria.png
+color: #b5523b
+temperature: 0.9
+---
+## Who they are
+A smuggler captain who owes money to everyone on the coast.
+
+## How they speak
+Short, dry sentences. Never apologises. Calls everyone "friend" when she is angry.
+
+## Example lines
+> "Friend, the cargo is legal until somebody opens it."
+
+## What they know / don't know
+Knows every harbour from here to the capital. Does not know her first mate is an informer.
+```
+
+- `name` — shown in the chat; defaults to the file name.
+- `avatar` — an image path relative to this file, or an `https://` URL. Without one, the initials are shown on the character's colour.
+- `color` — `#rgb` or `#rrggbb`; otherwise derived from the name.
+- `temperature` — 0 to 1.5 (default 0.8). Higher is more surprising.
+
+When a user asks you (the agent) to make a character file from their writing:
+
+1. Read the relevant files first, then create the file with `create_file`, named `<name>.persona.skill`. Use the folder the user names, or an existing characters folder, or a new `Characters` folder.
+2. Ground every detail in the text: their history, wants, fears, relationships, and how they talk (vocabulary, rhythm, habits, things they would never say).
+3. Include 2–4 example lines quoted or closely adapted from the writing. Example lines shape the voice more than descriptions do.
+4. Write "What they know / don't know" so the character does not reveal secrets they could not know.
+5. Keep it under about 600 words. Leave `avatar` empty unless an image of the character exists in the workspace.
+
 ---
 
 ## 14. Settings
@@ -555,4 +601,5 @@ The template is defined in `Template/template-manifest.json`.
 | `.mtree` | Module map | Yes | SVG tree |
 | `.urldb` | URL album | Yes | Image grid |
 | `.bmap` | Brainstorm diagram | Yes | Interactive canvas |
+| `.persona.skill` | Roleplay character (Markdown) | Yes | Character card + Markdown |
 | `.png` `.jpg` `.jpeg` `.gif` `.svg` `.webp` `.bmp` | Image | No | Image viewer |

@@ -121,3 +121,35 @@ test('chat transport sends both the compatibility version and chat base revision
   const saved = await pushServerChatWorkspace('https://example.test', 'test-token', { baseRevision: 7, threads: [] });
   assert.equal(body.version, SYNC_PROTOCOL_VERSION); assert.equal(body.baseRevision, 7); assert.equal(saved.revision, 8);
 });
+
+test('roleplay group chats keep their cast, speakers and authors through save, merge and reload', (t) => {
+  const old = globalThis.localStorage, data = new Map();
+  globalThis.localStorage = { getItem: key => data.get(key), setItem: (key, value) => data.set(key, value) };
+  t.after(() => globalThis.localStorage = old);
+  const group = { id: 'g', title: 'Storm', kind: 'group', createdAt: 1, updatedAt: 3,
+    members: ['Cast/aria.persona.skill', 'Cast/aria.persona.skill', 'bram.persona.skill'],
+    messages: [
+      { id: 'u1', role: 'user', content: '@aria status?', createdAt: 1, authorName: 'Leo' },
+      { id: 'a1', role: 'assistant', content: 'Sinking.', createdAt: 2, speaker: 'Cast/aria.persona.skill', speakerName: 'Aria' }
+    ], contextPaths: [], draft: '' };
+  const agent = { id: 'a', title: 'Chat', createdAt: 1, updatedAt: 1, messages: [], contextPaths: [], draft: '' };
+  saveChatWorkspace('p', { activeThreadId: 'g', activeGroupThreadId: 'g', threads: [group, agent] });
+  const loaded = loadChatWorkspace('p');
+  const thread = loaded.threads.find(row => row.id === 'g');
+  assert.equal(thread.kind, 'group');
+  assert.deepEqual(thread.members, ['Cast/aria.persona.skill', 'bram.persona.skill']);
+  assert.equal(thread.messages[0].authorName, 'Leo');
+  assert.equal(thread.messages[1].speaker, 'Cast/aria.persona.skill');
+  assert.equal(thread.messages[1].speakerName, 'Aria');
+  assert.equal(loaded.threads.find(row => row.id === 'a').kind, undefined);
+  // Each tab remembers its own conversation; the agent tab never opens a group chat.
+  assert.equal(loaded.activeThreadId, 'a');
+  assert.equal(loaded.activeGroupThreadId, 'g');
+  // The cast is shared with collaborators and survives a merge with their copy.
+  const shared = sharedChat(loaded).threads.find(row => row.id === 'g');
+  assert.deepEqual(shared.members, thread.members);
+  const remote = { revision: 2, threads: [{ ...copy(shared), members: [...shared.members, 'cid.persona.skill'], updatedAt: 4 }] };
+  const merged = mergeChatWorkspace(copy(sharedChat(loaded)), loaded, remote).threads.find(row => row.id === 'g');
+  assert.deepEqual(merged.members, [...thread.members, 'cid.persona.skill']);
+  assert.equal(merged.kind, 'group');
+});

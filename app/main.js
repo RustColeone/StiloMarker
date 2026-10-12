@@ -4,7 +4,7 @@ import { createChatSynchronizer } from "./services/chat-sync-service.js";
 import { shouldSubmitChat, isChatNearBottom, installMobileViewport } from "./services/chat-ui-service.js";
 import { snapshotProject, savedFileIds } from "./services/project-save-service.js";
 import { APP_VERSION } from "./version.js";
-import { ROOT_ID, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isAllowedFileName, isBmapFileName, isImageFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
+import { ROOT_ID, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isAllowedFileName, isBmapFileName, isImageFileName, isMarkdownFileName, isPersonaFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
 import { createProjectController, seedDefaultProject } from "./domain/project-service.js";
 import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
 import { supportsOpfs, listOpfsDir, mkdirOpfs, createProjectOpfs, openProjectOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs, deleteOpfsEntry, exportProjectModelOpfs, importProjectModelOpfs } from "./services/opfs-service.js";
@@ -13,6 +13,7 @@ import { fetchChatStatus, fetchServerChatWorkspace, pushServerChatWorkspace, sen
 import { createChatMessage, createChatThread, deriveChatTitle, loadChatWorkspace, saveChatWorkspace } from "./services/chat-storage-service.js";
 import { dataUrlToBlob, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent } from "./services/file-content-service.js";
 import { extractMarkdownLinks, renderMarkdown } from "./services/markdown-service.js";
+import { PERSONA_SUFFIX, parsePersona, personaAvatarHtml, personaFileName, personaTemplate } from "./services/persona-service.js";
 import { buildModuleMapSection, replaceOrAppendModuleMap } from "./services/mtree-module-map-service.js";
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
 import { applyEditorFont, applyTheme, clampSourceFontSize, loadSettings, patchStoredSettings, saveSettings } from "./services/settings-service.js";
@@ -312,6 +313,7 @@ const elements = {
   newMtreeButton: query("#new-mtree-button"),
   newUrlDbButton: query("#new-urldb-button"),
   newBmapButton: query("#new-bmap-button"),
+  newPersonaButton: query("#new-persona-button"),
   exportSelectedButton: query("#export-selected-button"),
   toggleExplorerMenuButton: query("#toggle-explorer-menu-button"),
   togglePreviewButton: query("#toggle-preview-button"),
@@ -349,6 +351,8 @@ const elements = {
   chatStatusText: query("#chat-status-text"),
   chatModelSelect: query("#chat-model-select"),
   chatNewThreadButton: query("#chat-new-thread-button"),
+  chatTabs: query("#chat-tabs"),
+  chatCastBar: query("#chat-cast-bar"),
   chatCollapseButton: query("#chat-collapse-button"),
   chatThreadList: query("#chat-thread-list"),
   chatAddActiveFileButton: query("#chat-add-active-file-button"),
@@ -510,6 +514,9 @@ const syncState = {
 let workspaceMode = "private";
 let sessionRestorer = null;
 let mcpControls = null;
+// The Roleplay tab's module, loaded the first time the tab is shown.
+let roleplay = null;
+let roleplayLoading = null;
 
 // Mobile pane state (drives #app[data-mobile-view]). Declared here so the layout
 // pass that runs during module load can read it before its helpers execute.
@@ -545,7 +552,11 @@ const chatState = {
   syncError: null,
   turn: null,
   renderedThreadId: null,
+  // The chat panel's two tabs keep separate conversations: the agent's threads
+  // and Roleplay group chats (thread.kind === "group").
+  tab: settings.chatTab === "roleplay" ? "roleplay" : "agent",
   activeThreadId: null,
+  activeGroupThreadId: null,
   threads: [],
   configured: false,
   localOnly: true,
@@ -940,7 +951,8 @@ function chatWorkspaceKey(project = controller.getProject()) {
 }
 
 function chatWorkspaceSnapshot() {
-  return { threads: chatState.threads, activeThreadId: chatState.activeThreadId, syncBase: chatState.syncBase };
+  return { threads: chatState.threads, activeThreadId: chatState.activeThreadId,
+    activeGroupThreadId: chatState.activeGroupThreadId, syncBase: chatState.syncBase };
 }
 
 function cacheChatWorkspace() {
@@ -955,8 +967,10 @@ function cancelChatForWorkspaceChange() {
   const thread = chatState.threads.find(thread => thread.id === turn.threadId);
   if (thread) {
     const partial = chatState.streamingText.trim();
+    // A Roleplay reply keeps its speaker, so the partial text stays theirs.
+    const speaker = turn.group && turn.speaker && partial ? { speaker: turn.speaker.path, speakerName: turn.speaker.name } : {};
     thread.messages.push(createChatMessage(partial ? "assistant" : "system",
-      partial || "Stopped because the workspace changed.", { interrupted: true }));
+      partial || "Stopped because the workspace changed.", { interrupted: true, ...speaker }));
     thread.updatedAt = Date.now();
   }
   turn.controller.abort();
@@ -985,6 +999,7 @@ function ensureChatWorkspaceLoaded(project) {
     chatState.projectId = key;
     chatState.threads = workspace.threads;
     chatState.activeThreadId = workspace.activeThreadId;
+    chatState.activeGroupThreadId = workspace.activeGroupThreadId ?? null;
     chatState.syncBase = workspace.syncBase ?? null;
     chatState.syncError = null;
     chatState.renderedThreadId = null;
@@ -1015,7 +1030,8 @@ function ensureChatWorkspaceLoaded(project) {
             return Object.assign(thread, next, { messages });
           });
           chatState.syncBase = base;
-          chatState.activeThreadId = workspace.activeThreadId ?? workspace.threads[0]?.id ?? null;
+          chatState.activeThreadId = workspace.activeThreadId
+            ?? workspace.threads.find(thread => thread.kind !== "group")?.id ?? null;
           cacheChatWorkspace();
           renderChatPanel(controller.getProject());
         },
@@ -1039,8 +1055,28 @@ function persistChatWorkspaceState(project = controller.getProject()) {
   chatSynchronizer?.schedule();
 }
 
+function isRoleplayTab() {
+  return chatState.tab === "roleplay";
+}
+
+function threadInActiveTab(thread) {
+  return (thread?.kind === "group") === isRoleplayTab();
+}
+
+function setActiveThreadForTab(threadId) {
+  if (isRoleplayTab()) chatState.activeGroupThreadId = threadId;
+  else chatState.activeThreadId = threadId;
+}
+
 function getActiveChatThread() {
-  return chatState.threads.find((thread) => thread.id === chatState.activeThreadId) ?? null;
+  const id = isRoleplayTab() ? chatState.activeGroupThreadId : chatState.activeThreadId;
+  return chatState.threads.find((thread) => thread.id === id && threadInActiveTab(thread)) ?? null;
+}
+
+function createThreadForActiveTab() {
+  return isRoleplayTab()
+    ? createChatThread("New Group Chat", { kind: "group", members: [] })
+    : createChatThread();
 }
 
 function ensureActiveChatThread() {
@@ -1048,9 +1084,9 @@ function ensureActiveChatThread() {
   if (thread) {
     return thread;
   }
-  thread = createChatThread();
+  thread = createThreadForActiveTab();
   chatState.threads.unshift(thread);
-  chatState.activeThreadId = thread.id;
+  setActiveThreadForTab(thread.id);
   persistChatWorkspaceState();
   return thread;
 }
@@ -1179,6 +1215,16 @@ function renderChatPanel(project) {
   ensureChatWorkspaceLoaded(project);
 
   const activeThread = getActiveChatThread();
+  const group = isRoleplayTab();
+  if (group && !roleplay) void loadRoleplay();
+  elements.chatPanel.classList.toggle("is-roleplay", group);
+  for (const tab of elements.chatTabs.querySelectorAll("[data-chat-tab]")) {
+    tab.setAttribute("aria-selected", String(tab.dataset.chatTab === chatState.tab));
+  }
+  elements.chatCastBar.hidden = !group;
+  if (group) roleplay?.renderCast(project, activeThread);
+  const placeholder = group ? "Message the group — @name to ask someone" : "Ask the agent…";
+  if (elements.chatInput.placeholder !== placeholder) elements.chatInput.placeholder = placeholder;
   const messageList = elements.chatMessageList;
   // Scroll state is read (and later written) only when the conversation will
   // actually change. Reading scrollTop forces a layout of the whole page, and
@@ -1212,12 +1258,13 @@ function renderChatPanel(project) {
     }
   }
 
-  elements.chatThreadList.innerHTML = chatState.threads.length
-    ? chatState.threads.map((thread) => {
+  const tabThreads = chatState.threads.filter(threadInActiveTab);
+  elements.chatThreadList.innerHTML = tabThreads.length
+    ? tabThreads.map((thread) => {
       const meta = `${thread.messages.length} msg · ${formatChatTimestamp(thread.updatedAt)}`;
       return `
         <button
-          class="chat-thread-button${thread.id === chatState.activeThreadId ? " is-active" : ""}"
+          class="chat-thread-button${thread.id === activeThread?.id ? " is-active" : ""}"
           type="button"
           data-chat-thread-id="${escapeHtmlAttribute(thread.id)}"
         >
@@ -1226,7 +1273,7 @@ function renderChatPanel(project) {
         </button>
       `;
     }).join("")
-    : '<div class="chat-empty-state">No conversations yet.<br>Press <strong>+</strong> to start one.</div>';
+    : `<div class="chat-empty-state">No ${group ? "group chats" : "conversations"} yet.<br>Press <strong>+</strong> to start one.</div>`;
 
   // Context chips — empty string collapses the list via CSS :empty rule.
   elements.chatContextList.innerHTML = activeThread?.contextPaths?.length
@@ -1248,7 +1295,9 @@ function renderChatPanel(project) {
   const reasoningHtml = chatState.reasoningText
     ? `<div class="chat-reasoning" aria-label="Agent thinking">${escapeHtmlAttribute(chatState.reasoningText)}</div>`
     : "";
-  const thinkingHtml = chatState.sending && chatState.turn?.threadId === activeThread?.id
+  const thinkingHtml = group
+    ? (roleplay?.streamHtml(project, activeThread) ?? "")
+    : chatState.sending && chatState.turn?.threadId === activeThread?.id
     ? `<div class="chat-thinking" aria-label="Agent is working" aria-live="polite">
         ${reasoningHtml}
         ${streamingHtml}
@@ -1263,7 +1312,9 @@ function renderChatPanel(project) {
        </div>`
     : "";
 
-  const historyHtml = activeThread?.messages?.length
+  const historyHtml = group
+    ? (roleplay ? roleplay.messagesHtml(project, activeThread) : '<div class="chat-empty-state">Loading Roleplay…</div>')
+    : activeThread?.messages?.length
     ? activeThread.messages.map((message) => {
       const roleLabel = message.role === "user" ? "You" : message.role === "assistant" ? "Agent" : "System";
       const contentHtml = message.role === "assistant"
@@ -1337,23 +1388,128 @@ function renderChatPanel(project) {
 }
 
 function setActiveChatThread(threadId) {
-  if (!chatState.threads.some((thread) => thread.id === threadId)) {
+  if (!chatState.threads.some((thread) => thread.id === threadId && threadInActiveTab(thread))) {
     return;
   }
-  chatState.activeThreadId = threadId;
+  setActiveThreadForTab(threadId);
   chatState.shouldScrollToBottom = true;
   persistChatWorkspaceState();
   renderChatPanel(controller.getProject());
 }
 
 function createNewChatConversation() {
-  const thread = createChatThread();
+  // A new group chat starts with the same cast as the one it replaces.
+  const previous = isRoleplayTab() ? getActiveChatThread() : null;
+  const thread = createThreadForActiveTab();
+  if (previous) thread.members = [...previous.members];
   chatState.threads.unshift(thread);
-  chatState.activeThreadId = thread.id;
+  setActiveThreadForTab(thread.id);
   chatState.shouldScrollToBottom = true;
   persistChatWorkspaceState();
   renderChatPanel(controller.getProject());
   elements.chatInput.focus();
+}
+
+function setChatTab(tab) {
+  const next = tab === "roleplay" ? "roleplay" : "agent";
+  if (next === chatState.tab) return;
+  roleplay?.closeMenu();
+  const current = getActiveChatThread();
+  if (current) current.draft = elements.chatInput.value;
+  chatState.tab = next;
+  settings.chatTab = next;
+  saveSettings(settings);
+  chatState.renderedThreadId = null; // reload the other tab's draft
+  chatState.shouldScrollToBottom = true;
+  cacheChatWorkspace();
+  renderChatPanel(controller.getProject());
+}
+
+function loadRoleplay() {
+  roleplayLoading ??= import("./ui/roleplay-view.js").then(({ createRoleplay }) => {
+    roleplay = createRoleplay({
+      elements: { chatPanel: elements.chatPanel, chatCastBar: elements.chatCastBar, chatInput: elements.chatInput },
+      chatState,
+      escapeHtml: escapeHtmlAttribute,
+      getProject: () => controller.getProject(),
+      getPath,
+      getNodeIdByPath,
+      isPersonaFileName,
+      avatarSrc: personaAvatarSrc,
+      renderMarkdown: (text) => renderMarkdown(text),
+      messageMarkdown: chatMessageMarkdown,
+      formatTime: formatChatTimestamp,
+      getActiveThread: getActiveChatThread,
+      ensureThread: ensureActiveChatThread,
+      getThread: (id) => chatState.threads.find((thread) => thread.id === id) ?? null,
+      persist: () => persistChatWorkspaceState(),
+      rerender: () => renderChatPanel(controller.getProject()),
+      session: () => ({ key: chatWorkspaceKey(), token: chatConnectionInfo()?.token }),
+      async ensureReady() {
+        if (!chatState.configured) await refreshChatStatus({ silent: true });
+        return chatState.configured ? null : chatState.detail;
+      },
+      buildRequest: (project, contextPaths) => ({
+        projectName: project.name,
+        model: chatState.selectedModel ?? undefined,
+        contextFiles: resolveChatContextFiles(project, { contextPaths }),
+        project: buildAgentProjectSnapshot(project),
+        ...agentRequestOverride()
+      }),
+      sendChatRequest: (payload, onProgress, signal) => sendChatRequest(settings.serverUrl, payload, onProgress, signal),
+      createChatMessage,
+      openFile: (nodeId) => openFileFromExplorer(nodeId),
+      promptForName,
+      createPersona(name) {
+        try {
+          const project = controller.getProject();
+          const created = createFileInFolder("persona", getSelectedParent(project).id, personaFileName(name).replace(/\.persona\.skill$/i, ""));
+          return created ? getPath(controller.getProject(), created.id) : null;
+        } catch (error) {
+          notify(error.message);
+          return null;
+        }
+      },
+      showToast
+    });
+    renderChatPanel(controller.getProject());
+    return roleplay;
+  }).catch((error) => {
+    roleplayLoading = null;
+    logDebug("response", "Roleplay failed to load", error.message);
+    showToast("Roleplay could not load. Check your connection and try again.");
+  });
+  return roleplayLoading;
+}
+
+/** A persona's avatar as an <img> src, or "" when it doesn't resolve. */
+function personaAvatarSrc(project, personaNodeId, avatar) {
+  const value = String(avatar ?? "").trim();
+  if (!value) return "";
+  if (/^(https?:\/\/|data:image\/)/i.test(value)) return value;
+  const resolved = resolveProjectAssetUrl(project, personaNodeId, value);
+  return resolved && resolved !== value ? resolved : "";
+}
+
+/** Keep group chats pointing at their characters after a local rename or
+ *  move (of the file itself or a folder above it). */
+function remapPersonaPaths(oldPath, newPath) {
+  if (!oldPath || oldPath === newPath) return;
+  const remap = (path) => (path === oldPath ? newPath
+    : path?.startsWith(`${oldPath}/`) ? `${newPath}${path.slice(oldPath.length)}` : path);
+  let changed = false;
+  for (const thread of chatState.threads) {
+    if (thread.kind !== "group") continue;
+    const members = thread.members.map(remap);
+    if (members.some((path, index) => path !== thread.members[index])) { thread.members = members; changed = true; }
+    for (const message of thread.messages) {
+      const speaker = remap(message.speaker);
+      if (speaker !== message.speaker) { message.speaker = speaker; changed = true; }
+    }
+  }
+  if (!changed) return;
+  persistChatWorkspaceState();
+  renderChatPanel(controller.getProject()); // the move already rendered with the old paths
 }
 
 function addChatContextPath(path) {
@@ -1533,15 +1689,26 @@ async function handleChatSubmit() {
   }
   const project = controller.getProject();
   const thread = ensureActiveChatThread();
+  const group = thread.kind === "group";
+  if (group && !roleplay) return; // the Roleplay module is still loading
   const contextPaths = (thread.contextPaths ?? []).slice();
   thread.contextPaths = [];
-  thread.messages.push(createChatMessage("user", prompt, { contextPaths }));
-  thread.title = thread.title === "New Chat" ? deriveChatTitle(prompt) : thread.title;
+  const authorName = group ? (settings.displayName || syncState.account?.username || "") : "";
+  thread.messages.push(createChatMessage("user", prompt, { contextPaths, ...(authorName ? { authorName } : {}) }));
+  thread.title = thread.title === "New Chat" || thread.title === "New Group Chat" ? deriveChatTitle(prompt) : thread.title;
   thread.updatedAt = Date.now();
   sortChatThreads();
-  chatState.activeThreadId = thread.id;
+  setActiveThreadForTab(thread.id);
   elements.chatInput.value = "";
   thread.draft = "";
+  if (group) {
+    roleplay.closeMenu();
+    chatState.shouldScrollToBottom = true;
+    persistChatWorkspaceState(project);
+    renderChatPanel(controller.getProject());
+    await roleplay.respond(thread.id, prompt);
+    return;
+  }
   await runAgentTurn(thread, project);
 }
 
@@ -1719,7 +1886,7 @@ async function runAgentTurn(thread, project) {
 }
 
 function isPreviewableFileName(name) {
-  return name.endsWith(".md") || isImageFileName(name) || isUrlDbFileName(name) || isBmapFileName(name);
+  return isMarkdownFileName(name) || isImageFileName(name) || isUrlDbFileName(name) || isBmapFileName(name);
 }
 
 function looksLikeUrl(value) {
@@ -1799,8 +1966,10 @@ function getNextDefaultFileName(project, parentId, kind) {
       ? "new mtree"
       : kind === "bmap"
         ? "new diagram"
-        : "new url album";
-  const extension = kind === "md" ? ".md" : kind === "mtree" ? ".mtree" : kind === "bmap" ? ".bmap" : ".urldb";
+        : kind === "persona"
+          ? "new character"
+          : "new url album";
+  const extension = fileExtensionForKind(kind);
   let index = 1;
   let candidate = slugTitle(label, index, extension);
   while (findChildByName(project, parentId, candidate)) {
@@ -1808,6 +1977,21 @@ function getNextDefaultFileName(project, parentId, kind) {
     candidate = slugTitle(label, index, extension);
   }
   return candidate;
+}
+
+function fileExtensionForKind(kind) {
+  return kind === "persona" ? PERSONA_SUFFIX : `.${kind}`;
+}
+
+// Starting content for a new file of `kind`: a default diagram, a character
+// sheet template, or nothing.
+function initialContentForKind(kind, name) {
+  if (kind === "bmap") return createDefaultBmap();
+  if (kind === "persona") {
+    const base = parsePersona("", name).name;
+    return personaTemplate(/^new character( \d+)?$/i.test(base) ? "New Character" : base);
+  }
+  return "";
 }
 
 function getNextUrlDbEntryName(fileContent) {
@@ -2544,7 +2728,7 @@ function findAutocompleteContext(force = false) {
   const lineStart = before.lastIndexOf("\n") + 1;
   const linePrefix = before.slice(lineStart);
 
-  if (activeFile.name.endsWith(".md")) {
+  if (isMarkdownFileName(activeFile.name)) {
     const imageMatch = linePrefix.match(/!\[[^\]]*\]\(([^)]*)$/);
     if (imageMatch) {
       const token = imageMatch[1];
@@ -6490,7 +6674,7 @@ function showLinkTooltipContent(linkEl) {
   editorLinkTooltip.hintEl.textContent = "Follow Link (Ctrl+Click)";
   editorLinkTooltip.previewEl.hidden = false;
 
-  if (node.name.endsWith(".md")) {
+  if (isMarkdownFileName(node.name)) {
     editorLinkTooltip.previewEl.innerHTML = renderMarkdown(node.content, {
       resolveUrl(url) { return resolveProjectAssetUrl(project, nodeId, url); }
     });
@@ -6546,7 +6730,7 @@ function hideLinkTooltip(immediate = false) {
 
 function handleEditorLinkHover(event) {
   const activeFile = controller.getActiveFile();
-  if (!activeFile?.name.endsWith(".md")) {
+  if (!isMarkdownFileName(activeFile?.name ?? "")) {
     if (!editorLinkTooltip.el.hidden) hideLinkTooltip(true);
     _lastHoveredLinkEl = null;
     return;
@@ -6594,7 +6778,7 @@ function cachedMarkdownLinks(nodeId, content) {
 
 function renderLinksPanel(project, activeFile) {
   if (!linksPanelEl) return;
-  if (!activeFile || !activeFile.name.endsWith(".md")) {
+  if (!activeFile || !isMarkdownFileName(activeFile.name)) {
     linksPanelEl.hidden = true;
     return;
   }
@@ -6650,7 +6834,7 @@ function renderLinksPanel(project, activeFile) {
   // Backlinks — scan all .md files for links pointing to the active file
   const backlinks = [];
   Object.values(project.nodes).forEach((node) => {
-    if (node.kind !== "file" || !node.name.endsWith(".md") || node.id === activeFile.id) return;
+    if (node.kind !== "file" || !isMarkdownFileName(node.name) || node.id === activeFile.id) return;
     const nodePath = getPath(project, node.id);
     const nodeSegments = nodePath.split("/").filter(Boolean);
     nodeSegments.pop();
@@ -7415,6 +7599,7 @@ function moveExplorerNode(nodeId, targetNodeId, placement) {
   // a pending edit lands on the moved file instead of the vanished old path.
   const newPath = getPath(controller.getProject(), nodeId);
   collaboration.remapPatchPath(oldPath, newPath);
+  remapPersonaPaths(oldPath, newPath);
   publishOperation({ type: "move-node", path: oldPath, parentPath, index: destination.index });
   logDebug("action", "Explorer node moved", `${oldPath} -> ${newPath}`);
   return true;
@@ -8248,7 +8433,19 @@ function renderPreviewContent(target, project, file) {
     return { shouldTypeset: false, content: "" };
   }
 
-  target.innerHTML = renderMarkdown(file.content, {
+  // A character sheet previews as a card (avatar, name, @handle) over its body,
+  // instead of showing the raw header lines as text.
+  const persona = isPersonaFileName(file.name) ? parsePersona(file.content, getPath(project, file.id)) : null;
+  const personaCard = persona
+    ? `<div class="persona-card" style="--persona-color:${escapeHtmlAttribute(persona.color)}">
+        ${personaAvatarHtml(persona, personaAvatarSrc(project, file.id, persona.avatar), "persona-avatar persona-card-avatar")}
+        <div class="persona-card-text">
+          <div class="persona-card-name">${escapeHtmlAttribute(persona.name)}</div>
+          <div class="persona-card-meta">@${escapeHtmlAttribute(persona.handle)} · Character for the Roleplay chat</div>
+        </div>
+      </div>`
+    : "";
+  target.innerHTML = personaCard + renderMarkdown(persona ? persona.body : file.content, {
     resolveUrl(url) {
       return resolveProjectAssetUrl(project, file.id, url);
     },
@@ -8317,7 +8514,7 @@ function printPreviewAsPdf() {
       }
     });
   const title = previewFile.name.replace(/\.md$/i, "") || "MDNotes";
-  const includeMath = previewFile.name.endsWith(".md") && hasMathMarkup(previewFile.content);
+  const includeMath = isMarkdownFileName(previewFile.name) && hasMathMarkup(previewFile.content);
 
   const cleanupPrintFrame = () => {
     globalThis.setTimeout(() => {
@@ -9155,7 +9352,7 @@ async function handleAddFileTransfer(transfer) {
 
 async function addDroppedImageAndInsert(file) {
   const activeFile = controller.getActiveFile();
-  if (!activeFile || !activeFile.name.endsWith(".md")) {
+  if (!activeFile || !isMarkdownFileName(activeFile.name)) {
     return false;
   }
 
@@ -9239,7 +9436,7 @@ async function handleEditorDrop(event) {
   }
 
   const urlDbPayload = event.dataTransfer?.getData("text/mdnotes-urldb-entry");
-  if (urlDbPayload && activeFile.name.endsWith(".md")) {
+  if (urlDbPayload && isMarkdownFileName(activeFile.name)) {
     try {
       const parsed = JSON.parse(urlDbPayload);
       const project = controller.getProject();
@@ -9262,7 +9459,7 @@ async function handleEditorDrop(event) {
   }
 
   const file = event.dataTransfer?.files?.[0];
-  if (file && isImageFileName(file.name) && activeFile.name.endsWith(".md")) {
+  if (file && isImageFileName(file.name) && isMarkdownFileName(activeFile.name)) {
     await addDroppedImageAndInsert(file);
   }
 }
@@ -10082,7 +10279,7 @@ function createItem(kind) {
     }
 
     const name = getNextDefaultFileName(project, parent.id, kind);
-    const content = kind === "bmap" ? createDefaultBmap() : "";
+    const content = initialContentForKind(kind, name);
     controller.createFile(parent.id, name, content);
     publishOperation({ type: "create-file", parentPath, name, content });
     // Open the new file as the active document (so it's what you're editing) but
@@ -10118,6 +10315,7 @@ async function renameFileById(fileId) {
     // publishing the rename, so a pending edit isn't sent against the old path
     // (which the server just renamed → 400 → disconnect / "server unreachable").
     collaboration.remapPatchPath(currentPath, getPath(controller.getProject(), node.id));
+    remapPersonaPaths(currentPath, getPath(controller.getProject(), node.id));
     publishOperation({ type: "rename-node", path: currentPath, name });
     showToast(`Renamed to ${name}`);
   } catch (error) {
@@ -10157,11 +10355,11 @@ function createFileInFolder(kind, parentId, baseName) {
   const project = controller.getProject();
   const parent = project.nodes[parentId] ?? project.nodes[project.rootId];
   const parentPath = parent.id === project.rootId ? "" : getPath(project, parent.id);
-  const ext = `.${kind}`;
+  const ext = fileExtensionForKind(kind);
   let name = String(baseName || "").trim();
   if (!name) name = getNextDefaultFileName(project, parent.id, kind);
   else if (!name.toLowerCase().endsWith(ext)) name = `${name}${ext}`;
-  const content = kind === "bmap" ? createDefaultBmap() : "";
+  const content = initialContentForKind(kind, name);
   controller.createFile(parent.id, name, content);
   publishOperation({ type: "create-file", parentPath, name, content });
   const created = findChildByName(controller.getProject(), parent.id, name);
@@ -10250,6 +10448,7 @@ async function renameSelected() {
     // publishing the rename, so a pending edit isn't sent against the old path
     // (which the server just renamed → 400 → disconnect / "server unreachable").
     collaboration.remapPatchPath(currentPath, getPath(controller.getProject(), node.id));
+    remapPersonaPaths(currentPath, getPath(controller.getProject(), node.id));
     publishOperation({ type: "rename-node", path: currentPath, name });
     showToast(`Renamed to ${name}`);
   } catch (error) {
@@ -10461,6 +10660,10 @@ async function handleExplorerAction(action, target, options = {}) {
   }
   if (action === "new-bmap") {
     createItem("bmap");
+    return;
+  }
+  if (action === "new-persona") {
+    createItem("persona");
     return;
   }
   if (action === "add-file") {
@@ -10809,7 +11012,7 @@ elements.editorContent.addEventListener("dragover", (event) => {
 
   const activeFile = controller.getActiveFile();
   const supportsTextDrop = Boolean(activeFile && isTextFileName(activeFile.name));
-  const supportsImageUrlDrop = Boolean(activeFile?.name.endsWith(".md") && types.includes("text/mdnotes-urldb-entry"));
+  const supportsImageUrlDrop = Boolean(activeFile && isMarkdownFileName(activeFile.name) && types.includes("text/mdnotes-urldb-entry"));
   const supportsTextPayload = types.includes("text/plain") || types.includes("text/mdnotes-editor-selection");
   if ((!supportsTextDrop || !supportsTextPayload) && !supportsImageUrlDrop) {
     clearEditorDropCaret();
@@ -11035,6 +11238,7 @@ elements.newMarkdownButton.addEventListener("click", () => createItem("md"));
 elements.newMtreeButton.addEventListener("click", () => createItem("mtree"));
 elements.newUrlDbButton.addEventListener("click", () => createItem("urldb"));
 elements.newBmapButton.addEventListener("click", () => createItem("bmap"));
+elements.newPersonaButton.addEventListener("click", () => createItem("persona"));
 elements.addFilePickerButton.addEventListener("click", () => elements.addFilePickerInput.click());
 elements.addFilePickerInput.addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
@@ -11837,6 +12041,7 @@ elements.chatComposeForm.addEventListener("submit", (event) => {
   void handleChatSubmit();
 });
 elements.chatInput.addEventListener("keydown", (event) => {
+  if (isRoleplayTab() && roleplay?.handleComposerKeydown(event)) return;
   if (!shouldSubmitChat(event, isMobileLayout()) || chatState.sending) return;
   event.preventDefault();
   void handleChatSubmit();
@@ -11847,6 +12052,12 @@ elements.chatInput.addEventListener("input", () => {
   cacheChatWorkspace();
   // Typing a draft must not rebuild the conversation or disturb its selection.
   elements.chatSendButton.disabled = !chatState.sending && !elements.chatInput.value.trim();
+  if (isRoleplayTab()) roleplay?.updateMentionMenu();
+});
+elements.chatInput.addEventListener("click", () => { if (isRoleplayTab()) roleplay?.updateMentionMenu(); });
+elements.chatTabs.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-chat-tab]");
+  if (button) setChatTab(button.dataset.chatTab);
 });
 installMobileViewport(window, document.documentElement);
 

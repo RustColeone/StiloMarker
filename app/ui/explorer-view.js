@@ -1,8 +1,12 @@
-import { ROOT_ID, isUrlDbFileName, listVisibleNodes } from "../domain/project-model.js";
+import { ROOT_ID, isMarkdownFileName, isPersonaFileName, isUrlDbFileName, listVisibleNodes } from "../domain/project-model.js";
 
 function getFileIconClass(node) {
   if (node.kind === "folder") {
     return node.expanded ? "is-folder-open" : "is-folder";
+  }
+
+  if (isPersonaFileName(node.name)) {
+    return "is-persona";
   }
 
   if (node.name.endsWith(".md")) {
@@ -59,7 +63,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
     }
 
     if (mode === "notes") {
-      return node.name.endsWith(".md");
+      return isMarkdownFileName(node.name);
     }
     if (mode === "mtree") {
       return node.name.endsWith(".mtree");
@@ -91,6 +95,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       ["New MTREE", "new-mtree"],
       ["New URL Album", "new-urldb"],
       ["New Diagram", "new-bmap"],
+      ["New Character", "new-persona"],
       ["Add File", "add-file"]
     ];
 
@@ -122,7 +127,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       }
 
       let typeEntries;
-      if (node.name.endsWith(".md")) {
+      if (isMarkdownFileName(node.name)) {
         typeEntries = [["Copy", "copy"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
       } else if (node.name.endsWith(".mtree")) {
         typeEntries = [["Copy", "copy"], ["Generate Module Map", "generate-module-map"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
