@@ -134,6 +134,17 @@ test("module instances created on first use are declared with var", async () => 
   assert.ok((mainSource.match(/^var \w+Instance;/gm) ?? []).length >= 4);
 });
 
+test("the offline app shell lists every app module", async () => {
+  // The service worker precaches this list; a module missing from it breaks the
+  // app offline (or after an update) the first time that module is needed.
+  const { readdir } = await import("node:fs/promises");
+  const walk = async (dir) => (await Promise.all((await readdir(resolveFromRoot(dir), { withFileTypes: true }))
+    .map((entry) => entry.isDirectory() ? walk(`${dir}/${entry.name}`) : [`${dir}/${entry.name}`]))).flat();
+  const worker = await readFile(resolveFromRoot("service-worker.js"), "utf8");
+  const missing = (await walk("app")).filter((file) => file.endsWith(".js") && !worker.includes(`"./${file}"`));
+  assert.deepEqual(missing, []);
+});
+
 test("every on-demand import points at a file that exists", async () => {
   // Modules split out of main.js load with import("..."); a wrong relative path
   // only fails when that feature is first opened, so check them all here.

@@ -13,9 +13,8 @@ import { PERSONA_SUFFIX, parsePersona, personaTemplate } from "./services/person
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
 import { applyEditorFont, applyTheme, clampSourceFontSize, loadSettings, patchStoredSettings, saveSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
-import { createFileSnapshot, deleteVersion, diffLines, getVersionContent, listFileVersions, listSnapshotPaths } from "./services/snapshot-service.js";
 import { clearViewStates, loadViewStates, saveViewStates } from "./services/view-state-service.js";
-import { browseServer, createProjectServer, createServerSnapshot, deleteComment, deleteServer, deleteServerSnapshot, exportProjectServer, getServerSnapshotContent, importProjectServer, listComments, listServerSnapshotPaths, listServerSnapshotVersions, mkdirServer, normalizeServerUrl, reanchorComments, saveComment } from "./services/sync-service.js";
+import { browseServer, createProjectServer, deleteServer, exportProjectServer, importProjectServer, mkdirServer, normalizeServerUrl } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { formatUrlDbEntryBody, parseUrlDb } from "./services/urldb-service.js";
 import { query } from "./ui/dom.js";
@@ -30,6 +29,9 @@ import { createFindReplace } from "./editor/find-replace.js";
 import { createAutocomplete } from "./editor/autocomplete.js";
 import { createLinks } from "./editor/links.js";
 import { createEditorCore } from "./editor/editor-core.js";
+import { createDialogs } from "./ui/dialogs.js";
+import { createLineComments } from "./editor/comments.js";
+import { createSnapshots } from "./features/snapshots.js";
 
 document.querySelectorAll("[data-app-version]").forEach((label) => { label.textContent = `v${APP_VERSION}`; });
 
@@ -1022,13 +1024,41 @@ function getNextUrlDbEntryName(fileContent) {
   }
   return candidate;
 }
-
-function buildDebugLogText() {
-  return debugState.entries.map((entry) => {
-    const detail = entry.detail ? ` :: ${entry.detail}` : "";
-    return `[${entry.timestamp}] ${entry.kind.toUpperCase()} ${entry.message}${detail}`;
-  }).join("\n");
+// ---- Dialogs, toasts and the debug log (./ui/dialogs.js) ----
+// Created on first use. The module reads main's shared values through this
+// context, so it always sees their current values. `var`: a forwarding
+// function can run during startup, before this line is reached.
+var dialogsInstance;
+function dialogs() {
+  return (dialogsInstance ??= createDialogs({
+    get controller() { return controller; },
+    get debugState() { return debugState; },
+    get debugTabs() { return debugTabs; },
+    get editorHistory() { return editorHistory; },
+    get elements() { return elements; },
+    get escapeEditorHtml() { return escapeEditorHtml; },
+    get getEditorLineIndexAtOffset() { return getEditorLineIndexAtOffset; },
+    get getEditorSelection() { return getEditorSelection; },
+    get settings() { return settings; }
+  }));
 }
+async function confirmAction(...args) { return dialogs().confirmAction(...args); }
+async function copyDebugLogToClipboard(...args) { return dialogs().copyDebugLogToClipboard(...args); }
+async function copyTextToClipboard(...args) { return dialogs().copyTextToClipboard(...args); }
+function flashStatusPanel(...args) { return dialogs().flashStatusPanel(...args); }
+async function forceAppUpgrade(...args) { return dialogs().forceAppUpgrade(...args); }
+function formatEditorDebugValue(...args) { return dialogs().formatEditorDebugValue(...args); }
+function logDebug(...args) { return dialogs().logDebug(...args); }
+function notify(...args) { return dialogs().notify(...args); }
+async function promptForName(...args) { return dialogs().promptForName(...args); }
+function renderDebugPanel(...args) { return dialogs().renderDebugPanel(...args); }
+function showAcceptConnectionDialog(...args) { return dialogs().showAcceptConnectionDialog(...args); }
+function showBookmarkEntryDialog(...args) { return dialogs().showBookmarkEntryDialog(...args); }
+function showConfirmDialog(...args) { return dialogs().showConfirmDialog(...args); }
+function showNoticeDialog(...args) { return dialogs().showNoticeDialog(...args); }
+function showToast(...args) { return dialogs().showToast(...args); }
+function traceEditorEvent(...args) { return dialogs().traceEditorEvent(...args); }
+
 
 function resolveProjectAssetUrl(project, sourceFileId, url) {
   const trimmed = String(url ?? "").trim();
@@ -1071,21 +1101,6 @@ function imageSrcFor(project, node) {
   return content;
 }
 
-function logDebug(kind, message, detail = "") {
-  debugState.entries.push({
-    kind,
-    message,
-    detail,
-    timestamp: new Date().toLocaleTimeString()
-  });
-
-  if (debugState.entries.length > debugState.maxEntries) {
-    debugState.entries.splice(0, debugState.entries.length - debugState.maxEntries);
-  }
-
-  renderDebugPanel();
-}
-
 function getEditorLineIndexAtOffset(textOffset) {
   const lineEls = Array.from(elements.editorContent.children);
   let remaining = Math.max(0, textOffset);
@@ -1099,336 +1114,11 @@ function getEditorLineIndexAtOffset(textOffset) {
   return Math.max(0, lineEls.length - 1);
 }
 
-function formatEditorDebugValue(value) {
-  return String(value ?? "")
-    .replaceAll("\\", "\\\\")
-    .replaceAll("\n", "\\n")
-    .replaceAll("\t", "\\t");
-}
-
-function getEditorTraceDetail(extra = {}) {
-  const selection = window.getSelection();
-  const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-  const { start, end } = getEditorSelection();
-  const lineEls = Array.from(elements.editorContent.children);
-  const lineIndex = getEditorLineIndexAtOffset(start);
-  const line = lineEls[lineIndex] ?? null;
-  const nextLine = lineEls[lineIndex + 1] ?? null;
-  const container = range?.startContainer ?? null;
-  const containerName = container?.nodeType === Node.TEXT_NODE
-    ? "#text"
-    : container?.nodeName?.toLowerCase() ?? "null";
-  const containerText = container?.nodeType === Node.TEXT_NODE
-    ? container.textContent ?? ""
-    : "";
-
-  const detail = {
-    file: controller.getActiveFile()?.name ?? "",
-    active: document.activeElement === elements.editorContent ? "editor" : document.activeElement?.nodeName?.toLowerCase() ?? "null",
-    sel: `${start}-${end}`,
-    dom: `${containerName}@${range?.startOffset ?? 0}`,
-    domText: formatEditorDebugValue(containerText),
-    line: lineIndex,
-    lineText: formatEditorDebugValue(line?.textContent ?? ""),
-    lineHtml: formatEditorDebugValue(line?.innerHTML ?? ""),
-    nextLineText: formatEditorDebugValue(nextLine?.textContent ?? ""),
-    autocomplete: elements.editorAutocomplete.hidden ? "hidden" : "visible",
-    history: `${editorHistory.index}/${editorHistory.stack.length}`,
-    ...extra
-  };
-
-  return Object.entries(detail)
-    .map(([key, value]) => `${key}=${value}`)
-    .join(" ; ");
-}
-
-function traceEditorEvent(message, extra = {}) {
-  // The input handler calls this for every space and Enter, twice. Building the
-  // detail walks the whole document, so only do it when someone can see it.
-  if (!settings.debugPanel) return;
-  logDebug("editor", message, getEditorTraceDetail(extra));
-}
-
 function getSelectedTarget() {
   if (sourceUrlDbEntry) {
     return { nodeId: sourceUrlDbEntry.fileId, entryId: sourceUrlDbEntry.entryId };
   }
   return { nodeId: selectionNodeId, entryId: null };
-}
-
-/** Flash the server status panel border green (success) or red (error). */
-function flashStatusPanel(type, panel = elements.serverStatusPanel) {
-  if (!panel) return;
-  panel.classList.remove("settings-status-panel--flash-success", "settings-status-panel--flash-error");
-  void panel.offsetWidth; // force reflow so restarting mid-animation works
-  panel.classList.add(type === "success"
-    ? "settings-status-panel--flash-success"
-    : "settings-status-panel--flash-error");
-}
-
-/** Shown before connecting — resolves true if the user confirms. */
-function showAcceptConnectionDialog() {
-  return new Promise((resolve) => {
-    if (elements.acceptConnectionMessage) {
-      elements.acceptConnectionMessage.textContent =
-        "If you join as a peer, the host\u2019s workspace will replace your current content. Export your work first if you want to keep it.";
-    }
-    const handleClose = () => {
-      elements.acceptConnectionDialog.removeEventListener("close", handleClose);
-      resolve(elements.acceptConnectionDialog.returnValue === "accept");
-    };
-    elements.acceptConnectionDialog.addEventListener("close", handleClose, { once: true });
-    elements.acceptConnectionDialog.showModal();
-  });
-}
-
-function showNoticeDialog(message, title = "Message") {
-  elements.noticeDialogTitle.textContent = title;
-  elements.noticeDialogMessage.textContent = String(message);
-  if (!elements.noticeDialog.open) {
-    elements.noticeDialog.showModal();
-  }
-}
-
-function showConfirmDialog({ title = "Confirm Action", message, acceptLabel = "Confirm" }) {
-  return new Promise((resolve) => {
-    elements.confirmDialogTitle.textContent = title;
-    elements.confirmDialogMessage.textContent = message;
-    elements.confirmDialogAcceptButton.textContent = acceptLabel;
-
-    const handleClose = () => {
-      elements.confirmDialog.removeEventListener("close", handleClose);
-      resolve(elements.confirmDialog.returnValue === "accept");
-    };
-
-    elements.confirmDialog.addEventListener("close", handleClose, { once: true });
-    elements.confirmDialog.showModal();
-  });
-}
-
-function showInputDialog({ title = "Rename Item", message = "Enter a value.", label = "Name", value = "", submitLabel = "Save", extension = "" }) {
-  return new Promise((resolve) => {
-    elements.inputDialogTitle.textContent = title;
-    elements.inputDialogMessage.textContent = message;
-    elements.inputDialogLabel.textContent = label;
-    elements.inputDialogSubmitButton.textContent = submitLabel;
-
-    // "Auto file extension": only offered when the caller knows the extension
-    // (file renames). On by default — the input then shows just the base name so
-    // the extension can't be edited by accident; it's re-appended on save.
-    const ext = String(extension || "");
-    const hasExt = ext.length > 0;
-    const endsWithExt = (v) => v.toLowerCase().endsWith(ext.toLowerCase());
-    const stripExt = (v) => (hasExt && endsWithExt(v) ? v.slice(0, -ext.length) : v);
-    if (elements.inputDialogAutoExtRow) elements.inputDialogAutoExtRow.hidden = !hasExt;
-    if (elements.inputDialogAutoExt) elements.inputDialogAutoExt.checked = hasExt;
-    elements.inputDialogInput.value = hasExt ? stripExt(value) : value;
-
-    const handleToggle = () => {
-      if (!hasExt) return;
-      const cur = elements.inputDialogInput.value;
-      elements.inputDialogInput.value = elements.inputDialogAutoExt.checked
-        ? stripExt(cur)
-        : (endsWithExt(cur) ? cur : `${cur}${ext}`);
-    };
-
-    const handleCancel = () => {
-      elements.inputDialog.close("cancel");
-    };
-
-    const handleClose = () => {
-      elements.inputDialog.removeEventListener("close", handleClose);
-      elements.inputDialogCancelButton.removeEventListener("click", handleCancel);
-      elements.inputDialogAutoExt?.removeEventListener("change", handleToggle);
-      let result = elements.inputDialog.returnValue === "accept"
-        ? elements.inputDialogInput.value.trim() || null
-        : null;
-      // Re-attach the extension when auto is on and the user didn't type it.
-      if (result && hasExt && elements.inputDialogAutoExt?.checked && !endsWithExt(result)) {
-        result = `${result}${ext}`;
-      }
-      resolve(result);
-    };
-
-    elements.inputDialog.addEventListener("close", handleClose, { once: true });
-    elements.inputDialogCancelButton.addEventListener("click", handleCancel);
-    elements.inputDialogAutoExt?.addEventListener("change", handleToggle);
-    elements.inputDialog.showModal();
-    elements.inputDialogInput.focus();
-    elements.inputDialogInput.select();
-  });
-}
-
-function showBookmarkEntryDialog({ title = "New Bookmark Entry", message = "Add a named image bookmark to this URL album.", name = "", url = "", description = "", submitLabel = "Save" }) {
-  return new Promise((resolve) => {
-    elements.bookmarkEntryDialogTitle.textContent = title;
-    elements.bookmarkEntryDialogMessage.textContent = message;
-    elements.bookmarkEntryNameInput.value = name;
-    elements.bookmarkEntryUrlInput.value = url;
-    elements.bookmarkEntryDescriptionInput.value = description;
-    elements.bookmarkEntrySubmitButton.textContent = submitLabel;
-
-    const handleClose = () => {
-      elements.bookmarkEntryDialog.removeEventListener("close", handleClose);
-      if (elements.bookmarkEntryDialog.returnValue !== "accept") {
-        resolve(null);
-        return;
-      }
-      resolve({
-        name: elements.bookmarkEntryNameInput.value.trim(),
-        url: elements.bookmarkEntryUrlInput.value.trim(),
-        description: elements.bookmarkEntryDescriptionInput.value.trim()
-      });
-    };
-
-    elements.bookmarkEntryDialog.addEventListener("close", handleClose, { once: true });
-    elements.bookmarkEntryDialog.showModal();
-    elements.bookmarkEntryNameInput.focus();
-    elements.bookmarkEntryNameInput.select();
-  });
-}
-
-function getVisibleDebugEntries() {
-  if (debugState.activeTab === "actions") {
-    return debugState.entries.filter((entry) => entry.kind === "action");
-  }
-
-  if (debugState.activeTab === "responses") {
-    return debugState.entries.filter((entry) => entry.kind !== "action");
-  }
-
-  return debugState.entries;
-}
-
-function renderDebugPanel() {
-  debugTabs.forEach((tab) => {
-    const active = tab.id === debugState.activeTab;
-    tab.element.classList.toggle("is-active", active);
-    tab.element.setAttribute("aria-selected", active ? "true" : "false");
-  });
-
-  elements.debugLogList.replaceChildren();
-
-  if (!settings.debugPanel) {
-    return;
-  }
-
-  const visibleEntries = getVisibleDebugEntries();
-
-  if (visibleEntries.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "debug-log-entry is-empty";
-    empty.textContent = "Log capture is enabled. Matching interactions will appear here.";
-    elements.debugLogList.append(empty);
-    return;
-  }
-
-  visibleEntries.forEach((entry) => {
-    const row = document.createElement("div");
-    row.className = `debug-log-entry is-${entry.kind}`;
-    row.innerHTML = `<span class="debug-log-time">${escapeEditorHtml(entry.timestamp)}</span><span class="debug-log-kind">${escapeEditorHtml(entry.kind)}</span><span class="debug-log-message">${escapeEditorHtml(entry.message)}</span>${entry.detail ? `<span class="debug-log-detail">${escapeEditorHtml(entry.detail)}</span>` : ""}`;
-    elements.debugLogList.append(row);
-  });
-
-  elements.debugLogList.scrollTop = elements.debugLogList.scrollHeight;
-}
-
-async function copyDebugLogToClipboard() {
-  const text = buildDebugLogText();
-  if (!text) {
-    notify("There are no debug entries to copy.");
-    return;
-  }
-
-  await copyTextToClipboard(text);
-  notify("Debug log copied to clipboard.");
-}
-
-async function copyTextToClipboard(text) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const fallback = document.createElement("textarea");
-  fallback.value = text;
-  fallback.setAttribute("readonly", "readonly");
-  fallback.style.position = "fixed";
-  fallback.style.opacity = "0";
-  document.body.append(fallback);
-  fallback.select();
-  document.execCommand("copy");
-  fallback.remove();
-}
-
-function notify(message) {
-  logDebug("response", String(message));
-  showNoticeDialog(message);
-}
-
-// The server refused this client as out of date (a stale cached service worker,
-// e.g. a long-lived tab). Sync has already been halted upstream; bring the app up
-// to the current version by unregistering the SW — so the reload fetches fresh
-// files instead of the old cache — then reloading. Guarded to run at most once per
-// tab so a misconfigured minimum can't trap the tab in a reload loop.
-let _appUpgradeInProgress = false;
-async function forceAppUpgrade(detail) {
-  if (_appUpgradeInProgress) return;
-  _appUpgradeInProgress = true;
-  const message = detail || "This app is out of date.";
-  logDebug("response", "Upgrade required", message);
-  if (sessionStorage.getItem("mdnotes.upgradeReloaded")) {
-    // Already auto-refreshed once this tab and still stale — stop and ask the user,
-    // rather than looping reloads.
-    notify(`${message} Please fully close this tab and reopen it to finish updating.`);
-    return;
-  }
-  try { sessionStorage.setItem("mdnotes.upgradeReloaded", "1"); } catch { /* ignore */ }
-  try { showToast("Updating to the latest version…", { duration: 1500 }); } catch { /* ignore */ }
-  try {
-    const regs = (await navigator.serviceWorker?.getRegistrations?.()) ?? [];
-    await Promise.all(regs.map((r) => r.unregister()));
-  } catch { /* ignore */ }
-  setTimeout(() => globalThis.location.reload(), 1200);
-}
-
-// Lightweight, auto-dismissing feedback for successful actions (open/create/
-// rename/…). Unlike notify(), it never blocks — important on mobile where a modal
-// for every tap would be heavy. Errors should still use notify().
-let toastHost = null;
-function showToast(message, { duration = 2200 } = {}) {
-  const text = String(message ?? "").trim();
-  if (!text) return;
-  toastHost = toastHost || document.getElementById("toast-host");
-  if (!toastHost) return;
-  const toast = document.createElement("div");
-  toast.className = "app-toast";
-  toast.setAttribute("role", "status");
-  toast.textContent = text;
-  toastHost.append(toast);
-  // Trigger the enter transition on the next frame.
-  requestAnimationFrame(() => toast.classList.add("is-visible"));
-  const remove = () => {
-    toast.classList.remove("is-visible");
-    toast.addEventListener("transitionend", () => toast.remove(), { once: true });
-    // Fallback in case the transitionend never fires.
-    setTimeout(() => toast.remove(), 400);
-  };
-  setTimeout(remove, duration);
-}
-
-async function confirmAction(message) {
-  logDebug("action", "Confirm requested", String(message));
-  const result = await showConfirmDialog({ message: String(message) });
-  logDebug("response", `Confirm ${result ? "accepted" : "cancelled"}`, String(message));
-  return result;
-}
-
-async function promptForName(message, defaultValue = "", options = {}) {
-  logDebug("action", "Prompt requested", `${message} :: ${defaultValue}`);
-  const result = await showInputDialog({ title: message, message, value: defaultValue, submitLabel: "Save", ...options });
-  logDebug("response", result ? `Prompt value: ${result}` : "Prompt cancelled", message);
-  return result;
 }
 
 // The extension to manage for a filename ("" for folders / no extension).
@@ -1552,195 +1242,38 @@ function snapshotProjectKey() {
 // the line's own content, so after edits shift it we re-find it rather than
 // leaving the note stranded on a line number that now means something else.
 const lineComments = { byFile: new Map(), loadedFor: null };
-
-function commentsAvailable() {
-  // settings alone aren't enough: during boot (before the workspace has actually
-  // opened) they still name the cloud workspace while a LOCAL project is on
-  // screen — commenting then would file that project's lines under the cloud
-  // workspace. Require that we are genuinely in the synced session.
-  return Boolean(cloudWorkspaceTarget()) && workspaceMode === "synced" && Boolean(collaboration.isConnected?.());
+// ---- Line comments (./editor/comments.js) ----
+// Created on first use. The module reads main's shared values through this
+// context, so it always sees their current values. `var`: a forwarding
+// function can run during startup, before this line is reached.
+var lineCommentsUiInstance;
+function lineCommentsUi() {
+  return (lineCommentsUiInstance ??= createLineComments({
+    get cloudWorkspaceTarget() { return cloudWorkspaceTarget; },
+    get collaboration() { return collaboration; },
+    get controller() { return controller; },
+    get elements() { return elements; },
+    get getEditorSelection() { return getEditorSelection; },
+    get getEditorText() { return getEditorText; },
+    get lineComments() { return lineComments; },
+    get logDebug() { return logDebug; },
+    get notify() { return notify; },
+    get renderEditorContent() { return renderEditorContent; },
+    get setEditorSelection() { return setEditorSelection; },
+    get showToast() { return showToast; },
+    get workspaceMode() { return workspaceMode; }
+  }));
 }
+function closeCommentPopover(...args) { return lineCommentsUi().closeCommentPopover(...args); }
+function commentsAvailable(...args) { return lineCommentsUi().commentsAvailable(...args); }
+function commentsForActiveFile(...args) { return lineCommentsUi().commentsForActiveFile(...args); }
+async function loadLineComments(...args) { return lineCommentsUi().loadLineComments(...args); }
+function openCommentPopover(...args) { return lineCommentsUi().openCommentPopover(...args); }
+async function removeLineComment(...args) { return lineCommentsUi().removeLineComment(...args); }
+function renderEditorFromModel(...args) { return lineCommentsUi().renderEditorFromModel(...args); }
+function scheduleCommentReanchor(...args) { return lineCommentsUi().scheduleCommentReanchor(...args); }
+async function submitLineComment(...args) { return lineCommentsUi().submitLineComment(...args); }
 
-function commentsForPath(path) {
-  return lineComments.byFile.get(path) ?? [];
-}
-
-function commentsForActiveFile() {
-  const project = controller.getProject();
-  const activeFile = controller.getActiveFile();
-  if (!activeFile) return [];
-  return commentsForPath(getPath(project, activeFile.id));
-}
-
-async function loadLineComments({ force = false } = {}) {
-  const target = commentsAvailable() ? cloudWorkspaceTarget() : null;
-  if (!target) {
-    lineComments.byFile.clear();
-    lineComments.loadedFor = null;
-    return;
-  }
-  const workspaceId = `${target.team}/${target.path}`;
-  if (!force && lineComments.loadedFor === workspaceId) return;
-  try {
-    const data = await listComments(target.serverUrl, target.token, target.team, target.path);
-    lineComments.byFile = new Map(Object.entries(data?.files ?? {}));
-    lineComments.loadedFor = workspaceId;
-    renderEditorFromModel();
-  } catch (error) {
-    logDebug("response", "Could not load line comments", error.message);
-  }
-}
-
-// Re-render the editor (and therefore the gutter markers) from the current model
-// without disturbing the caret.
-function renderEditorFromModel() {
-  const activeFile = controller.getActiveFile();
-  if (!activeFile || !isTextFileName(activeFile.name)) return;
-  if (elements.editorContent !== document.activeElement) {
-    renderEditorContent(getEditorText());
-    return;
-  }
-  const { start, end } = getEditorSelection();
-  renderEditorContent(getEditorText());
-  setEditorSelection(start, end);
-}
-
-// Follow the text: if a commented line moved, find it again by its own content.
-// Searching OUTWARD from the old position lands on the nearest match, which is
-// what you want when lines were inserted or removed above it.
-let reanchorTimer = null;
-function scheduleCommentReanchor() {
-  if (!commentsAvailable() || reanchorTimer) return;
-  reanchorTimer = setTimeout(() => {
-    reanchorTimer = null;
-    void reanchorActiveFileComments();
-  }, 400);
-}
-
-async function reanchorActiveFileComments() {
-  const target = commentsAvailable() ? cloudWorkspaceTarget() : null;
-  const project = controller.getProject();
-  const activeFile = controller.getActiveFile();
-  if (!target || !activeFile || !isTextFileName(activeFile.name)) return;
-  const path = getPath(project, activeFile.id);
-  const list = commentsForPath(path);
-  if (!list.length) return;
-
-  const lines = String(activeFile.content ?? "").split("\n");
-  const moves = [];
-  for (const comment of list) {
-    const anchor = String(comment.anchorText ?? "");
-    // A blank anchor can't be matched (every empty line looks alike), so leave it.
-    if (!anchor.trim()) continue;
-    if (lines[comment.line] === anchor) continue; // still where we left it
-    let found = -1;
-    for (let distance = 1; distance <= lines.length; distance += 1) {
-      const above = comment.line - distance;
-      const below = comment.line + distance;
-      if (above >= 0 && lines[above] === anchor) { found = above; break; }
-      if (below < lines.length && lines[below] === anchor) { found = below; break; }
-      if (above < 0 && below >= lines.length) break;
-    }
-    if (found >= 0 && found !== comment.line) {
-      comment.line = found;
-      moves.push({ id: comment.id, line: found, anchorText: anchor });
-    }
-  }
-  if (!moves.length) return;
-  renderEditorFromModel();
-  try {
-    await reanchorComments(target.serverUrl, target.token, target.team, target.path, path, moves);
-  } catch (error) {
-    logDebug("response", "Could not persist comment anchors", error.message);
-  }
-}
-
-// ---- Comment editor popover --------------------------------------------------
-let commentPopoverLine = null;
-
-function closeCommentPopover() {
-  commentPopoverLine = null;
-  if (elements.lineCommentPopover) elements.lineCommentPopover.hidden = true;
-}
-
-function openCommentPopover(lineIndex) {
-  const popover = elements.lineCommentPopover;
-  if (!popover) return;
-  if (!commentsAvailable()) {
-    showToast("Line comments need a cloud workspace");
-    return;
-  }
-  const project = controller.getProject();
-  const activeFile = controller.getActiveFile();
-  if (!activeFile || !isTextFileName(activeFile.name)) return;
-  const path = getPath(project, activeFile.id);
-  const existing = commentsForPath(path).find((c) => c.line === lineIndex) ?? null;
-
-  commentPopoverLine = lineIndex;
-  elements.lineCommentInput.value = existing?.text ?? "";
-  elements.lineCommentMeta.textContent = existing
-    ? `Line ${lineIndex + 1} · ${existing.author ?? "unknown"}`
-    : `Line ${lineIndex + 1}`;
-  elements.lineCommentDelete.hidden = !existing;
-  popover.dataset.commentId = existing?.id ?? "";
-  popover.hidden = false;
-
-  // Sit beside the line being commented, clamped to the viewport.
-  const row = elements.editorGutter?.querySelectorAll(".editor-gutter-line")[lineIndex];
-  const rect = (row ?? elements.editorGutter).getBoundingClientRect();
-  popover.style.top = `${Math.min(rect.top, window.innerHeight - popover.offsetHeight - 12)}px`;
-  popover.style.left = `${rect.right + 8}px`;
-  elements.lineCommentInput.focus();
-}
-
-async function submitLineComment() {
-  const target = commentsAvailable() ? cloudWorkspaceTarget() : null;
-  const popover = elements.lineCommentPopover;
-  if (!target || !popover || commentPopoverLine == null) return;
-  const project = controller.getProject();
-  const activeFile = controller.getActiveFile();
-  if (!activeFile) return;
-  const path = getPath(project, activeFile.id);
-  const text = elements.lineCommentInput.value.trim();
-  const id = popover.dataset.commentId || undefined;
-  if (!text) {
-    if (id) await removeLineComment(id);
-    else closeCommentPopover();
-    return;
-  }
-  const lines = String(activeFile.content ?? "").split("\n");
-  try {
-    const result = await saveComment(target.serverUrl, target.token, target.team, target.path, {
-      file: path, id, line: commentPopoverLine, anchorText: lines[commentPopoverLine] ?? "", text
-    });
-    const list = commentsForPath(path).filter((c) => c.id !== result.comment.id);
-    list.push(result.comment);
-    list.sort((a, b) => a.line - b.line);
-    lineComments.byFile.set(path, list);
-    closeCommentPopover();
-    renderEditorFromModel();
-    showToast(id ? "Comment updated" : "Comment added");
-  } catch (error) {
-    notify(error.message);
-  }
-}
-
-async function removeLineComment(id) {
-  const target = commentsAvailable() ? cloudWorkspaceTarget() : null;
-  const project = controller.getProject();
-  const activeFile = controller.getActiveFile();
-  if (!target || !activeFile) return;
-  const path = getPath(project, activeFile.id);
-  try {
-    await deleteComment(target.serverUrl, target.token, target.team, target.path, id);
-    lineComments.byFile.set(path, commentsForPath(path).filter((c) => c.id !== id));
-    closeCommentPopover();
-    renderEditorFromModel();
-    showToast("Comment removed");
-  } catch (error) {
-    notify(error.message);
-  }
-}
 
 // ---- Where snapshots live ----------------------------------------------------
 // A cloud workspace keeps snapshots ON THE SERVER, so they follow you to any
@@ -1754,290 +1287,55 @@ function cloudWorkspaceTarget() {
   if (settings.syncedProjectId !== `${ws.team}/${ws.path}`) return null; // on-screen project IS that workspace
   return { serverUrl: settings.serverUrl, token, team: ws.team, path: ws.path };
 }
-
-// ---- Version label (S.E.N) --------------------------------------------------
-// S — snapshots you have deliberately cut of this file
-// E — writing sittings since that snapshot
-// N — edits in the current sitting
-//
-// None of these is the `revision`. Revision is a Lamport clock: one integer per
-// workspace, monotonic forever, compared in ~170 places to order writes and
-// refuse stale ones. It must never reset, and it is plumbing — users should not
-// be reading a five-digit counter they cannot influence. These three they can:
-// snapshotting bumps S, walking away bumps E. Nothing compares them, which is
-// exactly why they are free to reset.
-
-function setSnapshotBaselines(baselines) {
-  snapshotBaselines = new Map(Object.entries(baselines ?? {}));
-  scheduleVersionLabel();
+// ---- Snapshots, version label and the diff tab (./features/snapshots.js) ----
+// Created on first use. The module reads main's shared values through this
+// context, so it always sees their current values. `var`: a forwarding
+// function can run during startup, before this line is reached.
+var snapshotsInstance;
+function snapshots() {
+  return (snapshotsInstance ??= createSnapshots({
+    get DIFF_TAB_ID() { return DIFF_TAB_ID; },
+    get cloudWorkspaceTarget() { return cloudWorkspaceTarget; },
+    get collaboration() { return collaboration; },
+    get controller() { return controller; },
+    get diffState() { return diffState; },
+    get elements() { return elements; },
+    get escapeHtmlAttribute() { return escapeHtmlAttribute; },
+    get logDebug() { return logDebug; },
+    get previewFileId() { return previewFileId; },
+    set previewFileId(value) { previewFileId = value; },
+    get previewOpenTabIds() { return previewOpenTabIds; },
+    get render() { return render; },
+    get settings() { return settings; },
+    get showToast() { return showToast; },
+    get snapshotBaselines() { return snapshotBaselines; },
+    set snapshotBaselines(value) { snapshotBaselines = value; },
+    get snapshotBaselinesInFlight() { return snapshotBaselinesInFlight; },
+    set snapshotBaselinesInFlight(value) { snapshotBaselinesInFlight = value; },
+    get snapshotProjectKey() { return snapshotProjectKey; },
+    get togglePreview() { return togglePreview; },
+    get updateStatus() { return updateStatus; }
+  }));
 }
+async function applyHistoryOperations(...args) { return snapshots().applyHistoryOperations(...args); }
+function closeDiff(...args) { return snapshots().closeDiff(...args); }
+async function createSnapshotNow(...args) { return snapshots().createSnapshotNow(...args); }
+function ensureSnapshotsMigrated(...args) { return snapshots().ensureSnapshotsMigrated(...args); }
+function formatBytes(...args) { return snapshots().formatBytes(...args); }
+function formatSnapshotTime(...args) { return snapshots().formatSnapshotTime(...args); }
+function gotoChange(...args) { return snapshots().gotoChange(...args); }
+function projectPaths(...args) { return snapshots().projectPaths(...args); }
+function refreshSnapshotBaselines(...args) { return snapshots().refreshSnapshotBaselines(...args); }
+function renderDiff(...args) { return snapshots().renderDiff(...args); }
+function renderVersionLabel(...args) { return snapshots().renderVersionLabel(...args); }
+function scheduleDiffRefresh(...args) { return snapshots().scheduleDiffRefresh(...args); }
+function scheduleVersionLabel(...args) { return snapshots().scheduleVersionLabel(...args); }
+function setSnapshotBaselines(...args) { return snapshots().setSnapshotBaselines(...args); }
+async function showFileDiff(...args) { return snapshots().showFileDiff(...args); }
+async function snapshotDirtyFiles(...args) { return snapshots().snapshotDirtyFiles(...args); }
+function snapshotStore(...args) { return snapshots().snapshotStore(...args); }
+function writeAtPathOperations(...args) { return snapshots().writeAtPathOperations(...args); }
 
-function refreshSnapshotBaselines() {
-  if (snapshotBaselinesInFlight) return snapshotBaselinesInFlight;
-  snapshotBaselinesInFlight = (async () => {
-    try {
-      const listing = await snapshotStore().paths();
-      setSnapshotBaselines(listing?.baselines);
-    } catch {
-      /* history is unavailable — the label just falls back to "no snapshots". */
-    } finally {
-      snapshotBaselinesInFlight = null;
-    }
-  })();
-  return snapshotBaselinesInFlight;
-}
-
-// Snapshots taken before this feature carry no baseline, so E/N count from 0
-// and read high once. That self-heals the next time the file is snapshotted.
-function fileVersionLabel(file, path) {
-  if (!file || file.kind !== "file") return null;
-  const base = (path && snapshotBaselines.get(path)) || null;
-  const sessions = Number(file.editSessions) || 0;
-  const edits = Number(file.sessionEdits) || 0;
-  const s = base ? Number(base.count) || 0 : 0;
-  // clamp: a workspace restored from a backup can sit behind its own snapshots.
-  const e = Math.max(0, sessions - (base ? Number(base.editSessions) || 0 : 0));
-  // Within the sitting the snapshot was taken in, subtract so a fresh snapshot
-  // reads x.0.0; once a new sitting starts, N is simply that sitting's count.
-  const n = e > 0 ? edits : Math.max(0, edits - (base ? Number(base.sessionEdits) || 0 : 0));
-  return `${s}.${e}.${n}`;
-}
-
-let versionLabelHandle = null;
-function scheduleVersionLabel() {
-  if (versionLabelHandle) return;
-  versionLabelHandle = requestAnimationFrame(() => {
-    versionLabelHandle = null;
-    renderVersionLabel();
-  });
-}
-
-function renderVersionLabel() {
-  const item = elements.statusVersionItem;
-  const label = elements.statusVersionText;
-  if (!item || !label) return;
-  const project = controller.getProject();
-  const file = controller.getActiveFile();
-  if (!file || file.kind !== "file" || !isTextFileName(file.name)) {
-    item.hidden = true;
-    return;
-  }
-  const path = getPath(project, file.id);
-  const text = fileVersionLabel(file, path);
-  if (!text) {
-    item.hidden = true;
-    return;
-  }
-  const [s, e, n] = text.split(".");
-  const total = Number(file.sourceVersion) || 0;
-  item.hidden = false;
-  label.textContent = `v${text}`;
-  item.title = `${file.name}\n`
-    + `${s} snapshot${s === "1" ? "" : "s"} · ${e} sitting${e === "1" ? "" : "s"} since the last one · ${n} edit${n === "1" ? "" : "s"} this sitting\n`
-    + `${total} edit${total === 1 ? "" : "s"} in total`;
-}
-
-function snapshotStore() {
-  const target = cloudWorkspaceTarget();
-  if (!target) {
-    const key = snapshotProjectKey();
-    return {
-      remote: false,
-      // No server here, so this browser is the host: it owns the counters and
-      // stamps them onto the snapshot itself.
-      create: (file, content, label, counters) => createFileSnapshot(key, file, content, label, counters),
-      paths: () => listSnapshotPaths(key),
-      versions: (file) => listFileVersions(key, file),
-      content: (id) => getVersionContent(id),
-      remove: (id) => deleteVersion(id)
-    };
-  }
-  const { serverUrl, token, team, path } = target;
-  return {
-    remote: true,
-    // The server reads the file's counters itself — it is the host, so its
-    // numbers are the ones every peer must agree on.
-    create: (file, content, label) => createServerSnapshot(serverUrl, token, team, path, file, content, label),
-    paths: async () => {
-      const result = await listServerSnapshotPaths(serverUrl, token, team, path);
-      return { paths: result.paths ?? [], baselines: result.baselines ?? {} };
-    },
-    versions: async (file) => (await listServerSnapshotVersions(serverUrl, token, team, path, file)).versions ?? [],
-    content: async (id) => {
-      try {
-        return (await getServerSnapshotContent(serverUrl, token, team, path, id)).content;
-      } catch {
-        return null; // gone or unreadable — callers already handle null
-      }
-    },
-    remove: (id) => deleteServerSnapshot(serverUrl, token, team, path, id)
-  };
-}
-
-// Snapshots made before they moved to the server still sit in this browser's
-// IndexedDB — under this workspace's id, or under "server-project", the project
-// id most server workspaces share (which is why they seemed to vanish). Upload
-// them once so no history is lost. From that shared key only files that exist in
-// THIS workspace are taken, so another workspace's history can't leak in. Safe
-// to repeat: the server skips anything already recorded (same time + content).
-let snapshotMigrationPromise = null;
-
-function ensureSnapshotsMigrated() {
-  const target = cloudWorkspaceTarget();
-  if (!target) return Promise.resolve(0);
-  if (!snapshotMigrationPromise) {
-    snapshotMigrationPromise = migrateLocalSnapshotsToServer(target)
-      .catch((error) => {
-        logDebug("response", "Snapshot migration failed", error?.message ?? String(error));
-        return 0;
-      })
-      .finally(() => { snapshotMigrationPromise = null; });
-  }
-  return snapshotMigrationPromise;
-}
-
-async function migrateLocalSnapshotsToServer(target) {
-  const workspaceId = `${target.team}/${target.path}`;
-  const flag = `mdnotes.snapshots.migrated.${workspaceId}`;
-  try {
-    if (localStorage.getItem(flag)) return 0;
-  } catch { /* storage blocked — just try */ }
-
-  const project = controller.getProject();
-  const workspaceFiles = new Set(Object.values(project?.nodes ?? {})
-    .filter((node) => node?.kind === "file")
-    .map((node) => getPath(project, node.id)));
-  let uploaded = 0;
-  for (const key of new Set([workspaceId, project?.id].filter(Boolean))) {
-    let files = [];
-    try { files = await listSnapshotPaths(key); } catch { continue; }
-    for (const file of files) {
-      if (key !== workspaceId && !workspaceFiles.has(file)) continue; // shared key: this workspace's files only
-      let versions = [];
-      try { versions = await listFileVersions(key, file); } catch { continue; }
-      for (const version of [...versions].reverse()) { // oldest first
-        const content = await getVersionContent(version.id).catch(() => null);
-        if (content == null) continue;
-        // A network failure throws out of here: the flag stays unset, so the next
-        // open retries and the server de-duplicates whatever already arrived.
-        const result = await createServerSnapshot(
-          target.serverUrl, target.token, target.team, target.path,
-          file, content, version.label || "", version.createdAt
-        );
-        if (result?.created) uploaded += 1;
-      }
-    }
-  }
-  try { localStorage.setItem(flag, String(Date.now())); } catch { /* ignore */ }
-  if (uploaded) logDebug("action", "Migrated local snapshots to server", `${uploaded} version(s) -> ${workspaceId}`);
-  return uploaded;
-}
-
-
-// A snapshot is always of the CURRENT file only — the intuitive "save this file's
-// version" action. (The project-wide createFileSnapshots stays in the service for
-// possible future use.)
-async function createSnapshotNow(label = "") {
-  const project = controller.getProject();
-  const activeFile = controller.getActiveFile();
-  if (!activeFile || !isTextFileName(activeFile.name)) {
-    showToast("Open a text file to snapshot it");
-    return;
-  }
-  const path = getPath(project, activeFile.id);
-  try {
-    const result = await snapshotStore().create(path, activeFile.content, label, activeFile);
-    void refreshSnapshotBaselines();
-    showToast(result.created ? `Snapshot saved: ${path.split("/").pop()}` : "Snapshot — no changes since the last one");
-    logDebug("action", "Snapshot created", `${path} ${result.created ? "saved" : "unchanged"}`);
-  } catch (error) {
-    logDebug("response", "Snapshot failed", error.message);
-    showToast("Couldn't save snapshot (storage unavailable)");
-  }
-}
-
-// Snapshot every file with unsaved local changes, so a pull that adopts newer
-// server content can never make those edits unrecoverable. Best-effort: snapshot
-// storage problems must not block opening a workspace.
-async function snapshotDirtyFiles(label) {
-  const project = controller.getProject();
-  const store = snapshotStore();
-  let saved = 0;
-  for (const node of Object.values(project?.nodes ?? {})) {
-    if (node?.kind !== "file" || !node.dirty || !isTextFileName(node.name)) continue;
-    try {
-      const result = await store.create(getPath(project, node.id), node.content ?? "", label);
-      if (result?.created) saved += 1;
-    } catch { /* storage unavailable — never block the open */ }
-  }
-  if (saved) logDebug("action", "Snapshotted unsaved files", `${saved} file(s) — ${label}`);
-  return saved;
-}
-
-function formatSnapshotTime(ts) {
-  const d = new Date(ts);
-  return Number.isNaN(d.getTime())
-    ? ""
-    : `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
-}
-
-function formatBytes(n) {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
-
-// ---- Workspace History (whole-workspace backups) ---------------------------
-// The dialog lives in app/features/workspace-history.js and loads on first use.
-// These restore helpers stay here: per-file Snapshots restores use them too.
-function projectPaths(project) {
-  const folders = new Set();
-  const files = new Map();
-  for (const node of Object.values(project.nodes ?? {})) {
-    if (!node || node.id === project.rootId) continue;
-    const path = getPath(project, node.id);
-    if (node.kind === "folder") folders.add(path);
-    else files.set(path, node);
-  }
-  return { folders, files };
-}
-
-// Apply restore operations through the server, one at a time, each based on
-// the revision the previous one produced. Images upload their bytes first, the
-// same way a normal image write does in a directory-backed workspace.
-async function applyHistoryOperations(ops) {
-  let revision = collaboration.getRevision?.() ?? 0;
-  for (const op of ops) {
-    let operation = op;
-    if (typeof operation.content === "string" && operation.content.startsWith("data:")
-        && collaboration.isDirectoryBacked?.()) {
-      const path = operation.type === "create-file"
-        ? [operation.parentPath, operation.name].filter(Boolean).join("/") : operation.path;
-      await collaboration.uploadAsset(path, operation.content);
-      operation = { ...operation, content: "" };
-    }
-    const result = await collaboration.publishOperation(
-      { ...operation, baseRevision: revision, expectedRevision: revision }, { optimistic: false });
-    if (!result) throw new Error("The workspace connection changed");
-    revision = result.revision;
-  }
-}
-
-// Operations that write `content` at `path`, creating missing folders first.
-function writeAtPathOperations(path, content, existingFolders) {
-  const segments = path.split("/");
-  const name = segments.pop();
-  const ops = [];
-  for (let i = 1; i <= segments.length; i += 1) {
-    const folder = segments.slice(0, i).join("/");
-    if (!existingFolders.has(folder)) {
-      ops.push({ type: "create-folder", parentPath: segments.slice(0, i - 1).join("/"), name: segments[i - 1] });
-      existingFolders.add(folder);
-    }
-  }
-  ops.push({ type: "create-file", parentPath: segments.join("/"), name, content });
-  return ops;
-}
 
 let workspaceHistory = null;
 let workspaceHistoryLoading = null;
@@ -2086,160 +1384,6 @@ async function openSnapshotsDialog() {
   } catch (error) {
     notify(`Snapshots could not load: ${error.message}`);
   }
-}
-
-// Compare the ACTIVE file's current content with one of its stored versions,
-// rendering the diff in the preview pane.
-async function showFileDiff(path, versionId, createdAt) {
-  const project = controller.getProject();
-  const activeFile = controller.getActiveFile();
-  const activePath = activeFile ? getPath(project, activeFile.id) : null;
-  if (activePath !== path) { showToast("Open that file to compare it"); return; }
-  const oldText = await snapshotStore().content(versionId);
-  if (oldText == null) { showToast("That version is no longer available"); return; }
-  diffState.active = true;
-  diffState.fileId = activeFile.id; // diff tracks the file by id (survives the editor switching files)
-  diffState.path = path;
-  diffState.versionId = versionId;
-  diffState.oldText = oldText;
-  diffState.createdAt = createdAt;
-  diffState.currentChange = -1;
-  if (settings.preview === "hidden") togglePreview();
-  previewFileId = DIFF_TAB_ID; // make the diff the active preview tab
-  updateStatus(project); // renders the tab strip + shows the diff pane
-  renderDiff(); // immediate full render so blocks are fresh (updateStatus may have debounced)
-  if (diffState.blocks.length) gotoChange(1); // jump to the first change
-}
-
-// Tear down the diff tab's state + hide the overlay WITHOUT re-rendering (safe to
-// call from inside updateStatus, e.g. when the diffed file is gone).
-function resetDiffState() {
-  diffState.active = false;
-  diffState.fileId = null;
-  diffState.path = null;
-  diffState.versionId = null;
-  diffState.oldText = "";
-  diffState.blocks = [];
-  diffState.currentChange = -1;
-  if (elements.previewDiffView) elements.previewDiffView.hidden = true;
-  if (elements.preview) elements.preview.hidden = false;
-}
-
-// Close the diff tab (its × button, or when its file disappears). Falls the
-// preview back to whatever file tab was last open.
-function closeDiff() {
-  resetDiffState();
-  if (previewFileId === DIFF_TAB_ID) {
-    previewFileId = previewOpenTabIds[previewOpenTabIds.length - 1] ?? null;
-  }
-  render(controller.getProject());
-}
-
-// Rebuild the diff into #diff-body, group changes into blocks, and draw the
-// overview ruler. `preserveScroll` keeps the reader's place on a live re-render
-// (e.g. while they edit the file with the diff open).
-function renderDiff({ preserveScroll = false } = {}) {
-  if (!diffState.active || !elements.diffBody) return;
-  const project = controller.getProject();
-  const node = project.nodes[diffState.fileId];
-  // The diffed file was deleted → close the diff tab.
-  if (!node || node.kind !== "file") {
-    closeDiff();
-    return;
-  }
-  const savedScroll = preserveScroll ? elements.diffBody.scrollTop : 0;
-  const ops = diffLines(diffState.oldText, String(node.content ?? ""));
-
-  // Group consecutive changed lines into blocks (for navigation + the ruler).
-  const blocks = [];
-  let cur = null;
-  ops.forEach((op, i) => {
-    if (op.type === "same") { cur = null; return; }
-    if (!cur) { cur = { start: i, end: i, hasAdd: false, hasDel: false }; blocks.push(cur); }
-    cur.end = i;
-    if (op.type === "add") cur.hasAdd = true;
-    if (op.type === "del") cur.hasDel = true;
-  });
-  diffState.blocks = blocks;
-
-  let added = 0;
-  let removed = 0;
-  const rowsHtml = ops.map((op) => {
-    if (op.type === "add") added += 1;
-    if (op.type === "del") removed += 1;
-    const marker = op.type === "add" ? "+" : op.type === "del" ? "−" : " ";
-    // One line-number column: the current-file line for kept/added rows, the old
-    // line for deleted rows (which have no current-file position).
-    const lineNo = op.newLine != null ? String(op.newLine) : (op.oldLine != null ? String(op.oldLine) : "");
-    return `<div class="diff-line diff-${op.type}"><span class="diff-gutter">${lineNo}</span><span class="diff-mark">${marker}</span><span class="diff-text">${escapeHtmlAttribute(op.text)}</span></div>`;
-  }).join("");
-  elements.diffBody.innerHTML = rowsHtml || '<div class="diff-line diff-same"><span class="diff-text">(identical to the current file)</span></div>';
-
-  if (elements.previewDiffLabel) elements.previewDiffLabel.textContent = `Current vs snapshot · ${formatSnapshotTime(diffState.createdAt)}`;
-  if (elements.previewDiffStats) elements.previewDiffStats.textContent = `+${added} −${removed} · ${blocks.length} change${blocks.length === 1 ? "" : "s"}`;
-
-  renderDiffRuler();
-  if (preserveScroll) elements.diffBody.scrollTop = savedScroll;
-  // Re-apply the current-change highlight after the rebuild.
-  if (diffState.currentChange >= 0 && diffState.currentChange < blocks.length) {
-    highlightChange(diffState.currentChange, { scroll: false });
-  }
-}
-
-function renderDiffRuler() {
-  const ruler = elements.diffRuler;
-  const body = elements.diffBody;
-  if (!ruler || !body) return;
-  ruler.replaceChildren();
-  const scrollHeight = body.scrollHeight || 1;
-  const rulerHeight = body.clientHeight || 1;
-  const rows = body.children;
-  diffState.blocks.forEach((block, index) => {
-    const firstRow = rows[block.start];
-    if (!firstRow) return;
-    const lastRow = rows[block.end] ?? firstRow;
-    const topPx = (firstRow.offsetTop / scrollHeight) * rulerHeight;
-    const heightPx = Math.max(3, ((lastRow.offsetTop + lastRow.offsetHeight - firstRow.offsetTop) / scrollHeight) * rulerHeight);
-    const tick = document.createElement("div");
-    tick.className = `diff-ruler-tick ${block.hasAdd && block.hasDel ? "tick-mix" : block.hasAdd ? "tick-add" : "tick-del"}`;
-    tick.style.top = `${topPx}px`;
-    tick.style.height = `${heightPx}px`;
-    tick.title = `Change ${index + 1} of ${diffState.blocks.length}`;
-    tick.addEventListener("click", () => { diffState.currentChange = index; highlightChange(index, { scroll: true }); });
-    ruler.append(tick);
-  });
-}
-
-function highlightChange(index, { scroll = true } = {}) {
-  const body = elements.diffBody;
-  if (!body) return;
-  body.querySelectorAll(".is-current-change").forEach((el) => el.classList.remove("is-current-change"));
-  const block = diffState.blocks[index];
-  if (!block) return;
-  const rows = body.children;
-  for (let i = block.start; i <= block.end; i += 1) rows[i]?.classList.add("is-current-change");
-  if (scroll) rows[block.start]?.scrollIntoView({ block: "center", behavior: "smooth" });
-}
-
-function gotoChange(delta) {
-  const total = diffState.blocks.length;
-  if (!total) { showToast("No changes"); return; }
-  const next = diffState.currentChange < 0
-    ? (delta > 0 ? 0 : total - 1)
-    : (((diffState.currentChange + delta) % total) + total) % total;
-  diffState.currentChange = next;
-  highlightChange(next, { scroll: true });
-}
-
-// Debounced live refresh so editing the file with the diff open stays smooth and
-// keeps the reader's scroll position.
-let diffRefreshTimer = null;
-function scheduleDiffRefresh() {
-  if (diffRefreshTimer) return;
-  diffRefreshTimer = setTimeout(() => {
-    diffRefreshTimer = null;
-    if (diffState.active) renderDiff({ preserveScroll: true });
-  }, 180);
 }
 
 // Cache of the latest remote cursor events by clientId so we can re-render

@@ -35,6 +35,8 @@ const APP_SHELL = [
   "./app/ui/bmap-view.js",
   "./app/ui/dom.js",
   "./app/ui/explorer-view.js",
+  "./app/ui/editor-format-toolbar.js",
+  "./app/ui/table-grid-picker.js",
   "./app/ui/roleplay-view.js",
   "./app/features/module-map-tools.js",
   "./app/features/workspace-history.js",
@@ -47,7 +49,11 @@ const APP_SHELL = [
   "./app/editor/highlight.js",
   "./app/editor/find-replace.js",
   "./app/editor/autocomplete.js",
-  "./app/editor/links.js"
+  "./app/editor/links.js",
+  "./app/editor/editor-core.js",
+  "./app/editor/comments.js",
+  "./app/ui/dialogs.js",
+  "./app/features/snapshots.js"
 ];
 
 self.addEventListener("install", (event) => {
