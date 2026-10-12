@@ -1,0 +1,331 @@
+"""OpenAI provider: model catalog, routing, sign-in gate, and image generation."""
+import base64, copy, io, json, sys, tempfile, time, unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+from urllib.error import HTTPError
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'server'))
+import mdnotes_server as server
+import openai_support as oa
+
+CATALOG = ['gpt-4o', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'gpt-5.1',
+           'gpt-5.1-mini', 'gpt-5-2025-08-07', 'gpt-4o-audio-preview', 'gpt-realtime', 'gpt-5.1-codex',
+           'gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'dall-e-3', 'text-embedding-3-large']
+PNG = b'\x89PNG\r\n\x1a\nfake-image-bytes'
+PROJECT = {'rootId': 'root', 'nodes': {
+    'root': {'id': 'root', 'kind': 'folder', 'name': 'Novel', 'parentId': None, 'children': ['f1']},
+    'f1': {'id': 'f1', 'kind': 'file', 'name': 'chapter.md', 'parentId': 'root', 'content': 'A lighthouse.'}}}
+USER = {'username': 'leo', 'teams': ['blue']}
+
+
+class FakeResponse(io.BytesIO):
+    def __enter__(self): return self
+    def __exit__(self, *exc): self.close()
+
+
+class FakeOpenAI:
+    """Stands in for api.openai.com: /models and /images/generations."""
+    def __init__(self, fail=None):
+        self.requests, self.fail = [], fail
+
+    def __call__(self, request, timeout):
+        body = json.loads(request.data) if request.data else None
+        self.requests.append({'url': request.full_url, 'body': body, 'auth': request.get_header('Authorization'), 'timeout': timeout})
+        if self.fail:
+            raise HTTPError(request.full_url, 400, 'bad', {}, io.BytesIO(json.dumps({'error': {'message': self.fail}}).encode()))
+        if request.full_url.endswith('/models'):
+            return FakeResponse(json.dumps({'data': [{'id': m} for m in CATALOG]}).encode())
+        return FakeResponse(json.dumps({'data': [{'b64_json': base64.b64encode(PNG).decode()}]}).encode())
+
+
+def proxy_with_openai(opener=None, env=None, store_dir=None):
+    proxy = server.ChatProxy()
+    proxy.api_key, proxy.api_url = 'deepseek-key', 'https://deepseek.example.invalid/chat'
+    proxy.openai = oa.OpenAIProvider({'OPENAI_API_KEY': 'openai-key', **(env or {})}, opener=opener or FakeOpenAI())
+    proxy.openai.apply_catalog(CATALOG)
+    if store_dir:
+        proxy.generated = oa.GeneratedImages(Path(store_dir))
+    return proxy
+
+
+def tool_call(name, args, call_id='call-1'):
+    return {'choices': [{'message': {'tool_calls': [
+        {'id': call_id, 'type': 'function', 'function': {'name': name, 'arguments': json.dumps(args)}}]}}]}
+
+
+def reply(text):
+    return {'choices': [{'message': {'content': text}}]}
+
+
+class CatalogTests(unittest.TestCase):
+    def test_newest_flagship_mini_and_image_model(self):
+        self.assertEqual(oa.pick_chat_models(CATALOG), ['gpt-5.1', 'gpt-5.1-mini'])
+        self.assertEqual(oa.pick_image_model(CATALOG), 'gpt-image-1.5')
+        self.assertEqual(oa.pick_image_model(['gpt-image-1-mini']), 'gpt-image-1-mini')
+        self.assertEqual(oa.pick_chat_models(['gpt-4o', 'gpt-4.1-mini']), ['gpt-4.1-mini'])
+        self.assertEqual(oa.pick_chat_models(['dall-e-3']), [])
+        self.assertIsNone(oa.pick_image_model(['gpt-5']))
+
+    def test_versions_compare_numerically(self):
+        self.assertEqual(oa.pick_chat_models(['gpt-5.9', 'gpt-5.10']), ['gpt-5.10'])
+
+    def test_overrides_are_kept_only_if_the_account_has_them(self):
+        provider = oa.OpenAIProvider({'OPENAI_API_KEY': 'k', 'MDNOTES_OPENAI_MODELS': 'gpt-4.1, gpt-9',
+                                      'MDNOTES_OPENAI_IMAGE_MODEL': 'gpt-image-1'})
+        provider.apply_catalog(CATALOG)
+        self.assertEqual(provider.models, ['gpt-4.1'])
+        self.assertEqual(provider.image_model, 'gpt-image-1')
+
+    def test_catalog_is_read_with_the_key_and_failures_keep_a_reason(self):
+        opener = FakeOpenAI()
+        provider = oa.OpenAIProvider({'OPENAI_API_KEY': 'k'}, opener=opener)
+        provider.load_catalog()
+        self.assertEqual(opener.requests[0]['url'], 'https://api.openai.com/v1/models')
+        self.assertEqual(opener.requests[0]['auth'], 'Bearer k')
+        self.assertEqual(provider.models, ['gpt-5.1', 'gpt-5.1-mini'])
+        failing = oa.OpenAIProvider({'OPENAI_API_KEY': 'k'}, opener=FakeOpenAI(fail='Incorrect API key'))
+        logs = []
+        with patch.object(oa.time, 'sleep', side_effect=SystemExit):
+            try:
+                failing.start(lambda *a, **k: logs.append((a, k)), retry_seconds=0)
+                time.sleep(0.2)
+            except SystemExit:
+                pass
+        self.assertEqual(failing.models, [])
+        self.assertIn('Incorrect API key', failing.catalog_error or '')
+        self.assertNotIn('k', json.dumps(failing.catalog_error).replace('key', ''))
+
+    def test_no_key_means_nothing_offered(self):
+        proxy = server.ChatProxy()
+        proxy.openai = oa.OpenAIProvider({})
+        proxy.openai.apply_catalog(CATALOG)
+        self.assertNotIn('gpt-5.1', proxy.all_models())
+        self.assertFalse(proxy.public_status()['imageGeneration'])
+
+
+class RoutingTests(unittest.TestCase):
+    def run_chat(self, proxy, model, **kwargs):
+        seen = []
+
+        def completion(payload, headers, emit):
+            seen.append({'payload': copy.deepcopy(payload), 'url': proxy._eff_url(), 'auth': headers['Authorization']})
+            return reply('Done.')
+        proxy._stream_completion = completion
+        with patch.object(server, '_log'):
+            result = proxy.chat([{'role': 'user', 'content': 'hi'}], [], 'Novel', PROJECT, model=model, **kwargs)
+        return result, seen[0]
+
+    def test_gpt_models_go_to_openai_without_unsupported_options(self):
+        proxy = proxy_with_openai()
+        proxy.enable_thinking = True
+        result, call = self.run_chat(proxy, 'gpt-5.1')
+        self.assertEqual(call['url'], 'https://api.openai.com/v1/chat/completions')
+        self.assertEqual(call['auth'], 'Bearer openai-key')
+        self.assertNotIn('temperature', call['payload'])
+        self.assertNotIn('thinking', call['payload'])
+        self.assertEqual(result['provider'], 'OpenAI')
+        self.assertEqual(result['model'], 'gpt-5.1')
+
+    def test_deepseek_stays_the_default_and_keeps_its_options(self):
+        proxy = proxy_with_openai()
+        proxy.enable_thinking = True
+        result, call = self.run_chat(proxy, None)
+        self.assertEqual(call['auth'], 'Bearer deepseek-key')
+        self.assertEqual(call['payload']['model'], proxy.model)
+        self.assertEqual(call['payload']['thinking'], {'type': 'enabled'})
+        self.assertEqual(call['payload']['temperature'], 0.2)
+        self.assertEqual(result['provider'], 'DeepSeek')
+        # An unknown model falls back to the default rather than being sent anywhere.
+        _, call = self.run_chat(proxy, 'gpt-99')
+        self.assertEqual(call['auth'], 'Bearer deepseek-key')
+
+    def test_own_key_is_never_replaced_by_a_server_key(self):
+        proxy = proxy_with_openai()
+        _, call = self.run_chat(proxy, 'gpt-5.1', override={'apiKey': 'mine', 'apiUrl': 'https://mine.invalid/chat', 'model': 'gpt-5.1'})
+        self.assertEqual(call['auth'], 'Bearer mine')
+        self.assertEqual(call['url'], 'https://mine.invalid/chat')
+
+    def test_route_state_does_not_leak_between_requests(self):
+        proxy = proxy_with_openai()
+        self.run_chat(proxy, 'gpt-5.1')
+        self.assertEqual(proxy._eff_key(), 'deepseek-key')
+
+    def test_status_lists_both_providers(self):
+        status = proxy_with_openai().public_status()
+        self.assertEqual(status['models'][:1], [server.ChatProxy().model])
+        self.assertIn('gpt-5.1', status['models'])
+        info = {row['id']: row['provider'] for row in status['modelInfo']}
+        self.assertEqual(info['gpt-5.1'], 'OpenAI')
+        self.assertEqual(info[status['model']], 'DeepSeek')
+        self.assertTrue(status['imageGeneration'])
+
+
+class ImageToolTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.opener = FakeOpenAI()
+        self.proxy = proxy_with_openai(self.opener, store_dir=self.tmp.name)
+
+    def turn(self, responses, identity=USER):
+        seen, queue = [], list(responses)
+
+        def completion(payload, headers, emit):
+            seen.append(copy.deepcopy(payload))
+            return queue.pop(0)
+        self.proxy._stream_completion = completion
+        with patch.object(server, '_log'):
+            result = self.proxy.chat([{'role': 'user', 'content': 'Draw the lighthouse'}], [], 'Novel', PROJECT, identity=identity)
+        return result, seen
+
+    def test_image_is_generated_stored_and_proposed_by_id(self):
+        result, seen = self.turn([
+            tool_call('generate_image', {'prompt': 'A lighthouse in a storm, ink wash', 'name': 'lighthouse.webp',
+                                         'parentPath': 'Art/', 'orientation': 'portrait'}),
+            reply('Here is the lighthouse.')])
+        self.assertIn('generate_image', [t['function']['name'] for t in seen[0]['tools']])
+        request = self.opener.requests[-1]
+        self.assertEqual(request['url'], 'https://api.openai.com/v1/images/generations')
+        self.assertEqual(request['auth'], 'Bearer openai-key')
+        self.assertEqual(request['body'], {'model': 'gpt-image-1.5', 'prompt': 'A lighthouse in a storm, ink wash', 'n': 1,
+                                           'size': '1024x1536', 'quality': 'medium', 'output_format': 'webp'})
+        [op] = result['proposedOperations']
+        self.assertEqual((op['type'], op['parentPath'], op['name'], op['content']), ('create-file', 'Art', 'lighthouse.webp', ''))
+        image = op['generatedImage']
+        self.assertEqual(image['mime'], 'image/webp')
+        self.assertNotIn('b64', json.dumps(result))  # no image bytes in the chat
+        self.assertEqual(self.proxy.generated.load(image['id'], 'leo'), (PNG, 'image/webp'))
+        self.assertIsNone(self.proxy.generated.load(image['id'], 'someone-else'))
+        told = json.loads(seen[1]['messages'][-1]['content'])
+        self.assertEqual(told['path'], 'Art/lighthouse.webp')
+
+    def test_at_most_two_images_per_request(self):
+        calls = [tool_call('generate_image', {'prompt': f'p{i}', 'name': f'i{i}.png'}, f'c{i}') for i in range(3)]
+        result, seen = self.turn([*calls, reply('Made two.')])
+        self.assertEqual(len(result['proposedOperations']), 2)
+        self.assertEqual(sum(r['url'].endswith('/images/generations') for r in self.opener.requests), 2)
+        self.assertIn('Image limit reached', seen[3]['messages'][-1]['content'])
+
+    def test_bad_names_become_png_and_paths_are_stripped(self):
+        result, _ = self.turn([tool_call('generate_image', {'prompt': 'x', 'name': '../../etc/cover.gif'}), reply('ok')])
+        op = result['proposedOperations'][0]
+        self.assertEqual(op['name'], 'cover.png')
+        self.assertEqual(op['generatedImage']['mime'], 'image/png')
+
+    def test_not_offered_without_sign_in_or_store_or_image_model(self):
+        _, seen = self.turn([reply('no')], identity=None)
+        self.assertNotIn('generate_image', [t['function']['name'] for t in seen[0]['tools']])
+        # A model calling it anyway gets an error, and nothing is spent.
+        result, _ = self.turn([tool_call('generate_image', {'prompt': 'x', 'name': 'a.png'}), reply('no')], identity=None)
+        self.assertEqual(result['proposedOperations'], [])
+        self.assertFalse(any(r['url'].endswith('/images/generations') for r in self.opener.requests))
+        self.proxy.openai.image_model = None
+        _, seen = self.turn([reply('no')])
+        self.assertNotIn('generate_image', [t['function']['name'] for t in seen[0]['tools']])
+
+    def test_persona_turns_never_get_the_image_tool(self):
+        seen = []
+        self.proxy._stream_completion = lambda p, h, e: seen.append(p) or reply('Aye.')
+        with patch.object(server, '_log'):
+            self.proxy.chat([{'name': 'Leo', 'content': 'hi', 'self': False}], [], 'Novel', PROJECT, identity=USER,
+                            persona={'name': 'Mara', 'content': 'sheet'}, cast=[])
+        self.assertEqual(sorted(t['function']['name'] for t in seen[0]['tools']), ['list_files', 'read_file'])
+
+    def test_provider_errors_reach_the_model_without_secrets(self):
+        self.proxy.openai._opener = FakeOpenAI(fail='Your request was rejected by the safety system.')
+        result, seen = self.turn([tool_call('generate_image', {'prompt': 'x', 'name': 'a.png'}), reply('Sorry.')])
+        self.assertEqual(result['proposedOperations'], [])
+        told = seen[1]['messages'][-1]['content']
+        self.assertIn('safety system', told)
+        self.assertNotIn('openai-key', told)
+
+
+class StoreTests(unittest.TestCase):
+    def test_owner_only_bad_ids_and_expiry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = oa.GeneratedImages(Path(tmp), ttl_seconds=60)
+            image_id = store.store(PNG, 'image/png', '.png', 'leo', 'prompt')
+            self.assertEqual(store.load(image_id, 'leo'), (PNG, 'image/png'))
+            self.assertIsNone(store.load(image_id, 'amy'))
+            self.assertIsNone(store.load('../../whitelist', 'leo'))
+            meta = Path(tmp) / f'{image_id}.json'
+            data = json.loads(meta.read_text()); data['created'] -= 120; meta.write_text(json.dumps(data))
+            store.store(PNG, 'image/png', '.png', 'leo', 'newer')  # storing purges expired ones
+            self.assertIsNone(store.load(image_id, 'leo'))
+            self.assertEqual(len(list(Path(tmp).glob('*.png'))), 1)
+
+
+class GateTests(unittest.TestCase):
+    def handler(self, payload, accounts=True, store=None):
+        handler = object.__new__(server.MDNotesRequestHandler)
+        handler.registry = SimpleNamespace(accounts=SimpleNamespace(enabled=accounts),
+                                           account_for_token=lambda token: USER if token == 'acct' else None,
+                                           _require_account=lambda token: USER if token == 'acct' else (_ for _ in ()).throw(PermissionError()))
+        calls = []
+        handler.chat_proxy = SimpleNamespace(authorize_client=lambda ip: None, generated=store,
+                                             chat=lambda *a, **k: calls.append(k) or {'message': 'ok', 'contextPaths': [], 'proposedOperations': []},
+                                             public_status=lambda: {'configured': True})
+        handler.client_address = ('203.0.113.9', 0)
+        handler._read_json = lambda: payload
+        handler.send_response = handler.send_header = handler.end_headers = lambda *a: None
+        handler._send_cors_headers = lambda: None
+        handler._log_request = lambda *a: None
+        handler.results, handler.written = [], []
+        handler._write_json = lambda status, body: handler.results.append((status, body))
+        handler.wfile = SimpleNamespace(write=handler.written.append, flush=lambda: None)
+        return handler, calls
+
+    def test_server_keys_need_a_signed_in_account(self):
+        handler, calls = self.handler({'messages': [{'role': 'user', 'content': 'hi'}]})
+        handler._handle_chat()
+        self.assertEqual(handler.results[0][0], 403)
+        self.assertIn('Sign in', handler.results[0][1]['message'])
+        self.assertEqual(calls, [])
+
+    def test_signed_in_requests_pass_their_identity(self):
+        handler, calls = self.handler({'messages': [{'role': 'user', 'content': 'hi'}], 'accountToken': 'acct'})
+        handler._handle_chat()
+        self.assertEqual(calls[0]['identity'], USER)
+
+    def test_own_key_and_account_free_servers_are_unchanged(self):
+        handler, calls = self.handler({'messages': [{'role': 'user', 'content': 'hi'}], 'apiKey': 'mine'})
+        handler._handle_chat()
+        self.assertEqual(len(calls), 1)
+        self.assertIsNone(calls[0]['identity'])
+        handler, calls = self.handler({'messages': [{'role': 'user', 'content': 'hi'}]}, accounts=False)
+        handler._handle_chat()
+        self.assertEqual(len(calls), 1)
+
+    def test_quick_generate_is_gated_too(self):
+        handler, _ = self.handler({'subject': 'x'})
+        handler._handle_generate()
+        self.assertEqual(handler.results[0][0], 403)
+
+    def test_status_says_an_account_is_needed(self):
+        handler, _ = self.handler({})
+        handler._handle_chat_status()
+        self.assertTrue(handler.results[0][1]['requiresAccount'])
+
+    def test_generated_images_are_served_to_their_owner_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = oa.GeneratedImages(Path(tmp))
+            image_id = store.store(PNG, 'image/png', '.png', 'leo', 'p')
+            handler, _ = self.handler({}, store=store)
+            handler._extract_token = lambda parsed: 'acct'
+            handler._handle_generated(SimpleNamespace(query=f'id={image_id}'))
+            self.assertEqual(b''.join(handler.written), PNG)
+            other = oa.GeneratedImages(Path(tmp))
+            other_id = other.store(PNG, 'image/png', '.png', 'amy', 'p')
+            handler, _ = self.handler({}, store=store)
+            handler._extract_token = lambda parsed: 'acct'
+            handler._handle_generated(SimpleNamespace(query=f'id={other_id}'))
+            self.assertEqual(handler.results[0][0], 404)
+            handler, _ = self.handler({}, store=store)
+            handler._extract_token = lambda parsed: 'nobody'
+            handler._handle_generated(SimpleNamespace(query=f'id={image_id}'))
+            self.assertEqual(handler.results[0][0], 403)
+
+
+if __name__ == '__main__':
+    unittest.main()

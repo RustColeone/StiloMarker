@@ -112,7 +112,7 @@ async def main():
         if await page.locator('#chat-panel').is_hidden():
             await page.locator('#chat-toggle-activity-button').click()
         assert await page.locator('#chat-cast-bar').is_hidden()
-        await page.wait_for_function('document.querySelector("#chat-status-text").textContent.includes("configured")')
+        await page.wait_for_function('window.__rpTest.chatState.status === "ready"')
         await assert_tabs_clickable(page)
         await page.locator('[data-chat-tab="roleplay"]').click()
         await page.wait_for_function('Boolean(window.__rpTest.roleplay)')
@@ -245,7 +245,7 @@ async def main():
         context, page, errors = await open_page(browser, phone_requests, {'width': 375, 'height': 760},
                                                 is_mobile=True, has_touch=True, device_scale_factor=1)
         await page.locator('#mobile-chat-toggle').click()
-        await page.wait_for_function('document.querySelector("#chat-status-text").textContent.includes("configured")')
+        await page.wait_for_function('window.__rpTest.chatState.status === "ready"')
         await assert_tabs_clickable(page)
         await page.locator('[data-chat-tab="roleplay"]').click()
         await page.wait_for_function('Boolean(window.__rpTest.roleplay)')

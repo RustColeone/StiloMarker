@@ -99,7 +99,9 @@ async def main():
         await page.wait_for_function('document.querySelector("#chat-message-list").textContent.includes("Ordinary chat") && !window.__mcpTest.controller.getProject().missing')
         await page.wait_for_timeout(100)
         assert len(chat_requests) == 2, chat_requests
-        assert 'mcpServers' not in chat_requests[1] and 'accountToken' not in chat_requests[1]
+        # No connections without opt-in; the account token now goes with every
+        # request, because the server's agent is for signed-in accounts only.
+        assert 'mcpServers' not in chat_requests[1] and chat_requests[1]['accountToken'] == 'test-account'
         await page.evaluate('window.dispatchEvent(new Event("online")); document.dispatchEvent(new Event("visibilitychange"));')
         assert len(mcp_requests) == 2, 'Foreground/recovery must not run MCP'
         assert not errors, errors

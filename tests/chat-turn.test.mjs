@@ -12,7 +12,7 @@ function harness() {
   const gate=deferred(), thread={id:'thread',messages:[{role:'user',content:'request',contextPaths:['note.md']}],contextPaths:[]};
   const state={configured:true,threads:[thread],streamingText:'',reasoningText:''}, applications=[],saves=[];
   const dependencies = {
-    mcpControls:{getRequest:()=>({})}, chatState:state, controller:{getProject:()=>project}, settings:{serverUrl:'https://test.invalid'},
+    mcpControls:{getRequest:()=>({})}, syncState:{account:{token:'acct-A'}}, chatState:state, controller:{getProject:()=>project}, settings:{serverUrl:'https://test.invalid'},
     chatWorkspaceKey:()=>project.id, chatConnectionInfo:()=>({token}), agentDocumentSignature:p=>p.content,
     collaboration:{getConnectionInfo:()=>({token}),getRevision:()=>5,getClientId:()=> 'client'},
     resolveChatContextFiles:(_,ctx)=>ctx.contextPaths, persistChatWorkspaceState:()=>saves.push(project.id),cacheChatWorkspace:()=>{},
@@ -37,7 +37,7 @@ test('late replies and progress cannot affect a new workspace or its active requ
 });
 
 test('submitted attachments survive composer clearing and proposals retain their original revision', async () => {
-  const h=harness(), done=h.run();assert.deepEqual(h.payload.contextFiles,['note.md']);
+  const h=harness(), done=h.run();assert.deepEqual(h.payload.contextFiles,['note.md']);assert.equal(h.payload.accountToken,'acct-A');
   h.gate.resolve({message:'reply',proposedOperations:[{type:'update-file',path:'note.md'}]});await done;
   assert.equal(h.applications[0].message.baseRevision,5);assert.equal(h.state.sending,false);
 });

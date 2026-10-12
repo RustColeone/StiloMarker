@@ -56,6 +56,12 @@ if errorlevel 1 (
   if errorlevel 1 goto :failed
 )
 
+call python -B tests\openai-images.test.py
+if errorlevel 1 (
+  call python3 -B tests\openai-images.test.py
+  if errorlevel 1 goto :failed
+)
+
 echo.
 echo === [4/4] MCP connection regressions ==================================
 call python -B tests\mcp-client.test.py

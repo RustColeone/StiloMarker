@@ -31,6 +31,31 @@ one. Affects only pre-existing local history.
 
 ## Fixed
 
+### v0.1.27: GPT models, generated images, and sign-in for the server's agent
+
+- **OpenAI as a second provider.** With `OPENAI_API_KEY` in the service
+  environment, the server reads the key's model catalog at start-up and offers
+  the newest GPT flagship and its mini next to DeepSeek (still the default);
+  `MDNOTES_OPENAI_MODELS` / `MDNOTES_OPENAI_IMAGE_MODEL` pin them instead. The
+  model picker groups models by provider and the status badge names the
+  provider of the selected model. GPT requests never carry DeepSeek's
+  `thinking` option, and reasoning models get no `temperature`.
+- **Generated images.** When an image model is available, the agent has a
+  `generate_image` tool (medium quality, at most 2 per request,
+  `MDNOTES_IMAGE_QUALITY` / `MDNOTES_MAX_IMAGES_PER_TURN`). The image is kept on
+  the server for 14 days under `server/data/_generated/`, readable only by the
+  account that asked for it; the edit card shows it, and applying the edit
+  saves it as an image file (uploaded to disk in cloud workspaces). Chat
+  history stores only the image id, never its bytes. Roleplay characters never
+  get the tool.
+- **Sign-in required for the server's keys.** On a server with accounts, the
+  agent, Roleplay and Quick Generate refuse requests without a signed-in
+  account (previously anyone who could open the site could spend the server's
+  DeepSeek key). A user's own key (Settings → Agent) still works without
+  signing in, but image generation always needs an account because it spends
+  the server's OpenAI key. Signed out, the badge says "Sign in to use the agent"
+  and opens the Account settings.
+
 ### v0.1.26: the Roleplay tab could be covered by the status badge
 
 Found by the first live test of v0.1.25 with a real model. The live server offers

@@ -6879,3 +6879,31 @@ pre.proposal-diff-block {
   font-size: 12px;
   color: var(--text-dim);
 }
+
+/* An image the agent generated, shown in its edit card before Keep/Drop. */
+.proposal-image {
+  flex-basis: 100%;
+  margin: 6px 0 2px;
+}
+
+.proposal-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+}
+
+.proposal-image figcaption {
+  display: grid;
+  gap: 2px;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.proposal-image figcaption span {
+  font-size: 10px;
+}
