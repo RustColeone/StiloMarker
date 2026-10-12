@@ -1037,5 +1037,12 @@ export function createPanes(app) {
     printWindow.setTimeout(finalizePrint, 80);
   }
 
-  return { bindPaneDropTarget, bindTabStripReorderTarget, cacheWorkspaceView, cachedWorkspaceView, clearPaneDropState, closeTabOverflowMenu, currentWorkspaceView, ensureOpenTabs, openDroppedFileInPane, openFileFromExplorer, openPreviewTab, openSourceTab, openTabOverflowMenu, printPreviewAsPdf, renderPreviewContent, renderTabs, restoreResumeState, setActiveSourceFile, setActiveSourceUrlDbEntry, setPreviewFile, showResumedFile, tabOverflowButton, typesetPreview };
+  return {
+    bindPaneDropTarget, bindTabStripReorderTarget, cacheWorkspaceView, cachedWorkspaceView,
+    clearPaneDropState, closeTabOverflowMenu, currentWorkspaceView, ensureOpenTabs,
+    openDroppedFileInPane, openFileFromExplorer, openPreviewTab, openSourceTab,
+    openTabOverflowMenu, printPreviewAsPdf, renderPreviewContent, renderTabs, restoreResumeState,
+    setActiveSourceFile, setActiveSourceUrlDbEntry, setPreviewFile, showResumedFile,
+    tabOverflowButton, typesetPreview
+  };
 }

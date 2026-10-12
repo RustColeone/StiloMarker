@@ -206,5 +206,8 @@ export function createFindReplace(app) {
     computeSearchMatches({ keepCaret: true });
   }
 
-  return { closeFindBar, computeSearchMatches, findNext, findPrev, gotoMatch, openFindBar, renderSearchHighlights, replaceAllMatches, replaceCurrent, toggleFindOption };
+  return {
+    closeFindBar, computeSearchMatches, findNext, findPrev, gotoMatch, openFindBar,
+    renderSearchHighlights, replaceAllMatches, replaceCurrent, toggleFindOption
+  };
 }

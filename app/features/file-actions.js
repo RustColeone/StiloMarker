@@ -1227,5 +1227,13 @@ export function createFileActions(app) {
     }
   }
 
-  return { canPasteIntoExplorerTarget, clearExplorerDropState, createFileInFolder, createItem, deleteSelected, exportNode, getExplorerDropPayloadKind, getExplorerDropPlacement, getSelectedNode, getSelectedParent, getSelectedUrlDbEntry, handleAddFileTransfer, handleEditorDrop, handleExplorerAction, handleNewFileSubmit, moveExplorerNode, moveExplorerUrlDbEntry, openNewFileDialog, renameFileById, renameSelected, replaceImageFile, resetAddFileState, setAddFileStatus, setExplorerDropState, stageAddFileFromLocalFile, submitAddFile };
+  return {
+    canPasteIntoExplorerTarget, clearExplorerDropState, createFileInFolder, createItem,
+    deleteSelected, exportNode, getExplorerDropPayloadKind, getExplorerDropPlacement,
+    getSelectedNode, getSelectedParent, getSelectedUrlDbEntry, handleAddFileTransfer,
+    handleEditorDrop, handleExplorerAction, handleNewFileSubmit, moveExplorerNode,
+    moveExplorerUrlDbEntry, openNewFileDialog, renameFileById, renameSelected, replaceImageFile,
+    resetAddFileState, setAddFileStatus, setExplorerDropState, stageAddFileFromLocalFile,
+    submitAddFile
+  };
 }

@@ -7,7 +7,7 @@ internals as `window.__chatInternals` once the module has loaded. `CHAT_HOOK`
 is the matching set of getters to splice into a test's `window.__…Test` object.
 """
 
-_MARKER = b"\n  return { receiveChatWorkspace"
+_MARKER = b"\n  return {\n    receiveChatWorkspace"
 _EXPOSE = (b"\n  window.__chatInternals = { chatState, setActiveChatThread, createNewChatConversation,"
            b" getActiveChatThread, setChatTab, get roleplay() { return roleplay; }, get mcpControls() { return mcpControls; },"
            b" receiveSync: (workspace) => chatSynchronizer?.receive(workspace) };")

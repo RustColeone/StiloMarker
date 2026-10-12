@@ -994,5 +994,11 @@ export function createCloudBrowser(app) {
     void app.refreshChatStatus({ silent: true }); // the server's agent needs an account
   }
 
-  return { activateBrowserEntry, beginTransfer, cancelPick, handleAccountLogin, handleAccountLogout, handleDeleteSelected, handleHost, handleNewFolder, handleNewProject, handleOpenWorkspace, handlePublishHere, handleSelectDestination, openAccessEditor, openFileBrowser, openLocalProjectFromBrowser, performLogin, pingCurrentServer, renderHostTargets, saveAccessEditor, splitServerPath, switchBrowserSide, toggleMultiSelect };
+  return {
+    activateBrowserEntry, beginTransfer, cancelPick, handleAccountLogin, handleAccountLogout,
+    handleDeleteSelected, handleHost, handleNewFolder, handleNewProject, handleOpenWorkspace,
+    handlePublishHere, handleSelectDestination, openAccessEditor, openFileBrowser,
+    openLocalProjectFromBrowser, performLogin, pingCurrentServer, renderHostTargets,
+    saveAccessEditor, splitServerPath, switchBrowserSide, toggleMultiSelect
+  };
 }
