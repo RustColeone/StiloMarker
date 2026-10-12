@@ -308,3 +308,26 @@ Private deployment backup: `/home/laplacengan/backups/stilomarker/20261012T06022
 Nine project manifests valid, 153/153 files (the count now includes
 `server/data/_backups`).
 
+Live test after deploy (the `test` account was not used; a local in-browser
+workspace on the public site, with the server's real model): the agent read a
+chapter and wrote two `.persona.skill` files grounded in it; in Roleplay,
+narration sent no request, `@mara-quill` produced one in-character reply (11 s),
+and `@all` produced two in cast order (23 s), the second reacting to the first.
+No page errors. It also found the tab-overlap bug fixed in v0.1.26.
+
+
+## Verified release: v0.1.26
+
+Deployed on 2026-10-12 at 06:24 UTC. CSS fix: the chat tabs no longer shrink
+under the status badge and model picker (on the live server the Roleplay tab
+was covered and could not be clicked on desktop). App version `0.1.26`; sync
+compatibility unchanged at `116`.
+
+Public checks: ping, four assets byte-identical, the `mdnotes-shell-v0.1.26`
+cache label, and a real mouse click on the Roleplay tab at 1280 px and 375 px
+(cast bar shown, no sideways scroll, no page errors). Validation: 149 Node tests
+and the updated `roleplay-browser.py`, which fails without the fix.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261012T062420Z-v0.1.26`.
+Nine project manifests valid, 153/153 files.
+
