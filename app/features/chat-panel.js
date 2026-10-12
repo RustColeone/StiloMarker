@@ -17,7 +17,12 @@ import { query } from "../ui/dom.js";
 
 export function createChatPanel(deps) {
   const {
-    agentCheckpoints, agentPendingDecorations, buildTextDiffHunks, captureAgentCheckpoint, chatConnectionInfo, chatWorkspaceKey, clearAgentDecorations, collaboration, controller, createFileInFolder, elements, escapeHtmlAttribute, getSelectedParent, isMobileLayout, jumpToAgentChange, logDebug, notify, openFileFromExplorer, openSettingsDialog, personaAvatarSrc, promptForName, publishSnapshot, registerAgentDecorations, settings, showConfirmDialog, showToast, storedProject, syncState, updateEditorAgentBar
+    agentCheckpoints, agentPendingDecorations, buildTextDiffHunks, captureAgentCheckpoint,
+    chatConnectionInfo, chatWorkspaceKey, clearAgentDecorations, collaboration, controller,
+    createFileInFolder, elements, escapeHtmlAttribute, getSelectedParent, isMobileLayout,
+    jumpToAgentChange, logDebug, notify, openFileFromExplorer, openSettingsDialog,
+    personaAvatarSrc, promptForName, publishSnapshot, registerAgentDecorations, settings,
+    showConfirmDialog, showToast, storedProject, syncState, updateEditorAgentBar
   } = deps;
 
   let mcpControls = null;
@@ -1446,5 +1451,9 @@ export function createChatPanel(deps) {
     if (workspace && Number.isInteger(workspace.revision)) chatSynchronizer?.receive(workspace);
   }
 
-  return { receiveChatWorkspace, renderChatPanel, refreshChatStatus, findBatchMessage, remapPersonaPaths, applyAgentSettingsStatus, ensureChatWorkspaceLoaded, chatState, mcpControls };
+  return {
+    receiveChatWorkspace, renderChatPanel, refreshChatStatus, findBatchMessage,
+    remapPersonaPaths, applyAgentSettingsStatus, ensureChatWorkspaceLoaded, chatState,
+    mcpControls
+  };
 }

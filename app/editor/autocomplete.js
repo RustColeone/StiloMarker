@@ -483,5 +483,8 @@ export function createAutocomplete(app) {
     hideEditorAutocomplete();
   }
 
-  return { acceptEditorAutocomplete, hideEditorAutocomplete, renderEditorAutocomplete, showEditorAutocomplete };
+  return {
+    acceptEditorAutocomplete, hideEditorAutocomplete, renderEditorAutocomplete,
+    showEditorAutocomplete
+  };
 }

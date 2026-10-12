@@ -29,6 +29,7 @@ node --test tests/       # raw test runner
 | File | Covers |
 |------|--------|
 | `helpers/mocks.mjs` | Shared module loader + in-memory File System Access mocks (not a test file). |
+| `helpers/chat_hook.py` | For browser tests: exposes the on-demand chat panel's internals (`window.__chatInternals`) and the matching getters for a test's hook object. |
 | `project-model.test.mjs` | Project tree, file/folder ops, sync operations. |
 | `rendering.test.mjs` | Markdown rendering + mtree module map. |
 | `bmap-service.test.mjs` | `.bmap` node/connector parsing, normalization, serialization. |

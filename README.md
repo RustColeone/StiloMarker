@@ -241,6 +241,27 @@ For a full technical reference including all file format specifications and deta
 - [docs/ISSUES.md](docs/ISSUES.md) — known issues, open and fixed, with severity and confidence.
 - [docs/HISTORY.md](docs/HISTORY.md) — project history, architecture rules, and superseded decisions.
 
+## Code layout
+
+There is no build step: the browser loads the ES modules under `app/` as they are.
+
+| Path | What it holds |
+|------|---------------|
+| `app/main.js` | The app shell: DOM lookups, shared state, the collaboration runtime, the render/status loop, event wiring, settings, boot and reconnect. |
+| `app/editor/` | The source editor: `editor-core.js` (text ↔ DOM, selection, rendering, undo, cursors, keys), `highlight.js`, `autocomplete.js`, `find-replace.js`, `links.js` (tooltip, Linked Notes). |
+| `app/features/` | Larger features. `panes.js` (tabs, preview), `file-actions.js` (explorer actions, Add File), `cloud-browser.js` (browser, accounts, hosting) are loaded with the page; `chat-panel.js`, `workspace-history.js`, `snapshots-dialog.js`, `module-map-tools.js` download the first time they are opened. |
+| `app/ui/` | Views: `explorer-view.js`, `layout.js` (panels, phone panes, gestures), `bmap-view.js` and `roleplay-view.js` (on demand), the format toolbar. |
+| `app/services/`, `app/domain/` | Storage, sync, chat API, parsers and the project model, with no DOM wiring. |
+
+How the split modules reach `main.js`'s state: each exports a factory that
+`main.js` calls on first use, passing an `app` object of getters (and setters
+for the few variables a module writes), so a module always reads the current
+value. `main.js` keeps a small forwarding function for every module function it
+calls, so call sites read as before; the instance holders are declared with
+`var` because a forwarding function can run during startup. A new value a
+module needs is added to that `app` object in `main.js`. A structure test checks
+every on-demand `import("…")` path.
+
 ## App releases
 
 The app uses `vMAJOR.MINOR.PATCH` release labels, beginning with **v0.1.12**.

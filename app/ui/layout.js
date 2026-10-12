@@ -420,5 +420,10 @@ export function createLayout(app) {
     setMobileMenuOpen(app.elements.app.dataset.mobileMenu !== "open");
   }
 
-  return { applyMobileViewState, cancelMobileGesture, handleFloatingExplorerOutsidePress, onGestureEnd, onGestureMove, onGestureStart, renderMobilePaneCaption, selectMobilePane, setExplorerAnchor, setMobileExplorerOpen, setMobileMenuOpen, toggleChat, toggleExplorer, toggleExplorerAnchor, toggleMobileExplorer, toggleMobileMenu, togglePreview, toggleSource };
+  return {
+    applyMobileViewState, cancelMobileGesture, handleFloatingExplorerOutsidePress, onGestureEnd,
+    onGestureMove, onGestureStart, renderMobilePaneCaption, selectMobilePane, setExplorerAnchor,
+    setMobileExplorerOpen, setMobileMenuOpen, toggleChat, toggleExplorer, toggleExplorerAnchor,
+    toggleMobileExplorer, toggleMobileMenu, togglePreview, toggleSource
+  };
 }

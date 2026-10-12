@@ -261,5 +261,8 @@ export function createLinks(app) {
     }
   }
 
-  return { handleEditorLinkHover, handleEditorMouseLeave, hideLinkTooltip, openLinkFromEditor, renderLinksPanel };
+  return {
+    handleEditorLinkHover, handleEditorMouseLeave, hideLinkTooltip, openLinkFromEditor,
+    renderLinksPanel
+  };
 }
