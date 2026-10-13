@@ -153,3 +153,19 @@ test('roleplay group chats keep their cast, speakers and authors through save, m
   assert.deepEqual(merged.members, [...thread.members, 'cid.persona.skill']);
   assert.equal(merged.kind, 'group');
 });
+
+test('a deleted conversation stays deleted when a collaborator still has it', (t) => {
+  const old = globalThis.localStorage, data = new Map();
+  globalThis.localStorage = { getItem: key => data.get(key), setItem: (key, value) => data.set(key, value) };
+  t.after(() => globalThis.localStorage = old);
+  const thread = { id: 't', title: 'Plot', createdAt: 1, updatedAt: 1, messages: [message('m1')], contextPaths: [], draft: '' };
+  const base = { revision: 3, threads: [copy(thread)] };
+  // This device deleted it; the server (another participant) still has it as it was.
+  const local = { activeThreadId: null, threads: [{ ...copy(thread), deleted: true, updatedAt: 2 }] };
+  const merged = mergeChatWorkspace(copy(sharedChat(base)), local, { revision: 4, threads: [copy(thread)] });
+  assert.equal(merged.threads[0].deleted, true);
+  // ...and the flag survives saving and loading on this device.
+  saveChatWorkspace('p', merged);
+  assert.equal(loadChatWorkspace('p').threads[0].deleted, true);
+  assert.equal(sharedChat(merged).threads[0].deleted, true); // it is synced too
+});

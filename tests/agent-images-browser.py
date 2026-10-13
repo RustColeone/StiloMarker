@@ -93,8 +93,11 @@ async def main():
         # Signed out: the server's agent asks for a sign-in and sends nothing.
         await page.wait_for_function('window.__imgTest.chatState.status === "signin"')
         badge = page.locator('#chat-status-text')
-        assert 'Sign in to use the agent' in await badge.inner_text()
-        assert 'is-error' in (await badge.get_attribute('class'))
+        # The compose footer's status: a word when something needs attention,
+        # the full detail in its tooltip.
+        assert (await badge.inner_text()).strip() == 'Sign in'
+        assert 'Sign in to use the agent' in await badge.get_attribute('title')
+        assert await badge.get_attribute('data-tone') == 'warn'
         assert await page.locator('#chat-model-select').is_hidden()
         await page.locator('#chat-input').fill('Draw Mara')
         await page.locator('#chat-input').press('Enter')
@@ -108,9 +111,10 @@ async def main():
         groups = await page.evaluate('[...document.querySelectorAll("#chat-model-select optgroup")].map(g => [g.label, [...g.children].map(o => o.value)])')
         assert groups == [['DeepSeek', ['deepseek-flash', 'deepseek-v4-pro']], ['OpenAI', ['gpt-5.1', 'gpt-5.1-mini']]], groups
         assert await page.locator('#chat-model-select').input_value() == 'deepseek-flash'
-        assert 'DeepSeek' in await badge.inner_text()
+        assert 'DeepSeek' in await badge.get_attribute('title')
+        assert await badge.get_attribute('data-tone') == 'ok'
         await page.locator('#chat-model-select').select_option('gpt-5.1')
-        assert 'OpenAI' in await badge.inner_text()
+        assert 'OpenAI' in await badge.get_attribute('title')
 
         # A generated image arrives as an edit, is shown, and is saved as a file.
         await page.locator('#chat-input').fill('Draw Mara at the lamp')
