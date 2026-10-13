@@ -262,6 +262,24 @@ class RegistryTests(RegistryBase):
         self.reg._backup_chats(now=time.mktime((2026, 10, 3, 12, 0, 0, 0, 0, 0)))
         self.assertEqual(len(list(folder.glob('*.sqlite'))), 2)
 
+    def test_old_roleplay_threads_import_as_groups(self):
+        result = self.call('leo', 'chats_import', 'Storm', ['Cast/aria.persona.skill', 'Cast/ghost.persona.skill'], [
+            {'role': 'user', 'content': 'The lamp is out', 'authorName': 'Leo', 'createdAt': 1_700_000_000_000},
+            {'role': 'assistant', 'content': 'Bail faster.', 'speaker': 'Cast/aria.persona.skill', 'speakerName': 'Aria'},
+            {'role': 'assistant', 'content': 'ghost line', 'speaker': 'Cast/ghost.persona.skill'},
+            {'role': 'system', 'content': 'Stopped before the agent replied.'},
+            {'role': 'assistant', 'content': 'half a', 'speaker': 'Cast/aria.persona.skill', 'interrupted': True}])
+        conversation = result['conversation']
+        self.assertEqual((conversation['kind'], conversation['title']), ('group', 'Storm'))
+        self.assertEqual(sorted(conversation['members']), sorted([LEO, ARIA]))  # the missing character is dropped
+        messages = self.call('leo', 'chats_messages', conversation['id'])['messages']
+        self.assertEqual([(m['author'], m['content'], m['state']) for m in messages],
+                         [(LEO, 'The lamp is out', 'done'), (ARIA, 'Bail faster.', 'done'), (ARIA, 'half a', 'interrupted')])
+        self.assertAlmostEqual(messages[0]['createdAt'], 1_700_000_000)
+        self.assertEqual(conversation['unread'], 0)
+        with self.assertRaises(LookupError):
+            self.call('amy', 'chats_messages', conversation['id'])  # imported for the importer only
+
     def test_notes_and_search_through_the_registry(self):
         pair = self.call('leo', 'chats_start', [AMY])['conversation']
         self.call('leo', 'chats_send', pair['id'], 'The lamp went dark')

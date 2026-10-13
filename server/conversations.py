@@ -303,6 +303,31 @@ class ProjectChats:
                             (str(title or "").strip()[:MAX_TITLE], time.time(), row["id"]))
             return self._view(self.db.execute("SELECT * FROM conversations WHERE id=?", (row["id"],)).fetchone(), me)
 
+    def import_group(self, me: str, title: str, members, messages) -> dict:
+        """Bring an old Roleplay group chat in as a group (even of two), keeping
+        who said what and when. Authors must be members."""
+        members = list(dict.fromkeys([me, *[_clean_member(k) for k in members]]))
+        with self.lock, self._tx():
+            cid = self._create("group", members, me, title)
+            last = 0
+            for message in messages[:5000]:
+                if message["author"] not in members or not str(message.get("content", "")).strip():
+                    continue
+                created = float(message.get("created_at") or time.time())
+                cur = self.db.execute(
+                    "INSERT INTO messages(conversation_id, author, author_name, content, context_paths, created_at, state) "
+                    "VALUES (?,?,?,?,?,?,?)", (cid, message["author"], str(message.get("author_name") or "")[:MAX_ALIAS],
+                                               str(message["content"])[:MAX_MESSAGE], "[]", created,
+                                               message.get("state") or "done"))
+                last = max(last, created)
+                if message["author"] == me:
+                    self.db.execute("UPDATE members SET last_read_id=? WHERE conversation_id=? AND member=?", (cur.lastrowid, cid, me))
+            self.db.execute("UPDATE conversations SET updated_at=?, created_at=MIN(created_at, ?) WHERE id=?",
+                            (max(last, time.time() - 1), last or time.time(), cid))
+            top = self.db.execute("SELECT COALESCE(MAX(id),0) FROM messages WHERE conversation_id=?", (cid,)).fetchone()[0]
+            self.db.execute("UPDATE members SET last_read_id=? WHERE conversation_id=? AND member=?", (top, cid, me))
+            return self._view(self.db.execute("SELECT * FROM conversations WHERE id=?", (cid,)).fetchone(), me)
+
     def members(self, cid) -> list[str]:
         with self.lock:
             return self._members(int(cid))

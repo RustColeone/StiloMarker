@@ -907,7 +907,7 @@ export function createPanes(app) {
           ${personaAvatarHtml(persona, app.personaAvatarSrc(project, file.id, persona.avatar), "persona-avatar persona-card-avatar")}
           <div class="persona-card-text">
             <div class="persona-card-name">${app.escapeHtmlAttribute(persona.name)}</div>
-            <div class="persona-card-meta">@${app.escapeHtmlAttribute(persona.handle)} · Character for the Roleplay chat</div>
+            <div class="persona-card-meta">@${app.escapeHtmlAttribute(persona.handle)} · Character for Chats</div>
           </div>
         </div>`
       : "";

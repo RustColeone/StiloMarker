@@ -68,7 +68,7 @@ async def main():
                                    'generatedImage': {'id': IMAGE_ID, 'mime': 'image/png', 'size': '1024x1536',
                                                       'model': 'gpt-image-1.5', 'prompt': 'Mara at the lamp, ink wash'}}]}
                 elif path == '/api/ping':
-                    payload = {'appVersion': '0.1.27', 'minSyncVersion': 116, 'accounts': True}
+                    payload = {'appVersion': '0.1.27', 'minSyncVersion': 117, 'accounts': True}
                 elif path == '/api/workspaces':
                     payload = {'workspaces': []}
                 else:

@@ -34,7 +34,7 @@ function createDefaultSettings() {
     bmapAutoPan: true,
     autoReconnect: true,
     chatModel: "",
-    // Which chat tab is open: "agent" or "roleplay".
+    // Which chat tab is open: "agent" or "chats" ("roleplay" from v0.1.25 means chats).
     chatTab: "agent",
     // Runtime memory: true while the user has an active/intended session, so the
     // app can auto-reconnect on next load or after a dropped connection.

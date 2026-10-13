@@ -41,7 +41,7 @@ async def main():
                         update = route.request.post_data_json
                         if update.get('baseRevision') != state['revision']:
                             await route.fulfill(status=409, content_type='application/json', body=json.dumps({'message':'conflict'})); return
-                        assert update['version'] == 116
+                        assert update['version'] == 117
                         state = cloud[token] = {'revision':state['revision']+1, 'threads':update['threads']}
                     payload = state
                 elif path == '/api/chat/status':
