@@ -486,15 +486,16 @@ The chat panel provides an AI assistant scoped to the current workspace.
 ### Conversations
 
 - Press `+` in the panel toolbar to start a new thread.
-- Press `☰` to toggle the history pane showing past threads.
-- Click a thread in the history pane to switch to it.
+- Press `☰` to toggle the history pane showing past threads. The search box at its top filters them by title and text.
+- Click a thread in the history pane to switch to it. Hovering a thread shows **Rename** and **Delete**.
 - Threads are sorted by most-recently-updated first.
+- A new thread shows a few example requests; clicking one puts it in the compose box.
 
 ### Attaching context
 
 The agent can answer questions about specific files if you attach them:
 
-- **`@ Active` button** — attaches the currently open file.
+- **`@ File` button** (bottom left of the compose box) — attaches the currently open file.
 - **Drag a file from the Explorer** onto the compose area to attach it.
 
 Attached files appear as chips above the compose area. Click `×` on a chip to remove a file.
@@ -518,7 +519,7 @@ Chat threads are stored in browser `localStorage` under the key `mdnotes.chat.v1
 
 ### Models and signing in
 
-On a server with accounts, the agent, Roleplay characters and Quick Generate need you to be signed in (Settings → Collaboration → Account), because they spend the server's API credit. With **My own API key** (Settings → Agent) no sign-in is needed. When the server has more than one provider, the model picker in the chat toolbar groups the models by provider (DeepSeek, OpenAI); DeepSeek is the default.
+On a server with accounts, the agent, characters in Chats and Quick Generate need you to be signed in (Settings → Collaboration → Account), because they spend the server's API credit. With **My own API key** (Settings → Agent) no sign-in is needed. The model picker sits in the compose box, next to **Send**. When the server has more than one provider it groups the models by provider (DeepSeek, OpenAI); DeepSeek is the default. The dot and word beside it show whether the agent is ready (green), needs attention such as signing in (amber) or is unavailable (red); hover for details, click to check again or fix it.
 
 ### Generating images
 
@@ -532,14 +533,20 @@ When the user asks you (the agent) for an image:
 4. If the image illustrates a note or a character, also update that note with a relative image link, e.g. `![Mara at the lamp](../art/mara-portrait.png)`, or set `avatar:` in the character's `.persona.skill` header.
 5. Make only the number of images the user asked for: each one costs money.
 
-### Roleplay tab (characters)
+### Chats tab (people and characters)
 
-The panel has two tabs: **Agent** (this assistant) and **Roleplay**, a group chat with characters the user has written. It is for any kind of writing: talking to a story's characters, rehearsing a script, running a game scene, practising a conversation.
+The panel has two tabs: **Agent** (this assistant) and **Chats**, a small chat app for the project: private chats and group chats with the other people who can open this workspace and with the characters written in it (`.persona.skill` files). It is for any kind of writing done together: talking to a story's characters, rehearsing a script, running a game scene with several players.
 
-- **+ Add** in the Roleplay tab adds a character to the chat; **New character…** creates one.
-- The user writes `@handle` to ask a character to reply, and `@all` for everyone in turn. A message without a mention is narration and gets no reply.
-- Characters can read every file in the workspace and any attached files, but cannot change anything.
-- A character's file is read again before each reply, so editing it changes how the character speaks from then on.
+- **The list** shows your chats (newest first, with unread counts), then **People** (a dot shows who is online) and **Characters**. Clicking a person or a character opens your private chat with them; if you have one already, that one is reopened. **New group** picks several people and characters. The Chats tab shows the total of unread messages.
+- **In a private chat with a character**, the character answers every message.
+- **In a group**, `@handle` asks a character to reply and `@all` asks every character in turn. A message without a mention is narration (or talk between the people) and gets no reply. Typing `@` suggests names.
+- Everyone in the chat sees new messages, and a character's reply as it is written, live. **Stop** under a reply being written stops it and the replies queued after it.
+- **Details** (the `ⓘ` in a chat's header): for a private chat, your own alias and note for that person or character — only you ever see them — and a search of the chat that jumps to the message. **Invite…** in a private chat starts a *new* group with everyone, so the private chat is kept; in a group it adds the people to that group. Groups can also be renamed and left.
+- Characters can read every file in the workspace and any attached files, but cannot change anything. A character's file is read again before each reply, so editing it changes how the character speaks from then on. Renaming or moving the file keeps the character in its chats.
+
+Where chats are kept: in a cloud workspace, on the server, in one database per project (`conversations.sqlite` in the project folder, hidden in the explorer, kept when the project is published over, and backed up daily). In a workspace kept in the browser, the Chats tab has characters only, stored in this browser; chatting with people needs a cloud workspace. Older Roleplay group chats are moved into Chats the first time the tab opens.
+
+Who writes characters' replies: normally the server, using its models and the model picked in the compose box (sign-in needed). With **My own API key** and **Characters' replies in Chats → Directly from this browser** (Settings → Agent), your browser calls your API URL itself — this can be a model on your own computer, e.g. Ollama at `http://localhost:11434/v1/chat/completions` (allow this site in `OLLAMA_ORIGINS`; the key can be empty). The server prepares the prompt and passes the reply on to everyone in the chat. If your browser closes while writing, the reply is marked interrupted after a minute.
 
 ### Character files (.persona.skill)
 
@@ -617,5 +624,5 @@ The template is defined in `Template/template-manifest.json`.
 | `.mtree` | Module map | Yes | SVG tree |
 | `.urldb` | URL album | Yes | Image grid |
 | `.bmap` | Brainstorm diagram | Yes | Interactive canvas |
-| `.persona.skill` | Roleplay character (Markdown) | Yes | Character card + Markdown |
+| `.persona.skill` | Chats character (Markdown) | Yes | Character card + Markdown |
 | `.png` `.jpg` `.jpeg` `.gif` `.svg` `.webp` `.bmp` | Image | No | Image viewer |

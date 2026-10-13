@@ -250,7 +250,7 @@ There is no build step: the browser loads the ES modules under `app/` as they ar
 | `app/main.js` | The app shell: DOM lookups, shared state, the collaboration runtime, the render/status loop, event wiring, settings, boot and reconnect. |
 | `app/editor/` | The source editor: `editor-core.js` (text ↔ DOM, selection, rendering, undo, cursors, keys), `highlight.js`, `autocomplete.js`, `find-replace.js`, `links.js` (tooltip, Linked Notes), `comments.js` (line comments). |
 | `app/features/` | Larger features. `panes.js` (tabs, preview), `file-actions.js` (explorer actions, Add File), `cloud-browser.js` (browser, accounts, hosting), `snapshots.js` (snapshots, version label, diff tab) are loaded with the page; `chat-panel.js`, `workspace-history.js`, `snapshots-dialog.js`, `module-map-tools.js` download the first time they are opened. |
-| `app/ui/` | Views: `explorer-view.js`, `layout.js` (panels, phone panes, gestures), `dialogs.js` (dialogs, toasts, debug log), `bmap-view.js` and `roleplay-view.js` (on demand), the format toolbar. |
+| `app/ui/` | Views: `explorer-view.js`, `layout.js` (panels, phone panes, gestures), `dialogs.js` (dialogs, toasts, debug log), `bmap-view.js` and `chats-view.js` (on demand), the format toolbar. |
 | `app/services/`, `app/domain/` | Storage, sync, chat API, parsers and the project model, with no DOM wiring. |
 
 How the split modules reach `main.js`'s state: each exports a factory that
