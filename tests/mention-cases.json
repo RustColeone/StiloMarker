@@ -1,0 +1,22 @@
+{
+  "handles": ["aria", "old-hermit", "李白", "bram"],
+  "cases": [
+    {"text": "@old-hermit, then @aria. @aria again", "expect": ["old-hermit", "aria"]},
+    {"text": "mail aria@ship.com or @bob", "expect": []},
+    {"text": "(@ARIA) what now?", "expect": ["aria"]},
+    {"text": "@李白 写首诗", "expect": ["李白"]},
+    {"text": "@aria first, then @all", "expect": ["aria", "old-hermit", "李白", "bram"]},
+    {"text": "@everyone", "expect": ["aria", "old-hermit", "李白", "bram"]},
+    {"text": "no mention here", "expect": []},
+    {"text": "@aria-", "expect": ["aria"]},
+    {"text": "@bram\n@aria", "expect": ["bram", "aria"]},
+    {"text": "x@aria y_@bram .@aria", "expect": []},
+    {"text": "“@aria” said", "expect": ["aria"]}
+  ],
+  "handleCases": [
+    {"path": "a/b/Captain Aria.persona.skill", "expect": "captain-aria"},
+    {"path": "李白.persona.skill", "expect": "李白"},
+    {"path": "!!!.persona.skill", "expect": "character"},
+    {"path": "Old  Hermit.persona.skill", "expect": "old-hermit"}
+  ]
+}

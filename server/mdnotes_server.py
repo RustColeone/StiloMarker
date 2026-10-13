@@ -31,6 +31,7 @@ _mcp_module_dir = str(Path(__file__).resolve().parent)
 if _mcp_module_dir not in sys.path:
     sys.path.insert(0, _mcp_module_dir)
 from mcp_client import MCPManager, MCPTurn
+from conversations import SIDE_FILES as CHAT_DB_FILES, ProjectChats, char_key, persona_handle, user_key
 from openai_support import IMAGE_FORMATS, IMAGE_SIZES, GeneratedImages, OpenAIProvider, is_openai_model, uses_fixed_temperature
 
 
@@ -1391,6 +1392,9 @@ class CollaborationBroker:
         self.operation_log_max = 2000
         # Called just before a destructive change (see WorkspaceRegistry backups).
         self.on_before_destructive = None
+        # Called with (broker, old_path, new_path) after a rename or move, so
+        # things that refer to files by path (chat characters) can follow.
+        self.on_paths_moved = None
         # Per-revision author tracking for sole-author revert (Phase 2 / subtask 2.1).
         self.revision_authors: dict[int, str] = {}
         # Bounded snapshot history for revert-to-revision (Phase 2 / subtask 2.2).
@@ -1485,6 +1489,24 @@ class CollaborationBroker:
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     _atomic_write(dest, data)
                     node["content"] = ""
+
+    def _paths_moved(self, operation: dict):
+        op_type = operation.get("type")
+        if self.on_paths_moved is None or op_type not in ("rename-node", "move-node"):
+            return
+        old = str(operation.get("path", "")).strip("/")
+        base = old.rsplit("/", 1)[-1]
+        if op_type == "rename-node":
+            parent = old.rsplit("/", 1)[0] if "/" in old else ""
+            name = str(operation.get("name", ""))
+        else:
+            parent, name = str(operation.get("parentPath", "")).strip("/"), base
+        new = f"{parent}/{name}" if parent else name
+        if old and name and old != new:
+            try:
+                self.on_paths_moved(self, old, new)
+            except Exception as error:  # noqa: BLE001 — never fail the change itself
+                _log("CHATS", f"path-move hook failed: {error}")
 
     def _before_destructive(self, reason: str):
         hook = self.on_before_destructive
@@ -1690,6 +1712,15 @@ class CollaborationBroker:
                 continue
             subscriber.put(event)
 
+    def _broadcast_to_users(self, usernames, event):
+        """Send an event only to the sessions of these accounts (private chats)."""
+        wanted = set(usernames)
+        with self.lock:
+            targets = [subscriber for token, subscriber in self.subscribers.items()
+                       if self.presence.get(token, {}).get("user") in wanted]
+        for subscriber in targets:
+            subscriber.put(event)
+
     def _broadcast_presence(self, message: str):
         presence_snapshot = self.get_presence()
         self._broadcast({
@@ -1883,7 +1914,7 @@ class CollaborationBroker:
         if self.workspace_dir is None or not self.workspace_dir.exists():
             return
         for child in self.workspace_dir.iterdir():
-            if child.name in ("access.json", "user-state.json", "comments.json", "chat.json"):
+            if child.name in ("access.json", "user-state.json", "comments.json", "chat.json", *CHAT_DB_FILES):
                 continue
             self._remove_path(child)
 
@@ -2414,6 +2445,7 @@ class CollaborationBroker:
             # Remember when this file last changed, so a later whole-file write
             # based on an older revision can be refused instead of overwriting it.
             self._note_path_changed(operation)
+            self._paths_moved(operation)
             self._persist_state()
             self.revision_authors[self.revision] = client_id  # subtask 2.1
             # Snapshot after apply (subtask 2.2); trim per retention rule (Decision Q4).
@@ -2598,6 +2630,9 @@ class WorkspaceRegistry:
         self.lock = threading.RLock()
         self._snapshot_lock = threading.Lock()  # guards data/_snapshots index writes
         self._backup_lock = threading.RLock()   # guards data/_backups (re-entered by a safety backup)
+        self._chat_stores: dict[str, ProjectChats] = {}  # workspace id -> its chats database
+        self._chat_stores_lock = threading.Lock()
+        self.on_chat_message = None  # set by the server: (team, relpath, conversation, message, sender) -> None
         self.pin = pin
         self.master_pin = master_pin or pin
         self.accounts = accounts or AccountStore(None)
@@ -2677,6 +2712,7 @@ class WorkspaceRegistry:
             except (OSError, ValueError, json.JSONDecodeError) as error:
                 _log("WORKSPACE", f"Migration failed for {team}/{name}: {error}")
         broker.on_before_destructive = self.backup_before_destructive  # safety backups
+        broker.on_paths_moved = self._chat_paths_moved
         return broker
 
     def _require_account(self, token: str) -> dict:
@@ -2714,7 +2750,7 @@ class WorkspaceRegistry:
 
     # ---- File-browser navigation (nested folders + per-project access) ---------
     # Files that are storage bookkeeping, never shown as browseable entries.
-    _RESERVED_NAMES = {"index.json", "access.json", "manifest.json", "user-state.json", "comments.json", "chat.json"}
+    _RESERVED_NAMES = {"index.json", "access.json", "manifest.json", "user-state.json", "comments.json", "chat.json", *CHAT_DB_FILES}
 
     def _safe_relpath(self, path: str) -> str:
         """Sanitize a '/'-separated path relative to a team dir. Each segment is
@@ -3398,7 +3434,30 @@ class WorkspaceRegistry:
                     made += 1
             except Exception as error:  # noqa: BLE001 — one workspace must not stop the others
                 _log("BACKUP", f"daily backup failed for {workspace_id}: {error}")
+        self._backup_chats(now)
         return made
+
+    CHAT_BACKUP_DAYS = 14
+
+    def _backup_chats(self, now=None):
+        """A daily copy of each open project's chats, on days they changed."""
+        if self.data_dir is None:
+            return
+        day = time.strftime("%Y-%m-%d", time.gmtime(time.time() if now is None else now))
+        with self._chat_stores_lock:
+            stores = list(self._chat_stores.items())
+        for workspace_id, store in stores:
+            if getattr(store, "backed_up_version", None) == store.version:
+                continue
+            team, relpath = workspace_id.split("/", 1)
+            try:
+                folder = self._backup_dir(team, relpath) / "chats"
+                store.backup_to(folder / f"{day}.sqlite")
+                store.backed_up_version = store.version
+                for old in sorted(folder.glob("*.sqlite"))[:-self.CHAT_BACKUP_DAYS]:
+                    old.unlink(missing_ok=True)
+            except Exception as error:  # noqa: BLE001
+                _log("BACKUP", f"chat backup failed for {workspace_id}: {error}")
 
     def list_backups(self, token, team, path):
         _, team, relpath = self._project_authorize(token, team, path)
@@ -3671,9 +3730,185 @@ class WorkspaceRegistry:
             # session can't recreate files after the tree is gone.
             for wid in [w for w in self.brokers if w == workspace_id or w.startswith(workspace_id + "/")]:
                 self.brokers.pop(wid, None)
+            self._close_chat_stores(workspace_id)
             shutil.rmtree(target)
         _log("WORKSPACE", f"{identity['username']} deleted {workspace_id}")
         return {"team": team, "path": relpath, "deleted": True}
+
+    # ---- Chats: conversations between a project's people and characters --------
+    # One SQLite database per project (server/conversations.py). Everything needs
+    # a signed-in account with access to the project; a conversation's contents
+    # only ever go to its members.
+
+    def chat_store(self, team: str, relpath: str) -> ProjectChats:
+        workspace_id = f"{team}/{relpath}"
+        with self._chat_stores_lock:
+            store = self._chat_stores.get(workspace_id)
+            if store is None:
+                store = ProjectChats(self._abs_under_team(team, relpath) / CHAT_DB_FILES[0])
+                self._chat_stores[workspace_id] = store
+            return store
+
+    def _close_chat_stores(self, workspace_id: str = None) -> None:
+        with self._chat_stores_lock:
+            for wid in [w for w in self._chat_stores if workspace_id is None or w == workspace_id or w.startswith(workspace_id + "/")]:
+                try:
+                    self._chat_stores.pop(wid).close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def _chat_paths_moved(self, broker, old_path: str, new_path: str) -> None:
+        workspace_id = self._workspace_id_of(broker)
+        if not workspace_id or "/" not in workspace_id:
+            return
+        team, relpath = workspace_id.split("/", 1)
+        db_path = self._abs_under_team(team, relpath) / CHAT_DB_FILES[0]
+        if not db_path.exists() and workspace_id not in self._chat_stores:
+            return  # no chats yet: nothing to follow
+        if self.chat_store(team, relpath).rename_character_paths(old_path, new_path):
+            broker._broadcast({"type": "chat-update", "reason": "characters-moved", "serverTime": time.time()})
+
+    def _chat_context(self, token: str, team: str, path: str):
+        identity, team, relpath = self._project_authorize(token, team, path)
+        return identity, team, relpath, self.chat_store(team, relpath), user_key(identity["username"])
+
+    def _project_snapshot(self, team: str, relpath: str) -> dict:
+        broker = self.get_broker(f"{team}/{relpath}")
+        if broker is None:
+            broker = CollaborationBroker(self.pin, None, master_pin=self.master_pin,
+                                         workspace_dir=self._abs_under_team(team, relpath))
+        with broker.lock:
+            return copy.deepcopy(broker.project)
+
+    @staticmethod
+    def _persona_name(content: str, path: str) -> str:
+        match = re.match(r"\ufeff?---[ \t]*\r?\n([\s\S]*?)\r?\n---", str(content or ""))
+        if match:
+            for line in match.group(1).splitlines():
+                key, _, value = line.partition(":")
+                if key.strip().lower() == "name":
+                    value = re.sub(r"\s+#.*$", "", value.strip()).strip().strip('"\'')
+                    if value:
+                        return value[:80]
+        base = path.rsplit("/", 1)[-1]
+        return base[: -len(".persona.skill")] if base.lower().endswith(".persona.skill") else base
+
+    def chat_characters(self, team: str, relpath: str, project: dict | None = None) -> list[dict]:
+        project = project or self._project_snapshot(team, relpath)
+        out = []
+        for node_id, node in project.get("nodes", {}).items():
+            name = node.get("name", "")
+            if node.get("kind") != "file" or not name.lower().endswith(".persona.skill"):
+                continue
+            path = self._node_path(project, node_id)
+            out.append({"key": char_key(path), "path": path, "name": self._persona_name(node.get("content", ""), path),
+                        "handle": persona_handle(path), "content": node.get("content", "")})
+        return sorted(out, key=lambda c: c["name"].lower())
+
+    @staticmethod
+    def _node_path(project: dict, node_id: str) -> str:
+        nodes, parts = project.get("nodes", {}), []
+        while node_id and node_id in nodes and nodes[node_id].get("parentId") is not None:
+            parts.append(nodes[node_id]["name"])
+            node_id = nodes[node_id].get("parentId")
+        return "/".join(reversed(parts))
+
+    def chat_people(self, team: str, relpath: str) -> list[dict]:
+        broker = self.get_broker(f"{team}/{relpath}")
+        online = set()
+        if broker is not None:
+            with broker.lock:
+                online = {entry.get("user") for entry in broker.presence.values() if entry.get("user")}
+        people = []
+        for username in sorted(self.accounts.team_members(team), key=str.lower):
+            identity = {"username": username, "teams": self.accounts.teams_for(username)}
+            if self.can_access(identity, team, relpath):
+                people.append({"key": user_key(username), "username": username, "name": username,
+                               "online": username in online})
+        return people
+
+    def chats_overview(self, token: str, team: str, path: str) -> dict:
+        identity, team, relpath, store, me = self._chat_context(token, team, path)
+        characters = [{k: v for k, v in c.items() if k != "content"} for c in self.chat_characters(team, relpath)]
+        return {"me": me, "conversations": store.list_for(me), "people": self.chat_people(team, relpath),
+                "characters": characters, "notes": store.notes_for(me)}
+
+    def chats_messages(self, token, team, path, conversation_id, before=None, after=None) -> dict:
+        _, team, relpath, store, me = self._chat_context(token, team, path)
+        return {"conversation": store.get(me, conversation_id),
+                "messages": store.messages(me, conversation_id, before=before, after=after)}
+
+    def _validate_chat_members(self, team: str, relpath: str, keys) -> list[str]:
+        """Only people with access and characters that exist may join a chat."""
+        people = {p["key"] for p in self.chat_people(team, relpath)}
+        characters = {c["key"] for c in self.chat_characters(team, relpath)}
+        out = []
+        for key in keys or []:
+            key = str(key)
+            if key not in people and key not in characters:
+                raise ValueError("Someone you picked isn't in this project")
+            out.append(key)
+        return out
+
+    def _chat_notify(self, team: str, relpath: str, store: ProjectChats, conversation_id, event: dict) -> None:
+        broker = self.get_broker(f"{team}/{relpath}")
+        if broker is None:
+            return
+        users = [key[5:] for key in store.members(conversation_id) if key.startswith("user:")]
+        try:
+            broker._broadcast_to_users(users, {**event, "conversationId": int(conversation_id), "serverTime": time.time()})
+        except Exception:  # noqa: BLE001 — a broadcast never fails the write that caused it
+            pass
+
+    def chats_start(self, token, team, path, members) -> dict:
+        _, team, relpath, store, me = self._chat_context(token, team, path)
+        conversation, created = store.start(me, self._validate_chat_members(team, relpath, members))
+        if created:
+            self._chat_notify(team, relpath, store, conversation["id"], {"type": "chat-update", "reason": "created"})
+        return {"conversation": conversation, "created": created}
+
+    def chats_send(self, token, team, path, conversation_id, content, context_paths=None, options=None) -> dict:
+        identity, team, relpath, store, me = self._chat_context(token, team, path)
+        message = store.send(me, conversation_id, content, identity["username"], context_paths)
+        self._chat_notify(team, relpath, store, conversation_id, {"type": "chat-message", "message": message})
+        conversation = store.get(me, conversation_id)
+        hook = self.on_chat_message
+        if hook is not None:
+            hook(self, team, relpath, conversation, message, identity, options or {})
+        return {"message": message, "conversation": conversation}
+
+    def chats_invite(self, token, team, path, conversation_id, members) -> dict:
+        _, team, relpath, store, me = self._chat_context(token, team, path)
+        conversation, created = store.invite(me, conversation_id, self._validate_chat_members(team, relpath, members))
+        self._chat_notify(team, relpath, store, conversation["id"], {"type": "chat-update", "reason": "members"})
+        return {"conversation": conversation, "created": created}
+
+    def chats_leave(self, token, team, path, conversation_id) -> dict:
+        _, team, relpath, store, me = self._chat_context(token, team, path)
+        store.leave(me, conversation_id)
+        self._chat_notify(team, relpath, store, conversation_id, {"type": "chat-update", "reason": "members"})
+        return {"left": True}
+
+    def chats_rename(self, token, team, path, conversation_id, title) -> dict:
+        _, team, relpath, store, me = self._chat_context(token, team, path)
+        conversation = store.rename(me, conversation_id, title)
+        self._chat_notify(team, relpath, store, conversation_id, {"type": "chat-update", "reason": "title"})
+        return {"conversation": conversation}
+
+    def chats_read(self, token, team, path, conversation_id, message_id) -> dict:
+        _, team, relpath, store, me = self._chat_context(token, team, path)
+        store.mark_read(me, conversation_id, message_id)
+        return {"conversation": store.get(me, conversation_id)}
+
+    def chats_search(self, token, team, path, conversation_id, query) -> dict:
+        _, team, relpath, store, me = self._chat_context(token, team, path)
+        return {"results": store.search(me, conversation_id, query)}
+
+    def chats_note(self, token, team, path, contact, alias=None, note=None) -> dict:
+        _, team, relpath, store, me = self._chat_context(token, team, path)
+        if alias is None and note is None:
+            return store.notes_for(me).get(str(contact), {"alias": "", "note": ""})
+        return store.set_note(me, contact, alias or "", note or "")
 
     def export_project(self, token: str, team: str, path: str) -> dict:
         """Return a portable copy of a project as ``{name, project}`` where
@@ -3778,6 +4013,7 @@ class WorkspaceRegistry:
             self.pin, None, master_pin=self.master_pin, workspace_dir=workspace_dir
         )
         broker.on_before_destructive = self.backup_before_destructive  # safety backups
+        broker.on_paths_moved = self._chat_paths_moved
         return broker
 
     def create_workspace(self, token: str, team: str, name: str, share_team: bool = False) -> dict:
@@ -4085,6 +4321,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_get_access(parsed)
         if parsed.path == "/api/comments":
             return self._handle_comments_get(parsed)
+        if parsed.path.startswith("/api/chats"):
+            return self._handle_chats(parsed)
         if parsed.path == "/api/snapshots":
             return self._handle_snapshots_get(parsed, "paths")
         if parsed.path == "/api/snapshots/versions":
@@ -4109,6 +4347,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/chats"):
+            return self._handle_chats(parsed)
         if parsed.path == "/api/chat/mcp":
             return self._handle_mcp()
         if parsed.path == "/api/chat":
@@ -4422,6 +4662,60 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         except ValueError as error:
             self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
             self._log_request(400, str(error))
+
+    # GET /api/chats[/messages|/search|/note]   POST /api/chats/<action>
+    _CHAT_ACTIONS = {
+        ("GET", "/api/chats"): "overview", ("GET", "/api/chats/messages"): "messages",
+        ("GET", "/api/chats/search"): "search", ("GET", "/api/chats/note"): "note-get",
+        ("POST", "/api/chats/start"): "start", ("POST", "/api/chats/send"): "send",
+        ("POST", "/api/chats/invite"): "invite", ("POST", "/api/chats/leave"): "leave",
+        ("POST", "/api/chats/rename"): "rename", ("POST", "/api/chats/read"): "read",
+        ("POST", "/api/chats/note"): "note-set",
+    }
+
+    def _handle_chats(self, parsed):
+        action = self._CHAT_ACTIONS.get((self.command, parsed.path.rstrip("/")))
+        if action is None:
+            return self._write_json(HTTPStatus.NOT_FOUND, {"message": "Unknown chats request"})
+        try:
+            token = self._extract_token(parsed)
+            query = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+            body = self._read_json() if self.command == "POST" else {}
+            if not isinstance(body, dict):
+                raise ValueError("Expected a JSON object")
+            arg = lambda key, default=None: body.get(key, query.get(key, default))
+            team, path, cid = str(arg("team", "")), str(arg("path", "")), arg("id")
+            r = self.registry
+            if action == "overview":
+                result = r.chats_overview(token, team, path)
+            elif action == "messages":
+                result = r.chats_messages(token, team, path, cid, before=arg("before"), after=arg("after"))
+            elif action == "search":
+                result = r.chats_search(token, team, path, cid, str(arg("q", "")))
+            elif action == "note-get":
+                result = r.chats_note(token, team, path, str(arg("contact", "")))
+            elif action == "note-set":
+                result = r.chats_note(token, team, path, str(arg("contact", "")), str(arg("alias", "")), str(arg("note", "")))
+            elif action == "start":
+                result = r.chats_start(token, team, path, arg("members") or [])
+            elif action == "send":
+                result = r.chats_send(token, team, path, cid, str(arg("content", "")), arg("contextPaths") or [],
+                                      {"model": arg("model"), "runner": arg("runner"), "accountToken": token})
+            elif action == "invite":
+                result = r.chats_invite(token, team, path, cid, arg("members") or [])
+            elif action == "leave":
+                result = r.chats_leave(token, team, path, cid)
+            elif action == "rename":
+                result = r.chats_rename(token, team, path, cid, str(arg("title", "")))
+            else:  # read
+                result = r.chats_read(token, team, path, cid, int(arg("messageId", 0) or 0))
+            self._write_json(HTTPStatus.OK, result)
+        except PermissionError as error:
+            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error) or "Sign in to use Chats"})
+        except LookupError as error:
+            self._write_json(HTTPStatus.NOT_FOUND, {"message": str(error.args[0]) if error.args else "Not found"})
+        except (ValueError, TypeError) as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
 
     def _handle_comments_get(self, parsed):
         try:
@@ -5146,6 +5440,7 @@ def build_server(host: str, port: int, pin: str, static_root: Path, state_file: 
                 registry.backup_sweep()
             except Exception as error:  # noqa: BLE001
                 _log("BACKUP", f"shutdown backup sweep failed: {error}")
+            registry._close_chat_stores()
             super().server_close()
 
     server = ServerWithPresenceSweep((host, port), handler)
