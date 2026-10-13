@@ -351,3 +351,29 @@ including the new `agent-images-browser.py`.
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261012T183821Z-v0.1.27`.
 Nine project manifests valid, 153/153 files.
 
+
+## Verified release: v0.1.28
+
+Deployed on 2026-10-13 at 04:52 UTC. Chats replaces Roleplay (private chats
+and groups with a project's people and characters, live to members only,
+stored per project in `conversations.sqlite`; replies by the server or by a
+member's own browser), the chat panel polish (model picker and status in the
+compose card, history search/rename/delete), and the code split (on-demand
+modules, `main.js` broken up). App version `0.1.28`; sync compatibility raised
+to `117`, because older tabs would keep writing Roleplay group threads into the
+shared chat. 61 files changed.
+
+Public checks: ping (`0.1.28`, `minSyncVersion` 117), the
+`mdnotes-shell-v0.1.28` cache label, seven assets byte-identical (including
+the new `chats-view.js` and `direct-model-service.js`), `/api/chats` refusing a
+signed-out request with 403, server files answered only by the app shell. The
+restart log is clean and OpenAI's models loaded as before. No live chat between
+two accounts or real-model character reply has been made yet.
+Validation: 166 Node tests, the Python suites including the new
+`conversations.test.py` (29 tests), the backend self-test, and twelve browser
+suites including the new `chats-browser.py` (real backend, two accounts, fake
+streaming model and a browser-run local model) and `chats-local-browser.py`.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261013T045217Z-v0.1.28`.
+Nine project manifests valid, 153/153 files.
+
