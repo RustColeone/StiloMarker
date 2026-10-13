@@ -42,7 +42,7 @@ async def main():
             path = urlparse(route.request.url).path
             if path.startswith('/api/'):
                 payload = {}
-                if path == '/api/ping': payload = {'accounts': True, 'appVersion': '0.1.22', 'minSyncVersion': 116}
+                if path == '/api/ping': payload = {'accounts': True, 'appVersion': '0.1.22', 'minSyncVersion': 117}
                 elif path == '/api/auth/login': payload = {'token': 'account-1', 'username': 'test-user', 'teams': ['friends']}
                 elif path == '/api/workspaces/open':
                     payload = {'token': 'session-1', 'clientId': 'c', 'workspace': 'friends/Novel', 'revision': 1,

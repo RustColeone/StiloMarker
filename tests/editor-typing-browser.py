@@ -61,7 +61,7 @@ async def main():
                 await route.continue_(); return
             path = parsed.path
             if path.startswith('/api/'):
-                payload = {'appVersion': '0.1.22', 'minSyncVersion': 116, 'accounts': False} if path == '/api/ping' else {'configured': False}
+                payload = {'appVersion': '0.1.22', 'minSyncVersion': 117, 'accounts': False} if path == '/api/ping' else {'configured': False}
                 await route.fulfill(status=200, content_type='application/json', body=json.dumps(payload)); return
             file = ROOT / (path.lstrip('/') or 'index.html')
             if file.is_file():

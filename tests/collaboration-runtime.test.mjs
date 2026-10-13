@@ -243,7 +243,7 @@ test('a scheduled whole-project publish keeps its original revision', async (t) 
     operation: { type: 'update-file', path: 'note.md', content: 'peer changed', baseRevision: 1 } });
   await h.tick(120);
   assert.equal(states[0].baseRevision, 1);
-  assert.equal(states[0].version, 116);
+  assert.equal(states[0].version, 117);
   assert.equal(h.local().nodes.file.content, 'peer changed');
 });
 

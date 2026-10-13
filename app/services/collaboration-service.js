@@ -6,7 +6,7 @@ function fingerprintProject(project) {
   return JSON.stringify(sanitizeProjectForSync(project));
 }
 
-function createCollaborationRuntime({ getProject, replaceProject, applyOperation, onStatusChange, onRemoteCursor, onPatchConfirmed, onHostCounters, onChatWorkspaceUpdate, onCommentsUpdate, preserveLocalFiles, reauthenticate }) {
+function createCollaborationRuntime({ getProject, replaceProject, applyOperation, onStatusChange, onRemoteCursor, onPatchConfirmed, onHostCounters, onChatWorkspaceUpdate, onCommentsUpdate, onChatEvent, preserveLocalFiles, reauthenticate }) {
   let connection = null;
   let isApplyingRemote = false;
   let pendingTextPatches = new Map();
@@ -915,6 +915,12 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
     // every tab of theirs in step too.
     if (event.type === "comments") {
       if (typeof onCommentsUpdate === "function") onCommentsUpdate(event.files ?? {});
+      return;
+    }
+
+    // Chats (people and characters): the server only sends these to members.
+    if (event.type === "chat-message" || event.type === "chat-typing" || event.type === "chat-update") {
+      if (typeof onChatEvent === "function") onChatEvent(event);
       return;
     }
 

@@ -72,7 +72,9 @@ BACKUP_SWEEP_SECONDS = _read_int_env("MDNOTES_BACKUP_SWEEP_SECONDS", 15 * 60, 60
 
 # 116: Roleplay group chats keep `kind`/`members` on threads and `speaker` on
 # messages; older tabs drop those fields when they save the shared chat.
-MIN_CLIENT_VERSION = _read_int_env("MDNOTES_MIN_CLIENT_VERSION", 116, 0, 1_000_000)
+# 117: Chats replaced Roleplay; older tabs would keep writing Roleplay group
+# threads into the shared chat after they have been moved into Chats.
+MIN_CLIENT_VERSION = _read_int_env("MDNOTES_MIN_CLIENT_VERSION", 117, 0, 1_000_000)
 
 # A writing "sitting": edits to one file separated by less than this gap belong
 # to the same session. It is the E in the S.E.N version label — snapshots you
@@ -3989,6 +3991,30 @@ class WorkspaceRegistry:
         typing("end")
         self._chat_notify(team, relpath, store, cid, {"type": "chat-message", "message": message})
 
+    def chats_import(self, token, team, path, title, characters, messages) -> dict:
+        """One old Roleplay group chat (from the agent's thread list) becomes a
+        group conversation of the importer and its characters."""
+        identity, team, relpath, store, me = self._chat_context(token, team, path)
+        existing = {c["path"] for c in self.chat_characters(team, relpath)}
+        members = [char_key(p) for p in dict.fromkeys(str(p) for p in (characters or [])) if p in existing]
+        rows = []
+        for message in (messages or [])[:5000]:
+            if not isinstance(message, dict):
+                continue
+            role, speaker = message.get("role"), str(message.get("speaker") or "")
+            if role == "user":
+                author, name = me, str(message.get("authorName") or identity["username"])
+            elif role == "assistant" and char_key(speaker) in members:
+                author, name = char_key(speaker), str(message.get("speakerName") or "")
+            else:
+                continue
+            created = message.get("createdAt")
+            rows.append({"author": author, "author_name": name, "content": str(message.get("content", "")),
+                         "created_at": (float(created) / 1000 if isinstance(created, (int, float)) and created > 1e11 else created),
+                         "state": "interrupted" if message.get("interrupted") else "done"})
+        conversation = store.import_group(me, str(title or "")[:120], members, rows)
+        return {"conversation": conversation}
+
     def chats_stop(self, token, team, path, conversation_id) -> dict:
         _, team, relpath, store, me = self._chat_context(token, team, path)
         store.get(me, conversation_id)  # members only
@@ -4788,6 +4814,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         ("POST", "/api/chats/invite"): "invite", ("POST", "/api/chats/leave"): "leave",
         ("POST", "/api/chats/rename"): "rename", ("POST", "/api/chats/read"): "read",
         ("POST", "/api/chats/note"): "note-set", ("POST", "/api/chats/stop"): "stop",
+        ("POST", "/api/chats/import"): "import",
     }
 
     def _handle_chats(self, parsed):
@@ -4826,6 +4853,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
                 result = r.chats_rename(token, team, path, cid, str(arg("title", "")))
             elif action == "stop":
                 result = r.chats_stop(token, team, path, cid)
+            elif action == "import":
+                result = r.chats_import(token, team, path, arg("title", ""), arg("characters") or [], arg("messages") or [])
             else:  # read
                 result = r.chats_read(token, team, path, cid, int(arg("messageId", 0) or 0))
             self._write_json(HTTPStatus.OK, result)

@@ -155,14 +155,14 @@ class PersonaTurnTests(unittest.TestCase):
         self.assertIn(b'"type": "result"', b''.join(written))
 
     def test_stale_tabs_are_refused(self):
-        self.assertEqual(server.MIN_CLIENT_VERSION, 116)
+        self.assertEqual(server.MIN_CLIENT_VERSION, 117)
         handler = object.__new__(server.MDNotesRequestHandler)
         results = []
         handler._write_json = lambda status, body: results.append((status, body))
         handler._log_request = lambda *a: None
-        self.assertTrue(handler._refuse_if_stale(115))
+        self.assertTrue(handler._refuse_if_stale(116))
         self.assertEqual(results[0][0], 426)
-        self.assertFalse(handler._refuse_if_stale(116))
+        self.assertFalse(handler._refuse_if_stale(117))
 
 
 if __name__ == '__main__':

@@ -804,7 +804,7 @@ function buildTextDiffHunks(oldText, newText) {
 }
 
 // ---- Chat panel ------------------------------------------------------------
-// The Agent / Roleplay panel lives in app/features/chat-panel.js. It loads the
+// The Agent / Chats panel lives in app/features/chat-panel.js. It loads the
 // first time it is needed — the panel shown, Settings open (Agent status), or a
 // character file renamed — so sessions that never open it don't download it.
 let chat = null;
@@ -817,6 +817,7 @@ function chatNeeded() {
 function loadChat() {
   chatLoading ??= import("./features/chat-panel.js").then(({ createChatPanel }) => {
     chat = createChatPanel({
+      cloudWorkspaceTarget,
       agentCheckpoints, agentPendingDecorations, buildTextDiffHunks, captureAgentCheckpoint, chatConnectionInfo,
       chatWorkspaceKey, clearAgentDecorations, collaboration, controller, createFileInFolder, elements,
       escapeHtmlAttribute, getSelectedParent, isMobileLayout, jumpToAgentChange, logDebug, notify,
@@ -1124,6 +1125,9 @@ function getSelectedTarget() {
 
 // The extension to manage for a filename ("" for folders / no extension).
 function fileExtensionOf(name) {
+  // A character file's extension is the whole ".persona.skill": renaming
+  // "aria.persona.skill" to "captain" must keep it a character file.
+  if (isPersonaFileName(name) && name.length > PERSONA_SUFFIX.length) return name.slice(-PERSONA_SUFFIX.length);
   const dot = String(name || "").lastIndexOf(".");
   return dot > 0 ? name.slice(dot) : "";
 }
@@ -1671,6 +1675,10 @@ const collaboration = createCollaborationRuntime({
     if (!commentsAvailable()) return;
     lineComments.byFile = new Map(Object.entries(files ?? {}));
     renderEditorFromModel();
+  },
+  onChatEvent(event) {
+    // Chats: a message, a character's reply being written, or a change.
+    chat?.receiveChatEvent(event);
   },
   onChatWorkspaceUpdate(workspace) {
     // Without the panel loaded nothing listens; it fetches the latest on load.

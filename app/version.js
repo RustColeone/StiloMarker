@@ -2,4 +2,4 @@
 // Update release versions with: node tools/release-version.mjs MAJOR.MINOR.PATCH
 export const APP_VERSION = "0.1.27";
 // Monotonic wire compatibility level; bump only when old sync clients must stop.
-export const SYNC_PROTOCOL_VERSION = 116;
+export const SYNC_PROTOCOL_VERSION = 117;

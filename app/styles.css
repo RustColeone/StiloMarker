@@ -5443,7 +5443,7 @@ menu {
   flex-grow: 0;
 }
 
-/* Agent | Roleplay tabs, where the panel title used to be. */
+/* Agent | Chats tabs, where the panel title used to be. */
 /* The tabs never shrink: the status badge and model picker give up space
    first (they ellipsize), so a long server status can't cover a tab. */
 .chat-tabs {
@@ -5479,7 +5479,7 @@ menu {
   border-bottom-color: var(--accent);
 }
 
-.chat-panel.is-roleplay #chat-mcp-summary {
+.chat-panel.is-chats #chat-mcp-summary {
   display: none;
 }
 
@@ -7055,4 +7055,270 @@ pre.proposal-diff-block {
 
 .chat-empty-hint {
   font-size: 11px;
+}
+
+/* ─ Chats (people and characters) ─────────────────────────────────────── */
+
+/* Unread count on the Chats tab. */
+.chat-tab[data-unread]:not([data-unread=""])::after {
+  content: attr(data-unread);
+  display: inline-block;
+  min-width: 16px;
+  margin-left: 5px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  letter-spacing: 0;
+  text-align: center;
+}
+
+/* Outside a conversation there is nothing to write into. */
+.chat-panel.is-chats-browse .chat-compose-shell {
+  display: none;
+}
+
+/* The header strip: list search, or the open conversation's title. */
+.chat-panel.is-chats .rp-cast {
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-height: 36px;
+  padding: 4px 8px;
+}
+
+.cv-search {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.cv-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.cv-text-btn,
+.cv-icon-btn,
+.cv-primary,
+.cv-older,
+.cv-stop {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cv-text-btn { padding: 4px 9px; }
+.cv-icon-btn { width: 26px; height: 26px; padding: 0; border-color: transparent; font-size: 16px; color: var(--text-dim); }
+.cv-icon-btn.is-active,
+.cv-icon-btn:hover { color: var(--text); background: var(--surface-2); }
+.cv-text-btn:hover,
+.cv-older:hover { background: var(--surface-2); }
+.cv-text-btn.is-danger { color: var(--danger, #c0392b); }
+.cv-primary { padding: 6px 14px; background: var(--accent); border-color: var(--accent); color: #fff; }
+.cv-primary:disabled { opacity: 0.5; cursor: default; }
+.cv-older { display: block; margin: 4px auto 8px; padding: 3px 10px; color: var(--text-dim); }
+.cv-stop { margin-left: auto; padding: 0 8px; font-size: 11px; color: var(--text-dim); }
+.cv-stop:hover { color: var(--text); border-color: var(--border-strong); }
+
+.cv-head-avatars { display: flex; flex: 0 0 auto; }
+.cv-head-avatars .persona-avatar + .persona-avatar { margin-left: -6px; box-shadow: 0 0 0 2px var(--sidebar); }
+.cv-head-avatar { width: 24px; height: 24px; font-size: 10px; }
+.cv-head-text { display: grid; flex: 1; min-width: 0; line-height: 1.2; }
+.cv-head-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-head-sub { font-size: 11px; color: var(--text-dim); }
+
+.cv-list,
+.cv-details,
+.cv-picker {
+  display: grid;
+  gap: 10px;
+  padding: 4px 8px 12px;
+}
+
+.cv-section { display: grid; gap: 2px; }
+.cv-section-title {
+  padding: 4px 6px 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.cv-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cv-row:hover,
+.cv-row:focus-visible { background: var(--surface-2); outline: none; }
+.cv-row .persona-avatar { width: 30px; height: 30px; font-size: 11px; }
+.cv-row-text { display: grid; flex: 1; min-width: 0; gap: 1px; }
+.cv-row-title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-row[data-unread] .cv-row-title { font-weight: 700; }
+.cv-row-sub { font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-row-meta { display: grid; justify-items: end; gap: 3px; flex: 0 0 auto; }
+.cv-time { font-size: 10px; color: var(--text-dim); }
+.cv-badge {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.cv-group-avatar { position: relative; flex: 0 0 auto; width: 30px; height: 30px; }
+.cv-group-avatar .persona-avatar { position: absolute; width: 20px; height: 20px; font-size: 8px; box-shadow: 0 0 0 2px var(--sidebar); }
+.cv-group-avatar .persona-avatar:first-child { top: 0; left: 0; }
+.cv-group-avatar .persona-avatar:nth-child(2) { right: 0; bottom: 0; }
+
+/* People: initials with a presence dot. */
+.cv-person { position: relative; overflow: visible; }
+.cv-person.is-online::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3dba72;
+  box-shadow: 0 0 0 2px var(--sidebar);
+}
+
+.cv-empty,
+.cv-note {
+  padding: 4px 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.cv-note {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-0);
+  padding: 7px 9px;
+}
+
+.cv-error {
+  margin: 6px 8px 0;
+  padding: 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--danger, #c0392b) 50%, transparent);
+  border-radius: 6px;
+  color: var(--danger, #c0392b);
+  font-size: 12px;
+}
+
+/* Messages: your own sit on the right; a run from one author shares a header. */
+.cv-message.is-mine {
+  margin-left: 18%;
+  border-left-color: transparent;
+  border-right: 2px solid var(--accent);
+}
+
+.cv-message.is-mine .chat-message-meta { justify-content: flex-end; }
+.cv-message.is-mine .chat-message-time { margin-left: 0; }
+.cv-message.is-compact { padding-top: 0; }
+.chat-message.cv-message.is-compact + .chat-message,
+.chat-message + .chat-message.cv-message.is-compact { border-top-color: transparent; }
+.cv-message:not(.is-mine):not(.rp-message) { border-left-color: var(--persona-color); }
+.cv-message.is-found { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cv-state { font-size: 11px; color: var(--text-dim); font-style: italic; }
+
+.cv-card { display: flex; align-items: center; gap: 12px; padding: 8px 6px; }
+.cv-card > div { flex: 1; min-width: 0; }
+.cv-card-avatar { width: 48px; height: 48px; font-size: 17px; }
+.cv-card-name { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.cv-card-sub { font-size: 12px; color: var(--text-dim); }
+
+.cv-field { display: grid; gap: 3px; padding: 2px 6px; font-size: 11px; color: var(--text-dim); }
+.cv-field input,
+.cv-field textarea {
+  padding: 5px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  resize: vertical;
+}
+
+.cv-results { display: grid; gap: 2px; margin-top: 4px; }
+.cv-result {
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cv-result:hover { background: var(--surface-2); }
+.cv-result-meta { font-size: 10px; color: var(--text-dim); }
+.cv-result-text { font-size: 12px; }
+.cv-result-text mark { background: color-mix(in srgb, var(--accent) 30%, transparent); color: inherit; border-radius: 2px; }
+
+.cv-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 6px; }
+.cv-member { display: flex; align-items: center; gap: 8px; padding: 4px 6px; font-size: 13px; }
+.cv-member .persona-avatar { width: 24px; height: 24px; font-size: 9px; }
+
+.cv-pick {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cv-pick:hover { background: var(--surface-2); }
+.cv-pick .persona-avatar { width: 26px; height: 26px; font-size: 10px; }
+.cv-pick .cv-row-sub { margin-left: auto; }
+
+@media (max-width: 900px) {
+  .cv-row, .cv-pick, .cv-result { min-height: 44px; }
+  .cv-icon-btn { width: 44px; height: 44px; }
+  .cv-text-btn, .cv-stop, .cv-primary { min-height: 36px; }
+  .cv-search { min-height: 40px; font-size: 16px; }
+}
+
+/* People's and characters' names keep their own case in Chats. */
+.cv-message .chat-message-role {
+  text-transform: none;
+  letter-spacing: 0;
 }

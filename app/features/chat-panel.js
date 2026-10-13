@@ -1,4 +1,4 @@
-// The chat panel: Agent and Roleplay tabs, conversations and their sync, the
+// The chat panel: Agent and Chats tabs, conversations and their sync, the
 // agent's turns and the edits it proposes (Keep / Drop), and the Agent status
 // in Settings. Loaded the first time the panel (or Settings) is shown; the
 // app passes in what it needs through deps.
@@ -10,13 +10,16 @@ import { createChatSynchronizer } from "../services/chat-sync-service.js";
 import { isChatNearBottom, shouldSubmitChat } from "../services/chat-ui-service.js";
 import { renderMarkdown } from "../services/markdown-service.js";
 import { createMcpControls } from "../services/mcp-ui-service.js";
-import { personaFileName } from "../services/persona-service.js";
+import { parsePersona, personaSummary } from "../services/persona-service.js";
+import { createCloudChats } from "../services/chats-api-service.js";
+import { createLocalChats } from "../services/local-chats-service.js";
 import { saveSettings } from "../services/settings-service.js";
 import { normalizeServerUrl } from "../services/sync-service.js";
 import { query } from "../ui/dom.js";
 
 export function createChatPanel(deps) {
   const {
+    cloudWorkspaceTarget,
     agentCheckpoints, agentPendingDecorations, buildTextDiffHunks, captureAgentCheckpoint,
     chatConnectionInfo, chatWorkspaceKey, clearAgentDecorations, collaboration, controller,
     createFileInFolder, elements, escapeHtmlAttribute, getSelectedParent, isMobileLayout,
@@ -26,9 +29,11 @@ export function createChatPanel(deps) {
   } = deps;
 
   let mcpControls = null;
-  // The Roleplay tab's module, loaded the first time the tab is shown.
-  let roleplay = null;
-  let roleplayLoading = null;
+  // The Chats tab's view, loaded the first time the tab is shown, and the store
+  // it reads (the server's for a cloud workspace, this browser's otherwise).
+  let chats = null;
+  let chatsLoading = null;
+  const chatsStores = new Map(); // store key -> store
 
   const legacyChatProjectId = storedProject?.id ?? "server-project";
   const legacyChatScope = settings.syncedProjectId
@@ -43,7 +48,7 @@ export function createChatPanel(deps) {
     renderedThreadId: null,
     // The chat panel's two tabs keep separate conversations: the agent's threads
     // and Roleplay group chats (thread.kind === "group").
-    tab: settings.chatTab === "roleplay" ? "roleplay" : "agent",
+    tab: settings.chatTab === "chats" || settings.chatTab === "roleplay" ? "chats" : "agent",
     activeThreadId: null,
     activeGroupThreadId: null,
     threads: [],
@@ -303,28 +308,26 @@ export function createChatPanel(deps) {
     chatSynchronizer?.schedule();
   }
 
-  function isRoleplayTab() {
-    return chatState.tab === "roleplay";
+  function isChatsTab() {
+    return chatState.tab === "chats";
   }
 
+  // The agent's threads. (Old Roleplay group threads, kind "group", are moved
+  // into Chats once and then hidden.)
   function threadInActiveTab(thread) {
-    return Boolean(thread) && !thread.deleted && (thread.kind === "group") === isRoleplayTab();
+    return Boolean(thread) && !thread.deleted && thread.kind !== "group" && !isChatsTab();
   }
 
   function setActiveThreadForTab(threadId) {
-    if (isRoleplayTab()) chatState.activeGroupThreadId = threadId;
-    else chatState.activeThreadId = threadId;
+    chatState.activeThreadId = threadId;
   }
 
   function getActiveChatThread() {
-    const id = isRoleplayTab() ? chatState.activeGroupThreadId : chatState.activeThreadId;
-    return chatState.threads.find((thread) => thread.id === id && threadInActiveTab(thread)) ?? null;
+    return chatState.threads.find((thread) => thread.id === chatState.activeThreadId && threadInActiveTab(thread)) ?? null;
   }
 
   function createThreadForActiveTab() {
-    return isRoleplayTab()
-      ? createChatThread("New Group Chat", { kind: "group", members: [] })
-      : createChatThread();
+    return createChatThread();
   }
 
   function ensureActiveChatThread() {
@@ -465,24 +468,42 @@ export function createChatPanel(deps) {
     ensureChatWorkspaceLoaded(project);
 
     const activeThread = getActiveChatThread();
-    const group = isRoleplayTab();
-    if (group && !roleplay) void loadRoleplay();
-    elements.chatPanel.classList.toggle("is-roleplay", group);
+    const group = isChatsTab();
+    if (group) ensureChats(project);
+    elements.chatPanel.classList.toggle("is-chats", group);
+    elements.chatPanel.classList.toggle("is-chats-browse", group && !chats?.composeVisible());
     for (const tab of elements.chatTabs.querySelectorAll("[data-chat-tab]")) {
       tab.setAttribute("aria-selected", String(tab.dataset.chatTab === chatState.tab));
     }
+    const unread = chats?.unreadTotal() ?? 0;
+    const chatsTabButton = elements.chatTabs.querySelector('[data-chat-tab="chats"]');
+    if (chatsTabButton && chatsTabButton.dataset.unread !== String(unread || "")) {
+      chatsTabButton.dataset.unread = unread ? String(unread) : "";
+      chatsTabButton.setAttribute("aria-label", unread ? `Chats, ${unread} unread` : "Chats");
+    }
     elements.chatCastBar.hidden = !group;
-    if (group) roleplay?.renderCast(project, activeThread);
-    const placeholder = group ? "Message the group — @name to ask someone" : "Ask the agent…";
+    if (group && chats && chats.store()?.kind === "cloud") {
+      chats.setOnline(new Set((collaboration.getPresence?.() ?? []).map((entry) => entry.user).filter(Boolean)));
+    }
+    if (group) {
+      const header = chats ? chats.headerHtml(project) : "";
+      if (elements.chatCastBar._renderedHtml !== header) { elements.chatCastBar.innerHTML = header; elements.chatCastBar._renderedHtml = header; }
+    }
+    if (elements.chatHistoryToggleButton) {
+      elements.chatHistoryToggleButton.hidden = group; // in Chats the list *is* the history
+      if (group && elements.chatHistoryPane) elements.chatHistoryPane.hidden = true;
+    }
+    const placeholder = group ? (chats?.placeholder(project) || "Message") : "Ask the agent…";
     if (elements.chatInput.placeholder !== placeholder) elements.chatInput.placeholder = placeholder;
     const messageList = elements.chatMessageList;
     // Scroll state is read (and later written) only when the conversation will
     // actually change. Reading scrollTop forces a layout of the whole page, and
     // this panel renders on many unrelated events — it was paying for laying out
     // a freshly rebuilt preview on every one of them, even while hidden.
-    const threadChanged = chatState.renderedThreadId !== activeThread?.id;
-    if (threadChanged) elements.chatInput.value = activeThread?.draft ?? "";
-    chatState.renderedThreadId = activeThread?.id;
+    const renderedKey = group ? `chats:${chats?.viewKey() ?? ""}` : activeThread?.id;
+    const threadChanged = chatState.renderedThreadId !== renderedKey;
+    if (threadChanged && !group) elements.chatInput.value = activeThread?.draft ?? "";
+    chatState.renderedThreadId = renderedKey;
     // Model picker — only meaningful when the server offers more than one model.
     const showPicker = chatState.configured && chatState.models.length > 1;
     renderChatStatus(showPicker);
@@ -540,8 +561,9 @@ export function createChatPanel(deps) {
     }
 
     // Context chips — empty string collapses the list via CSS :empty rule.
-    elements.chatContextList.innerHTML = activeThread?.contextPaths?.length
-      ? activeThread.contextPaths.map((path) => `
+    const contextPaths = group ? (chats?.contextPaths() ?? []) : (activeThread?.contextPaths ?? []);
+    elements.chatContextList.innerHTML = contextPaths.length
+      ? contextPaths.map((path) => `
           <span class="chat-context-chip">
             <span class="chat-context-chip-label">${escapeHtmlAttribute(path)}</span>
             <button type="button" data-chat-remove-context="${escapeHtmlAttribute(path)}" aria-label="Remove ${escapeHtmlAttribute(path)}">×</button>
@@ -560,7 +582,7 @@ export function createChatPanel(deps) {
       ? `<div class="chat-reasoning" aria-label="Agent thinking">${escapeHtmlAttribute(chatState.reasoningText)}</div>`
       : "";
     const thinkingHtml = group
-      ? (roleplay?.streamHtml(project, activeThread) ?? "")
+      ? (chats?.streamHtml(project) ?? "")
       : chatState.sending && chatState.turn?.threadId === activeThread?.id
       ? `<div class="chat-thinking" aria-label="Agent is working" aria-live="polite">
           ${reasoningHtml}
@@ -577,7 +599,7 @@ export function createChatPanel(deps) {
       : "";
 
     const historyHtml = group
-      ? (roleplay ? roleplay.messagesHtml(project, activeThread) : '<div class="chat-empty-state">Loading Roleplay…</div>')
+      ? (chats ? chats.contentHtml(project) : '<div class="chat-empty-state">Loading chats…</div>')
       : activeThread?.messages?.length
       ? activeThread.messages.map((message) => {
         const roleLabel = message.role === "user" ? "You" : message.role === "assistant" ? "Agent" : "System";
@@ -635,7 +657,8 @@ export function createChatPanel(deps) {
 
     // While a turn is in flight the send button becomes a Stop control — before
     // this there was no way to interrupt the agent once it started.
-    const sending = chatState.sending;
+    // In Chats the button always sends: each reply being written has its own Stop.
+    const sending = chatState.sending && !group;
     elements.chatSendButton.disabled = sending ? false : !elements.chatInput.value.trim();
     elements.chatSendButton.classList.toggle("is-stop", sending);
     elements.chatSendButton.textContent = sending ? "\u25a0" : "\u2191";
@@ -730,10 +753,8 @@ export function createChatPanel(deps) {
   }
 
   function createNewChatConversation() {
-    // A new group chat starts with the same cast as the one it replaces.
-    const previous = isRoleplayTab() ? getActiveChatThread() : null;
+    if (isChatsTab()) { chats?.newChat(); return; }
     const thread = createThreadForActiveTab();
-    if (previous) thread.members = [...previous.members];
     chatState.threads.unshift(thread);
     setActiveThreadForTab(thread.id);
     chatState.shouldScrollToBottom = true;
@@ -743,9 +764,9 @@ export function createChatPanel(deps) {
   }
 
   function setChatTab(tab) {
-    const next = tab === "roleplay" ? "roleplay" : "agent";
+    const next = tab === "chats" ? "chats" : "agent";
     if (next === chatState.tab) return;
-    roleplay?.closeMenu();
+    chats?.closeMenu();
     const current = getActiveChatThread();
     if (current) current.draft = elements.chatInput.value;
     chatState.tab = next;
@@ -757,86 +778,122 @@ export function createChatPanel(deps) {
     renderChatPanel(controller.getProject());
   }
 
-  function loadRoleplay() {
-    roleplayLoading ??= import("../ui/roleplay-view.js").then(({ createRoleplay }) => {
-      roleplay = createRoleplay({
-        elements: { chatPanel: elements.chatPanel, chatCastBar: elements.chatCastBar, chatInput: elements.chatInput },
-        chatState,
-        escapeHtml: escapeHtmlAttribute,
-        getProject: () => controller.getProject(),
-        getPath,
-        getNodeIdByPath,
-        isPersonaFileName,
-        avatarSrc: personaAvatarSrc,
-        renderMarkdown: (text) => renderMarkdown(text),
-        messageMarkdown: chatMessageMarkdown,
-        formatTime: formatChatTimestamp,
-        getActiveThread: getActiveChatThread,
-        ensureThread: ensureActiveChatThread,
-        getThread: (id) => chatState.threads.find((thread) => thread.id === id) ?? null,
-        persist: () => persistChatWorkspaceState(),
-        rerender: () => renderChatPanel(controller.getProject()),
-        session: () => ({ key: chatWorkspaceKey(), token: chatConnectionInfo()?.token }),
-        async ensureReady() {
-          if (!chatState.configured) await refreshChatStatus({ silent: true });
-          return chatState.configured ? null : chatState.detail;
-        },
-        buildRequest: (project, contextPaths) => ({
-          projectName: project.name,
-          model: chatState.selectedModel ?? undefined,
-          contextFiles: resolveChatContextFiles(project, { contextPaths }),
-          project: buildAgentProjectSnapshot(project),
-          accountToken: syncState.account?.token,
-          ...agentRequestOverride()
-        }),
-        sendChatRequest: (payload, onProgress, signal) => sendChatRequest(settings.serverUrl, payload, onProgress, signal),
-        createChatMessage,
-        openFile: (nodeId) => openFileFromExplorer(nodeId),
-        promptForName,
-        createPersona(name) {
-          try {
-            const project = controller.getProject();
-            const created = createFileInFolder("persona", getSelectedParent(project).id, personaFileName(name).replace(/\.persona\.skill$/i, ""));
-            return created ? getPath(controller.getProject(), created.id) : null;
-          } catch (error) {
-            notify(error.message);
-            return null;
-          }
-        },
-        showToast
+  // ---- Chats tab ---------------------------------------------------------------
+
+  /** The project's characters, as the local store and replies need them. */
+  function projectCharacters(project) {
+    return Object.values(project.nodes ?? {})
+      .filter((node) => node?.kind === "file" && /\.persona\.skill$/i.test(node.name))
+      .map((node) => {
+        const path = getPath(project, node.id);
+        const persona = parsePersona(node.content ?? "", path);
+        return { key: `char:${path}`, path, name: persona.name, handle: persona.handle, temperature: persona.temperature,
+          content: String(node.content ?? ""), body: persona.body };
       });
-      renderChatPanel(controller.getProject());
-      return roleplay;
-    }).catch((error) => {
-      roleplayLoading = null;
-      logDebug("response", "Roleplay failed to load", error.message);
-      showToast("Roleplay could not load. Check your connection and try again.");
-    });
-    return roleplayLoading;
   }
 
-  /** Keep group chats pointing at their characters after a local rename or
-   *  move (of the file itself or a folder above it). */
-  function remapPersonaPaths(oldPath, newPath) {
-    if (!oldPath || oldPath === newPath) return;
-    const remap = (path) => (path === oldPath ? newPath
-      : path?.startsWith(`${oldPath}/`) ? `${newPath}${path.slice(oldPath.length)}` : path);
-    let changed = false;
-    for (const thread of chatState.threads) {
-      if (thread.kind !== "group") continue;
-      const members = thread.members.map(remap);
-      if (members.some((path, index) => path !== thread.members[index])) { thread.members = members; changed = true; }
-      for (const message of thread.messages) {
-        const speaker = remap(message.speaker);
-        if (speaker !== message.speaker) { message.speaker = speaker; changed = true; }
+  /** A character's reply run in this browser (a browser-only workspace). */
+  async function runPersonaReply({ character, cast, transcript, trigger, signal, onText }) {
+    const project = controller.getProject();
+    if (!chatState.configured) await refreshChatStatus({ silent: true });
+    if (!chatState.configured) throw new Error(chatState.detail);
+    let text = "";
+    const response = await sendChatRequest(settings.serverUrl, {
+      projectName: project.name,
+      model: chatState.selectedModel ?? undefined,
+      contextFiles: resolveChatContextFiles(project, { contextPaths: trigger?.contextPaths ?? [] }),
+      project: buildAgentProjectSnapshot(project),
+      accountToken: syncState.account?.token,
+      ...agentRequestOverride(),
+      mode: "persona",
+      persona: { path: character.path, name: character.name, content: character.content, temperature: character.temperature },
+      cast: cast.map((member) => ({ name: member.name, summary: personaSummary(member.body) })),
+      messages: transcript
+    }, (event) => {
+      if (event.type === "delta") { text += event.text || ""; onText(text); }
+      else if (event.type === "status") { text = ""; onText(text); }
+    }, signal);
+    return response.message;
+  }
+
+  function chatsStoreFor(project) {
+    const target = cloudWorkspaceTarget();
+    const key = target ? `cloud:${target.serverUrl}|${target.team}/${target.path}|${target.token}` : `local:${chatWorkspaceKey(project)}`;
+    let store = chatsStores.get(key);
+    if (!store) {
+      store = target
+        ? createCloudChats(() => cloudWorkspaceTarget())
+        : createLocalChats({ workspaceKey: chatWorkspaceKey(project), listCharacters: () => projectCharacters(controller.getProject()),
+          runReply: runPersonaReply, onEvent: (event) => chats?.receive(event) });
+      chatsStores.set(key, store);
+    }
+    return store;
+  }
+
+  /** Old Roleplay group threads move into Chats once, then leave the agent's list. */
+  async function importRoleplayThreads(store) {
+    const old = chatState.threads.filter((thread) => thread.kind === "group" && !thread.deleted && thread.messages?.length);
+    for (const thread of old) {
+      try {
+        await store.importGroup(thread.title, thread.members ?? [], thread.messages);
+        thread.deleted = true;
+        thread.updatedAt = Date.now();
+      } catch (error) {
+        logDebug("response", "Roleplay chat import failed", error.message);
+        return;
       }
     }
-    if (!changed) return;
-    persistChatWorkspaceState();
-    renderChatPanel(controller.getProject()); // the move already rendered with the old paths
+    if (old.length) {
+      persistChatWorkspaceState();
+      showToast(`Moved ${old.length} Roleplay chat${old.length === 1 ? "" : "s"} into Chats`);
+      await chats?.refresh();
+    }
+  }
+
+  function ensureChats(project) {
+    if (!chats) {
+      chatsLoading ??= import("../ui/chats-view.js").then(({ createChatsView }) => {
+        chats = createChatsView({
+          elements: { chatPanel: elements.chatPanel, chatCastBar: elements.chatCastBar, chatMessageList: elements.chatMessageList, chatInput: elements.chatInput },
+          escapeHtml: escapeHtmlAttribute,
+          getNodeIdByPath,
+          avatarSrc: personaAvatarSrc,
+          renderMarkdown: (text) => renderMarkdown(text),
+          rerender: () => renderChatPanel(controller.getProject()),
+          setDraft: (text) => { elements.chatInput.value = text; },
+          sendOptions: () => ({ model: chatState.selectedModel ?? undefined }),
+          scrollToBottom: () => { chatState.shouldScrollToBottom = true; },
+          scrollToBottomIfNear: () => { if (isChatNearBottom(elements.chatMessageList)) chatState.shouldScrollToBottom = true; },
+          toast: showToast,
+          confirm: (message) => showConfirmDialog({ title: "Leave group", message, acceptLabel: "Leave" }),
+          openFile: (nodeId) => openFileFromExplorer(nodeId)
+        });
+        renderChatPanel(controller.getProject());
+        return chats;
+      }).catch((error) => {
+        chatsLoading = null;
+        logDebug("response", "Chats failed to load", error.message);
+        showToast("Chats could not load. Check your connection and try again.");
+      });
+      return;
+    }
+    const store = chatsStoreFor(project);
+    if (chats.store() !== store) {
+      chats.setStore(store);
+      void importRoleplayThreads(store);
+    }
+  }
+
+  /** A character file (or a folder holding some) moved. The server follows it
+   *  in cloud chats; this browser's own chats are updated here. */
+  function remapPersonaPaths(oldPath, newPath) {
+    if (!oldPath || oldPath === newPath) return;
+    const store = chats?.store();
+    if (store?.kind === "local") void store.renameCharacterPaths(oldPath, newPath).then(() => chats.refresh());
   }
 
   function addChatContextPath(path) {
+    if (isChatsTab()) { chats?.addContext(path); renderChatPanel(controller.getProject()); return; }
     const thread = ensureActiveChatThread();
     if (!path || thread.contextPaths.includes(path)) {
       renderChatPanel(controller.getProject());
@@ -850,6 +907,7 @@ export function createChatPanel(deps) {
   }
 
   function removeChatContextPath(path) {
+    if (isChatsTab()) { chats?.removeContext(path); renderChatPanel(controller.getProject()); return; }
     const thread = getActiveChatThread();
     if (!thread) {
       return;
@@ -1001,31 +1059,29 @@ export function createChatPanel(deps) {
 
   async function handleChatSubmit() {
     const prompt = elements.chatInput.value.trim();
-    if (!prompt || chatState.sending) {
+    if (!prompt || (chatState.sending && !isChatsTab())) {
       return;
     }
     const project = controller.getProject();
+    if (isChatsTab()) {
+      if (!chats?.composeVisible()) return;
+      elements.chatInput.value = "";
+      chats.saveDraft("");
+      renderChatPanel(project);
+      if (!(await chats.submit(prompt))) elements.chatInput.value = prompt; // keep the text if it failed
+      renderChatPanel(controller.getProject());
+      return;
+    }
     const thread = ensureActiveChatThread();
-    const group = thread.kind === "group";
-    if (group && !roleplay) return; // the Roleplay module is still loading
     const contextPaths = (thread.contextPaths ?? []).slice();
     thread.contextPaths = [];
-    const authorName = group ? (settings.displayName || syncState.account?.username || "") : "";
-    thread.messages.push(createChatMessage("user", prompt, { contextPaths, ...(authorName ? { authorName } : {}) }));
-    thread.title = thread.title === "New Chat" || thread.title === "New Group Chat" ? deriveChatTitle(prompt) : thread.title;
+    thread.messages.push(createChatMessage("user", prompt, { contextPaths }));
+    thread.title = thread.title === "New Chat" ? deriveChatTitle(prompt) : thread.title;
     thread.updatedAt = Date.now();
     sortChatThreads();
     setActiveThreadForTab(thread.id);
     elements.chatInput.value = "";
     thread.draft = "";
-    if (group) {
-      roleplay.closeMenu();
-      chatState.shouldScrollToBottom = true;
-      persistChatWorkspaceState(project);
-      renderChatPanel(controller.getProject());
-      await roleplay.respond(thread.id, prompt);
-      return;
-    }
     await runAgentTurn(thread, project);
   }
 
@@ -1504,27 +1560,32 @@ export function createChatPanel(deps) {
   });
   elements.chatComposeForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    if (chatState.sending) {
+    if (chatState.sending && !isChatsTab()) {
       stopAgentTurn(); // the send button is a Stop button mid-turn
       return;
     }
     void handleChatSubmit();
   });
   elements.chatInput.addEventListener("keydown", (event) => {
-    if (isRoleplayTab() && roleplay?.handleComposerKeydown(event)) return;
-    if (!shouldSubmitChat(event, isMobileLayout()) || chatState.sending) return;
+    if (isChatsTab() && chats?.handleComposerKeydown(event)) return;
+    if (!shouldSubmitChat(event, isMobileLayout()) || (chatState.sending && !isChatsTab())) return;
     event.preventDefault();
     void handleChatSubmit();
   });
   elements.chatInput.addEventListener("input", () => {
+    if (isChatsTab()) {
+      chats?.saveDraft(elements.chatInput.value);
+      chats?.updateMentionMenu(controller.getProject());
+      elements.chatSendButton.disabled = !elements.chatInput.value.trim();
+      return;
+    }
     const thread = ensureActiveChatThread();
     thread.draft = elements.chatInput.value;
     cacheChatWorkspace();
     // Typing a draft must not rebuild the conversation or disturb its selection.
     elements.chatSendButton.disabled = !chatState.sending && !elements.chatInput.value.trim();
-    if (isRoleplayTab()) roleplay?.updateMentionMenu();
   });
-  elements.chatInput.addEventListener("click", () => { if (isRoleplayTab()) roleplay?.updateMentionMenu(); });
+  elements.chatInput.addEventListener("click", () => { if (isChatsTab()) chats?.updateMentionMenu(controller.getProject()); });
   elements.chatTabs.addEventListener("click", (event) => {
     const button = event.target.closest("[data-chat-tab]");
     if (button) setChatTab(button.dataset.chatTab);
@@ -1536,7 +1597,13 @@ export function createChatPanel(deps) {
     if (workspace && Number.isInteger(workspace.revision)) chatSynchronizer?.receive(workspace);
   }
 
+  /** A Chats event from the server (a message, a reply being written, a change). */
+  function receiveChatEvent(event) {
+    chats?.receive(event);
+  }
+
   return {
+    receiveChatEvent,
     receiveChatWorkspace, renderChatPanel, refreshChatStatus, findBatchMessage,
     remapPersonaPaths, applyAgentSettingsStatus, ensureChatWorkspaceLoaded, chatState,
     mcpControls
