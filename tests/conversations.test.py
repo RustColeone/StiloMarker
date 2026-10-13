@@ -1,0 +1,274 @@
+"""Chats: per-project conversations between people and characters (SQLite)."""
+import importlib.util
+import json
+import queue
+import sys
+import tempfile
+import time
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'server'))
+import conversations as chats  # noqa: E402
+
+spec = importlib.util.spec_from_file_location('mdnotes_server', ROOT / 'server/mdnotes_server.py')
+server = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(server)
+
+ARIA = 'char:Cast/aria.persona.skill'
+LEO, AMY, BEN = 'user:leo', 'user:amy', 'user:ben'
+
+
+class StoreTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
+        self.store = chats.ProjectChats(Path(self.tmp.name) / chats.DB_NAME)
+        self.addCleanup(self.store.close)
+
+    def test_a_pair_is_reused_and_order_does_not_matter(self):
+        first, created = self.store.start(LEO, [AMY])
+        again, created_again = self.store.start(AMY, [LEO])
+        self.assertTrue(created); self.assertFalse(created_again)
+        self.assertEqual(first['id'], again['id'])
+        self.assertEqual(first['kind'], 'pair')
+        with self.assertRaises(ValueError):
+            self.store.start(LEO, [])  # alone
+        with self.assertRaises(ValueError):
+            self.store.start(LEO, ['amy'])  # not a member key
+
+    def test_inviting_into_a_pair_starts_a_new_group_and_keeps_the_pair(self):
+        pair, _ = self.store.start(LEO, [AMY])
+        self.store.send(LEO, pair['id'], 'just us')
+        group, created = self.store.invite(LEO, pair['id'], [BEN])
+        self.assertTrue(created)
+        self.assertNotEqual(group['id'], pair['id'])
+        self.assertEqual(group['kind'], 'group')
+        self.assertEqual(sorted(group['members']), sorted([LEO, AMY, BEN]))
+        self.assertEqual(sorted(self.store.members(pair['id'])), sorted([LEO, AMY]))
+        self.assertEqual([m['content'] for m in self.store.messages(AMY, pair['id'])], ['just us'])
+        self.assertEqual(self.store.messages(BEN, group['id']), [])  # the new group starts empty
+        # Inviting into a group adds to that same group.
+        same, created = self.store.invite(AMY, group['id'], [ARIA])
+        self.assertFalse(created); self.assertEqual(same['id'], group['id'])
+        self.assertIn(ARIA, same['members'])
+        with self.assertRaises(ValueError):
+            self.store.invite(AMY, group['id'], [ARIA])  # already there
+
+    def test_members_only(self):
+        pair, _ = self.store.start(LEO, [AMY])
+        self.store.send(LEO, pair['id'], 'secret')
+        for call in (lambda: self.store.messages(BEN, pair['id']), lambda: self.store.send(BEN, pair['id'], 'hi'),
+                     lambda: self.store.get(BEN, pair['id']), lambda: self.store.search(BEN, pair['id'], 'secret'),
+                     lambda: self.store.messages(LEO, 'nope')):
+            with self.assertRaises(LookupError):
+                call()
+        self.assertEqual(self.store.list_for(BEN), [])
+        with self.assertRaises(LookupError):
+            self.store.post_as(pair['id'], ARIA, 'Aria', 'not in this chat')
+
+    def test_unread_counts_and_read_pointer(self):
+        pair, _ = self.store.start(LEO, [AMY])
+        for text in ('one', 'two', 'three'):
+            self.store.send(LEO, pair['id'], text)
+        self.assertEqual(self.store.get(AMY, pair['id'])['unread'], 3)
+        self.assertEqual(self.store.get(LEO, pair['id'])['unread'], 0)  # your own messages are read
+        second = self.store.messages(AMY, pair['id'])[1]['id']
+        self.store.mark_read(AMY, pair['id'], second)
+        self.assertEqual(self.store.get(AMY, pair['id'])['unread'], 1)
+        self.store.mark_read(AMY, pair['id'], 10 ** 9)  # clamps to the last message
+        self.assertEqual(self.store.get(AMY, pair['id'])['unread'], 0)
+        self.store.mark_read(AMY, pair['id'], 1)  # never moves backwards
+        self.assertEqual(self.store.get(AMY, pair['id'])['unread'], 0)
+
+    def test_paging(self):
+        pair, _ = self.store.start(LEO, [AMY])
+        ids = [self.store.send(LEO, pair['id'], f'm{i}')['id'] for i in range(120)]
+        newest = self.store.messages(AMY, pair['id'])
+        self.assertEqual([m['id'] for m in newest], ids[-50:])
+        older = self.store.messages(AMY, pair['id'], before=newest[0]['id'])
+        self.assertEqual([m['id'] for m in older], ids[-100:-50])
+        since = self.store.messages(AMY, pair['id'], after=ids[-3])
+        self.assertEqual([m['id'] for m in since], ids[-2:])
+
+    def test_search_with_full_text_and_without(self):
+        pair, _ = self.store.start(LEO, [AMY])
+        self.store.send(LEO, pair['id'], 'The lighthouse keeper hid a letter')
+        self.store.send(AMY, pair['id'], 'Ask her about the letters')
+        self.store.send(LEO, pair['id'], 'Something else: 50% off')
+        for fts in (True, False):
+            self.store.fts = fts and self.store.fts
+            found = self.store.search(AMY, pair['id'], 'lett')
+            self.assertEqual(len(found), 2, f'fts={self.store.fts}')
+            self.assertEqual(len(self.store.search(AMY, pair['id'], 'lighthouse letter')), 1)
+            self.assertEqual(len(self.store.search(AMY, pair['id'], '50%')), 1)
+            self.assertEqual(self.store.search(AMY, pair['id'], '   '), [])
+            self.assertEqual(self.store.search(AMY, pair['id'], 'quote"s'), [])
+        self.assertTrue(chats.ProjectChats(Path(self.tmp.name) / 'other.sqlite').fts, 'this SQLite has FTS5')
+
+    def test_notes_are_private_to_their_owner(self):
+        self.store.set_note(LEO, AMY, alias='Captain', note='plays Aria')
+        self.assertEqual(self.store.notes_for(LEO)[AMY]['alias'], 'Captain')
+        self.assertEqual(self.store.notes_for(AMY), {})
+        self.store.set_note(LEO, AMY, '', '')  # clearing removes it
+        self.assertEqual(self.store.notes_for(LEO), {})
+
+    def test_groups_can_be_left_and_renamed_pairs_cannot(self):
+        pair, _ = self.store.start(LEO, [AMY])
+        group, _ = self.store.start(LEO, [AMY, BEN])
+        with self.assertRaises(ValueError):
+            self.store.leave(LEO, pair['id'])
+        with self.assertRaises(ValueError):
+            self.store.rename(LEO, pair['id'], 'x')
+        self.assertEqual(self.store.rename(AMY, group['id'], ' Night watch ')['title'], 'Night watch')
+        self.store.leave(BEN, group['id'])
+        with self.assertRaises(LookupError):
+            self.store.messages(BEN, group['id'])
+
+    def test_characters_follow_their_files(self):
+        pair, _ = self.store.start(LEO, [ARIA])
+        self.store.post_as(pair['id'], ARIA, 'Aria', 'Aye.')
+        self.store.set_note(LEO, ARIA, alias='Cap')
+        self.assertEqual(self.store.rename_character_paths('Cast', 'People/Cast'), 3)  # member, author, note
+        moved = 'char:People/Cast/aria.persona.skill'
+        self.assertEqual(sorted(self.store.members(pair['id'])), sorted([LEO, moved]))
+        self.assertEqual(self.store.messages(LEO, pair['id'])[0]['author'], moved)
+        self.assertIn(moved, self.store.notes_for(LEO))
+        again, created = self.store.start(LEO, [moved])
+        self.assertFalse(created); self.assertEqual(again['id'], pair['id'])  # the pair key followed too
+
+    def test_backup_copy_is_a_readable_database(self):
+        pair, _ = self.store.start(LEO, [AMY])
+        self.store.send(LEO, pair['id'], 'keep me')
+        copy = Path(self.tmp.name) / 'b' / 'copy.sqlite'
+        self.store.backup_to(copy)
+        restored = chats.ProjectChats(copy)
+        self.addCleanup(restored.close)
+        self.assertEqual(restored.messages(AMY, pair['id'])[0]['content'], 'keep me')
+
+
+class RegistryTests(unittest.TestCase):
+    def setUp(self):
+        self.logs = patch.object(server, '_log'); self.logs.start(); self.addCleanup(self.logs.stop)
+        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
+        accounts = server.AccountStore(None)
+        accounts.users = {name: {'password': 'pw', 'teams': ['qa']} for name in ('leo', 'amy', 'ben')}
+        accounts.users['eve'] = {'password': 'pw', 'teams': ['other']}
+        self.data = Path(self.tmp.name) / 'data'
+        self.reg = server.WorkspaceRegistry('2468', Path(self.tmp.name) / 'state.json', accounts=accounts, data_dir=self.data)
+        self.addCleanup(self.reg._close_chat_stores)
+        self.tokens = {name: self.reg.login(name, 'pw')['token'] for name in ('leo', 'amy', 'ben', 'eve')}
+        self.reg.create_workspace(self.tokens['leo'], 'qa', 'Novel', share_team=True)
+        self.path = 'workspaces/Novel'
+        self.sessions = {name: self.reg.open_workspace(self.tokens[name], 'qa', self.path)['token'] for name in ('leo', 'amy', 'ben')}
+        self.broker = self.reg.brokers[f'qa/{self.path}']
+        self.queues = {name: self.broker.subscribe(token) for name, token in self.sessions.items()}
+        for q in self.queues.values():
+            q.get_nowait()  # the "ready" event
+        self.op({'type': 'create-folder', 'parentPath': '', 'name': 'Cast'})
+        self.op({'type': 'create-file', 'parentPath': 'Cast', 'name': 'aria.persona.skill',
+                 'content': '---\nname: Captain Aria Voss\n---\nA smuggler.'})
+
+    def op(self, operation):
+        return self.broker.apply_operation(self.sessions['leo'], {**operation, 'baseRevision': self.broker.revision})
+
+    def call(self, name, method, *args):
+        return getattr(self.reg, method)(self.tokens[name], 'qa', self.path, *args)
+
+    def events(self, name, kind):
+        out, q = [], self.queues[name]
+        while True:
+            try:
+                event = q.get_nowait()
+            except queue.Empty:
+                return out
+            if event.get('type') == kind:
+                out.append(event)
+
+    def test_contacts_are_people_with_access_and_the_project_characters(self):
+        overview = self.call('leo', 'chats_overview')
+        self.assertEqual(overview['me'], LEO)
+        self.assertEqual([p['username'] for p in overview['people']], ['amy', 'ben', 'leo'])
+        self.assertTrue(all(p['online'] for p in overview['people']))
+        self.assertEqual(overview['characters'], [{'key': ARIA, 'path': 'Cast/aria.persona.skill',
+                                                   'name': 'Captain Aria Voss', 'handle': 'aria'}])
+        with self.assertRaises(PermissionError):
+            self.call('eve', 'chats_overview')  # not in the team
+
+    def test_only_project_people_and_real_characters_can_join(self):
+        with self.assertRaises(ValueError):
+            self.call('leo', 'chats_start', ['user:eve'])
+        with self.assertRaises(ValueError):
+            self.call('leo', 'chats_start', ['char:Cast/ghost.persona.skill'])
+        result = self.call('leo', 'chats_start', [AMY])
+        self.assertTrue(result['created'])
+
+    def test_messages_go_live_to_members_only(self):
+        pair = self.call('leo', 'chats_start', [AMY])['conversation']
+        self.assertEqual(len(self.events('amy', 'chat-update')), 1)  # amy sees the new chat
+        self.assertEqual(self.events('ben', 'chat-update'), [])
+        self.call('leo', 'chats_send', pair['id'], 'hello amy')
+        [event] = self.events('amy', 'chat-message')
+        self.assertEqual(event['message']['content'], 'hello amy')
+        self.assertEqual(event['conversationId'], pair['id'])
+        self.assertEqual(len(self.events('leo', 'chat-message')), 1)  # the sender's other tabs too
+        self.assertEqual(self.events('ben', 'chat-message'), [])  # not a member: nothing at all
+
+    def test_send_hands_new_messages_to_the_reply_hook(self):
+        seen = []
+        self.reg.on_chat_message = lambda reg, team, relpath, conversation, message, identity, options: seen.append(
+            (conversation['id'], message['content'], identity['username'], options['model']))
+        pair = self.call('leo', 'chats_start', [ARIA])['conversation']
+        self.reg.chats_send(self.tokens['leo'], 'qa', self.path, pair['id'], 'Ahoy', [], {'model': 'gpt-5.5'})
+        self.assertEqual(seen, [(pair['id'], 'Ahoy', 'leo', 'gpt-5.5')])
+
+    def test_moving_a_character_file_moves_it_in_chats(self):
+        pair = self.call('leo', 'chats_start', [ARIA])['conversation']
+        self.op({'type': 'rename-node', 'path': 'Cast/aria.persona.skill', 'name': 'captain.persona.skill'})
+        members = lambda: [m for m in self.reg.chat_store('qa', self.path).members(pair['id']) if m.startswith('char:')]
+        self.assertEqual(members(), ['char:Cast/captain.persona.skill'])
+        self.op({'type': 'move-node', 'path': 'Cast', 'parentPath': '', 'index': 0})  # a no-op path: same place
+        self.op({'type': 'create-folder', 'parentPath': '', 'name': 'People'})
+        self.op({'type': 'move-node', 'path': 'Cast', 'parentPath': 'People'})
+        self.assertEqual(members(), ['char:People/Cast/captain.persona.skill'])
+
+    def test_the_database_survives_a_publish_and_is_never_a_project_file(self):
+        pair = self.call('leo', 'chats_start', [AMY])['conversation']
+        self.call('leo', 'chats_send', pair['id'], 'still here')
+        folder = self.data / 'team_qa' / 'workspaces' / 'Novel'
+        self.assertTrue((folder / chats.DB_NAME).is_file())
+        # Publishing replaces the whole tree: the folder is wiped and rewritten.
+        project = json.loads(json.dumps(self.broker.project))
+        self.broker.apply_operation(self.sessions['leo'], {'type': 'replace-project', 'project': project,
+                                                          'baseRevision': self.broker.revision})
+        self.assertTrue((folder / chats.DB_NAME).is_file())
+        self.assertEqual(self.call('amy', 'chats_messages', pair['id'])['messages'][0]['content'], 'still here')
+        self.assertNotIn(chats.DB_NAME, json.dumps(self.broker.project))
+        self.assertTrue(set(chats.SIDE_FILES) <= self.reg._RESERVED_NAMES)
+
+    def test_chats_get_a_daily_backup_only_when_they_changed(self):
+        pair = self.call('leo', 'chats_start', [AMY])['conversation']
+        self.call('leo', 'chats_send', pair['id'], 'one')
+        self.reg._backup_chats(now=time.mktime((2026, 10, 1, 12, 0, 0, 0, 0, 0)))
+        folder = self.reg._backup_dir('qa', self.path) / 'chats'
+        self.assertEqual([p.name for p in folder.glob('*.sqlite')], ['2026-10-01.sqlite'])
+        self.reg._backup_chats(now=time.mktime((2026, 10, 2, 12, 0, 0, 0, 0, 0)))
+        self.assertEqual(len(list(folder.glob('*.sqlite'))), 1, 'no change: no new copy')
+        self.call('amy', 'chats_send', pair['id'], 'two')
+        self.reg._backup_chats(now=time.mktime((2026, 10, 3, 12, 0, 0, 0, 0, 0)))
+        self.assertEqual(len(list(folder.glob('*.sqlite'))), 2)
+
+    def test_notes_and_search_through_the_registry(self):
+        pair = self.call('leo', 'chats_start', [AMY])['conversation']
+        self.call('leo', 'chats_send', pair['id'], 'The lamp went dark')
+        self.call('leo', 'chats_note', AMY, 'Captain', 'plays Aria')
+        self.assertEqual(self.call('leo', 'chats_overview')['notes'][AMY]['alias'], 'Captain')
+        self.assertEqual(self.call('amy', 'chats_overview')['notes'], {})
+        self.assertEqual(len(self.call('amy', 'chats_search', pair['id'], 'lamp')['results']), 1)
+        with self.assertRaises(LookupError):
+            self.call('ben', 'chats_search', pair['id'], 'lamp')
+
+
+if __name__ == '__main__':
+    unittest.main()
