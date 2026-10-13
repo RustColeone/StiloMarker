@@ -31,6 +31,48 @@ one. Affects only pre-existing local history.
 
 ## Fixed
 
+### v0.1.28: Chats (people and characters, live), a tidier chat panel, and the code split
+
+- **Chats replaces Roleplay.** The panel's second tab is now a small chat app
+  for the project: private chats and groups with the people who can open the
+  workspace and with its characters, all live. Starting a chat with someone
+  reopens the existing private chat; inviting a third person into it starts a
+  *new* group, so the private chat is kept (inviting into a group adds to it).
+  A character answers every message in a private chat; in groups the
+  @mention rule stays. A private chat's details page has a search that jumps to
+  the message and a private alias/note per contact that only its owner sees.
+  Unread counts show in the list and on the tab.
+- **Stored per project in SQLite** (`conversations.sqlite` in the project
+  folder, WAL, FTS5 search with a LIKE fallback): hidden from the explorer,
+  kept when a project is published over, and backed up daily (last 14) when it
+  changed. Live events go only to members (`chat-message`, `chat-typing`,
+  `chat-update`), never to everyone on the project stream. Renamed or moved
+  character files are followed on the server.
+- **Who writes a character's reply.** Normally the server (sign-in, the model
+  picked in the compose box), one character at a time per conversation, never
+  twice for the same message. With an own key and "Directly from this
+  browser", the sender's browser claims the reply, fetches the prompt the
+  server builds (`POST /api/chats/prompt`), calls the user's endpoint itself
+  (works with a local model such as Ollama) and posts the text back for
+  everyone; a claim left by a closed browser is marked interrupted after 60 s.
+- **Browser-only workspaces** get character chats kept in IndexedDB, with a
+  note that chatting with people needs a cloud workspace. Old Roleplay group
+  threads are moved into Chats once.
+- **Panel polish.** The model picker and a small status (dot + word, detail on
+  hover) moved from the toolbar into the compose card's footer, next to
+  `@ File` and Send; the toolbar keeps only the tabs and three buttons. History
+  can be searched, and threads renamed or deleted. A new thread lists example
+  requests.
+- **Renaming a character file** no longer drops `.persona` (the extension was
+  read as `.skill`).
+- **The code split.** `main.js` was broken into modules (explorer, tabs and
+  preview, layout, editor core and its tools, dialogs, cloud browser and
+  accounts); the diagram editor, module-map tools, Workspace History,
+  Snapshots and the chat panel load the first time they are used.
+
+Sync compatibility moved to `117`: older tabs would keep writing Roleplay group
+threads into the shared chat, so they are asked to reload.
+
 ### v0.1.27: GPT models, generated images, and sign-in for the server's agent
 
 - **OpenAI as a second provider.** With `OPENAI_API_KEY` in the service
