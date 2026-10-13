@@ -148,7 +148,9 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(restored.messages(AMY, pair['id'])[0]['content'], 'keep me')
 
 
-class RegistryTests(unittest.TestCase):
+class RegistryBase(unittest.TestCase):
+    """A registry with three teammates in one shared project, all subscribed to
+    its live events, and one character file."""
     def setUp(self):
         self.logs = patch.object(server, '_log'); self.logs.start(); self.addCleanup(self.logs.stop)
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
@@ -186,6 +188,7 @@ class RegistryTests(unittest.TestCase):
             if event.get('type') == kind:
                 out.append(event)
 
+class RegistryTests(RegistryBase):
     def test_contacts_are_people_with_access_and_the_project_characters(self):
         overview = self.call('leo', 'chats_overview')
         self.assertEqual(overview['me'], LEO)
@@ -268,6 +271,123 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(len(self.call('amy', 'chats_search', pair['id'], 'lamp')['results']), 1)
         with self.assertRaises(LookupError):
             self.call('ben', 'chats_search', pair['id'], 'lamp')
+
+
+
+class FakeProxy:
+    """Stands in for ChatProxy.chat: streams a reply and records each turn."""
+    def __init__(self, reply=lambda persona, messages: f"{persona['name']} says hi", fail=None, hold=None):
+        self.turns, self.reply, self.fail, self.hold = [], reply, fail, hold
+
+    def chat(self, messages, context_files, project_name, client_project=None, progress=None, model=None,
+             cancelled=None, identity=None, persona=None, cast=None, **_):
+        self.turns.append({'persona': persona, 'messages': messages, 'cast': cast, 'model': model,
+                           'identity': identity, 'context': context_files})
+        progress({'type': 'status', 'iteration': 0})
+        text = self.reply(persona, messages)
+        for word in text.split(' '):
+            progress({'type': 'delta', 'text': word + ' '})
+            if self.hold:
+                self.hold.wait(5)
+            if cancelled and cancelled():
+                raise RuntimeError('Chat stopped.')
+        if self.fail:
+            raise RuntimeError(self.fail)
+        return {'message': text}
+
+
+class ReplyTests(RegistryBase):
+    def setUp(self):
+        super().setUp()
+        self.op({'type': 'create-file', 'parentPath': 'Cast', 'name': 'bram.persona.skill',
+                 'content': '## Who\nA nervous cook.'})
+        self.reg.chat_proxy = FakeProxy()
+        self.reg.TYPING_INTERVAL = 0
+
+    def wait(self, pair_id):
+        key = f'qa/{self.path}#{pair_id}'
+        for _ in range(200):
+            if not self.reg.chat_replies.busy(key):
+                return
+            time.sleep(0.02)
+        self.fail('replies did not finish')
+
+    def test_a_private_chat_with_a_character_gets_a_reply_to_every_message(self):
+        pair = self.call('leo', 'chats_start', [ARIA])['conversation']
+        sent = self.reg.chats_send(self.tokens['leo'], 'qa', self.path, pair['id'], 'Ahoy', [], {'model': 'gpt-5.5'})
+        self.assertEqual(sent['replies'], [ARIA])
+        self.wait(pair['id'])
+        messages = self.call('leo', 'chats_messages', pair['id'])['messages']
+        self.assertEqual([(m['author'], m['content'], m['state']) for m in messages],
+                         [(LEO, 'Ahoy', 'done'), (ARIA, 'Captain Aria Voss says hi', 'done')])
+        turn = self.reg.chat_proxy.turns[0]
+        self.assertEqual(turn['persona']['name'], 'Captain Aria Voss')
+        self.assertEqual(turn['messages'], [{'name': 'leo', 'content': 'Ahoy', 'self': False}])
+        self.assertEqual(turn['model'], 'gpt-5.5')
+        self.assertEqual(turn['identity']['username'], 'leo')
+        typing = [e['state'] for e in self.events('leo', 'chat-typing')]
+        self.assertEqual(typing[0], 'queued'); self.assertEqual(typing[-1], 'end'); self.assertIn('writing', typing)
+        self.assertEqual(self.events('amy', 'chat-typing'), [])  # a private chat stays private, live too
+
+    def test_in_a_group_only_mentioned_characters_reply_in_order(self):
+        group = self.call('leo', 'chats_start', [AMY, ARIA, 'char:Cast/bram.persona.skill'])['conversation']
+        self.assertEqual(self.reg.chats_send(self.tokens['leo'], 'qa', self.path, group['id'], 'The storm hits.')['replies'], [])
+        sent = self.reg.chats_send(self.tokens['amy'], 'qa', self.path, group['id'], '@bram then @aria: what now?')
+        self.assertEqual(sent['replies'], ['char:Cast/bram.persona.skill', ARIA])
+        self.wait(group['id'])
+        authors = [m['author'] for m in self.call('leo', 'chats_messages', group['id'])['messages']]
+        self.assertEqual(authors, [LEO, AMY, 'char:Cast/bram.persona.skill', ARIA])
+        second = self.reg.chat_proxy.turns[1]  # Aria sees Bram's reply
+        self.assertEqual(second['messages'][-1], {'name': 'bram', 'content': 'bram says hi', 'self': False})
+        self.assertEqual({c['name'] for c in second['cast']}, {'Captain Aria Voss', 'bram'})
+        self.assertTrue(self.events('amy', 'chat-typing'))  # every member watches it being written
+        sent = self.reg.chats_send(self.tokens['leo'], 'qa', self.path, group['id'], '@all')
+        self.assertEqual(len(sent['replies']), 2)
+        self.wait(group['id'])
+
+    def test_a_reply_is_never_queued_twice(self):
+        pair = self.call('leo', 'chats_start', [ARIA])['conversation']
+        message = self.reg.chat_store('qa', self.path).send(LEO, pair['id'], 'hi', 'leo')
+        conversation = self.reg.chat_store('qa', self.path).get(LEO, pair['id'])
+        first = self.reg._queue_chat_replies(self.reg, 'qa', self.path, conversation, message, {'username': 'leo'}, {})
+        again = self.reg._queue_chat_replies(self.reg, 'qa', self.path, conversation, message, {'username': 'leo'}, {})
+        self.assertEqual((first, again), ([ARIA], []))
+        self.wait(pair['id'])
+        self.assertEqual(len(self.reg.chat_proxy.turns), 1)
+
+    def test_stop_keeps_what_was_written(self):
+        import threading
+        hold = threading.Event()
+        self.reg.chat_proxy = FakeProxy(reply=lambda p, m: 'one two three four', hold=hold)
+        pair = self.call('leo', 'chats_start', [ARIA])['conversation']
+        self.reg.chats_send(self.tokens['leo'], 'qa', self.path, pair['id'], 'Talk')
+        time.sleep(0.1)
+        self.assertTrue(self.call('leo', 'chats_stop', pair['id'])['stopped'])
+        hold.set()
+        self.wait(pair['id'])
+        last = self.call('leo', 'chats_messages', pair['id'])['messages'][-1]
+        self.assertEqual((last['author'], last['state']), (ARIA, 'interrupted'))
+        self.assertTrue(last['content'].startswith('one'))
+        with self.assertRaises(LookupError):
+            self.call('ben', 'chats_stop', pair['id'])  # only members can stop it
+
+    def test_a_failed_reply_is_a_visible_message(self):
+        self.reg.chat_proxy = FakeProxy(fail='Sign in to use the agent')
+        pair = self.call('leo', 'chats_start', [ARIA])['conversation']
+        self.reg.chats_send(self.tokens['leo'], 'qa', self.path, pair['id'], 'Hi')
+        self.wait(pair['id'])
+        last = self.call('leo', 'chats_messages', pair['id'])['messages'][-1]
+        self.assertEqual(last['state'], 'error')
+        self.assertIn('could not reply', last['content'])
+        # Errors are not fed back to the next turn as things the character said.
+        self.reg.chat_proxy = FakeProxy()
+        self.reg.chats_send(self.tokens['leo'], 'qa', self.path, pair['id'], 'Again')
+        self.wait(pair['id'])
+        self.assertEqual([m['content'] for m in self.reg.chat_proxy.turns[0]['messages']], ['Hi', 'Again'])
+
+    def test_people_in_a_pair_get_no_automatic_replies(self):
+        pair = self.call('leo', 'chats_start', [AMY])['conversation']
+        self.assertEqual(self.reg.chats_send(self.tokens['leo'], 'qa', self.path, pair['id'], '@aria?')['replies'], [])
 
 
 if __name__ == '__main__':

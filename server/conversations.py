@@ -17,6 +17,8 @@ import re
 import sqlite3
 import threading
 import time
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 DB_NAME = "conversations.sqlite"
@@ -111,6 +113,32 @@ def find_mentions(text: str, handles) -> list[str]:
             if handle not in found:
                 found.append(handle)
     return found
+
+
+def persona_header(content: str) -> dict:
+    """The `key: value` header of a persona file (see persona-service.js)."""
+    match = re.match(r"\ufeff?---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)", str(content or ""))
+    header = {}
+    if match:
+        for line in match.group(1).splitlines():
+            key, colon, value = line.partition(":")
+            if not colon or line.lstrip().startswith("#"):
+                continue
+            value = re.sub(r"\s+#.*$", "", value.strip()).strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            header.setdefault(key.strip().lower(), value)
+    return {"header": header, "body": str(content or "")[match.end():] if match else str(content or "")}
+
+
+def persona_summary(body: str, limit: int = 200) -> str:
+    """First paragraph of prose: tells each character who else is present."""
+    for paragraph in re.split(r"\n\s*\n", str(body or "").replace("\r", "")):
+        lines = [l for l in paragraph.split("\n") if l.strip() and not re.match(r"\s*(#|>|---)", l)]
+        text = re.sub(r"\s+", " ", re.sub(r"[*_`]", "", " ".join(lines))).strip()
+        if text:
+            return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+    return ""
 
 
 def user_key(username: str) -> str:
@@ -322,6 +350,20 @@ class ProjectChats:
         self.db.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now, cid))
         return self._message(self.db.execute("SELECT * FROM messages WHERE id=?", (cur.lastrowid,)).fetchone())
 
+    def history(self, cid, limit=60) -> list[dict]:
+        """The latest messages of a conversation, for a character's reply (the
+        server's own use; no member check)."""
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT * FROM (SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT ?) ORDER BY id",
+                (int(cid), int(limit))).fetchall()
+            return [self._message(r) for r in rows]
+
+    def message(self, message_id) -> dict | None:
+        with self.lock:
+            row = self.db.execute("SELECT * FROM messages WHERE id=?", (int(message_id),)).fetchone()
+            return self._message(row) if row else None
+
     def mark_read(self, me: str, cid, message_id) -> None:
         with self.lock, self._tx():
             row = self._require_member(cid, me)
@@ -444,3 +486,64 @@ class _Transaction:
             if not exc_type:
                 self.store.version += 1
         return False
+
+
+class ReplyQueue:
+    """Characters' replies, run in worker threads: one at a time per
+    conversation (so each character sees the replies before theirs), never the
+    same (message, character) twice, and stoppable per conversation."""
+
+    def __init__(self, run, workers: int = 2):
+        self.run = run  # run(job, cancelled: () -> bool) -> None
+        self.lock = threading.Lock()
+        self.pending: dict[str, deque] = {}
+        self.active: set[str] = set()
+        self.cancelled: set[str] = set()
+        self.seen: set[tuple] = set()
+        self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="chat-reply")
+
+    def submit(self, conversation: str, jobs) -> list:
+        accepted = []
+        with self.lock:
+            for job in jobs:
+                key = (conversation, job["trigger"], job["character"])
+                if key in self.seen:
+                    continue
+                self.seen.add(key)
+                self.pending.setdefault(conversation, deque()).append(job)
+                accepted.append(job)
+            if accepted and conversation not in self.active:
+                self.active.add(conversation)
+                self.cancelled.discard(conversation)
+                self.pool.submit(self._drain, conversation)
+        return accepted
+
+    def busy(self, conversation: str) -> bool:
+        with self.lock:
+            return conversation in self.active
+
+    def cancel(self, conversation: str) -> bool:
+        with self.lock:
+            if conversation not in self.active:
+                return False
+            self.pending.pop(conversation, None)
+            self.cancelled.add(conversation)
+            return True
+
+    def _drain(self, conversation: str) -> None:
+        while True:
+            with self.lock:
+                queue = self.pending.get(conversation)
+                if not queue or conversation in self.cancelled:
+                    self.pending.pop(conversation, None)
+                    self.active.discard(conversation)
+                    self.cancelled.discard(conversation)
+                    return
+                job = queue.popleft()
+            try:
+                self.run(job, lambda: conversation in self.cancelled)
+            except Exception:  # noqa: BLE001 — the runner reports its own failures
+                pass
+
+    def shutdown(self) -> None:
+        self.pool.shutdown(wait=False, cancel_futures=True)

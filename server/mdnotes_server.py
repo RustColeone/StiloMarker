@@ -31,7 +31,8 @@ _mcp_module_dir = str(Path(__file__).resolve().parent)
 if _mcp_module_dir not in sys.path:
     sys.path.insert(0, _mcp_module_dir)
 from mcp_client import MCPManager, MCPTurn
-from conversations import SIDE_FILES as CHAT_DB_FILES, ProjectChats, char_key, persona_handle, user_key
+from conversations import (SIDE_FILES as CHAT_DB_FILES, ProjectChats, ReplyQueue, char_key, find_mentions,
+                           persona_handle, persona_header, persona_summary, user_key)
 from openai_support import IMAGE_FORMATS, IMAGE_SIZES, GeneratedImages, OpenAIProvider, is_openai_model, uses_fixed_temperature
 
 
@@ -1125,26 +1126,14 @@ class ChatProxy:
             return self.PERSONA_DEFAULT_TEMPERATURE
         return min(self.PERSONA_MAX_TEMPERATURE, max(0.0, number))
 
-    def _persona_inner(self, messages, context_files, project_name, client_project,
-                       progress, model, own_key: bool, own_model: str, persona, cast) -> dict:
-        if not isinstance(persona, dict):
-            raise ValueError("Persona must be an object.")
+    def build_persona_payload(self, messages, context_files, project_name, project_snapshot, persona, cast,
+                              active_model) -> tuple[dict, list]:
+        """The chat-completions request for one character's reply: the system
+        prompt (sheet, cast, workspace), the transcript, and read-only tools.
+        Used by the server's own turns and handed to a browser that runs the
+        model itself (a local model or the user's own key)."""
         name = self._clean_text(persona.get("name"), 80)
         sheet = self._clean_text(persona.get("content"), self.PERSONA_MAX_SHEET_CHARS)
-        path = self._clean_text(persona.get("path"), 512)
-        if not name:
-            raise ValueError("The character needs a name.")
-        active_model = self._route(model, own_key, own_model)
-        if not (self._eff_key() and self._eff_url()):
-            raise ValueError("Chat is not configured. Add your API key in Settings → Agent, or set DEEPSEEK_API_KEY on the server.")
-
-        project_snapshot = None
-        if isinstance(client_project, dict) and client_project.get("nodes"):
-            project_snapshot = client_project
-        elif self.broker is not None:
-            with self.broker.lock:
-                project_snapshot = copy.deepcopy(self.broker.project)
-
         turns = self._persona_transcript(messages)
         others = []
         for member in (cast if isinstance(cast, list) else [])[:self.PERSONA_MAX_CAST]:
@@ -1196,6 +1185,30 @@ class ChatProxy:
             payload["tools"] = [tool for tool in self._get_tool_schemas()
                                 if tool["function"]["name"] in self.READ_TOOLS]
             payload["tool_choice"] = "auto"
+        return payload, used_paths
+
+    def _persona_inner(self, messages, context_files, project_name, client_project,
+                       progress, model, own_key: bool, own_model: str, persona, cast) -> dict:
+        if not isinstance(persona, dict):
+            raise ValueError("Persona must be an object.")
+        name = self._clean_text(persona.get("name"), 80)
+        sheet = self._clean_text(persona.get("content"), self.PERSONA_MAX_SHEET_CHARS)
+        path = self._clean_text(persona.get("path"), 512)
+        if not name:
+            raise ValueError("The character needs a name.")
+        active_model = self._route(model, own_key, own_model)
+        if not (self._eff_key() and self._eff_url()):
+            raise ValueError("Chat is not configured. Add your API key in Settings → Agent, or set DEEPSEEK_API_KEY on the server.")
+
+        project_snapshot = None
+        if isinstance(client_project, dict) and client_project.get("nodes"):
+            project_snapshot = client_project
+        elif self.broker is not None:
+            with self.broker.lock:
+                project_snapshot = copy.deepcopy(self.broker.project)
+
+        payload, used_paths = self.build_persona_payload(messages, context_files, project_name, project_snapshot,
+                                                         persona, cast, active_model)
 
         headers = {
             "Content-Type": "application/json",
@@ -2632,7 +2645,9 @@ class WorkspaceRegistry:
         self._backup_lock = threading.RLock()   # guards data/_backups (re-entered by a safety backup)
         self._chat_stores: dict[str, ProjectChats] = {}  # workspace id -> its chats database
         self._chat_stores_lock = threading.Lock()
-        self.on_chat_message = None  # set by the server: (team, relpath, conversation, message, sender) -> None
+        self.on_chat_message = None  # (registry, team, relpath, conversation, message, identity, options) -> list
+        self.chat_proxy = None       # set by build_server; characters' replies use it
+        self.chat_replies = ReplyQueue(self._run_chat_reply)
         self.pin = pin
         self.master_pin = master_pin or pin
         self.accounts = accounts or AccountStore(None)
@@ -3872,10 +3887,112 @@ class WorkspaceRegistry:
         message = store.send(me, conversation_id, content, identity["username"], context_paths)
         self._chat_notify(team, relpath, store, conversation_id, {"type": "chat-message", "message": message})
         conversation = store.get(me, conversation_id)
-        hook = self.on_chat_message
-        if hook is not None:
-            hook(self, team, relpath, conversation, message, identity, options or {})
-        return {"message": message, "conversation": conversation}
+        hook = self.on_chat_message or self._queue_chat_replies
+        replies = hook(self, team, relpath, conversation, message, identity, options or {}) or []
+        return {"message": message, "conversation": conversation, "replies": replies}
+
+    # ---- characters' replies -----------------------------------------------------
+    # In a private chat with a character, it answers every message; in a group,
+    # the characters @mentioned answer (@all = every character), one after
+    # another. Replies run on the server (default) and stream to every member.
+
+    def chat_responders(self, conversation: dict, message: dict, characters: list[dict]) -> list[str]:
+        members = conversation["members"]
+        cast = [c for c in characters if c["key"] in members]
+        if conversation["kind"] == "pair":
+            return [c["key"] for c in cast]
+        handles = find_mentions(message["content"], [c["handle"] for c in cast])
+        by_handle = {c["handle"]: c["key"] for c in cast}
+        return [by_handle[h] for h in handles if h in by_handle]
+
+    @staticmethod
+    def _queue_chat_replies(registry, team, relpath, conversation, message, identity, options):
+        if not message["author"].startswith("user:"):
+            return []
+        characters = registry.chat_characters(team, relpath)
+        responders = registry.chat_responders(conversation, message, characters)
+        if not responders or registry.chat_proxy is None:
+            return []
+        jobs = [{"team": team, "relpath": relpath, "conversation": conversation["id"], "character": key,
+                 "trigger": message["id"], "model": options.get("model"), "identity": identity}
+                for key in responders]
+        accepted = registry.chat_replies.submit(f"{team}/{relpath}#{conversation['id']}", jobs)
+        store = registry.chat_store(team, relpath)
+        for job in accepted:  # everyone sees who is about to answer
+            name = next((c["name"] for c in characters if c["key"] == job["character"]), "")
+            registry._chat_notify(team, relpath, store, conversation["id"],
+                                  {"type": "chat-typing", "character": job["character"], "name": name, "state": "queued", "text": ""})
+        return [job["character"] for job in accepted]
+
+    TYPING_INTERVAL = 0.25  # seconds between live updates of a reply being written
+
+    def _run_chat_reply(self, job: dict, cancelled) -> None:
+        team, relpath, cid, char = job["team"], job["relpath"], job["conversation"], job["character"]
+        store = self.chat_store(team, relpath)
+        project = self._project_snapshot(team, relpath)
+        characters = self.chat_characters(team, relpath, project)
+        character = next((c for c in characters if c["key"] == char), None)
+        members = store.members(cid)
+        if character is None or char not in members:
+            self._chat_notify(team, relpath, store, cid, {"type": "chat-typing", "character": char, "state": "end", "text": ""})
+            return
+        names = {c["key"]: c["name"] for c in characters}
+        transcript = [{"name": names.get(m["author"], m["authorName"] or m["author"].split(":", 1)[-1]),
+                       "content": m["content"], "self": m["author"] == char}
+                      for m in store.history(cid) if m["state"] == "done"]
+        cast = [{"name": c["name"], "summary": persona_summary(persona_header(c["content"])["body"])}
+                for c in characters if c["key"] in members]
+        trigger = store.message(job["trigger"]) or {}
+        context_files = []
+        for path in trigger.get("contextPaths", []):
+            node_id = ChatProxy._get_node_id_by_path_in(project, path)
+            node = project.get("nodes", {}).get(node_id) if node_id else None
+            if node and node.get("kind") == "file":
+                context_files.append({"path": path, "kind": "image" if is_image_name(node.get("name", "")) else "text",
+                                      "content": "" if is_image_name(node.get("name", "")) else node.get("content", "")})
+        header = persona_header(character["content"])["header"]
+        state = {"text": "", "last": 0.0}
+
+        def typing(text_state="writing"):
+            self._chat_notify(team, relpath, store, cid, {"type": "chat-typing", "character": char, "name": character["name"],
+                                                          "state": text_state, "text": state["text"]})
+
+        def progress(event):
+            if event.get("type") == "status":
+                state["text"] = ""
+            elif event.get("type") == "delta":
+                state["text"] += event.get("text", "")
+            elif event.get("type") != "tool":
+                return
+            now = time.monotonic()
+            if now - state["last"] >= self.TYPING_INTERVAL:
+                state["last"] = now
+                typing("reading" if event.get("type") == "tool" else "writing")
+
+        typing("writing")
+        try:
+            if self.chat_proxy is None:
+                raise RuntimeError("Replies are not available on this server.")
+            result = self.chat_proxy.chat(
+                transcript, context_files, relpath.rsplit("/", 1)[-1], project, progress=progress,
+                model=job.get("model"), cancelled=cancelled, identity=job.get("identity"),
+                persona={"path": character["path"], "name": character["name"], "content": character["content"],
+                         "temperature": header.get("temperature")}, cast=cast)
+            message = store.post_as(cid, char, character["name"], result["message"])
+        except Exception as error:  # noqa: BLE001 — the failure becomes a visible message
+            partial = state["text"].strip()
+            if cancelled():
+                content, outcome = (partial or "(stopped before replying)"), "interrupted"
+            else:
+                content, outcome = f"{character['name']} could not reply: {error}", "error"
+            message = store.post_as(cid, char, character["name"], content, outcome)
+        typing("end")
+        self._chat_notify(team, relpath, store, cid, {"type": "chat-message", "message": message})
+
+    def chats_stop(self, token, team, path, conversation_id) -> dict:
+        _, team, relpath, store, me = self._chat_context(token, team, path)
+        store.get(me, conversation_id)  # members only
+        return {"stopped": self.chat_replies.cancel(f"{team}/{relpath}#{int(conversation_id)}")}
 
     def chats_invite(self, token, team, path, conversation_id, members) -> dict:
         _, team, relpath, store, me = self._chat_context(token, team, path)
@@ -4670,7 +4787,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         ("POST", "/api/chats/start"): "start", ("POST", "/api/chats/send"): "send",
         ("POST", "/api/chats/invite"): "invite", ("POST", "/api/chats/leave"): "leave",
         ("POST", "/api/chats/rename"): "rename", ("POST", "/api/chats/read"): "read",
-        ("POST", "/api/chats/note"): "note-set",
+        ("POST", "/api/chats/note"): "note-set", ("POST", "/api/chats/stop"): "stop",
     }
 
     def _handle_chats(self, parsed):
@@ -4707,6 +4824,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
                 result = r.chats_leave(token, team, path, cid)
             elif action == "rename":
                 result = r.chats_rename(token, team, path, cid, str(arg("title", "")))
+            elif action == "stop":
+                result = r.chats_stop(token, team, path, cid)
             else:  # read
                 result = r.chats_read(token, team, path, cid, int(arg("messageId", 0) or 0))
             self._write_json(HTTPStatus.OK, result)
@@ -5419,6 +5538,7 @@ def build_server(host: str, port: int, pin: str, static_root: Path, state_file: 
     # Chat context falls back to the default workspace's project when the client
     # doesn't supply one — same behaviour as the pre-registry single broker.
     chat_proxy.broker = registry.default_broker
+    registry.chat_proxy = chat_proxy
     if data_dir is not None and chat_proxy.generated is None:
         chat_proxy.generated = GeneratedImages(Path(data_dir) / "_generated")
     handler = partial(MDNotesRequestHandler, registry=registry, static_root=static_root, chat_proxy=chat_proxy)
@@ -5440,6 +5560,7 @@ def build_server(host: str, port: int, pin: str, static_root: Path, state_file: 
                 registry.backup_sweep()
             except Exception as error:  # noqa: BLE001
                 _log("BACKUP", f"shutdown backup sweep failed: {error}")
+            registry.chat_replies.shutdown()
             registry._close_chat_stores()
             super().server_close()
 
