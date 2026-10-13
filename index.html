@@ -633,7 +633,14 @@
                   Model <span class="subtle-label">(optional)</span>
                   <input id="agent-model-input" type="text" autocomplete="off" placeholder="deepseek-chat">
                 </label>
-                <p class="subtle-label">Your key is sent over HTTPS to this server's proxy for each request and is never stored server-side. It stays in this browser.</p>
+                <label>
+                  Characters' replies in Chats
+                  <select id="agent-runner-select">
+                    <option value="server">Through this server</option>
+                    <option value="browser">Directly from this browser</option>
+                  </select>
+                </label>
+                <p class="subtle-label" id="agent-runner-note">Your key is sent over HTTPS to this server's proxy for each request and is never stored server-side. It stays in this browser.</p>
               </div>
             </section>
             <section class="settings-section" aria-label="Connected tools">

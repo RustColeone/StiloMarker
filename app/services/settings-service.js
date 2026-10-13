@@ -55,6 +55,9 @@ function createDefaultSettings() {
     agentApiKey: "",
     agentApiUrl: "",
     agentModel: "",
+    // "browser": characters' replies in Chats call agentApiUrl straight from this
+    // browser (e.g. a local model at http://localhost:11434/v1/chat/completions).
+    agentRunner: "server",
     // "team/path" when the locally-stored project is a cloud workspace's content,
     // so a reload with unsaved edits can push local instead of pulling over it.
     syncedProjectId: null,

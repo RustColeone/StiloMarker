@@ -46,6 +46,10 @@ export function createCloudChats(getTarget) {
     read: (id, messageId) => call("POST", "read", { id, messageId }),
     note: (contact, alias, note) => call("POST", "note", { contact, alias, note }),
     stop: (id) => call("POST", "stop", { id }),
-    importGroup: (title, characters, messages) => call("POST", "import", { title, characters, messages })
+    importGroup: (title, characters, messages) => call("POST", "import", { title, characters, messages }),
+    // Replies written by this browser (its own key or a local model):
+    prompt: (id, character, trigger) => call("POST", "prompt", { id, character, trigger }),
+    typing: (id, character, trigger, text, state) => call("POST", "typing", { id, character, trigger, text, state }),
+    reply: (id, character, trigger, content, state) => call("POST", "reply", { id, character, trigger, content, state })
   };
 }

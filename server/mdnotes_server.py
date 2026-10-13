@@ -2650,6 +2650,8 @@ class WorkspaceRegistry:
         self.on_chat_message = None  # (registry, team, relpath, conversation, message, identity, options) -> list
         self.chat_proxy = None       # set by build_server; characters' replies use it
         self.chat_replies = ReplyQueue(self._run_chat_reply)
+        self._chat_claims: dict = {}  # (workspace, conversation, trigger, character) -> claim
+        self._chat_claims_lock = threading.Lock()
         self.pin = pin
         self.master_pin = master_pin or pin
         self.accounts = accounts or AccountStore(None)
@@ -3890,8 +3892,9 @@ class WorkspaceRegistry:
         self._chat_notify(team, relpath, store, conversation_id, {"type": "chat-message", "message": message})
         conversation = store.get(me, conversation_id)
         hook = self.on_chat_message or self._queue_chat_replies
-        replies = hook(self, team, relpath, conversation, message, identity, options or {}) or []
-        return {"message": message, "conversation": conversation, "replies": replies}
+        options = dict(options or {})
+        replies = hook(self, team, relpath, conversation, message, identity, options) or []
+        return {"message": message, "conversation": conversation, "replies": replies, "claims": options.get("claims", [])}
 
     # ---- characters' replies -----------------------------------------------------
     # In a private chat with a character, it answers every message; in a group,
@@ -3913,7 +3916,11 @@ class WorkspaceRegistry:
             return []
         characters = registry.chat_characters(team, relpath)
         responders = registry.chat_responders(conversation, message, characters)
-        if not responders or registry.chat_proxy is None:
+        if not responders:
+            return []
+        if options.get("runner") == "client":
+            return registry._claim_chat_replies(team, relpath, conversation, message, identity, characters, responders, options)
+        if registry.chat_proxy is None:
             return []
         jobs = [{"team": team, "relpath": relpath, "conversation": conversation["id"], "character": key,
                  "trigger": message["id"], "model": options.get("model"), "identity": identity}
@@ -3927,24 +3934,112 @@ class WorkspaceRegistry:
         return [job["character"] for job in accepted]
 
     TYPING_INTERVAL = 0.25  # seconds between live updates of a reply being written
+    CLAIM_SECONDS = 60      # a browser writing a reply must report progress at least this often
 
-    def _run_chat_reply(self, job: dict, cancelled) -> None:
-        team, relpath, cid, char = job["team"], job["relpath"], job["conversation"], job["character"]
+    # ---- replies written by a member's own browser (their key / a local model) ----
+    # The server doesn't call a model: it records that this person's browser will
+    # write these replies ("claims"), hands it the prompt, relays its progress to
+    # the other members, and stores the result. A claim that goes quiet expires.
+
+    def _claim_chat_replies(self, team, relpath, conversation, message, identity, characters, responders, options):
+        store = self.chat_store(team, relpath)
+        claims = []
+        with self._chat_claims_lock:
+            for key in responders:
+                claim_key = (f"{team}/{relpath}", conversation["id"], message["id"], key)
+                if claim_key in self._chat_claims:
+                    continue
+                name = next((c["name"] for c in characters if c["key"] == key), "")
+                self._chat_claims[claim_key] = {"user": identity["username"], "touched": time.monotonic(), "text": "", "name": name}
+                claims.append({"character": key, "trigger": message["id"], "name": name})
+        for claim in claims:
+            self._chat_notify(team, relpath, store, conversation["id"], {"type": "chat-typing", "character": claim["character"],
+                                                                         "name": claim["name"], "state": "queued", "text": ""})
+        options["claims"] = claims
+        return [claim["character"] for claim in claims]
+
+    def _my_claim(self, team, relpath, cid, trigger, char, username) -> dict:
+        claim = self._chat_claims.get((f"{team}/{relpath}", int(cid), int(trigger), str(char)))
+        if claim is None or claim["user"] != username:
+            raise LookupError("That reply isn't yours to write (or it timed out)")
+        return claim
+
+    def chats_prompt(self, token, team, path, conversation_id, character, trigger) -> dict:
+        identity, team, relpath, store, me = self._chat_context(token, team, path)
+        store.get(me, conversation_id)  # members only
+        with self._chat_claims_lock:
+            claim = self._my_claim(team, relpath, conversation_id, trigger, character, identity["username"])
+            claim["touched"] = time.monotonic()
+        context = self._reply_context(team, relpath, int(conversation_id), str(character), int(trigger))
+        if context is None or self.chat_proxy is None:
+            raise LookupError("That character is no longer in this chat")
+        payload, _ = self.chat_proxy.build_persona_payload(
+            context["transcript"], context["context_files"], relpath.rsplit("/", 1)[-1], context["project"],
+            context["persona"], context["cast"], "")
+        for key in ("model", "thinking", "reasoning_effort"):
+            payload.pop(key, None)
+        return {"payload": payload, "name": context["character"]["name"]}
+
+    def chats_typing(self, token, team, path, conversation_id, character, trigger, text, state="writing") -> dict:
+        identity, team, relpath, store, me = self._chat_context(token, team, path)
+        with self._chat_claims_lock:
+            claim = self._my_claim(team, relpath, conversation_id, trigger, character, identity["username"])
+            claim.update(touched=time.monotonic(), text=str(text or "")[:16000])
+        self._chat_notify(team, relpath, store, conversation_id, {"type": "chat-typing", "character": str(character),
+                                                                  "name": claim["name"], "state": "reading" if state == "reading" else "writing",
+                                                                  "text": claim["text"]})
+        return {"ok": True}
+
+    def chats_reply(self, token, team, path, conversation_id, character, trigger, content, state="done") -> dict:
+        identity, team, relpath, store, me = self._chat_context(token, team, path)
+        with self._chat_claims_lock:
+            claim = self._my_claim(team, relpath, conversation_id, trigger, character, identity["username"])
+            self._chat_claims.pop((f"{team}/{relpath}", int(conversation_id), int(trigger), str(character)), None)
+        state = state if state in ("done", "interrupted", "error") else "done"
+        text = str(content or "").strip() or ("(stopped before replying)" if state != "done" else "")
+        if not text:
+            raise ValueError("The reply is empty")
+        message = store.post_as(int(conversation_id), str(character), claim["name"], text, state)
+        self._chat_notify(team, relpath, store, conversation_id, {"type": "chat-typing", "character": str(character), "state": "end", "text": ""})
+        self._chat_notify(team, relpath, store, conversation_id, {"type": "chat-message", "message": message})
+        return {"message": message}
+
+    def expire_chat_claims(self, now=None) -> int:
+        """Replies whose browser went away: keep what was written, marked stopped."""
+        now = time.monotonic() if now is None else now
+        with self._chat_claims_lock:
+            stale = [(key, claim) for key, claim in self._chat_claims.items() if now - claim["touched"] > self.CLAIM_SECONDS]
+            for key, _ in stale:
+                self._chat_claims.pop(key, None)
+        for (workspace_id, cid, _, char), claim in stale:
+            team, relpath = workspace_id.split("/", 1)
+            try:
+                store = self.chat_store(team, relpath)
+                message = store.post_as(cid, char, claim["name"], claim["text"].strip() or "(the reply was interrupted)", "interrupted")
+                self._chat_notify(team, relpath, store, cid, {"type": "chat-typing", "character": char, "state": "end", "text": ""})
+                self._chat_notify(team, relpath, store, cid, {"type": "chat-message", "message": message})
+            except Exception as error:  # noqa: BLE001
+                _log("CHATS", f"could not close an expired reply: {error}")
+        return len(stale)
+
+    def _reply_context(self, team, relpath, cid, char, trigger_id) -> dict | None:
+        """What a character's reply is built from: their sheet, the others in
+        the chat, this conversation as the transcript, the files attached to the
+        message that asked, and the project. None if the character is gone."""
         store = self.chat_store(team, relpath)
         project = self._project_snapshot(team, relpath)
         characters = self.chat_characters(team, relpath, project)
         character = next((c for c in characters if c["key"] == char), None)
         members = store.members(cid)
         if character is None or char not in members:
-            self._chat_notify(team, relpath, store, cid, {"type": "chat-typing", "character": char, "state": "end", "text": ""})
-            return
+            return None
         names = {c["key"]: c["name"] for c in characters}
         transcript = [{"name": names.get(m["author"], m["authorName"] or m["author"].split(":", 1)[-1]),
                        "content": m["content"], "self": m["author"] == char}
                       for m in store.history(cid) if m["state"] == "done"]
         cast = [{"name": c["name"], "summary": persona_summary(persona_header(c["content"])["body"])}
                 for c in characters if c["key"] in members]
-        trigger = store.message(job["trigger"]) or {}
+        trigger = store.message(trigger_id) or {}
         context_files = []
         for path in trigger.get("contextPaths", []):
             node_id = ChatProxy._get_node_id_by_path_in(project, path)
@@ -3953,6 +4048,20 @@ class WorkspaceRegistry:
                 context_files.append({"path": path, "kind": "image" if is_image_name(node.get("name", "")) else "text",
                                       "content": "" if is_image_name(node.get("name", "")) else node.get("content", "")})
         header = persona_header(character["content"])["header"]
+        return {"store": store, "project": project, "character": character, "transcript": transcript, "cast": cast,
+                "context_files": context_files,
+                "persona": {"path": character["path"], "name": character["name"], "content": character["content"],
+                            "temperature": header.get("temperature")}}
+
+    def _run_chat_reply(self, job: dict, cancelled) -> None:
+        team, relpath, cid, char = job["team"], job["relpath"], job["conversation"], job["character"]
+        context = self._reply_context(team, relpath, cid, char, job["trigger"])
+        store = self.chat_store(team, relpath)
+        if context is None:
+            self._chat_notify(team, relpath, store, cid, {"type": "chat-typing", "character": char, "state": "end", "text": ""})
+            return
+        project, character = context["project"], context["character"]
+        transcript, cast, context_files = context["transcript"], context["cast"], context["context_files"]
         state = {"text": "", "last": 0.0}
 
         def typing(text_state="writing"):
@@ -3978,8 +4087,7 @@ class WorkspaceRegistry:
             result = self.chat_proxy.chat(
                 transcript, context_files, relpath.rsplit("/", 1)[-1], project, progress=progress,
                 model=job.get("model"), cancelled=cancelled, identity=job.get("identity"),
-                persona={"path": character["path"], "name": character["name"], "content": character["content"],
-                         "temperature": header.get("temperature")}, cast=cast)
+                persona=context["persona"], cast=cast)
             message = store.post_as(cid, char, character["name"], result["message"])
         except Exception as error:  # noqa: BLE001 — the failure becomes a visible message
             partial = state["text"].strip()
@@ -4496,6 +4604,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             return self._handle_mcp()
         if parsed.path == "/api/chat":
             return self._handle_chat()
+        if parsed.path == "/api/chat/prompt":
+            return self._handle_persona_prompt()
         if parsed.path == "/api/generate":
             return self._handle_generate()
         if parsed.path == "/api/chat/workspace":
@@ -4814,7 +4924,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         ("POST", "/api/chats/invite"): "invite", ("POST", "/api/chats/leave"): "leave",
         ("POST", "/api/chats/rename"): "rename", ("POST", "/api/chats/read"): "read",
         ("POST", "/api/chats/note"): "note-set", ("POST", "/api/chats/stop"): "stop",
-        ("POST", "/api/chats/import"): "import",
+        ("POST", "/api/chats/import"): "import", ("POST", "/api/chats/prompt"): "prompt",
+        ("POST", "/api/chats/typing"): "typing", ("POST", "/api/chats/reply"): "reply",
     }
 
     def _handle_chats(self, parsed):
@@ -4853,6 +4964,14 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
                 result = r.chats_rename(token, team, path, cid, str(arg("title", "")))
             elif action == "stop":
                 result = r.chats_stop(token, team, path, cid)
+            elif action == "prompt":
+                result = r.chats_prompt(token, team, path, cid, str(arg("character", "")), int(arg("trigger", 0) or 0))
+            elif action == "typing":
+                result = r.chats_typing(token, team, path, cid, str(arg("character", "")), int(arg("trigger", 0) or 0),
+                                        str(arg("text", "")), str(arg("state", "writing")))
+            elif action == "reply":
+                result = r.chats_reply(token, team, path, cid, str(arg("character", "")), int(arg("trigger", 0) or 0),
+                                       str(arg("content", "")), str(arg("state", "done")))
             elif action == "import":
                 result = r.chats_import(token, team, path, arg("title", ""), arg("characters") or [], arg("messages") or [])
             else:  # read
@@ -5261,6 +5380,23 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
                     pass
 
+    def _handle_persona_prompt(self):
+        """A character's request, built but not sent: for a browser that runs
+        the model itself (a local model). Spends no key, so needs no sign-in."""
+        try:
+            payload = self._read_json()
+            if not isinstance(payload, dict) or not isinstance(payload.get("persona"), dict):
+                raise ValueError("A character is required")
+            project = payload.get("project") if isinstance(payload.get("project"), dict) else None
+            request, _ = self.chat_proxy.build_persona_payload(
+                payload.get("messages") or [], payload.get("contextFiles") or [], str(payload.get("projectName", "")),
+                project, payload["persona"], payload.get("cast") or [], "")
+            for key in ("model", "thinking", "reasoning_effort"):
+                request.pop(key, None)
+            self._write_json(HTTPStatus.OK, {"payload": request})
+        except (ValueError, TypeError) as error:
+            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
+
     def _handle_generate(self):
         try:
             payload = self._read_json()
@@ -5598,6 +5734,7 @@ def build_server(host: str, port: int, pin: str, static_root: Path, state_file: 
     def sweep_presence():
         while not server.presence_stop.wait(15):
             registry.expire_leases()
+            registry.expire_chat_claims()
     threading.Thread(target=sweep_presence, daemon=True, name="presence-lease-sweep").start()
     def sweep_backups():
         while not server.presence_stop.wait(BACKUP_SWEEP_SECONDS):

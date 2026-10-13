@@ -13,6 +13,7 @@ import { createMcpControls } from "../services/mcp-ui-service.js";
 import { parsePersona, personaSummary } from "../services/persona-service.js";
 import { createCloudChats } from "../services/chats-api-service.js";
 import { createLocalChats } from "../services/local-chats-service.js";
+import { runDirectReply } from "../services/direct-model-service.js";
 import { saveSettings } from "../services/settings-service.js";
 import { normalizeServerUrl } from "../services/sync-service.js";
 import { query } from "../ui/dom.js";
@@ -792,9 +793,84 @@ export function createChatPanel(deps) {
       });
   }
 
+  // Characters' replies can be generated straight from this browser with the
+  // user's own endpoint (Settings → Agent: own key, "directly from this browser").
+  function directRunner() {
+    return settings.agentSource === "own" && settings.agentRunner === "browser" && Boolean((settings.agentApiUrl || "").trim());
+  }
+
+  /** read_file / list_files for a reply written here, from this browser's copy. */
+  function directTools() {
+    return {
+      list_files: () => ({ files: Object.values(controller.getProject().nodes ?? {})
+        .filter((node) => node.parentId != null)
+        .map((node) => ({ path: getPath(controller.getProject(), node.id), kind: node.kind })) }),
+      read_file: ({ path } = {}) => {
+        const project = controller.getProject();
+        const id = getNodeIdByPath(project, String(path ?? ""));
+        const node = id ? project.nodes[id] : null;
+        if (!node || node.kind !== "file") return { error: `File not found: ${path}` };
+        return isImageFileName(node.name) ? { content: "[image]" } : { content: String(node.content ?? "") };
+      }
+    };
+  }
+
+  function runDirect(payload, signal, onText, onTool) {
+    return runDirectReply({ payload, apiUrl: settings.agentApiUrl.trim(), apiKey: (settings.agentApiKey || "").trim(),
+      model: (settings.agentModel || "").trim(), signal, onText, onTool, tools: directTools() });
+  }
+
+  // Replies this browser claimed in a cloud chat: write each, streaming progress
+  // to the server so every member sees it, then post it. Stop aborts them.
+  const claimRuns = new Map(); // conversation id -> AbortController
+
+  async function writeClaimedReplies(store, conversationId, claims) {
+    const run = new AbortController();
+    claimRuns.get(conversationId)?.abort();
+    claimRuns.set(conversationId, run);
+    try {
+      for (const claim of claims) {
+        let text = "", sent = 0, pending = null;
+        const report = (state = "writing") => {
+          const now = Date.now();
+          if (state === "writing" && now - sent < 250) { pending ??= setTimeout(() => { pending = null; report(); }, 250); return; }
+          sent = now;
+          void store.typing(conversationId, claim.character, claim.trigger, text, state).catch(() => {});
+        };
+        if (run.signal.aborted) { await store.reply(conversationId, claim.character, claim.trigger, "", "interrupted").catch(() => {}); continue; }
+        try {
+          const { payload } = await store.prompt(conversationId, claim.character, claim.trigger);
+          const reply = await runDirect(payload, run.signal, (next) => { text = next; report(); }, () => report("reading"));
+          clearTimeout(pending);
+          await store.reply(conversationId, claim.character, claim.trigger, reply || text, "done");
+        } catch (error) {
+          clearTimeout(pending);
+          const stopped = run.signal.aborted || error?.name === "AbortError";
+          await store.reply(conversationId, claim.character, claim.trigger,
+            stopped ? text : `${claim.name || "The character"} could not reply: ${error.message || error}`, stopped ? "interrupted" : "error").catch(() => {});
+          if (!stopped) run.abort(); // the rest would fail the same way
+        }
+      }
+    } finally {
+      if (claimRuns.get(conversationId) === run) claimRuns.delete(conversationId);
+    }
+  }
+
   /** A character's reply run in this browser (a browser-only workspace). */
   async function runPersonaReply({ character, cast, transcript, trigger, signal, onText }) {
     const project = controller.getProject();
+    if (directRunner()) {
+      const response = await fetch(`${normalizeServerUrl(settings.serverUrl)}/api/chat/prompt`, {
+        method: "POST", headers: { "content-type": "application/json" }, signal,
+        body: JSON.stringify({ projectName: project.name, project: buildAgentProjectSnapshot(project), messages: transcript,
+          contextFiles: resolveChatContextFiles(project, { contextPaths: trigger?.contextPaths ?? [] }),
+          persona: { path: character.path, name: character.name, content: character.content, temperature: character.temperature },
+          cast: cast.map((member) => ({ name: member.name, summary: personaSummary(member.body) })) })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || `Preparing the reply failed (${response.status}).`);
+      return runDirect(data.payload, signal, onText);
+    }
     if (!chatState.configured) await refreshChatStatus({ silent: true });
     if (!chatState.configured) throw new Error(chatState.detail);
     let text = "";
@@ -861,7 +937,13 @@ export function createChatPanel(deps) {
           renderMarkdown: (text) => renderMarkdown(text),
           rerender: () => renderChatPanel(controller.getProject()),
           setDraft: (text) => { elements.chatInput.value = text; },
-          sendOptions: () => ({ model: chatState.selectedModel ?? undefined }),
+          sendOptions: () => ({ model: chatState.selectedModel ?? undefined, ...(directRunner() ? { runner: "client" } : {}) }),
+          afterSend: async (result, conversation) => {
+            if (result.claims?.length && chats?.store()?.kind === "cloud") {
+              await writeClaimedReplies(chats.store(), conversation.id, result.claims);
+            }
+          },
+          onStop: (conversationId) => claimRuns.get(Number(conversationId))?.abort(),
           scrollToBottom: () => { chatState.shouldScrollToBottom = true; },
           scrollToBottomIfNear: () => { if (isChatNearBottom(elements.chatMessageList)) chatState.shouldScrollToBottom = true; },
           toast: showToast,

@@ -149,6 +149,8 @@ const elements = {
   agentApiKeyInput: query("#agent-api-key-input"),
   agentApiUrlInput: query("#agent-api-url-input"),
   agentModelInput: query("#agent-model-input"),
+  agentRunnerSelect: query("#agent-runner-select"),
+  agentRunnerNote: query("#agent-runner-note"),
   agentStatusLine: query("#agent-status-line"),
   accountLockedNote: query("#account-locked-note"),
   settingsMenuButton: query("#settings-menu-button"),
@@ -896,6 +898,12 @@ function applyAgentSettingsControls() {
   if (elements.agentSourceSelect) elements.agentSourceSelect.value = settings.agentSource === "own" ? "own" : "server";
   const own = settings.agentSource === "own";
   if (elements.agentOwnFields) elements.agentOwnFields.hidden = !own;
+  if (elements.agentRunnerSelect) elements.agentRunnerSelect.value = settings.agentRunner === "browser" ? "browser" : "server";
+  if (elements.agentRunnerNote) {
+    elements.agentRunnerNote.textContent = settings.agentRunner === "browser"
+      ? "Characters' replies call the API URL above straight from this browser, so it can be a model on this computer (e.g. Ollama at http://localhost:11434/v1/chat/completions; allow this site in OLLAMA_ORIGINS). The key may be left empty for a local model. The Agent tab still goes through this server."
+      : "Your key is sent over HTTPS to this server's proxy for each request and is never stored server-side. It stays in this browser.";
+  }
   if (elements.agentApiKeyInput) elements.agentApiKeyInput.value = settings.agentApiKey || "";
   if (elements.agentApiUrlInput) elements.agentApiUrlInput.value = settings.agentApiUrl || "";
   if (elements.agentModelInput) elements.agentModelInput.value = settings.agentModel || "";
@@ -4101,6 +4109,12 @@ function openSettingsDialog(tab = "appearance") {
 }
 
 // ── Agent settings ──────────────────────────────────────────────────────────
+elements.agentRunnerSelect?.addEventListener("change", (event) => {
+  settings.agentRunner = event.target.value === "browser" ? "browser" : "server";
+  saveSettings(settings);
+  applyAgentSettingsControls();
+  logDebug("action", "Character replies run", settings.agentRunner);
+});
 elements.agentSourceSelect?.addEventListener("change", (event) => {
   settings.agentSource = event.target.value === "own" ? "own" : "server";
   saveSettings(settings);

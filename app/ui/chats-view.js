@@ -369,7 +369,7 @@ export function createChatsView(deps) {
     upsertConversation(result.conversation);
     deps.scrollToBottom();
     deps.rerender();
-    await deps.afterSend?.(result, conversation);
+    void deps.afterSend?.(result, conversation); // replies this browser writes run on their own
     return true;
   }
 
@@ -494,7 +494,10 @@ export function createChatsView(deps) {
     else if (t.matches("[data-chats-open]")) await openConversation(t.dataset.chatsOpen);
     else if (t.matches("[data-chats-start]")) await startWith([t.dataset.chatsStart]);
     else if (t.matches("[data-chats-older]")) await loadMessages(ui.conversationId, { older: true });
-    else if (t.matches("[data-chats-stop]")) await guard(() => ui.store.stop(ui.conversationId));
+    else if (t.matches("[data-chats-stop]")) {
+      deps.onStop?.(ui.conversationId); // a reply this browser is writing
+      await guard(() => ui.store.stop(ui.conversationId));
+    }
     else if (t.matches("[data-chats-invite]")) {
       Object.assign(ui, { view: "picker", picker: { mode: "invite", selected: new Set(), title: "" } });
       deps.rerender();

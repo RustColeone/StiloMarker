@@ -22,15 +22,29 @@ ROOT = Path(__file__).resolve().parents[1]
 TMP = tempfile.TemporaryDirectory()
 
 
+CALLS = []  # (from a browser?, persona name) for each model call
+
+
 class FakeModel(BaseHTTPRequestHandler):
-    """Streams 'Aye, <last line>' as chat-completions deltas, slowly."""
+    """Streams 'Aye, <last line>' as chat-completions deltas, slowly. Allows
+    browsers (CORS), so a page can call it directly like a local model."""
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "content-type, authorization")
+        self.send_header("Access-Control-Allow-Methods", "POST")
+        self.end_headers()
+
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get("content-length", 0))))
         system = body["messages"][0]["content"]
         name = system.split("You are playing ", 1)[1].split(",", 1)[0] if "You are playing " in system else "Agent"
-        last = body["messages"][-1]["content"].split(": ", 1)[-1]
+        # Consecutive user turns arrive merged ("bob: …\n\nanna: …"): answer the last.
+        last = body["messages"][-1]["content"].split("\n")[-1].split(": ", 1)[-1]
         words = f"{name} here. Aye, {last}".split(" ")
+        CALLS.append((bool(self.headers.get("Origin")), name))
         self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
         for word in words:
@@ -82,8 +96,8 @@ async def shot(page, name):
     if SHOTS: await page.screenshot(path=str(Path(SHOTS) / f"chats-{name}.png"))
 
 
-async def browser_for(b, user, viewport={"width": 1280, "height": 860}, **extra):
-    settings = {"serverUrl": "", "accountUsername": user, "accountPassword": "pw", "accountSuccess": {BASE: user},
+async def browser_for(b, user, viewport={"width": 1280, "height": 860}, own=None, **extra):
+    settings = {**(own or {}), "serverUrl": "", "accountUsername": user, "accountPassword": "pw", "accountSuccess": {BASE: user},
                 "lastWorkspace": {"team": "qa", "path": WS}, "syncedProjectId": f"qa/{WS}", "chatPanel": "shown", "chatTab": "chats"}
     ctx = await b.new_context(viewport=viewport, service_workers="block", **extra)
     await ctx.add_init_script("localStorage.setItem('mdnotes.settings.v1', " + json.dumps(json.dumps(settings)) + ");")
@@ -199,6 +213,24 @@ async def main():
         await a.wait_for_selector('.cv-message.rp-message:has-text("Aye, Ahoy")', timeout=30000)
         assert await bb.locator('[data-chats-open]:has-text("Ahoy")').count() == 0
         ok("a private chat with a character answers every message, privately")
+
+        # A browser that runs replies itself (a local model): the server only
+        # relays them. The fake model sees the call come from the page.
+        own = {"agentSource": "own", "agentRunner": "browser", "agentApiKey": "",
+               "agentApiUrl": f"http://127.0.0.1:{MODEL_PORT}/chat/completions", "agentModel": "local-model"}
+        ctx_l, local, errors_l = await browser_for(b, "anna", own=own)
+        # The group (Aria + bob), not anna's private chat with Aria.
+        await local.locator("[data-chats-open]").filter(has_text="Captain Aria Voss").filter(has_text="bob").click()
+        await bb.click("[data-chats-back]")
+        await bb.locator("[data-chats-open]", has_text="Captain Aria Voss").first.click()
+        before = len(CALLS)
+        await send(local, "@aria from my machine")
+        await bb.wait_for_selector(".rp-message.is-streaming", timeout=15000)
+        await bb.wait_for_selector('.cv-message.rp-message:has-text("Aye, @aria from my machine")', timeout=30000)
+        assert CALLS[before:] == [(True, "Captain Aria Voss")], CALLS[before:]
+        ok("a reply written by a member's own browser (local model) reaches everyone live")
+        errors_a += errors_l
+        await ctx_l.close()
 
         # Phone width: nothing sideways.
         ctx_p, phone, errors_p = await browser_for(b, "bob", {"width": 375, "height": 760}, is_mobile=True, has_touch=True)
