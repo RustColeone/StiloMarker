@@ -403,6 +403,53 @@ class ReplyTests(RegistryBase):
         self.wait(pair['id'])
         self.assertEqual([m['content'] for m in self.reg.chat_proxy.turns[0]['messages']], ['Hi', 'Again'])
 
+    def test_a_browser_can_write_the_reply_itself(self):
+        group = self.call('leo', 'chats_start', [AMY, ARIA])['conversation']
+        sent = self.reg.chats_send(self.tokens['leo'], 'qa', self.path, group['id'], '@aria hello', [], {'runner': 'client'})
+        self.assertEqual(sent['claims'], [{'character': ARIA, 'trigger': sent['message']['id'], 'name': 'Captain Aria Voss'}])
+        self.assertEqual(self.reg.chat_proxy.turns, [])  # the server did not call a model
+        self.assertEqual([e['state'] for e in self.events('amy', 'chat-typing')], ['queued'])
+        trigger = sent['message']['id']
+        self.reg.chat_proxy = server.ChatProxy()  # builds the prompt; never calls a model here
+        prompt = self.call('leo', 'chats_prompt', group['id'], ARIA, trigger)
+        self.assertIn('You are playing Captain Aria Voss', prompt['payload']['messages'][0]['content'])
+        self.assertEqual(prompt['payload']['messages'][-1], {'role': 'user', 'content': 'leo: @aria hello'})
+        self.assertNotIn('model', prompt['payload'])
+        self.assertEqual(sorted(t['function']['name'] for t in prompt['payload']['tools']), ['list_files', 'read_file'])
+        with self.assertRaises(LookupError):
+            self.call('amy', 'chats_prompt', group['id'], ARIA, trigger)  # not amy's to write
+        self.call('leo', 'chats_typing', group['id'], ARIA, trigger, 'Hel')
+        self.assertEqual(self.events('amy', 'chat-typing')[-1]['text'], 'Hel')
+        with self.assertRaises(LookupError):
+            self.call('amy', 'chats_reply', group['id'], ARIA, trigger, 'forged')
+        reply = self.call('leo', 'chats_reply', group['id'], ARIA, trigger, 'Hello there.')['message']
+        self.assertEqual((reply['author'], reply['content'], reply['state']), (ARIA, 'Hello there.', 'done'))
+        self.assertEqual(self.events('amy', 'chat-message')[-1]['message']['content'], 'Hello there.')
+        with self.assertRaises(LookupError):
+            self.call('leo', 'chats_reply', group['id'], ARIA, trigger, 'twice')  # a claim is used once
+
+    def test_a_reply_whose_browser_went_away_is_closed(self):
+        pair = self.call('leo', 'chats_start', [ARIA])['conversation']
+        sent = self.reg.chats_send(self.tokens['leo'], 'qa', self.path, pair['id'], 'Hi', [], {'runner': 'client'})
+        self.call('leo', 'chats_typing', pair['id'], ARIA, sent['message']['id'], 'Half a th')
+        self.assertEqual(self.reg.expire_chat_claims(), 0)  # still fresh
+        self.assertEqual(self.reg.expire_chat_claims(now=time.monotonic() + 120), 1)
+        last = self.call('leo', 'chats_messages', pair['id'])['messages'][-1]
+        self.assertEqual((last['author'], last['content'], last['state']), (ARIA, 'Half a th', 'interrupted'))
+
+    def test_the_stateless_prompt_needs_no_key(self):
+        handler = object.__new__(server.MDNotesRequestHandler)
+        handler.chat_proxy = server.ChatProxy()
+        handler._read_json = lambda: {'persona': {'name': 'Aria', 'content': 'A smuggler.'}, 'cast': [],
+                                      'messages': [{'name': 'You', 'content': 'hi', 'self': False}], 'projectName': 'Novel'}
+        results = []
+        handler._write_json = lambda status, body: results.append((status, body))
+        handler._handle_persona_prompt()
+        status, body = results[0]
+        self.assertEqual(status, 200)
+        self.assertEqual(body['payload']['messages'][-1], {'role': 'user', 'content': 'You: hi'})
+        self.assertNotIn('tools', body['payload'])  # no project sent, so no file tools
+
     def test_people_in_a_pair_get_no_automatic_replies(self):
         pair = self.call('leo', 'chats_start', [AMY])['conversation']
         self.assertEqual(self.reg.chats_send(self.tokens['leo'], 'qa', self.path, pair['id'], '@aria?')['replies'], [])

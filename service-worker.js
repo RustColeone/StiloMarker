@@ -40,6 +40,7 @@ const APP_SHELL = [
   "./app/ui/chats-view.js",
   "./app/services/chats-api-service.js",
   "./app/services/local-chats-service.js",
+  "./app/services/direct-model-service.js",
   "./app/features/module-map-tools.js",
   "./app/features/workspace-history.js",
   "./app/features/snapshots-dialog.js",
