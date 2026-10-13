@@ -377,3 +377,17 @@ streaming model and a browser-run local model) and `chats-local-browser.py`.
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261013T045217Z-v0.1.28`.
 Nine project manifests valid, 153/153 files.
 
+Live test after deploy (18:01 UTC, accounts `test` and `test1` in two browsers,
+throwaway project `blue/chats-live-test-180143`, deleted afterwards): each saw
+the other online and the character; a private message arrived live with an
+unread badge in 0.2 s and the answer came back live; inviting the character
+into the private chat started a new 3-member group and kept the private chat;
+`@aria …` showed `test1` the reply being written within 0.2 s and the real
+DeepSeek reply (in character) reached both in 3.4 s; a message without a
+mention got no reply; no page errors.
+
+Note: `server/whitelist.json` is read only at start-up, and a file that fails to
+parse turns accounts off entirely. Adding `test1` needed a restart, and the
+first restart found a syntax error in the edited file (no one could sign in
+until it was fixed, about three minutes).
+
