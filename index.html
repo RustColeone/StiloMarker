@@ -287,9 +287,6 @@
               <button class="chat-tab" type="button" role="tab" data-chat-tab="agent" aria-selected="true" title="The workspace agent: asks, edits and organizes files">Agent</button>
               <button class="chat-tab" type="button" role="tab" data-chat-tab="roleplay" aria-selected="false" title="Group chat with your characters (.persona.skill files)">Roleplay</button>
             </div>
-            <button id="chat-status-text" class="chat-model-badge" type="button"
-              title="Agent status — click to open settings / retry">Checking…</button>
-            <select id="chat-model-select" class="chat-model-select" aria-label="Agent model" hidden></select>
             <div class="chat-toolbar-actions">
               <button id="chat-new-thread-button" class="chat-toolbar-icon-btn" type="button" aria-label="New chat" title="New chat">&#43;</button>
               <button id="chat-history-toggle-button" class="chat-toolbar-icon-btn" type="button" aria-label="Chat history" title="Chat history" aria-pressed="false">&#9776;</button>
@@ -299,6 +296,8 @@
 
           <!-- History drawer (toggled by the history button) -->
           <div id="chat-history-pane" class="chat-history-pane" hidden>
+            <input id="chat-history-search" class="chat-history-search" type="search" placeholder="Search conversations"
+              aria-label="Search conversations" autocomplete="off" spellcheck="false">
             <div id="chat-thread-list" class="chat-thread-list"></div>
           </div>
 
@@ -309,18 +308,21 @@
           <div id="chat-message-list" class="chat-message-list" role="log" aria-label="Chat conversation" aria-live="polite"></div>
 
           <!-- Compose area -->
+          <!-- Compose: one card with attachments, the input, and a footer holding
+               attach / connections / status / model / send. Drop files anywhere on it. -->
           <div class="chat-compose-shell">
-            <div id="chat-context-list" class="chat-context-list"></div>
             <form id="chat-compose-form" class="chat-compose-form">
-              <div class="chat-compose-context-controls">
+              <div id="chat-context-list" class="chat-context-list"></div>
+              <textarea id="chat-input" class="chat-input" rows="2" spellcheck="true"
+                placeholder="Ask the agent…"></textarea>
+              <div class="chat-compose-footer">
                 <button id="chat-add-active-file-button" class="chat-compose-chip-btn" type="button"
-                  title="Add the currently open file to context">&#64; Active</button>
-                <span class="chat-compose-drop-hint">or drag files here</span>
-              </div>
-              <div id="chat-mcp-summary" class="subtle-label" hidden></div>
-              <div class="chat-compose-input-row">
-                <textarea id="chat-input" class="chat-input" rows="2" spellcheck="true"
-                  placeholder="Ask the agent…"></textarea>
+                  title="Attach the open file — or drag files here from the explorer">&#64; File</button>
+                <div id="chat-mcp-summary" class="chat-compose-mcp" hidden></div>
+                <span class="chat-compose-spacer"></span>
+                <button id="chat-status-text" class="chat-status" type="button" data-tone="busy"
+                  title="Checking the agent…" aria-label="Checking the agent…"><span class="chat-status-dot" aria-hidden="true"></span><span class="chat-status-label">Checking…</span></button>
+                <select id="chat-model-select" class="chat-model-select" aria-label="Model" hidden></select>
                 <button id="chat-send-button" class="chat-send-button" type="submit"
                   title="Send (Enter)" aria-label="Send">&#8593;</button>
               </div>

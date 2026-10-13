@@ -323,7 +323,8 @@ const elements = {
   chatInput: query("#chat-input"),
   chatSendButton: query("#chat-send-button"),
   chatHistoryToggleButton: query("#chat-history-toggle-button"),
-  chatHistoryPane: query("#chat-history-pane")
+  chatHistoryPane: query("#chat-history-pane"),
+  chatHistorySearch: query("#chat-history-search")
 };
 
 const settings = loadSettings();

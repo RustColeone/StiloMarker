@@ -308,7 +308,7 @@ export function createChatPanel(deps) {
   }
 
   function threadInActiveTab(thread) {
-    return (thread?.kind === "group") === isRoleplayTab();
+    return Boolean(thread) && !thread.deleted && (thread.kind === "group") === isRoleplayTab();
   }
 
   function setActiveThreadForTab(threadId) {
@@ -483,19 +483,10 @@ export function createChatPanel(deps) {
     const threadChanged = chatState.renderedThreadId !== activeThread?.id;
     if (threadChanged) elements.chatInput.value = activeThread?.draft ?? "";
     chatState.renderedThreadId = activeThread?.id;
-    const statusPrefix = chatState.syncError || (chatState.sending ? "Sending…" : chatState.detail);
-    // The provider shown is the one serving the selected model.
-    const provider = chatState.modelProviders?.get(chatState.selectedModel) ?? chatState.provider;
-    const statusSuffix = chatState.configured && provider && chatState.model && chatState.models.length <= 1
-      ? ` · ${provider} ${chatState.model}`
-      : (chatState.configured && provider ? ` · ${provider}` : "");
-    elements.chatStatusText.textContent = `${statusPrefix}${statusSuffix}`.trim();
-    const badgeError = Boolean(chatState.syncError) || ["offline", "restricted", "unconfigured", "signin"].includes(chatState.status);
-    elements.chatStatusText.classList.toggle("is-error", badgeError);
-
     // Model picker — only meaningful when the server offers more than one model.
+    const showPicker = chatState.configured && chatState.models.length > 1;
+    renderChatStatus(showPicker);
     if (elements.chatModelSelect) {
-      const showPicker = chatState.configured && chatState.models.length > 1;
       elements.chatModelSelect.hidden = !showPicker;
       if (showPicker) {
         const desired = chatState.selectedModel ?? chatState.models[0];
@@ -517,22 +508,36 @@ export function createChatPanel(deps) {
       }
     }
 
-    const tabThreads = chatState.threads.filter(threadInActiveTab);
-    elements.chatThreadList.innerHTML = tabThreads.length
+    const allTabThreads = chatState.threads.filter(threadInActiveTab);
+    const query = (elements.chatHistorySearch?.value ?? "").trim().toLowerCase();
+    const tabThreads = query
+      ? allTabThreads.filter((thread) => thread.title.toLowerCase().includes(query)
+        || thread.messages.some((message) => String(message.content ?? "").toLowerCase().includes(query)))
+      : allTabThreads;
+    const threadListHtml = tabThreads.length
       ? tabThreads.map((thread) => {
         const meta = `${thread.messages.length} msg · ${formatChatTimestamp(thread.updatedAt)}`;
+        const id = escapeHtmlAttribute(thread.id);
         return `
-          <button
-            class="chat-thread-button${thread.id === activeThread?.id ? " is-active" : ""}"
-            type="button"
-            data-chat-thread-id="${escapeHtmlAttribute(thread.id)}"
-          >
-            <span class="chat-thread-title">${escapeHtmlAttribute(thread.title)}</span>
-            <span class="chat-thread-meta">${escapeHtmlAttribute(meta)}</span>
-          </button>
+          <div class="chat-thread-row${thread.id === activeThread?.id ? " is-active" : ""}">
+            <button class="chat-thread-button" type="button" data-chat-thread-id="${id}">
+              <span class="chat-thread-title">${escapeHtmlAttribute(thread.title)}</span>
+              <span class="chat-thread-meta">${escapeHtmlAttribute(meta)}</span>
+            </button>
+            <span class="chat-thread-actions">
+              <button class="chat-thread-action" type="button" data-chat-thread-rename="${id}" title="Rename" aria-label="Rename ${escapeHtmlAttribute(thread.title)}">✎</button>
+              <button class="chat-thread-action" type="button" data-chat-thread-delete="${id}" title="Delete" aria-label="Delete ${escapeHtmlAttribute(thread.title)}">×</button>
+            </span>
+          </div>
         `;
       }).join("")
-      : `<div class="chat-empty-state">No ${group ? "group chats" : "conversations"} yet.<br>Press <strong>+</strong> to start one.</div>`;
+      : query
+        ? `<div class="chat-empty-state">No conversations match “${escapeHtmlAttribute(query)}”.</div>`
+        : `<div class="chat-empty-state">No ${group ? "group chats" : "conversations"} yet.<br>Press <strong>+</strong> to start one.</div>`;
+    if (elements.chatThreadList._renderedHtml !== threadListHtml) {
+      elements.chatThreadList.innerHTML = threadListHtml;
+      elements.chatThreadList._renderedHtml = threadListHtml;
+    }
 
     // Context chips — empty string collapses the list via CSS :empty rule.
     elements.chatContextList.innerHTML = activeThread?.contextPaths?.length
@@ -608,7 +613,7 @@ export function createChatPanel(deps) {
           </article>
         `;
       }).join("")
-      : '<div class="chat-empty-state">No messages yet.<br>Attach context files below, then send a prompt.</div>';
+      : agentEmptyStateHtml();
 
     // Update only the live reply while streaming; keep earlier DOM nodes intact
     // so selections and expanded message controls survive incoming tokens.
@@ -644,6 +649,74 @@ export function createChatPanel(deps) {
 
     // Refresh in-editor agent bar whenever proposal state changes.
     updateEditorAgentBar();
+  }
+
+  // The compose footer's status: a coloured dot, a word only when something
+  // needs attention (or the single model's name), and the detail in the tooltip.
+  const STATUS_WORDS = { signin: "Sign in", offline: "Offline", unconfigured: "No key", restricted: "Not allowed", checking: "Checking…" };
+
+  function renderChatStatus(showPicker) {
+    const el = elements.chatStatusText;
+    const provider = chatState.modelProviders?.get(chatState.selectedModel) ?? chatState.provider;
+    const ready = chatState.status === "ready" && chatState.configured;
+    const tone = chatState.syncError ? "warn"
+      : ready ? "ok"
+      : chatState.status === "checking" ? "busy"
+      : chatState.status === "signin" ? "warn"
+      : "error";
+    const word = chatState.syncError ? "Sync paused"
+      : ready ? (showPicker ? "" : (chatState.model ?? ""))
+      : (STATUS_WORDS[chatState.status] ?? "Unavailable");
+    const where = chatState.configured && provider
+      ? `${provider}${chatState.selectedModel ?? chatState.model ? ` · ${chatState.selectedModel ?? chatState.model}` : ""}` : "";
+    const detail = [chatState.syncError || chatState.detail, where].filter(Boolean).join(" — ");
+    const title = `${detail}${ready ? " (click to re-check)" : " (click to fix)"}`;
+    el.dataset.tone = tone;
+    el.classList.toggle("is-error", tone === "error" || tone === "warn");
+    const label = el.querySelector(".chat-status-label");
+    if (label && label.textContent !== word) label.textContent = word;
+    if (el.title !== title) { el.title = title; el.setAttribute("aria-label", title); }
+  }
+
+  /** First-run hints for the agent: what it can do, as prompts to start from. */
+  function agentEmptyStateHtml() {
+    const examples = [
+      "Summarize the open file and suggest a better title",
+      "Make a character file for the main character of my current chapter",
+      ...(chatState.imageGeneration && syncState.account ? ["Draw the opening scene of my current chapter"] : []),
+      "Find every note that mentions this file and link them together"
+    ];
+    return `<div class="chat-empty-state chat-empty-agent">
+      <p>Ask about your workspace, or have the agent edit it — you review every change.</p>
+      <div class="chat-examples">${examples.map((text) =>
+        `<button type="button" class="chat-example" data-chat-example="${escapeHtmlAttribute(text)}">${escapeHtmlAttribute(text)}</button>`).join("")}</div>
+      <p class="chat-empty-hint">Attach files with <strong>@ File</strong> or by dragging them onto the box below.</p>
+    </div>`;
+  }
+
+  async function renameChatThread(threadId) {
+    const thread = chatState.threads.find((entry) => entry.id === threadId);
+    if (!thread) return;
+    const title = await promptForName("Rename conversation", thread.title, { submitLabel: "Rename", label: "Title" });
+    if (!title || title === thread.title) return;
+    thread.title = title.trim().slice(0, 120);
+    thread.updatedAt = Date.now();
+    persistChatWorkspaceState();
+    renderChatPanel(controller.getProject());
+  }
+
+  async function deleteChatThread(threadId) {
+    const thread = chatState.threads.find((entry) => entry.id === threadId);
+    if (!thread) return;
+    const ok = await showConfirmDialog({ title: "Delete conversation", message: `Delete “${thread.title}”? It is removed for everyone in this workspace.`, acceptLabel: "Delete" });
+    if (!ok) return;
+    thread.deleted = true;
+    thread.updatedAt = Date.now();
+    if (thread.id === chatState.activeThreadId) chatState.activeThreadId = chatState.threads.find((t) => !t.deleted && t.kind !== "group")?.id ?? null;
+    if (thread.id === chatState.activeGroupThreadId) chatState.activeGroupThreadId = chatState.threads.find((t) => !t.deleted && t.kind === "group")?.id ?? null;
+    chatState.shouldScrollToBottom = true;
+    persistChatWorkspaceState();
+    renderChatPanel(controller.getProject());
   }
 
   function setActiveChatThread(threadId) {
@@ -1404,11 +1477,23 @@ export function createChatPanel(deps) {
     if (path) addChatContextPath(path);
   });
   elements.chatThreadList.addEventListener("click", (event) => {
+    const rename = event.target.closest("[data-chat-thread-rename]");
+    if (rename) { void renameChatThread(rename.dataset.chatThreadRename); return; }
+    const remove = event.target.closest("[data-chat-thread-delete]");
+    if (remove) { void deleteChatThread(remove.dataset.chatThreadDelete); return; }
     const button = event.target.closest("[data-chat-thread-id]");
     if (!button) {
       return;
     }
     setActiveChatThread(button.dataset.chatThreadId);
+  });
+  elements.chatHistorySearch?.addEventListener("input", () => renderChatPanel(controller.getProject()));
+  elements.chatMessageList.addEventListener("click", (event) => {
+    const example = event.target.closest("[data-chat-example]");
+    if (!example) return;
+    elements.chatInput.value = example.dataset.chatExample;
+    elements.chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+    elements.chatInput.focus();
   });
   elements.chatContextList.addEventListener("click", (event) => {
     const button = event.target.closest("[data-chat-remove-context]");

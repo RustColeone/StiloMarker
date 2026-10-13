@@ -96,6 +96,9 @@ function normalizeChatThread(value) {
     thread.members = Array.from(new Set((Array.isArray(value.members) ? value.members : [])
       .map((path) => String(path ?? "").trim()).filter(Boolean))).slice(0, MAX_GROUP_MEMBERS);
   }
+  // Deleted threads stay as a tombstone: chat sync merges by id and never treats
+  // a missing thread as deleted, so a collaborator's copy would bring it back.
+  if (value.deleted === true) thread.deleted = true;
   return thread;
 }
 
