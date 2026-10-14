@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-14 · release `v0.1.29` (deployed; public verification passed)
+Last updated: 2026-10-14 · release `v0.1.30`
 
 ---
 
@@ -30,6 +30,16 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.30: the account file is re-read when it changes; a broken one keeps the last good accounts
+
+`server/whitelist.json` was read only at start-up, so adding an account needed
+a restart, and a file that failed to parse (a missing comma) turned accounts
+off entirely: on 2026-10-13 nobody could sign in for about three minutes. Now
+the file is checked at most every 2 s when accounts are used and re-read when
+it changes; a file that cannot be parsed keeps the accounts already loaded and
+logs one `WARNING` until it is fixed. Removed accounts stop working the same
+way, without a restart.
 
 ### v0.1.29: GPT 6.1 Sol and Luna in the model picker
 
