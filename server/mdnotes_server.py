@@ -33,7 +33,7 @@ if _mcp_module_dir not in sys.path:
 from mcp_client import MCPManager, MCPTurn
 from conversations import (SIDE_FILES as CHAT_DB_FILES, ProjectChats, ReplyQueue, char_key, find_mentions,
                            persona_handle, persona_header, persona_summary, user_key)
-from openai_support import IMAGE_FORMATS, IMAGE_SIZES, GeneratedImages, OpenAIProvider, is_openai_model, uses_fixed_temperature, tools_need_no_reasoning
+from openai_support import IMAGE_FORMATS, IMAGE_SIZES, GeneratedImages, OpenAIProvider, is_openai_model, uses_fixed_temperature, uses_responses_api, to_responses_request, ResponsesStream
 
 
 def _log(tag: str, message: str, **fields):
@@ -241,8 +241,6 @@ class ChatProxy:
             payload["reasoning_effort"] = self.reasoning_effort
         if uses_fixed_temperature(model):
             payload.pop("temperature", None)
-        if tools_need_no_reasoning(model):
-            payload["reasoning_effort"] = "none"
         return payload
 
     def images_available(self) -> bool:
@@ -508,8 +506,12 @@ class ChatProxy:
         """
         payload = dict(base_payload)
         payload["stream"] = True
+        responses = None
+        url = self._eff_url()
+        if url == self.openai.chat_url and uses_responses_api(payload.get("model", "")):
+            responses, url, payload = ResponsesStream(), self.openai.responses_url, to_responses_request(payload)
         request = Request(
-            self._eff_url(),
+            url,
             data=json.dumps(payload).encode("utf-8"),
             headers=headers,
             method="POST",
@@ -543,6 +545,20 @@ class ChatProxy:
                 try:
                     chunk = json.loads(data)
                 except json.JSONDecodeError:
+                    continue
+                if responses is not None:
+                    shown = responses.feed(chunk)
+                    if shown and shown.get("text"):
+                        emit({"type": "delta", "text": shown["text"]})
+                    elif shown and shown.get("reasoning"):
+                        emit({"type": "reasoning", "text": shown["reasoning"]})
+                    now = time.time()
+                    if responses.tools and now - last_emit > 0.4:
+                        last_emit = now
+                        for slot in responses.tools.values():
+                            if slot["function"]["name"]:
+                                emit({"type": "writing", "name": slot["function"]["name"],
+                                      "chars": len(slot["function"]["arguments"])})
                     continue
                 choices = chunk.get("choices") or []
                 if not choices:
@@ -588,6 +604,8 @@ class ChatProxy:
                             emit({"type": "writing", "name": name,
                                   "chars": len(slot["function"]["arguments"])})
 
+        if responses is not None:
+            return responses.result()
         message: dict = {"role": "assistant", "content": "".join(content_parts)}
         if tool_acc:
             message["tool_calls"] = [tool_acc[i] for i in sorted(tool_acc)]
