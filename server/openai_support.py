@@ -40,8 +40,8 @@ def _version(text: str) -> tuple:
 
 
 def pick_chat_models(ids) -> list[str]:
-    """Every offered variant of the newest GPT version (flagship, Sol, Luna,
-    mini). When that version has only a flagship, the newest mini is added."""
+    """The newest flagship, Sol, Luna and mini of the newest GPT major version.
+    When that leaves only a flagship, the newest mini is added."""
     found: dict[tuple, str] = {}
     for model_id in ids:
         match = CHAT_MODEL.match(model_id)
@@ -50,7 +50,13 @@ def pick_chat_models(ids) -> list[str]:
     if not found:
         return []
     newest = max(version for version, _ in found)
-    picks = [found[(newest, v)] for v in CHAT_VARIANTS if (newest, v) in found]
+    # The newest of each variant within the newest major version (6.1 Sol
+    # next to 6 Luna when there is no 6.1 Luna yet).
+    picks = []
+    for variant in CHAT_VARIANTS:
+        versions = [v for v, name in found if name == variant and v[0] == newest[0]]
+        if versions:
+            picks.append(found[(max(versions), variant)])
     if picks == [found.get((newest, ""))]:
         minis = [version for version, v in found if v == "mini"]
         if minis:

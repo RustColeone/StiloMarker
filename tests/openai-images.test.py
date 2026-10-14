@@ -71,6 +71,8 @@ class CatalogTests(unittest.TestCase):
         ids = ['gpt-5.5', 'gpt-5.4-mini', 'gpt-6.1-sol', 'gpt-6.1-luna', 'gpt-6.1-sol-2026-09-01', 'gpt-6-luna']
         self.assertEqual(oa.pick_chat_models(ids), ['gpt-6.1-sol', 'gpt-6.1-luna'])
         self.assertEqual(oa.pick_chat_models(ids + ['gpt-6.1']), ['gpt-6.1', 'gpt-6.1-sol', 'gpt-6.1-luna'])
+        self.assertEqual(oa.pick_chat_models(['gpt-6-astra', 'gpt-6-luna', 'gpt-6-sol', 'gpt-6.1-sol', 'gpt-5.5']),
+                         ['gpt-6.1-sol', 'gpt-6-luna'])
         self.assertEqual(oa.newest_gpt_ids(ids), ['gpt-6-luna', 'gpt-6.1-luna', 'gpt-6.1-sol', 'gpt-6.1-sol-2026-09-01'])
         self.assertTrue(oa.uses_fixed_temperature('gpt-6.1-sol') and oa.uses_fixed_temperature('gpt-10'))
         self.assertTrue(oa.is_openai_model('gpt-6.1-luna'))
