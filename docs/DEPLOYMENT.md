@@ -412,3 +412,20 @@ backend self-test.
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261014T191602Z-v0.1.29`.
 Nine project manifests valid, 165/165 files.
 
+
+## Verified release: v0.1.30
+
+Deployed on 2026-10-14 at 19:24 UTC. Server only: `server/whitelist.json` is
+re-read when it changes (checked at most every 2 s), and a file that cannot be
+parsed keeps the accounts already loaded with a logged `WARNING`. App version
+`0.1.30`; sync compatibility unchanged at `117`.
+
+Public checks: ping (`0.1.30`, accounts on), `test` and `test1` sign in, four
+accounts loaded at start. The live account file was not edited to test the
+reload (it holds passwords); `server-reliability.test.py` covers adding,
+removing and a broken file. Validation: 166 Node tests, the Python suites
+(reliability now 30 tests), the backend self-test.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261014T192408Z-v0.1.30`.
+Nine project manifests valid, 165/165 files.
+
