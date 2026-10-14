@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-13 · release `v0.1.29`
+Last updated: 2026-10-14 · release `v0.1.29` (deployed; public verification passed)
 
 ---
 
@@ -41,6 +41,13 @@ when that leaves a flagship alone. The live account has `gpt-6.1-sol` and
 `gpt-6-luna` (no 6.1 Luna yet), so those two are offered. GPT 6 and later are treated
 as reasoning models (no `temperature`). The start-up log lists the catalog's
 newest GPT ids, so the names can be checked.
+
+GPT 6 models refuse function tools on `/v1/chat/completions` while reasoning
+is on, and Sol cannot turn reasoning off, so every agent and character request
+failed. GPT 6+ on the server's key now goes through `/v1/responses`: the
+request is still built in chat-completions form and translated
+(`to_responses_request`, `ResponsesStream`), so the tool loop, streaming and
+progress are unchanged for every provider. An own key keeps chat completions.
 
 ### v0.1.28: Chats (people and characters, live), a tidier chat panel, and the code split
 

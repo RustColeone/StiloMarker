@@ -391,3 +391,24 @@ parse turns accounts off entirely. Adding `test1` needed a restart, and the
 first restart found a syntax error in the edited file (no one could sign in
 until it was fixed, about three minutes).
 
+
+## Verified release: v0.1.29
+
+Deployed on 2026-10-14 at 19:16 UTC, with two server-only follow-ups the same
+evening. The model picker offers GPT 6.1 Sol and GPT 6 Luna (the account has
+no 6.1 Luna yet; the start-up log lists `gpt-6-astra, gpt-6-luna, gpt-6-sol,
+gpt-6.1-sol`), and GPT 6+ requests go through the Responses API. App version
+`0.1.29`; sync compatibility unchanged at `117`.
+
+Public checks with the `test` account: `/api/chat/status` lists
+`deepseek-flash, deepseek-v4-pro, gpt-6.1-sol, gpt-6-luna`; both GPT models
+answered a plain request (0.9–1.8 s) and called `read_file` on `welcome.md`
+and quoted its heading correctly; DeepSeek unchanged. Before the Responses
+change both GPT 6 models failed every tool request ("Function tools with
+reasoning_effort are not supported"). Validation: 166 Node tests, the Python
+suites (OpenAI suite now 26 tests, including the translation round trip), the
+backend self-test.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261014T191602Z-v0.1.29`.
+Nine project manifests valid, 165/165 files.
+
