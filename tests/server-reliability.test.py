@@ -352,5 +352,27 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual([events.get_nowait()['revision'], events.get_nowait()['revision']], [2, 3])
 
 
+class AccountFileTests(unittest.TestCase):
+    def test_accounts_reload_on_change_and_a_broken_file_keeps_the_last_good_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'whitelist.json'
+            path.write_text(json.dumps({'users': [{'username': 'a', 'password': 'p', 'teams': ['red']}]}))
+            store = server.AccountStore(path)
+            self.assertTrue(store.authenticate('a', 'p'))
+            path.write_text(json.dumps({'users': [{'username': 'a', 'password': 'p', 'teams': ['red']},
+                                                  {'username': 'b', 'password': 'q', 'teams': ['red', 'blue']}]}))
+            store._checked = 0
+            self.assertEqual(store.authenticate('b', 'q')['teams'], ['red', 'blue'])  # no restart
+            path.write_text('{"users": [ {"username": "a"} {"username": "c"} ]}')  # missing comma
+            store._checked = 0
+            self.assertTrue(store.enabled)
+            self.assertTrue(store.authenticate('b', 'q'), 'the last good accounts are kept')
+            self.assertEqual(sorted(store.team_members('red')), ['a', 'b'])
+            path.write_text(json.dumps({'users': [{'username': 'c', 'password': 'r', 'teams': []}]}))
+            store._checked = 0
+            self.assertIsNone(store.authenticate('b', 'q'), 'a removed account stops working')
+            self.assertTrue(store.authenticate('c', 'r'))
+
+
 if __name__ == '__main__':
     unittest.main()
