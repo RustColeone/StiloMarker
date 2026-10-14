@@ -33,7 +33,7 @@ if _mcp_module_dir not in sys.path:
 from mcp_client import MCPManager, MCPTurn
 from conversations import (SIDE_FILES as CHAT_DB_FILES, ProjectChats, ReplyQueue, char_key, find_mentions,
                            persona_handle, persona_header, persona_summary, user_key)
-from openai_support import IMAGE_FORMATS, IMAGE_SIZES, GeneratedImages, OpenAIProvider, is_openai_model, uses_fixed_temperature
+from openai_support import IMAGE_FORMATS, IMAGE_SIZES, GeneratedImages, OpenAIProvider, is_openai_model, uses_fixed_temperature, tools_need_no_reasoning
 
 
 def _log(tag: str, message: str, **fields):
@@ -241,6 +241,8 @@ class ChatProxy:
             payload["reasoning_effort"] = self.reasoning_effort
         if uses_fixed_temperature(model):
             payload.pop("temperature", None)
+        if tools_need_no_reasoning(model):
+            payload["reasoning_effort"] = "none"
         return payload
 
     def images_available(self) -> bool:
