@@ -35,9 +35,10 @@ one. Affects only pre-existing local history.
 
 The server offered only `gpt-N`, `gpt-N-mini` and `gpt-N-nano`, so the
 account's newest models with named tiers never appeared and the picker stayed
-on GPT-5.5. It now offers every variant of the newest GPT version it finds
-(flagship, Sol, Luna, mini; dated snapshots are skipped), adding the newest
-mini only when that version has no other variant. GPT 6 and later are treated
+on GPT-5.5. It now offers the newest flagship, Sol, Luna and mini within the newest
+GPT major version (dated snapshots are skipped), adding the newest mini only
+when that leaves a flagship alone. The live account has `gpt-6.1-sol` and
+`gpt-6-luna` (no 6.1 Luna yet), so those two are offered. GPT 6 and later are treated
 as reasoning models (no `temperature`). The start-up log lists the catalog's
 newest GPT ids, so the names can be checked.
 
