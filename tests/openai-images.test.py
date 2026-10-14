@@ -67,6 +67,14 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(oa.pick_chat_models(['dall-e-3']), [])
         self.assertIsNone(oa.pick_image_model(['gpt-5']))
 
+    def test_named_variants_of_the_newest_version_are_offered(self):
+        ids = ['gpt-5.5', 'gpt-5.4-mini', 'gpt-6.1-sol', 'gpt-6.1-luna', 'gpt-6.1-sol-2026-09-01', 'gpt-6-luna']
+        self.assertEqual(oa.pick_chat_models(ids), ['gpt-6.1-sol', 'gpt-6.1-luna'])
+        self.assertEqual(oa.pick_chat_models(ids + ['gpt-6.1']), ['gpt-6.1', 'gpt-6.1-sol', 'gpt-6.1-luna'])
+        self.assertEqual(oa.newest_gpt_ids(ids), ['gpt-6-luna', 'gpt-6.1-luna', 'gpt-6.1-sol', 'gpt-6.1-sol-2026-09-01'])
+        self.assertTrue(oa.uses_fixed_temperature('gpt-6.1-sol') and oa.uses_fixed_temperature('gpt-10'))
+        self.assertTrue(oa.is_openai_model('gpt-6.1-luna'))
+
     def test_versions_compare_numerically(self):
         self.assertEqual(oa.pick_chat_models(['gpt-5.9', 'gpt-5.10']), ['gpt-5.10'])
 

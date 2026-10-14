@@ -21,10 +21,12 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-CHAT_MODEL = re.compile(r"^gpt-(\d+(?:\.\d+)?)(?:-(mini|nano))?$")
+CHAT_MODEL = re.compile(r"^gpt-(\d+(?:\.\d+)?)(?:-(mini|nano|sol|luna))?$")
+# Variants offered from the newest version, in picker order.
+CHAT_VARIANTS = ("", "sol", "luna", "mini")
 IMAGE_MODEL = re.compile(r"^gpt-image-(\d+(?:\.\d+)?)(?:-(mini))?$")
 # Reasoning models accept only the default sampling temperature.
-FIXED_TEMPERATURE_MODEL = re.compile(r"^(gpt-5|o\d)")
+FIXED_TEMPERATURE_MODEL = re.compile(r"^(gpt-([5-9]|\d{2,})|o\d)")
 IMAGE_SIZES = {"square": "1024x1024", "portrait": "1024x1536", "landscape": "1536x1024"}
 IMAGE_FORMATS = {".png": ("png", "image/png"), ".jpg": ("jpeg", "image/jpeg"),
                  ".jpeg": ("jpeg", "image/jpeg"), ".webp": ("webp", "image/webp")}
@@ -38,14 +40,28 @@ def _version(text: str) -> tuple:
 
 
 def pick_chat_models(ids) -> list[str]:
-    """Newest GPT flagship and newest GPT mini from a model catalog."""
-    by_variant: dict[str, dict[str, str]] = {"": {}, "mini": {}}
+    """Every offered variant of the newest GPT version (flagship, Sol, Luna,
+    mini). When that version has only a flagship, the newest mini is added."""
+    found: dict[tuple, str] = {}
     for model_id in ids:
         match = CHAT_MODEL.match(model_id)
-        if match and (match[2] or "") in by_variant:
-            by_variant[match[2] or ""][match[1]] = model_id
-    picks = [variant[max(variant, key=_version)] for variant in by_variant.values() if variant]
-    return list(dict.fromkeys(picks))
+        if match and (match[2] or "") in CHAT_VARIANTS:
+            found[(_version(match[1]), match[2] or "")] = model_id
+    if not found:
+        return []
+    newest = max(version for version, _ in found)
+    picks = [found[(newest, v)] for v in CHAT_VARIANTS if (newest, v) in found]
+    if picks == [found.get((newest, ""))]:
+        minis = [version for version, v in found if v == "mini"]
+        if minis:
+            picks.append(found[(max(minis), "mini")])
+    return picks
+
+
+def newest_gpt_ids(ids) -> list[str]:
+    """The catalog's ids of the newest GPT major version (for the start-up log)."""
+    majors = [int(m[1].split(".")[0]) for m in map(re.compile(r"^gpt-(\d+(?:\.\d+)?)").match, ids) if m]
+    return sorted(i for i in ids if majors and i.startswith(f"gpt-{max(majors)}")) if majors else []
 
 
 def pick_image_model(ids) -> str | None:
@@ -96,6 +112,7 @@ class OpenAIProvider:
         except ValueError:
             self.max_images_per_turn = 2
         self.models: list[str] = []
+        self.newest_ids: list[str] = []
         self.image_model: str | None = None
         self.catalog_error: str | None = None
         self._opener = opener
@@ -122,7 +139,9 @@ class OpenAIProvider:
     def load_catalog(self) -> None:
         """Read the account's model list. Raises on failure (caller retries)."""
         payload = self._request(self.models_url, timeout=20)
-        self.apply_catalog(row.get("id", "") for row in payload.get("data", []) if isinstance(row, dict))
+        ids = [str(row.get("id", "")) for row in payload.get("data", []) if isinstance(row, dict)]
+        self.newest_ids = newest_gpt_ids(ids)
+        self.apply_catalog(ids)
         self.catalog_error = None
 
     def start(self, log, retry_seconds: float = 600) -> None:
@@ -135,7 +154,7 @@ class OpenAIProvider:
                 try:
                     self.load_catalog()
                     log("OPENAI", "Models ready", chat=",".join(self.models) or "none",
-                        image=self.image_model or "none")
+                        image=self.image_model or "none", newest=",".join(self.newest_ids[:20]) or "none")
                     return
                 except HTTPError as error:
                     self.catalog_error = _api_error(error, "Model list failed")

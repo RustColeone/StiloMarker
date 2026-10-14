@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-13 · release `v0.1.28` (deployed; public verification passed)
+Last updated: 2026-10-13 · release `v0.1.29`
 
 ---
 
@@ -30,6 +30,16 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.29: GPT 6.1 Sol and Luna in the model picker
+
+The server offered only `gpt-N`, `gpt-N-mini` and `gpt-N-nano`, so the
+account's newest models with named tiers never appeared and the picker stayed
+on GPT-5.5. It now offers every variant of the newest GPT version it finds
+(flagship, Sol, Luna, mini; dated snapshots are skipped), adding the newest
+mini only when that version has no other variant. GPT 6 and later are treated
+as reasoning models (no `temperature`). The start-up log lists the catalog's
+newest GPT ids, so the names can be checked.
 
 ### v0.1.28: Chats (people and characters, live), a tidier chat panel, and the code split
 
