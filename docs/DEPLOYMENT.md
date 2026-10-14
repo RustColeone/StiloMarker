@@ -406,7 +406,7 @@ answered a plain request (0.9–1.8 s) and called `read_file` on `welcome.md`
 and quoted its heading correctly; DeepSeek unchanged. Before the Responses
 change both GPT 6 models failed every tool request ("Function tools with
 reasoning_effort are not supported"). Validation: 166 Node tests, the Python
-suites (OpenAI suite now 26 tests, including the translation round trip), the
+suites (OpenAI suite now 25 tests, including the translation round trip), the
 backend self-test.
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261014T191602Z-v0.1.29`.
