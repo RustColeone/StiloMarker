@@ -76,7 +76,31 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(oa.newest_gpt_ids(ids), ['gpt-6-luna', 'gpt-6.1-luna', 'gpt-6.1-sol', 'gpt-6.1-sol-2026-09-01'])
         self.assertTrue(oa.uses_fixed_temperature('gpt-6.1-sol') and oa.uses_fixed_temperature('gpt-10'))
         self.assertTrue(oa.is_openai_model('gpt-6.1-luna'))
-        self.assertTrue(oa.tools_need_no_reasoning('gpt-6.1-sol') and not oa.tools_need_no_reasoning('gpt-5.5'))
+        self.assertTrue(oa.uses_responses_api('gpt-6.1-sol') and not oa.uses_responses_api('gpt-5.5'))
+
+    def test_responses_translation_round_trip(self):
+        payload = {"model": "gpt-6.1-sol", "temperature": 0.4, "tool_choice": "auto", "messages": [
+            {"role": "system", "content": "sys"}, {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "read_file", "arguments": '{"path":"a.md"}'}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": "file body"}],
+            "tools": [{"type": "function", "function": {"name": "read_file", "description": "Read", "parameters": {"type": "object"}}}]}
+        r = oa.to_responses_request(payload)
+        self.assertEqual(r["input"], [{"role": "developer", "content": "sys"}, {"role": "user", "content": "hi"},
+                                      {"type": "function_call", "call_id": "c1", "name": "read_file", "arguments": '{"path":"a.md"}'},
+                                      {"type": "function_call_output", "call_id": "c1", "output": "file body"}])
+        self.assertEqual(r["tools"], [{"type": "function", "name": "read_file", "description": "Read", "parameters": {"type": "object"}}])
+        self.assertNotIn("temperature", r); self.assertEqual(r["tool_choice"], "auto"); self.assertTrue(r["stream"])
+        stream = oa.ResponsesStream()
+        self.assertEqual(stream.feed({"type": "response.output_text.delta", "delta": "Hel"}), {"text": "Hel"})
+        stream.feed({"type": "response.output_item.added", "output_index": 1, "item": {"type": "function_call", "call_id": "c2", "name": "list_files", "arguments": ""}})
+        stream.feed({"type": "response.function_call_arguments.delta", "output_index": 1, "delta": '{"a"'})
+        stream.feed({"type": "response.function_call_arguments.delta", "output_index": 1, "delta": ':1}'})
+        stream.feed({"type": "response.completed", "response": {}})
+        message = stream.result()["choices"][0]
+        self.assertEqual(message["finish_reason"], "tool_calls")
+        self.assertEqual(message["message"]["tool_calls"], [{"id": "c2", "type": "function", "function": {"name": "list_files", "arguments": '{"a":1}'}}])
+        with self.assertRaises(RuntimeError):
+            oa.ResponsesStream().feed({"type": "response.failed", "response": {"error": {"message": "nope"}}})
 
     def test_versions_compare_numerically(self):
         self.assertEqual(oa.pick_chat_models(['gpt-5.9', 'gpt-5.10']), ['gpt-5.10'])
