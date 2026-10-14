@@ -76,6 +76,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(oa.newest_gpt_ids(ids), ['gpt-6-luna', 'gpt-6.1-luna', 'gpt-6.1-sol', 'gpt-6.1-sol-2026-09-01'])
         self.assertTrue(oa.uses_fixed_temperature('gpt-6.1-sol') and oa.uses_fixed_temperature('gpt-10'))
         self.assertTrue(oa.is_openai_model('gpt-6.1-luna'))
+        self.assertTrue(oa.tools_need_no_reasoning('gpt-6.1-sol') and not oa.tools_need_no_reasoning('gpt-5.5'))
 
     def test_versions_compare_numerically(self):
         self.assertEqual(oa.pick_chat_models(['gpt-5.9', 'gpt-5.10']), ['gpt-5.10'])

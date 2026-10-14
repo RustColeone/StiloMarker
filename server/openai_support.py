@@ -85,6 +85,15 @@ def uses_fixed_temperature(model: str) -> bool:
     return bool(FIXED_TEMPERATURE_MODEL.match(model or ""))
 
 
+# GPT 6+ on /v1/chat/completions refuses function tools while reasoning is on.
+# The agent and characters always send tools, so reasoning is turned off.
+TOOLS_NEED_NO_REASONING = re.compile(r"^gpt-([6-9]|\d{2,})")
+
+
+def tools_need_no_reasoning(model: str) -> bool:
+    return bool(TOOLS_NEED_NO_REASONING.match(model or ""))
+
+
 def is_openai_model(model: str) -> bool:
     return bool(CHAT_MODEL.match(model or "") or FIXED_TEMPERATURE_MODEL.match(model or "")
                 or (model or "").startswith(("gpt-", "chatgpt-")))
