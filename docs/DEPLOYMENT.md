@@ -499,3 +499,26 @@ Private deployment backups: `/home/laplacengan/backups/stilomarker/20261016T1859
 and `/home/laplacengan/backups/stilomarker/20261016T191332Z-v0.1.34`.
 Nine project manifests valid, 166/166 files each time.
 
+
+## Verified release: v0.1.35
+
+Deployed on 2026-10-16 at 21:25 UTC. Module restructure step 4, part 2: the
+project model and store in the browser's Workspace module; the tree, text
+offsets and folder storage (with its crash-safe commit) in the server's
+Workspace module, which CollaborationBroker calls. The server now refuses file
+types the app does not know, as the browser does. App version `0.1.35`; sync
+compatibility unchanged at `117`.
+
+Public checks: ping (`0.1.35`), the `mdnotes-shell-v0.1.35` cache label, the
+journal shows the kernel starting file_types, transport and workspace, no
+errors. Existing projects load through the new folder storage (read-only:
+open, read, leave): `red/Novel` 27 files, about 300,000 characters, revision
+68062; `red/Lyrics` 2 files. The live two-account write-path test (`test`,
+`test1`, a throwaway `blue/write-path-live-*`, deleted afterwards) passed all
+four checks. Validation: 207 Node tests (new: operations parity), all Python
+suites (new: operations parity; the crash-recovery tests now inject failures
+in the folder store), the backend self-test, fourteen browser suites.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261016T212510Z-v0.1.35`.
+Nine project manifests valid, 166/166 files.
+
