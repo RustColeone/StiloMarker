@@ -1,3 +1,5 @@
+// The open project, held in memory: changes go through it, and listeners hear
+// about each one. No input or output; saving it is someone else's job.
 import {
   ROOT_ID,
   applySyncOperation,
@@ -13,7 +15,7 @@ import {
   setActiveFile,
   toggleFolder,
   updateFileContent
-} from "./project-model.js";
+} from "../model/project.js";
 
 function seedDefaultProject() {
   let project = createProject("Workspace");

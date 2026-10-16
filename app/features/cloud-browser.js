@@ -1,7 +1,7 @@
 // Cloud file browser (server and on-device projects), accounts (log in / out),
 // guest-PIN hosting, workspace access, and opening a cloud workspace.
 // main.js creates this on first use and passes its shared values in `app`.
-import { seedDefaultProject } from "../domain/project-service.js";
+import { seedDefaultProject } from "../modules/workspace/index.js";
 import { openProjectOpfs, supportsOpfs } from "../services/opfs-service.js";
 import { saveSettings } from "../services/settings-service.js";
 import { createProjectServer, getAccess, loginToServer, normalizeServerUrl, pingServer, setAccess } from "../services/sync-service.js";

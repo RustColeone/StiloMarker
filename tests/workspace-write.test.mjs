@@ -6,6 +6,7 @@ import workspaceModule from "../app/modules/workspace/index.js";
 import fileTypesModule from "../app/modules/file-types/index.js";
 import { startModules } from "../app/kernel/index.js";
 import { undoSteps } from "../app/features/agent-undo.js";
+import { ROOT_ID, addFile, createProject, getNodeByPath, getNodeIdByPath } from "../app/modules/workspace/index.js";
 
 const ORIGINAL = "one\ntwo\nthree\nfour\nfive\n";
 
@@ -40,16 +41,21 @@ test("an edit lands beside other people's changes, and refuses to guess", () => 
   assert.equal(placeHunks(diffHunks(repeated, "a\nB\na\nb\n"), repeated, `x\n${repeated}${repeated}`), null);
 });
 
+// A real project in the module, with fake editing/sync ports beside it.
 async function harness(files) {
   const { workspace } = await startModules([fileTypesModule, workspaceModule]);
+  let project = createProject("W");
+  for (const [name, content] of Object.entries(files)) project = addFile(project, ROOT_ID, name, content);
+  const store = workspace.openProject(project);
+  const contentOf = (path) => getNodeByPath(store.getProject(), path).content;
   const commits = [], replaced = [], written = [];
   workspace.attach({
-    read: (path) => (path in files ? { content: files[path] } : null),
-    commit: (path, previous, next, source) => { commits.push({ path, previous, next, source }); files[path] = next; },
-    replace: async (operation) => { replaced.push(operation); files[operation.path] = operation.content; }
+    commit: (path, previous, next, source) => { commits.push({ path, previous, next, source }); store.updateContent(getNodeIdByPath(store.getProject(), path), next); },
+    replace: async (operation) => { replaced.push(operation); store.updateContent(getNodeIdByPath(store.getProject(), operation.path), operation.content); }
   });
   workspace.events.on("written", (event) => written.push(event));
-  return { workspace, files, commits, replaced, written };
+  const set = (path, text) => store.updateContent(getNodeIdByPath(store.getProject(), path), text);
+  return { workspace, store, contentOf, set, commits, replaced, written };
 }
 
 test("write: a text file changes by commit (a patch), merged when the file moved on, stale when it cannot fit", async () => {
@@ -62,17 +68,17 @@ test("write: a text file changes by commit (a patch), merged when the file moved
 
   // Undo is the same write backwards: only the agent's line goes back.
   await h.workspace.write("notes.md", ORIGINAL, { base: agent, source: "assistant undo" });
-  assert.equal(h.files["notes.md"], ORIGINAL.replace("five", "five (bob)"));
+  assert.equal(h.contentOf("notes.md"), ORIGINAL.replace("five", "five (bob)"));
 
   // A conflicting edit changes nothing.
-  h.files["notes.md"] = ORIGINAL.replace("two", "two (bob)");
+  h.set("notes.md", ORIGINAL.replace("two", "two (bob)"));
   const before = h.commits.length;
   await assert.rejects(h.workspace.write("notes.md", agent, { base: ORIGINAL }), (error) => h.workspace.isStale(error));
   assert.equal(h.commits.length, before);
   assert.equal(h.workspace.fits("notes.md", agent, ORIGINAL), false);
 
   // Writing what is already there is not a change; an image is replaced whole.
-  assert.equal((await h.workspace.write("notes.md", h.files["notes.md"])).changed, false);
+  assert.equal((await h.workspace.write("notes.md", h.contentOf("notes.md"))).changed, false);
   await h.workspace.write("art.png", "data:image/png;base64,BBBB", { source: "replace file" });
   assert.deepEqual(h.replaced, [{ type: "update-file", path: "art.png", content: "data:image/png;base64,BBBB" }]);
   await assert.rejects(h.workspace.write("missing.md", "x"), /No file at missing.md/);
