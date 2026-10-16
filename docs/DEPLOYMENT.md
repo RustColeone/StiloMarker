@@ -451,3 +451,24 @@ self-test, and thirteen browser suites (new: `shell-browser.py`).
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261016T044953Z-v0.1.31`.
 Nine project manifests valid, 166/166 files.
 
+
+## Verified release: v0.1.32
+
+Deployed on 2026-10-16 at 05:24 UTC. Module restructure step 3: File types.
+Every file type is defined once in `protocol/file-types.json`, loaded by both
+ends; every type check in the browser and on the server asks the File types
+module. App version `0.1.32`; sync compatibility unchanged at `117`.
+
+Public checks: ping (`0.1.32`), the `mdnotes-shell-v0.1.32` cache label, four
+assets byte-identical, `test` and `test1` sign in, journal clean. In a real
+browser on the public site the import picker accepts every type plus `.zip`,
+the Add File "Supported" line lists all thirteen extensions (it used to miss
+`.bmap` and `.skill`), the new-file picker offers the five creatable types,
+the menus are unchanged, no page errors. `protocol/file-types.json` is
+publicly readable, which is fine: it is the same data the page uses.
+Validation: 187 Node tests, all Python suites (new: file-type parity), the
+backend self-test, and thirteen browser suites.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261016T052417Z-v0.1.32`.
+Nine project manifests valid, 166/166 files.
+
