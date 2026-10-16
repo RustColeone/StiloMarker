@@ -472,3 +472,30 @@ backend self-test, and thirteen browser suites.
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261016T052417Z-v0.1.32`.
 Nine project manifests valid, 166/166 files.
 
+
+## Verified releases: v0.1.33 and v0.1.34
+
+v0.1.33 deployed on 2026-10-16 at 18:59 UTC, v0.1.34 at 19:13 UTC. Module
+restructure step 4, part 1: the one write path. Every text change leaves the
+browser as a patch through the Workspace module's `write()`; the agent's edits
+merge with other people's typing and Drop undoes only its own changes. v0.1.34
+fixes the asker losing Keep and Drop after a reconnect (found by the live
+test). Sync compatibility unchanged at `117`: old tabs still send operations the
+server accepts, and handle incoming patches already.
+
+Public checks: ping (`0.1.34`), the `mdnotes-shell-v0.1.34` cache label, the new
+module files byte-identical, journal clean. Live test with `test` and `test1`
+in a throwaway project (`blue/write-path-live-*`, deleted afterwards), the agent's
+reply mocked in the test browser (no model call): an agent edit made before
+test1 typed merged with that typing in both browsers and in the server's copy;
+Drop (from the editor bar) undid only the agent's line; an agent edit to a line
+test1 had changed was refused; a restore went out as a patch; only
+`patch-file` operations were sent; two client ids over the whole run (no
+reconnects); no page errors. Validation: 192 Node tests (new: the write path),
+all Python suites, the backend self-test, fourteen browser suites (new:
+`write-path-browser.py`, two accounts on a real backend).
+
+Private deployment backups: `/home/laplacengan/backups/stilomarker/20261016T185936Z-v0.1.33`
+and `/home/laplacengan/backups/stilomarker/20261016T191332Z-v0.1.34`.
+Nine project manifests valid, 166/166 files each time.
+

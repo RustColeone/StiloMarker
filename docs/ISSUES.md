@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-16 · release `v0.1.34`
+Last updated: 2026-10-16 · release `v0.1.34` (deployed; public verification passed)
 
 ---
 
@@ -34,9 +34,12 @@ one. Affects only pre-existing local history.
 ### v0.1.34: the person who asked the agent could lose Keep and Drop
 
 Found by the live test of v0.1.33. An agent batch remembered who asked by the
-sync session's client id, which changes whenever the session reconnects
-(common behind the proxy, never on a local test server). After a reconnect the
-asker's Keep and Drop buttons were disabled as if someone else had asked. The
+sync session's client id, which changes whenever the session reconnects (a
+network blip, a sleeping laptop, a server restart). After a reconnect the
+asker's Keep and Drop buttons were disabled as if someone else had asked. In
+the live test the reconnect came from the test itself: its server checks
+opened sessions for the same account without a device id, which evicts every
+session of that account; browsers always send their device id. The
 batch now remembers the browser tab instead, which lasts as long as the tab is
 open. `write-path-browser.py` checks that both Drop buttons are usable by the
 asker and uses the editor bar's.
