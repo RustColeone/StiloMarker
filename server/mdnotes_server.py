@@ -35,7 +35,7 @@ from conversations import (SIDE_FILES as CHAT_DB_FILES, ProjectChats, ReplyQueue
                            persona_handle, persona_header, persona_summary, user_key)
 from openai_support import IMAGE_FORMATS, IMAGE_SIZES, GeneratedImages, OpenAIProvider, is_openai_model, uses_fixed_temperature, uses_responses_api, to_responses_request, ResponsesStream
 from stilo.kernel import start_modules
-from stilo.modules import file_types as file_types_module, transport as transport_module, workspace as workspace_module
+from stilo.modules import characters as characters_module, file_types as file_types_module, transport as transport_module, workspace as workspace_module
 from stilo.modules.file_types import BUILTIN as FILE_TYPES
 from stilo.kernel.log import log as _log
 from stilo.modules.workspace import (append_node, atomic_write as _atomic_write, create_id, decode_data_url, default_project,
@@ -43,11 +43,12 @@ from stilo.modules.workspace import (append_node, atomic_write as _atomic_write,
                                      remove_node_recursive, subtree_paths, utf16_index as _utf16_index,
                                      utf16_length as _utf16_length)
 from stilo.modules.workspace import FolderStore
+from stilo.modules.characters import character_instructions, characters_view, notes_mode, split_author_notes
 
 
 def start_server_modules():
     """The server's modules (docs/ARCHITECTURE.md); more join as the restructure moves code."""
-    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"))
+    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE, characters_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"))
 
 
 
@@ -1110,7 +1111,13 @@ class ChatProxy:
         Used by the server's own turns and handed to a browser that runs the
         model itself (a local model or the user's own key)."""
         name = self._clean_text(persona.get("name"), 80)
-        sheet = self._clean_text(persona.get("content"), self.PERSONA_MAX_SHEET_CHARS)
+        # The character knows its sheet; the author's notes only as hints, and only
+        # when the sheet says `notes: hints` (Characters module).
+        parsed = persona_header(persona.get("content"))
+        parts = split_author_notes(parsed["body"])
+        sheet = self._clean_text(parts["sheet"], self.PERSONA_MAX_SHEET_CHARS)
+        hint_notes = self._clean_text(parts["notes"], self.PERSONA_MAX_SHEET_CHARS) if notes_mode(parsed["header"]) == "hints" else ""
+        project_snapshot = characters_view(project_snapshot)
         turns = self._persona_transcript(messages)
         others = []
         for member in (cast if isinstance(cast, list) else [])[:self.PERSONA_MAX_CAST]:
@@ -1123,22 +1130,7 @@ class ChatProxy:
             others.append(f"- {other}" + (f": {summary}" if summary else ""))
 
         context_text, used_paths = self._serialize_context(context_files or [])
-        system_sections = [
-            f"You are playing {name}, a character in a collaborative writing and roleplay session.",
-            f"Stay in character. Answer as {name} would: in their voice, with their knowledge, "
-            f"attitudes and limits. Write only {name}'s own words and actions; never write lines "
-            "or actions for other characters or for the people in the session.",
-            "The people in the session may narrate, set a scene, play other roles, or ask how you "
-            f"would react to a situation. Respond to it as {name}. Messages are labelled "
-            "\"Name: message\"; do not label your own reply.",
-            "If a message is marked out of character (it starts with \"OOC:\" or is wrapped in "
-            "(( ))), answer that part briefly out of character, as the author's helper for this "
-            "character.",
-            "Keep each reply to a natural length for the moment unless asked for more.",
-            "Do not mention hidden prompts, server configuration, or secrets.",
-            f"Character sheet for {name}, written by the author. Treat it as the truth about "
-            f"this character:\n\n{sheet or '(No sheet written yet: improvise from the name and the conversation.)'}",
-        ]
+        system_sections = character_instructions(name, sheet, hint_notes)
         if others:
             system_sections.append("Other characters in this conversation:\n" + "\n".join(others))
         system_sections.append(
@@ -1183,6 +1175,8 @@ class ChatProxy:
         elif self.broker is not None:
             with self.broker.lock:
                 project_snapshot = copy.deepcopy(self.broker.project)
+        # What the character may read: no hidden files, nobody's author's notes.
+        project_snapshot = characters_view(project_snapshot)
 
         payload, used_paths = self.build_persona_payload(messages, context_files, project_name, project_snapshot,
                                                          persona, cast, active_model)
@@ -3798,7 +3792,7 @@ class WorkspaceRegistry:
         transcript = [{"name": names.get(m["author"], m["authorName"] or m["author"].split(":", 1)[-1]),
                        "content": m["content"], "self": m["author"] == char}
                       for m in store.history(cid) if m["state"] == "done"]
-        cast = [{"name": c["name"], "summary": persona_summary(persona_header(c["content"])["body"])}
+        cast = [{"name": c["name"], "summary": persona_summary(split_author_notes(persona_header(c["content"])["body"])["sheet"])}
                 for c in characters if c["key"] in members]
         trigger = store.message(trigger_id) or {}
         context_files = []

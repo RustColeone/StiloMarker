@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-16 · release `v0.1.35` (deployed; public verification passed)
+Last updated: 2026-10-16 · release `v0.1.36`
 
 ---
 
@@ -30,6 +30,33 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.36: restructure step 5 (Characters): author's notes and hidden plans
+
+The Characters module now owns what a character file is, what a character
+knows, and what it may read, on both ends, with one shared case table.
+
+- **Author's notes.** A `## Author's notes` section holds plans and
+  foreshadowing the author has not written yet. The character never sees it:
+  it is left out of the character's prompt, out of the summary other
+  characters get, and out of the file whenever a character reads it. With
+  `notes: hints` in the header the character gets the notes as foreshadowing
+  it may let colour a small detail, never as knowledge. The preview shows the
+  notes in a collapsed panel that says which applies. The New Character
+  template has the section.
+- **Files characters cannot read.** A `Plans` folder (any depth) and
+  `*.plan.md` files are invisible to characters (not listed, not readable),
+  on the server and in a browser that runs the model itself. The agent still
+  reads them.
+- **The agent's character rules.** How to update a character after new
+  writing (change only what the writing changes, keep the author's wording,
+  never touch the notes except to retire a plan that happened, say where a
+  fact came from, ask when the writing contradicts the sheet), and length
+  guidance ("as long as the writing supports", no fixed cap).
+- Fixed on the way: the server read character headers with Windows line
+  endings left in the body; both ends now read them the same way. The
+  character's prompt no longer includes the raw header lines. Twin rules
+  without a case table: 3 -> 1.
 
 ### v0.1.35: restructure step 4, part 2 (the project in the Workspace module)
 

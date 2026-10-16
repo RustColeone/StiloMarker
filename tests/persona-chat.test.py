@@ -57,6 +57,37 @@ class PersonaTurnTests(unittest.TestCase):
         self.assertNotIn('APP MANUAL TEXT', system)
         self.assertEqual(seen[0]['temperature'], 0.9)
 
+    def test_authors_notes_stay_hidden_unless_the_sheet_allows_hints(self):
+        sheet = '---\nname: Mara\n---\n## Who\nA keeper.\n\n## Author\'s notes\nGoes blind in chapter nine.'
+        _, seen = self.run_turn([reply('Hm.')], persona={**PERSONA, 'name': 'Mara', 'content': sheet})
+        system = seen[0]['messages'][0]['content']
+        self.assertIn('A keeper.', system)
+        self.assertNotIn('blind', system, 'hidden notes never reach the character')
+        self.assertNotIn('name: Mara', system, 'the header is not part of the sheet')
+        hinted = sheet.replace('name: Mara', 'name: Mara\nnotes: hints')
+        _, seen = self.run_turn([reply('Hm.')], persona={**PERSONA, 'name': 'Mara', 'content': hinted})
+        system = seen[0]['messages'][0]['content']
+        self.assertIn('Goes blind in chapter nine.', system)
+        self.assertIn('must never state it, reveal it, or act on it as knowledge', system)
+
+    def test_characters_never_see_plans_or_anyone_s_notes(self):
+        project = copy.deepcopy(PROJECT)
+        project['nodes']['root']['children'] += ['plans', 'ending']
+        project['nodes']['plans'] = {'id': 'plans', 'kind': 'folder', 'name': 'Plans', 'parentId': 'root', 'children': ['act']}
+        project['nodes']['act'] = {'id': 'act', 'kind': 'file', 'name': 'act-two.md', 'parentId': 'plans', 'content': 'The traitor is Tobias.'}
+        project['nodes']['ending'] = {'id': 'ending', 'kind': 'file', 'name': 'ending.plan.md', 'parentId': 'root', 'content': 'She survives.'}
+        project['nodes']['f2']['content'] = "## Who\nA smuggler.\n## Author's notes\nShe dies in act three."
+        responses = [tool_call('list_files', {}, 'c1'), tool_call('read_file', {'path': 'Plans/act-two.md'}, 'c2'),
+                     tool_call('read_file', {'path': 'aria.persona.skill'}, 'c3'), reply('Nothing.')]
+        _, seen = self.run_turn(responses, project=project)
+        system = seen[0]['messages'][0]['content']
+        self.assertNotIn('Plans', system); self.assertNotIn('ending.plan.md', system)
+        results = [m['content'] for m in seen[-1]['messages'] if m.get('role') == 'tool']
+        self.assertNotIn('act-two', results[0]); self.assertNotIn('ending', results[0]); self.assertIn('chapter.md', results[0])
+        self.assertIn('not found', results[1].lower())
+        self.assertIn('A smuggler.', results[2]); self.assertNotIn('dies', results[2])
+        self.assertIn('She dies in act three.', project['nodes']['f2']['content'], 'the real project is untouched')
+
     def test_only_read_tools_are_offered_and_writes_are_refused(self):
         responses = [tool_call('update_file', {'path': 'chapter.md', 'content': 'hijacked'}),
                      tool_call('read_file', {'path': 'chapter.md'}, 'call-2'),

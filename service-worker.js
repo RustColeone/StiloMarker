@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v0.1.35";
+const CACHE_NAME = "mdnotes-shell-v0.1.36";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -49,6 +49,8 @@ const APP_SHELL = [
   "./app/modules/workspace/service/project-store.js",
   "./app/features/workspace-ports.js",
   "./app/features/agent-undo.js",
+  "./app/modules/characters/index.js",
+  "./app/modules/characters/model/persona.js",
   "./app/modules/shell/model/keys.js",
   "./app/modules/shell/model/menu-layout.js",
   "./app/modules/shell/service/commands.js",

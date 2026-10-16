@@ -39,7 +39,7 @@ This file is the short reference that the structure tests enforce.
 
 Arrows are "uses": a module calls only the modules it points at, always on a
 lower level. News travels the other way, as events or extension points, so it
-needs no arrow. Green modules exist (as of v0.1.34); the rest are still legacy
+needs no arrow. Green modules exist (as of v0.1.36); the rest are still legacy
 code. Modules marked *both* have a browser half and a server half that share a
 model and a contract.
 
@@ -82,7 +82,7 @@ flowchart TB
   L5 ~~~ L4 ~~~ L3 ~~~ L2 ~~~ L1
 
   classDef built fill:#d8f5dd,stroke:#2e8b47,color:#123;
-  class Shell,Transport,FileTypes,Workspace,Kernel built;
+  class Shell,Transport,FileTypes,Workspace,Characters,Kernel built;
 ```
 
 ### Inside a module
@@ -216,8 +216,8 @@ refuses to record anything new.
 | 4 | Workspace, part 1: the one write path. Every text change travels as a patch; the agent is a collaborator (its edits merge, Drop undoes only its own) | done |
 | 4b | Workspace, part 2: the project model and store (browser) and the tree, text offsets and folder storage (server) move into the module; operations get a shared case table | done |
 | 4c | The server's operations (`_apply_operation`) and the sessions/sync parts of CollaborationBroker | with step 7 (Sync) |
-| 5 | Characters (author's notes, update rules, hidden Plans) | next |
-| 6 | Assistant (`edit_file`) | |
+| 5 | Characters on both ends: author's notes (hidden unless `notes: hints`), files characters cannot read (`Plans/`, `*.plan.md`), the agent's update rules and length guidance; every rule in one shared case table | done |
+| 6 | Assistant (`edit_file`) | next |
 | 7 | Sync, History, Comments, Identity, Models, Chats, Editor | |
 | 8 | The URL album as an extension | |
 

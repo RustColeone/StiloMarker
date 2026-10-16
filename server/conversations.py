@@ -33,7 +33,6 @@ MAX_ALIAS = 80
 MAX_NOTE = 4000
 MAX_MEMBERS = 24
 PAGE = 50
-PERSONA_SUFFIX = FILE_TYPES.extensions_of("persona")[0]  # the File types module owns it
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
@@ -88,59 +87,8 @@ CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE OF content ON messages BEG
 END;
 """
 
-# Mirrors app/services/persona-service.js (personaHandle / findMentions); the
-# shared case table in spec/characters/mentions.cases.json keeps the two in step.
-_HANDLE_STRIP = re.compile(r"[^\w-]", re.UNICODE)
-_MENTION = re.compile(r"(^|[^\w@.])@([\w-]+)", re.UNICODE)
-
-
-def persona_handle(path: str) -> str:
-    name = str(path or "").rsplit("/", 1)[-1]
-    if name.lower().endswith(PERSONA_SUFFIX):
-        name = name[: -len(PERSONA_SUFFIX)]
-    handle = _HANDLE_STRIP.sub("", re.sub(r"\s+", "-", name.strip().lower())).strip("-")
-    return handle or "character"
-
-
-def find_mentions(text: str, handles) -> list[str]:
-    """Handles addressed in text, in order of first mention; @all / @everyone
-    stands for every handle given, in their order."""
-    known = [str(h).lower() for h in handles if str(h)]
-    known_set = set(known)
-    found: list[str] = []
-    for match in _MENTION.finditer(str(text or "")):
-        token = match.group(2).lower().rstrip("-")
-        picks = known if token in ("all", "everyone") else ([token] if token in known_set else [])
-        for handle in picks:
-            if handle not in found:
-                found.append(handle)
-    return found
-
-
-def persona_header(content: str) -> dict:
-    """The `key: value` header of a persona file (see persona-service.js)."""
-    match = re.match(r"\ufeff?---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)", str(content or ""))
-    header = {}
-    if match:
-        for line in match.group(1).splitlines():
-            key, colon, value = line.partition(":")
-            if not colon or line.lstrip().startswith("#"):
-                continue
-            value = re.sub(r"\s+#.*$", "", value.strip()).strip()
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-                value = value[1:-1]
-            header.setdefault(key.strip().lower(), value)
-    return {"header": header, "body": str(content or "")[match.end():] if match else str(content or "")}
-
-
-def persona_summary(body: str, limit: int = 200) -> str:
-    """First paragraph of prose: tells each character who else is present."""
-    for paragraph in re.split(r"\n\s*\n", str(body or "").replace("\r", "")):
-        lines = [l for l in paragraph.split("\n") if l.strip() and not re.match(r"\s*(#|>|---)", l)]
-        text = re.sub(r"\s+", " ", re.sub(r"[*_`]", "", " ".join(lines))).strip()
-        if text:
-            return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
-    return ""
+# Character rules belong to the Characters module (server/stilo/modules/characters).
+from stilo.modules.characters import PERSONA_SUFFIX, find_mentions, persona_handle, persona_header, persona_summary  # noqa: E402,F401
 
 
 def user_key(username: str) -> str:
