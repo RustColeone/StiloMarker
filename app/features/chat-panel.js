@@ -11,7 +11,7 @@ import { createChatSynchronizer } from "../services/chat-sync-service.js";
 import { isChatNearBottom, shouldSubmitChat } from "../services/chat-ui-service.js";
 import { renderMarkdown } from "../services/markdown-service.js";
 import { createMcpControls } from "../services/mcp-ui-service.js";
-import { parsePersona, personaSummary } from "../services/persona-service.js";
+import { charactersView, parsePersona, personaSummary } from "../modules/characters/index.js";
 import { createCloudChats } from "../services/chats-api-service.js";
 import { createLocalChats } from "../services/local-chats-service.js";
 import { runDirectReply } from "../services/direct-model-service.js";
@@ -794,7 +794,7 @@ export function createChatPanel(deps) {
         const path = getPath(project, node.id);
         const persona = parsePersona(node.content ?? "", path);
         return { key: `char:${path}`, path, name: persona.name, handle: persona.handle, temperature: persona.temperature,
-          content: String(node.content ?? ""), body: persona.body };
+          content: String(node.content ?? ""), body: persona.body, sheet: persona.sheet };
       });
   }
 
@@ -807,11 +807,11 @@ export function createChatPanel(deps) {
   /** read_file / list_files for a reply written here, from this browser's copy. */
   function directTools() {
     return {
-      list_files: () => ({ files: Object.values(controller.getProject().nodes ?? {})
-        .filter((node) => node.parentId != null)
-        .map((node) => ({ path: getPath(controller.getProject(), node.id), kind: node.kind })) }),
+      // What characters may read: no Plans, nobody's author's notes (Characters module).
+      list_files: () => { const view = charactersView(controller.getProject()); return { files: Object.values(view.nodes ?? {})
+        .filter((node) => node.parentId != null).map((node) => ({ path: getPath(view, node.id), kind: node.kind })) }; },
       read_file: ({ path } = {}) => {
-        const project = controller.getProject();
+        const project = charactersView(controller.getProject());
         const id = getNodeIdByPath(project, String(path ?? ""));
         const node = id ? project.nodes[id] : null;
         if (!node || node.kind !== "file") return { error: `File not found: ${path}` };
@@ -870,7 +870,7 @@ export function createChatPanel(deps) {
         body: JSON.stringify({ projectName: project.name, project: buildAgentProjectSnapshot(project), messages: transcript,
           contextFiles: resolveChatContextFiles(project, { contextPaths: trigger?.contextPaths ?? [] }),
           persona: { path: character.path, name: character.name, content: character.content, temperature: character.temperature },
-          cast: cast.map((member) => ({ name: member.name, summary: personaSummary(member.body) })) })
+          cast: cast.map((member) => ({ name: member.name, summary: personaSummary(member.sheet ?? member.body) })) })
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.message || `Preparing the reply failed (${response.status}).`);
@@ -888,7 +888,7 @@ export function createChatPanel(deps) {
       ...agentRequestOverride(),
       mode: "persona",
       persona: { path: character.path, name: character.name, content: character.content, temperature: character.temperature },
-      cast: cast.map((member) => ({ name: member.name, summary: personaSummary(member.body) })),
+      cast: cast.map((member) => ({ name: member.name, summary: personaSummary(member.sheet ?? member.body) })),
       messages: transcript
     }, (event) => {
       if (event.type === "delta") { text += event.text || ""; onText(text); }

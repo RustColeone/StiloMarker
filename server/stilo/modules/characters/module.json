@@ -1,0 +1,6 @@
+{
+  "name": "characters",
+  "level": 3,
+  "uses": ["file_types", "workspace"],
+  "owns": { "rules": ["character sheet", "author's notes", "hidden from characters"] }
+}

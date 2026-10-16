@@ -1,0 +1,38 @@
+{
+  "about": "Character files on both ends (app/modules/characters/model/persona.js and server/stilo/modules/characters/model.py). Run by tests/characters-parity.test.mjs and .py.",
+  "headers": [
+    { "content": "---\nname: Aria\n---\nA smuggler.\n", "header": { "name": "Aria" }, "body": "A smuggler.\n" },
+    { "content": "---\r\nname: \"Aria Voss\"  # a comment\r\n---\r\nLine one\r\nline two", "header": { "name": "Aria Voss" }, "body": "Line one\nline two" },
+    { "content": "﻿---\nname: Bram\ncolor: '#b5523b'\n---\nBody", "header": { "name": "Bram", "color": "#b5523b" }, "body": "Body" },
+    { "content": "---\nNAME: First\nname: second\n# skipped: yes\n---\nBody", "header": { "name": "First" }, "body": "Body" },
+    { "content": "No header.\n\nSecond.", "header": {}, "body": "No header.\n\nSecond." },
+    { "content": "---\nnotes: hints\n---\nB", "header": { "notes": "hints" }, "body": "B" }
+  ],
+  "summaries": [
+    { "body": "# Head\n\n> a quote\n\nThe **cook**, nervous.\n\nMore.", "summary": "The cook, nervous." },
+    { "body": "Line one\r\nline two\r\n\r\nNext", "summary": "Line one line two" },
+    { "body": "", "summary": "" }
+  ],
+  "notes": [
+    { "body": "## Who\nA smuggler.\n\n## Author's notes\n- Tobias leaves the notes.\n\n## How they speak\nDry.",
+      "sheet": "## Who\nA smuggler.\n\n## How they speak\nDry.", "notes": "- Tobias leaves the notes." },
+    { "body": "## Who\nA.\n## AUTHOR NOTES\nsecret\n### still notes\nmore", "sheet": "## Who\nA.", "notes": "secret\n### still notes\nmore" },
+    { "body": "## Author's notes\n```\n## not a heading\n```\nafter\n## Who\nA.", "sheet": "## Who\nA.", "notes": "```\n## not a heading\n```\nafter" },
+    { "body": "## Who\nNo notes here.", "sheet": "## Who\nNo notes here.", "notes": "" },
+    { "body": "## Authors notes\none\n## Who\nA\n## Author note\ntwo", "sheet": "## Who\nA", "notes": "one\ntwo" }
+  ],
+  "modes": [
+    { "header": {}, "mode": "hidden" }, { "header": { "notes": "hints" }, "mode": "hints" }, { "header": { "notes": " Hints " }, "mode": "hints" },
+    { "header": { "notes": "yes" }, "mode": "hidden" }
+  ],
+  "without": [
+    { "content": "---\nname: Mara\n---\n## Who\nKeeper.\n\n## Author's notes\nGoes blind in chapter 9.\n", "result": "---\nname: Mara\n---\n## Who\nKeeper." },
+    { "content": "## Who\r\nKeeper.\r\n## Author's notes\r\nsecret", "result": "## Who\nKeeper." }
+  ],
+  "hidden": [
+    { "path": "Plans/act-two.md", "hidden": true }, { "path": "Book/plans/notes.md", "hidden": true }, { "path": "Plans", "hidden": true },
+    { "path": "ending.plan.md", "hidden": true }, { "path": "Notes/Ending.PLAN.md", "hidden": true },
+    { "path": "Planning.md", "hidden": false }, { "path": "plans.md", "hidden": false }, { "path": "Chapter 1.md", "hidden": false },
+    { "path": "Characters/aria.persona.skill", "hidden": false }
+  ]
+}

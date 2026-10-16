@@ -4,7 +4,7 @@
 // main.js creates this on first use and passes its shared values in `app`.
 import { getNodeIdByPath, getPath, isBmapFileName, isImageFileName, isMarkdownFileName, isMtreeFileName, isPersonaFileName, isUrlDbFileName } from "../domain/project-model.js";
 import { renderMarkdown } from "../services/markdown-service.js";
-import { parsePersona, personaAvatarHtml } from "../services/persona-service.js";
+import { authorNotesHtml, parsePersona, personaAvatarHtml } from "../modules/characters/index.js";
 import { normalizeServerUrl, saveUserState } from "../services/sync-service.js";
 
 export function createPanes(app) {
@@ -905,13 +905,11 @@ export function createPanes(app) {
     const personaCard = persona
       ? `<div class="persona-card" style="--persona-color:${app.escapeHtmlAttribute(persona.color)}">
           ${personaAvatarHtml(persona, app.personaAvatarSrc(project, file.id, persona.avatar), "persona-avatar persona-card-avatar")}
-          <div class="persona-card-text">
-            <div class="persona-card-name">${app.escapeHtmlAttribute(persona.name)}</div>
-            <div class="persona-card-meta">@${app.escapeHtmlAttribute(persona.handle)} · Character for Chats</div>
-          </div>
+          <div class="persona-card-text"><div class="persona-card-name">${app.escapeHtmlAttribute(persona.name)}</div>
+            <div class="persona-card-meta">@${app.escapeHtmlAttribute(persona.handle)} · Character for Chats</div></div>
         </div>`
       : "";
-    target.innerHTML = personaCard + renderMarkdown(persona ? persona.body : file.content, {
+    target.innerHTML = personaCard + authorNotesHtml(persona) + renderMarkdown(persona ? persona.sheet : file.content, {
       resolveUrl(url) {
         return app.resolveProjectAssetUrl(project, file.id, url);
       },

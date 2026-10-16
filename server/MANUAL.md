@@ -570,12 +570,21 @@ Short, dry sentences. Never apologises. Calls everyone "friend" when she is angr
 
 ## What they know / don't know
 Knows every harbour from here to the capital. Does not know her first mate is an informer.
+
+## Author's notes
+- Her first mate sells the routes to the Harrow Company; she finds out in chapter 12.
+- Foreshadowing: she always counts the lifeboats when she boards.
 ```
 
 - `name` — shown in the chat; defaults to the file name.
 - `avatar` — an image path relative to this file, or an `https://` URL. Without one, the initials are shown on the character's colour.
 - `color` — `#rgb` or `#rrggbb`; otherwise derived from the name.
 - `temperature` — 0 to 1.5 (default 0.8). Higher is more surprising.
+- `notes` — `hints` lets the character take light hints from its author's notes (see below); otherwise it never sees them.
+
+**Author's notes.** A `## Author's notes` section (it runs to the next `##` heading) holds what the author plans but has not written yet: twists, secrets, foreshadowing. The character never sees it: it is left out of the character's prompt, out of what other characters are told about it, and out of the file when any character reads it. With `notes: hints` in the header, the character is shown the notes as foreshadowing it may let colour a small detail, never as something it knows. The preview shows the notes in a marked panel.
+
+**Files characters cannot read.** Anything in a folder named `Plans` (at any depth) and any file ending in `.plan.md` is invisible to characters: they cannot list or read it. The agent still reads them. Put outlines and plot plans there so a character cannot spoil them. A file attached to a chat message by hand is still sent: attaching it is the author's choice.
 
 When a user asks you (the agent) to make a character file from their writing:
 
@@ -583,7 +592,17 @@ When a user asks you (the agent) to make a character file from their writing:
 2. Ground every detail in the text: their history, wants, fears, relationships, and how they talk (vocabulary, rhythm, habits, things they would never say).
 3. Include 2–4 example lines quoted or closely adapted from the writing. Example lines shape the voice more than descriptions do.
 4. Write "What they know / don't know" so the character does not reveal secrets they could not know.
-5. Keep it under about 600 words. Leave `avatar` empty unless an image of the character exists in the workspace.
+5. Make it as long as the writing supports, and no longer: a minor character may need 200 words, a lead 1,500. Never invent details to fill space. Leave `avatar` empty unless an image of the character exists in the workspace.
+6. Add an empty `## Author's notes` section at the end for the author's plans.
+
+When a user asks you to update a character file after new writing:
+
+1. Read the character file and the new writing first.
+2. Change only what the new writing changes. Keep the author's wording everywhere else, including the example lines. (Until there is a tool for editing part of a file, send the complete file with `update_file`, unchanged except for those parts.)
+3. Never change `## Author's notes`, except to remove a plan once the writing has made it happen; then add the event to the sheet in the past tense, with the chapter it happened in.
+4. Write new facts with where they come from, e.g. "(chapter 4)", so a later update can tell writing from inference.
+5. When the writing contradicts the sheet, do not choose: leave that point unchanged and ask the author which is true.
+6. Keep "What they know / don't know" in step: a character learns something only when the writing shows it.
 
 ---
 
