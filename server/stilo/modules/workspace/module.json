@@ -1,0 +1,8 @@
+{
+  "name": "workspace",
+  "level": 2,
+  "uses": ["file_types"],
+  "owns": {
+    "names": ["operation update-file", "operation patch-file", "operation replace-project"]
+  }
+}
