@@ -42,6 +42,7 @@ from stilo.modules.workspace import (append_node, atomic_write as _atomic_write,
                                      find_child_by_name, fsync_directory as _fsync_directory, node_id_by_path, path_of,
                                      remove_node_recursive, subtree_paths, utf16_index as _utf16_index,
                                      utf16_length as _utf16_length)
+from stilo.modules.workspace import FolderStore
 
 
 def start_server_modules():
@@ -1348,6 +1349,7 @@ class CollaborationBroker:
         # manifest.json (structure only), and image bytes live on disk and are
         # served by URL rather than inlined as data: URLs. state_file is ignored.
         self.workspace_dir = workspace_dir
+        self.store = FolderStore(workspace_dir) if workspace_dir is not None else None  # Workspace module
         self.lock = threading.RLock()
         self.project = None
         self._persisted_project = None
@@ -1400,54 +1402,20 @@ class CollaborationBroker:
 
     # ---- directory-backed storage helpers (workspace_dir mode) -----------------
     def _abs_path(self, node_id: str) -> Path:
-        """On-disk path of a node, mirroring its position in the workspace tree."""
-        return self.workspace_dir / self._get_path(node_id)
+        return self.store.file_path(self.project, node_id)
 
     @staticmethod
     def _decode_data_url(url: str) -> bytes | None:
         return decode_data_url(url)
 
     def _write_node_file(self, node_id: str) -> None:
-        """Write a single file node to disk. Images externalize their data URL to
-        raw bytes (and the in-memory content is stripped); text writes its string."""
-        node = self.project["nodes"].get(node_id)
-        if not node or node.get("kind") != "file":
-            return
-        path = self._abs_path(node_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if FILE_TYPES.is_image(node.get("name", "")):
-            data = self._decode_data_url(node.get("content", ""))
-            if data is not None:
-                _atomic_write(path, data)
-                node["content"] = ""  # bytes now live on disk; served by URL
-            elif not path.exists():
-                _atomic_write(path, b"")
-        else:
-            _atomic_write(path, str(node.get("content", "")).encode("utf-8"))
+        self.store.write_node_file(self.project, node_id)
 
     def _remove_path(self, path: Path) -> None:
-        try:
-            if path.is_dir():
-                shutil.rmtree(path)
-            elif path.exists():
-                path.unlink()
-        except OSError:
-            pass
+        FolderStore.remove(path)
 
     def _externalize_images(self, project: dict) -> None:
-        """Strip every image node's data URL out to a real file on disk (used when
-        adopting a whole project, e.g. a publish/replace-project)."""
-        nodes = project.get("nodes", {})
-        for node_id, node in nodes.items():
-            if node.get("kind") == "file" and FILE_TYPES.is_image(node.get("name", "")):
-                data = self._decode_data_url(node.get("content", ""))
-                if data is not None:
-                    # Compute path within this project (not yet self.project).
-                    rel = self._path_in(project, node_id)
-                    dest = self.workspace_dir / rel
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    _atomic_write(dest, data)
-                    node["content"] = ""
+        self.store.externalize_images(project)
 
     def _paths_moved(self, operation: dict):
         op_type = operation.get("type")
@@ -1483,39 +1451,19 @@ class CollaborationBroker:
         return path_of(project, node_id)
 
     def resolve_asset(self, rel_path: str) -> Path | None:
-        """Map a workspace-relative file path to an on-disk file, refusing any
-        path that escapes the workspace directory. Assets are addressed by path
-        (not node id) so all peers agree on the URL despite differing local ids."""
-        if self.workspace_dir is None or not rel_path:
-            return None
-        base = self.workspace_dir.resolve()
-        candidate = (self.workspace_dir / rel_path).resolve()
-        if not str(candidate).startswith(str(base)) or not candidate.is_file():
-            return None
-        return candidate
+        """The on-disk file at a workspace-relative path (by path, so every peer
+        agrees on the URL), or None; never outside the workspace folder."""
+        return self.store.resolve_asset(rel_path) if self.store is not None else None
 
     def _asset_dest(self, rel_path: str) -> Path:
-        base = self.workspace_dir.resolve()
-        dest = (self.workspace_dir / rel_path).resolve()
-        if not str(dest).startswith(str(base)):
-            raise PermissionError("Invalid asset path")
-        return dest
+        return self.store.asset_dest(rel_path)
 
     def write_asset_chunk(self, rel_path: str, offset: int, data: bytes) -> int:
-        """Append a binary chunk to an image asset at the given byte offset. Large
-        images upload in small sequential chunks (each safely under the proxy body
-        limit) instead of riding through the op stream as base64. The matching
-        node is created separately by a content-less create-file op. Returns the
-        file's new size."""
-        if self.workspace_dir is None:
+        """Write one chunk of an image (large images upload in pieces, not through
+        the operation stream); its node is created by a content-less create-file."""
+        if self.store is None:
             raise PermissionError("This workspace does not store server assets")
-        dest = self._asset_dest(rel_path)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        mode = "wb" if offset == 0 else "r+b"
-        with open(dest, mode) as handle:
-            handle.seek(offset)
-            handle.write(data)
-        return dest.stat().st_size
+        return self.store.write_asset_chunk(rel_path, offset, data)
 
     def _load_state(self):
         if self.workspace_dir is not None:
@@ -1531,24 +1479,13 @@ class CollaborationBroker:
         self._path_change_floor = self.revision  # in-memory map is empty after a load
 
     def _load_state_dir(self):
-        journal = self.workspace_dir / ".pending-state.json"
-        if journal.exists():
-            self._finish_directory_commit(json.loads(journal.read_text(encoding="utf-8")))
-        manifest = self.workspace_dir / "manifest.json"
-        if not manifest.exists():
+        loaded = self.store.load()
+        if loaded is None:
             self.project = self._default_project()
             self.revision = 0
             return
-        data = json.loads(manifest.read_text(encoding="utf-8"))
-        self.project = data.get("project") or self._default_project()
-        self.revision = int(data.get("revision", 0))
+        self.project, self.revision = loaded
         self._path_change_floor = self.revision  # in-memory map is empty after a load
-        # Re-hydrate text content from real files; leave images empty (served by URL).
-        for node_id, node in self.project.get("nodes", {}).items():
-            if node.get("kind") != "file" or FILE_TYPES.is_image(node.get("name", "")):
-                continue
-            path = self._abs_path(node_id)
-            node["content"] = path.read_text(encoding="utf-8") if path.exists() else ""
         self._persisted_project = copy.deepcopy(self.project)
 
     def _ensure_persisted(self):
@@ -1576,80 +1513,11 @@ class CollaborationBroker:
             raise
 
     def _persist_state_dir(self):
-        self.workspace_dir.mkdir(parents=True, exist_ok=True)
-        project = copy.deepcopy(self.project)
-        previous = self._persisted_project or self._default_project()
-        # Capture moved images before any destination is replaced. The redo
-        # journal must contain their bytes too, so a crash halfway through a
-        # rename/swap never makes recovery depend on an already-deleted source.
-        for node_id, node in project.get("nodes", {}).items():
-            if node.get("kind") != "file" or not FILE_TYPES.is_image(node.get("name", "")):
-                continue
-            if self._decode_data_url(node.get("content", "")) is not None:
-                continue
-            old = previous.get("nodes", {}).get(node_id)
-            if old and self._path_in(previous, node_id) != self._path_in(project, node_id):
-                source = self.workspace_dir / self._path_in(previous, node_id)
-                if source.is_file():
-                    node["content"] = "data:application/octet-stream;base64," + base64.b64encode(source.read_bytes()).decode("ascii")
-        payload = {"project": project, "revision": self.revision, "previousProject": previous}
-        # Write-ahead redo record: durable BEFORE changing any workspace files.
-        _atomic_write(self.workspace_dir / ".pending-state.json",
-                      json.dumps(payload, ensure_ascii=False).encode("utf-8"))
-        self._finish_directory_commit(payload, skip_unchanged=True)
-        self.project = payload["project"]
+        self.project = self.store.save(self.project, self.revision, self._persisted_project)
         self._persisted_project = copy.deepcopy(self.project)
 
     def _finish_directory_commit(self, payload, skip_unchanged=False):
-        project = payload["project"]
-        previous = payload.get("previousProject") or self._default_project()
-        old_files = {self._path_in(previous, node_id): node
-                     for node_id, node in previous.get("nodes", {}).items()
-                     if node.get("kind") == "file"}
-        paths = set()
-        for node_id, node in project.get("nodes", {}).items():
-            if node_id == project.get("rootId"):
-                continue
-            rel = self._path_in(project, node_id)
-            paths.add(rel)
-            dest = self.workspace_dir / rel
-            if node.get("kind") == "folder":
-                dest.mkdir(parents=True, exist_ok=True)
-                _fsync_directory(dest.parent)
-                continue
-            if FILE_TYPES.is_image(node.get("name", "")):
-                data = self._decode_data_url(node.get("content", ""))
-                if data is not None:
-                    _atomic_write(dest, data)
-                elif not dest.exists():
-                    _atomic_write(dest, b"")
-                node["content"] = ""
-            else:
-                content = str(node.get("content", ""))
-                old = old_files.get(rel)
-                if not (skip_unchanged and old and old.get("content") == content and dest.is_file()):
-                    _atomic_write(dest, content.encode("utf-8"))
-        old_paths = {self._path_in(previous, node_id)
-                     for node_id in previous.get("nodes", {}) if node_id != previous.get("rootId")}
-        for rel in sorted(old_paths - paths, key=lambda value: value.count("/"), reverse=True):
-            dest = self.workspace_dir / rel
-            if dest.is_dir():
-                shutil.rmtree(dest)  # explicit deletion of a removed project folder
-            elif dest.exists():
-                dest.unlink()
-            if dest.parent.exists():
-                _fsync_directory(dest.parent)
-        manifest_project = copy.deepcopy(project)
-        for node in manifest_project.get("nodes", {}).values():
-            if node.get("kind") == "file":
-                node["content"] = ""
-        _atomic_write(self.workspace_dir / "manifest.json", json.dumps({
-            "project": manifest_project, "revision": payload["revision"]
-        }, ensure_ascii=False).encode("utf-8"))
-        journal = self.workspace_dir / ".pending-state.json"
-        if journal.exists():
-            journal.unlink()
-            _fsync_directory(self.workspace_dir)
+        self.store.finish_commit(payload, skip_unchanged)
 
     def _broadcast(self, event, exclude_token: str | None = None):
         subscribers = {}
@@ -1831,15 +1699,10 @@ class CollaborationBroker:
         remove_node_recursive(self.project, node_id)
 
     def _wipe_workspace_dir(self):
-        """Remove all files/dirs inside the workspace dir (keep the dir itself).
-        The access.json sidecar (per-project whitelist/blacklist) is preserved so
-        a publish/replace-project never resets who can reach the project."""
-        if self.workspace_dir is None or not self.workspace_dir.exists():
-            return
-        for child in self.workspace_dir.iterdir():
-            if child.name in ("access.json", "user-state.json", "comments.json", "chat.json", *CHAT_DB_FILES):
-                continue
-            self._remove_path(child)
+        """Empty the workspace folder, keeping the sidecars other parts keep beside
+        it, so a publish never resets who may open the project or its chats."""
+        if self.store is not None:
+            self.store.wipe(("access.json", "user-state.json", "comments.json", "chat.json", *CHAT_DB_FILES))
 
     def _apply_operation(self, operation):
         operation_type = operation.get("type")

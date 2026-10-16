@@ -214,8 +214,9 @@ refuses to record anything new.
 | 2 | Kernel (both ends), Shell (browser: commands, menus, shortcuts, dialogs), Transport (server: route table, CORS, JSON, error mapping) | done |
 | 3 | File types: `protocol/file-types.json` on both ends; every type check in the browser and on the server asks it | done |
 | 4 | Workspace, part 1: the one write path. Every text change travels as a patch; the agent is a collaborator (its edits merge, Drop undoes only its own) | done |
-| 4b | Workspace, part 2: the project tree and operations move into the module | next |
-| 5 | Characters (author's notes, update rules, hidden Plans) | |
+| 4b | Workspace, part 2: the project model and store (browser) and the tree, text offsets and folder storage (server) move into the module; operations get a shared case table | done |
+| 4c | The server's operations (`_apply_operation`) and the sessions/sync parts of CollaborationBroker | with step 7 (Sync) |
+| 5 | Characters (author's notes, update rules, hidden Plans) | next |
 | 6 | Assistant (`edit_file`) | |
 | 7 | Sync, History, Comments, Identity, Models, Chats, Editor | |
 | 8 | The URL album as an extension | |

@@ -203,9 +203,11 @@ class ReliabilityTests(unittest.TestCase):
 
     def test_unchanged_notes_are_not_rewritten(self):
         self.op({'type': 'create-file', 'parentPath': '', 'name': 'other.md', 'content': 'keep'})
-        with patch.object(server, '_atomic_write', wraps=server._atomic_write) as writes:
+        from stilo.modules.workspace.adapters import folder_store  # where the writes happen
+        with patch.object(folder_store, 'atomic_write', wraps=folder_store.atomic_write) as writes:
             self.op({'type': 'update-file', 'path': 'note.md', 'content': 'changed', 'baseRevision': self.broker.revision})
         paths = [call.args[0].name for call in writes.call_args_list]
+        self.assertIn('note.md', paths, 'the changed note is written (so the check below means something)')
         self.assertNotIn('other.md', paths)
         self.assertEqual((self.directory / 'other.md').read_text(), 'keep')
 
@@ -217,7 +219,9 @@ class ReliabilityTests(unittest.TestCase):
                 old_revision = self.broker.revision
                 old_text = self.content()
                 text = f'new draft {fail_at}'
-                original = server._atomic_write
+                # The writes happen in the Workspace module's folder store.
+                from stilo.modules.workspace.adapters import folder_store
+                original = folder_store.atomic_write
                 calls = 0
                 def fail(path, data):
                     nonlocal calls
@@ -225,7 +229,7 @@ class ReliabilityTests(unittest.TestCase):
                     if calls == fail_at:
                         raise OSError('simulated disk failure')
                     return original(path, data)
-                with patch.object(server, '_atomic_write', side_effect=fail):
+                with patch.object(folder_store, 'atomic_write', side_effect=fail):
                     with self.assertRaises(OSError):
                         self.op({'type': 'update-file', 'path': 'note.md', 'content': text, 'baseRevision': old_revision})
                 recovered = self.reopen()
@@ -249,12 +253,13 @@ class ReliabilityTests(unittest.TestCase):
         self.op({'type': 'create-folder', 'name': 'old', 'parentPath': ''})
         self.op({'type': 'create-file', 'name': 'a.md', 'parentPath': 'old', 'content': 'story'})
         self.op({'type': 'create-file', 'name': 'a.png', 'parentPath': 'old', 'content': 'data:image/png;base64,YWJj'})
-        original = server._atomic_write
+        from stilo.modules.workspace.adapters import folder_store  # where the writes happen
+        original = folder_store.atomic_write
         def fail(path, data):
             if path.name == 'manifest.json':
                 raise OSError('crashed before manifest')
             return original(path, data)
-        with patch.object(server, '_atomic_write', side_effect=fail):
+        with patch.object(folder_store, 'atomic_write', side_effect=fail):
             with self.assertRaises(OSError):
                 self.op({'type': 'rename-node', 'path': 'old', 'name': 'new'})
         recovered = self.reopen()
