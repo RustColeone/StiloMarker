@@ -34,6 +34,13 @@ from mcp_client import MCPManager, MCPTurn
 from conversations import (SIDE_FILES as CHAT_DB_FILES, ProjectChats, ReplyQueue, char_key, find_mentions,
                            persona_handle, persona_header, persona_summary, user_key)
 from openai_support import IMAGE_FORMATS, IMAGE_SIZES, GeneratedImages, OpenAIProvider, is_openai_model, uses_fixed_temperature, uses_responses_api, to_responses_request, ResponsesStream
+from stilo.kernel import start_modules
+from stilo.modules import transport as transport_module
+
+
+def start_server_modules():
+    """The server's modules (docs/ARCHITECTURE.md); more join as the restructure moves code."""
+    return start_modules([transport_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"))
 
 
 def _log(tag: str, message: str, **fields):
@@ -4572,7 +4579,8 @@ def _gzip_static(path: Path, content: bytes) -> bytes:
 class MDNotesRequestHandler(BaseHTTPRequestHandler):
     server_version = "MDNotesServer/0.1"
 
-    def __init__(self, *args, registry: WorkspaceRegistry, static_root: Path, chat_proxy: ChatProxy, **kwargs):
+    def __init__(self, *args, registry: WorkspaceRegistry, static_root: Path, chat_proxy: ChatProxy, transport, **kwargs):
+        self.transport = transport
         self.registry = registry
         self.static_root = static_root
         self.chat_proxy = chat_proxy
@@ -4597,117 +4605,13 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
-        if parsed.path == "/api/ping":
-            return self._write_json(HTTPStatus.OK, {
-                "message": "pong",
-                "server": "mdnotes",
-                "appVersion": APP_VERSION,
-                "minSyncVersion": MIN_CLIENT_VERSION,
-                "transport": "sse-text-ops",
-                "accounts": self.registry.accounts.enabled,  # capability flag for the Login UI
-                "hosting": True,  # this backend supports ephemeral guest-PIN hosting
-            })
-        if parsed.path == "/api/chat/status":
-            return self._handle_chat_status()
-        if parsed.path == "/api/chat/workspace":
-            return self._handle_get_chat_workspace(parsed)
-        if parsed.path == "/api/session/state":
-            return self._handle_get_state(parsed)
-        if parsed.path == "/api/session/presence":
-            return self._handle_get_presence(parsed)
-        if parsed.path == "/api/workspaces":
-            return self._handle_list_workspaces(parsed)
-        if parsed.path == "/api/workspaces/browse":
-            return self._handle_browse(parsed)
-        if parsed.path == "/api/workspaces/access":
-            return self._handle_get_access(parsed)
-        if parsed.path == "/api/comments":
-            return self._handle_comments_get(parsed)
-        if parsed.path.startswith("/api/chats"):
-            return self._handle_chats(parsed)
-        if parsed.path == "/api/snapshots":
-            return self._handle_snapshots_get(parsed, "paths")
-        if parsed.path == "/api/snapshots/versions":
-            return self._handle_snapshots_get(parsed, "versions")
-        if parsed.path == "/api/backups":
-            return self._handle_backups_get(parsed, "list")
-        if parsed.path == "/api/backups/files":
-            return self._handle_backups_get(parsed, "files")
-        if parsed.path == "/api/backups/content":
-            return self._handle_backups_get(parsed, "content")
-        if parsed.path == "/api/snapshots/content":
-            return self._handle_snapshots_get(parsed, "content")
-        if parsed.path == "/api/workspaces/export":
-            return self._handle_export_project(parsed)
-        if parsed.path == "/api/workspaces/asset":
-            return self._handle_asset(parsed)
-        if parsed.path == "/api/generated":
-            return self._handle_generated(parsed)
-        if parsed.path == "/api/events/stream":
-            return self._handle_event_stream(parsed)
-        return self._serve_static(parsed.path)
+        if not self.transport.handle(self, "GET", parsed):
+            return self._serve_static(parsed.path)
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path.startswith("/api/chats"):
-            return self._handle_chats(parsed)
-        if parsed.path == "/api/chat/mcp":
-            return self._handle_mcp()
-        if parsed.path == "/api/chat":
-            return self._handle_chat()
-        if parsed.path == "/api/chat/prompt":
-            return self._handle_persona_prompt()
-        if parsed.path == "/api/generate":
-            return self._handle_generate()
-        if parsed.path == "/api/chat/workspace":
-            return self._handle_post_chat_workspace(parsed)
-        if parsed.path == "/api/auth/login":
-            return self._handle_login()
-        if parsed.path == "/api/workspaces":
-            return self._handle_create_workspace(parsed)
-        if parsed.path == "/api/workspaces/mkdir":
-            return self._handle_mkdir(parsed)
-        if parsed.path == "/api/workspaces/create":
-            return self._handle_create_project(parsed)
-        if parsed.path == "/api/workspaces/delete":
-            return self._handle_delete(parsed)
-        if parsed.path == "/api/workspaces/import":
-            return self._handle_import_project(parsed)
-        if parsed.path == "/api/workspaces/access":
-            return self._handle_set_access(parsed)
-        if parsed.path == "/api/comments":
-            return self._handle_comments_post(parsed, "save")
-        if parsed.path == "/api/comments/delete":
-            return self._handle_comments_post(parsed, "delete")
-        if parsed.path == "/api/comments/reanchor":
-            return self._handle_comments_post(parsed, "reanchor")
-        if parsed.path == "/api/snapshots":
-            return self._handle_snapshots_post(parsed, "create")
-        if parsed.path == "/api/backups":
-            return self._handle_backups_post(parsed)
-        if parsed.path == "/api/snapshots/delete":
-            return self._handle_snapshots_post(parsed, "delete")
-        if parsed.path == "/api/workspaces/user-state":
-            return self._handle_set_user_state(parsed)
-        if parsed.path == "/api/workspaces/open":
-            return self._handle_open_workspace(parsed)
-        if parsed.path == "/api/workspaces/asset":
-            return self._handle_asset_upload(parsed)
-        if parsed.path == "/api/session/host":
-            return self._handle_host()
-        if parsed.path == "/api/session/connect":
-            return self._handle_connect()
-        if parsed.path == "/api/session/state":
-            return self._handle_post_state(parsed)
-        if parsed.path == "/api/session/presence":
-            return self._handle_post_presence(parsed)
-        if parsed.path == "/api/session/lease":
-            return self._handle_session_lease(parsed)
-        if parsed.path == "/api/session/leave":
-            return self._handle_session_leave(parsed)
-        if parsed.path == "/api/operations":
-            return self._handle_operation(parsed)
-        self._write_json(HTTPStatus.NOT_FOUND, {"message": "Not found"})
+        if not self.transport.handle(self, "POST", parsed):
+            self._write_json(HTTPStatus.NOT_FOUND, {"message": "Not found"})
 
     def _read_json(self):
         length = int(self.headers.get("content-length", "0"))
@@ -4718,19 +4622,10 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             raise ValueError("Invalid JSON payload")
 
     def _send_cors_headers(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
-        allowed_headers = "Content-Type, Authorization" if urlparse(self.path).path == "/api/chat/mcp" else "Content-Type"
-        self.send_header("Access-Control-Allow-Headers", allowed_headers)
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.transport.send_cors(self, urlparse(self.path).path)
 
     def _write_json(self, status, payload):
-        data = json.dumps(payload).encode("utf-8")
-        self.send_response(status)
-        self._send_cors_headers()
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        self.transport.write_json(self, status, payload, urlparse(self.path).path)
 
     def _extract_token(self, parsed):
         query = parse_qs(parsed.query)
@@ -5747,6 +5642,61 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         return False
 
 
+# Routes from before the restructure, in the order the if-chains checked them.
+# Each writes its own response; Transport only finds it. Modules take theirs
+# over as they move, and this list shrinks (docs/ARCHITECTURE.md).
+LEGACY_ROUTES = [
+    ("GET", "/api/chats", True, lambda h, parsed: h._handle_chats(parsed)),
+    ("POST", "/api/chats", True, lambda h, parsed: h._handle_chats(parsed)),
+    ("GET", "/api/chat/status", False, lambda h, parsed: h._handle_chat_status()),
+    ("GET", "/api/chat/workspace", False, lambda h, parsed: h._handle_get_chat_workspace(parsed)),
+    ("GET", "/api/session/state", False, lambda h, parsed: h._handle_get_state(parsed)),
+    ("GET", "/api/session/presence", False, lambda h, parsed: h._handle_get_presence(parsed)),
+    ("GET", "/api/workspaces", False, lambda h, parsed: h._handle_list_workspaces(parsed)),
+    ("GET", "/api/workspaces/browse", False, lambda h, parsed: h._handle_browse(parsed)),
+    ("GET", "/api/workspaces/access", False, lambda h, parsed: h._handle_get_access(parsed)),
+    ("GET", "/api/comments", False, lambda h, parsed: h._handle_comments_get(parsed)),
+    ("GET", "/api/snapshots", False, lambda h, parsed: h._handle_snapshots_get(parsed, "paths")),
+    ("GET", "/api/snapshots/versions", False, lambda h, parsed: h._handle_snapshots_get(parsed, "versions")),
+    ("GET", "/api/backups", False, lambda h, parsed: h._handle_backups_get(parsed, "list")),
+    ("GET", "/api/backups/files", False, lambda h, parsed: h._handle_backups_get(parsed, "files")),
+    ("GET", "/api/backups/content", False, lambda h, parsed: h._handle_backups_get(parsed, "content")),
+    ("GET", "/api/snapshots/content", False, lambda h, parsed: h._handle_snapshots_get(parsed, "content")),
+    ("GET", "/api/workspaces/export", False, lambda h, parsed: h._handle_export_project(parsed)),
+    ("GET", "/api/workspaces/asset", False, lambda h, parsed: h._handle_asset(parsed)),
+    ("GET", "/api/generated", False, lambda h, parsed: h._handle_generated(parsed)),
+    ("GET", "/api/events/stream", False, lambda h, parsed: h._handle_event_stream(parsed)),
+    ("POST", "/api/chat/mcp", False, lambda h, parsed: h._handle_mcp()),
+    ("POST", "/api/chat", False, lambda h, parsed: h._handle_chat()),
+    ("POST", "/api/chat/prompt", False, lambda h, parsed: h._handle_persona_prompt()),
+    ("POST", "/api/generate", False, lambda h, parsed: h._handle_generate()),
+    ("POST", "/api/chat/workspace", False, lambda h, parsed: h._handle_post_chat_workspace(parsed)),
+    ("POST", "/api/auth/login", False, lambda h, parsed: h._handle_login()),
+    ("POST", "/api/workspaces", False, lambda h, parsed: h._handle_create_workspace(parsed)),
+    ("POST", "/api/workspaces/mkdir", False, lambda h, parsed: h._handle_mkdir(parsed)),
+    ("POST", "/api/workspaces/create", False, lambda h, parsed: h._handle_create_project(parsed)),
+    ("POST", "/api/workspaces/delete", False, lambda h, parsed: h._handle_delete(parsed)),
+    ("POST", "/api/workspaces/import", False, lambda h, parsed: h._handle_import_project(parsed)),
+    ("POST", "/api/workspaces/access", False, lambda h, parsed: h._handle_set_access(parsed)),
+    ("POST", "/api/comments", False, lambda h, parsed: h._handle_comments_post(parsed, "save")),
+    ("POST", "/api/comments/delete", False, lambda h, parsed: h._handle_comments_post(parsed, "delete")),
+    ("POST", "/api/comments/reanchor", False, lambda h, parsed: h._handle_comments_post(parsed, "reanchor")),
+    ("POST", "/api/snapshots", False, lambda h, parsed: h._handle_snapshots_post(parsed, "create")),
+    ("POST", "/api/backups", False, lambda h, parsed: h._handle_backups_post(parsed)),
+    ("POST", "/api/snapshots/delete", False, lambda h, parsed: h._handle_snapshots_post(parsed, "delete")),
+    ("POST", "/api/workspaces/user-state", False, lambda h, parsed: h._handle_set_user_state(parsed)),
+    ("POST", "/api/workspaces/open", False, lambda h, parsed: h._handle_open_workspace(parsed)),
+    ("POST", "/api/workspaces/asset", False, lambda h, parsed: h._handle_asset_upload(parsed)),
+    ("POST", "/api/session/host", False, lambda h, parsed: h._handle_host()),
+    ("POST", "/api/session/connect", False, lambda h, parsed: h._handle_connect()),
+    ("POST", "/api/session/state", False, lambda h, parsed: h._handle_post_state(parsed)),
+    ("POST", "/api/session/presence", False, lambda h, parsed: h._handle_post_presence(parsed)),
+    ("POST", "/api/session/lease", False, lambda h, parsed: h._handle_session_lease(parsed)),
+    ("POST", "/api/session/leave", False, lambda h, parsed: h._handle_session_leave(parsed)),
+    ("POST", "/api/operations", False, lambda h, parsed: h._handle_operation(parsed)),
+]
+
+
 def build_server(host: str, port: int, pin: str, static_root: Path, state_file: Path, master_pin: str | None = None, chat_proxy: ChatProxy | None = None, whitelist_file: Path | None = None, data_dir: Path | None = None):
     accounts = AccountStore(whitelist_file)
     registry = WorkspaceRegistry(pin, state_file, master_pin=master_pin, accounts=accounts, data_dir=data_dir)
@@ -5757,7 +5707,21 @@ def build_server(host: str, port: int, pin: str, static_root: Path, state_file: 
     registry.chat_proxy = chat_proxy
     if data_dir is not None and chat_proxy.generated is None:
         chat_proxy.generated = GeneratedImages(Path(data_dir) / "_generated")
-    handler = partial(MDNotesRequestHandler, registry=registry, static_root=static_root, chat_proxy=chat_proxy)
+    transport = start_server_modules()["transport"]
+    transport.add_route("GET", "/api/ping", lambda request: {
+            "message": "pong",
+            "server": "mdnotes",
+            "appVersion": APP_VERSION,
+            "minSyncVersion": MIN_CLIENT_VERSION,
+            "transport": "sse-text-ops",
+            "accounts": registry.accounts.enabled,  # capability flag for the Login UI
+            "hosting": True,  # this backend supports ephemeral guest-PIN hosting
+        })
+    for method, path, prefix, run in LEGACY_ROUTES:
+        transport.add_legacy_route(method, path, run, prefix=prefix,
+                                   allow_headers=("Authorization",) if path == "/api/chat/mcp" else ())
+    handler = partial(MDNotesRequestHandler, registry=registry, static_root=static_root, chat_proxy=chat_proxy,
+                      transport=transport)
 
     class QuietThreadingHTTPServer(ThreadingHTTPServer):
         """Suppress noisy client-disconnect tracebacks on Windows."""

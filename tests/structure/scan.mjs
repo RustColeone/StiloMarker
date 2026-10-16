@@ -3,7 +3,7 @@
 // and the baseline it compares against always measure the same way.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, normalize, relative } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const ROOT = normalize(join(dirname(fileURLToPath(import.meta.url)), "../.."));
 
@@ -103,29 +103,45 @@ export function pyImports(file) {
   return out;
 }
 
-// Modules: every folder under a modules root with a module.json.
+// Modules. A browser module is a folder under app/modules whose index.js
+// exports defineModule({...}) as its default: the definition is its only
+// manifest. A server module is a folder under server/stilo/modules with a
+// module.json, which its __init__.py also reads. Importing a browser
+// module's index.js must not touch the page, so this can run in Node.
 export const MODULE_ROOTS = ["app/modules", "server/stilo/modules"];
 
-export function modules() {
+function moduleDirs(root) {
+  const base = join(ROOT, root);
+  if (!existsSync(base)) return [];
   const out = [];
-  for (const root of MODULE_ROOTS) {
-    const base = join(ROOT, root);
-    if (!existsSync(base)) continue;
-    const visit = (dir) => {
-      const manifest = join(dir, "module.json");
-      if (existsSync(manifest)) {
-        out.push({ root, dir: rel(dir), ...JSON.parse(readFileSync(manifest, "utf8")) });
-        return; // a module's own sub-folders are its layers, not modules
-      }
-      for (const name of readdirSync(dir)) {
-        if (!SKIP.has(name) && statSync(join(dir, name)).isDirectory()) visit(join(dir, name));
-      }
-    };
-    visit(base);
+  const visit = (dir, depth) => {
+    const has = (name) => existsSync(join(dir, name));
+    if (depth > 0 && (has("module.json") || (root === "app/modules" && has("index.js")))) {
+      out.push(dir);
+      return; // a module's own sub-folders are its layers, not modules
+    }
+    for (const name of readdirSync(dir)) {
+      if (!SKIP.has(name) && statSync(join(dir, name)).isDirectory()) visit(join(dir, name), depth + 1);
+    }
+  };
+  visit(base, 0);
+  return out;
+}
+
+export async function loadModules() {
+  const out = [];
+  for (const dir of moduleDirs("app/modules")) {
+    const definition = (await import(pathToFileURL(join(dir, "index.js")).href)).default;
+    if (!definition?.name) throw new Error(`${rel(dir)}/index.js must export defineModule({...}) as its default`);
+    const { name, level, uses, owns } = definition;
+    out.push({ root: "app/modules", dir: rel(dir), name, level, uses: [...uses], owns: owns ?? {} });
+  }
+  for (const dir of moduleDirs("server/stilo/modules")) {
+    out.push({ root: "server/stilo/modules", dir: rel(dir), ...JSON.parse(readFileSync(join(dir, "module.json"), "utf8")) });
   }
   return out;
 }
 
-export function moduleOf(file, all = modules()) {
+export function moduleOf(file, all) {
   return all.find((m) => file === m.dir || file.startsWith(`${m.dir}/`)) ?? null;
 }

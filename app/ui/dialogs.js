@@ -1,5 +1,6 @@
-// Dialogs (notice, confirm, input, bookmark entry, accept connection), toasts,
-// the debug log panel and editor tracing, and the forced app upgrade.
+// Legacy (before the module restructure): the debug log panel and editor
+// tracing, the bookmark-entry and accept-connection dialogs, and the forced app
+// upgrade. Notices, confirms, inputs and toasts moved to the Shell module.
 // main.js creates this on first use and passes its shared values in `app`.
 
 
@@ -102,82 +103,8 @@ export function createDialogs(app) {
     });
   }
 
-  function showNoticeDialog(message, title = "Message") {
-    app.elements.noticeDialogTitle.textContent = title;
-    app.elements.noticeDialogMessage.textContent = String(message);
-    if (!app.elements.noticeDialog.open) {
-      app.elements.noticeDialog.showModal();
-    }
-  }
 
-  function showConfirmDialog({ title = "Confirm Action", message, acceptLabel = "Confirm" }) {
-    return new Promise((resolve) => {
-      app.elements.confirmDialogTitle.textContent = title;
-      app.elements.confirmDialogMessage.textContent = message;
-      app.elements.confirmDialogAcceptButton.textContent = acceptLabel;
 
-      const handleClose = () => {
-        app.elements.confirmDialog.removeEventListener("close", handleClose);
-        resolve(app.elements.confirmDialog.returnValue === "accept");
-      };
-
-      app.elements.confirmDialog.addEventListener("close", handleClose, { once: true });
-      app.elements.confirmDialog.showModal();
-    });
-  }
-
-  function showInputDialog({ title = "Rename Item", message = "Enter a value.", label = "Name", value = "", submitLabel = "Save", extension = "" }) {
-    return new Promise((resolve) => {
-      app.elements.inputDialogTitle.textContent = title;
-      app.elements.inputDialogMessage.textContent = message;
-      app.elements.inputDialogLabel.textContent = label;
-      app.elements.inputDialogSubmitButton.textContent = submitLabel;
-
-      // "Auto file extension": only offered when the caller knows the extension
-      // (file renames). On by default — the input then shows just the base name so
-      // the extension can't be edited by accident; it's re-appended on save.
-      const ext = String(extension || "");
-      const hasExt = ext.length > 0;
-      const endsWithExt = (v) => v.toLowerCase().endsWith(ext.toLowerCase());
-      const stripExt = (v) => (hasExt && endsWithExt(v) ? v.slice(0, -ext.length) : v);
-      if (app.elements.inputDialogAutoExtRow) app.elements.inputDialogAutoExtRow.hidden = !hasExt;
-      if (app.elements.inputDialogAutoExt) app.elements.inputDialogAutoExt.checked = hasExt;
-      app.elements.inputDialogInput.value = hasExt ? stripExt(value) : value;
-
-      const handleToggle = () => {
-        if (!hasExt) return;
-        const cur = app.elements.inputDialogInput.value;
-        app.elements.inputDialogInput.value = app.elements.inputDialogAutoExt.checked
-          ? stripExt(cur)
-          : (endsWithExt(cur) ? cur : `${cur}${ext}`);
-      };
-
-      const handleCancel = () => {
-        app.elements.inputDialog.close("cancel");
-      };
-
-      const handleClose = () => {
-        app.elements.inputDialog.removeEventListener("close", handleClose);
-        app.elements.inputDialogCancelButton.removeEventListener("click", handleCancel);
-        app.elements.inputDialogAutoExt?.removeEventListener("change", handleToggle);
-        let result = app.elements.inputDialog.returnValue === "accept"
-          ? app.elements.inputDialogInput.value.trim() || null
-          : null;
-        // Re-attach the extension when auto is on and the user didn't type it.
-        if (result && hasExt && app.elements.inputDialogAutoExt?.checked && !endsWithExt(result)) {
-          result = `${result}${ext}`;
-        }
-        resolve(result);
-      };
-
-      app.elements.inputDialog.addEventListener("close", handleClose, { once: true });
-      app.elements.inputDialogCancelButton.addEventListener("click", handleCancel);
-      app.elements.inputDialogAutoExt?.addEventListener("change", handleToggle);
-      app.elements.inputDialog.showModal();
-      app.elements.inputDialogInput.focus();
-      app.elements.inputDialogInput.select();
-    });
-  }
 
   function showBookmarkEntryDialog({ title = "New Bookmark Entry", message = "Add a named image bookmark to this URL album.", name = "", url = "", description = "", submitLabel = "Save" }) {
     return new Promise((resolve) => {
@@ -256,35 +183,15 @@ export function createDialogs(app) {
   async function copyDebugLogToClipboard() {
     const text = buildDebugLogText();
     if (!text) {
-      notify("There are no debug entries to copy.");
+      app.shell.notify("There are no debug entries to copy.");
       return;
     }
 
-    await copyTextToClipboard(text);
-    notify("Debug log copied to clipboard.");
+    await app.shell.copyText(text);
+    app.shell.notify("Debug log copied to clipboard.");
   }
 
-  async function copyTextToClipboard(text) {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return;
-    }
 
-    const fallback = document.createElement("textarea");
-    fallback.value = text;
-    fallback.setAttribute("readonly", "readonly");
-    fallback.style.position = "fixed";
-    fallback.style.opacity = "0";
-    document.body.append(fallback);
-    fallback.select();
-    document.execCommand("copy");
-    fallback.remove();
-  }
-
-  function notify(message) {
-    logDebug("response", String(message));
-    showNoticeDialog(message);
-  }
 
   // The server refused this client as out of date (a stale cached service worker,
   // e.g. a long-lived tab). Sync has already been halted upstream; bring the app up
@@ -300,11 +207,11 @@ export function createDialogs(app) {
     if (sessionStorage.getItem("mdnotes.upgradeReloaded")) {
       // Already auto-refreshed once this tab and still stale — stop and ask the user,
       // rather than looping reloads.
-      notify(`${message} Please fully close this tab and reopen it to finish updating.`);
+      app.shell.notify(`${message} Please fully close this tab and reopen it to finish updating.`);
       return;
     }
     try { sessionStorage.setItem("mdnotes.upgradeReloaded", "1"); } catch { /* ignore */ }
-    try { showToast("Updating to the latest version…", { duration: 1500 }); } catch { /* ignore */ }
+    try { app.shell.toast("Updating to the latest version…", { duration: 1500 }); } catch { /* ignore */ }
     try {
       const regs = (await navigator.serviceWorker?.getRegistrations?.()) ?? [];
       await Promise.all(regs.map((r) => r.unregister()));
@@ -312,49 +219,10 @@ export function createDialogs(app) {
     setTimeout(() => globalThis.location.reload(), 1200);
   }
 
-  // Lightweight, auto-dismissing feedback for successful actions (open/create/
-  // rename/…). Unlike notify(), it never blocks — important on mobile where a modal
-  // for every tap would be heavy. Errors should still use notify().
-  let toastHost = null;
-  function showToast(message, { duration = 2200 } = {}) {
-    const text = String(message ?? "").trim();
-    if (!text) return;
-    toastHost = toastHost || document.getElementById("toast-host");
-    if (!toastHost) return;
-    const toast = document.createElement("div");
-    toast.className = "app-toast";
-    toast.setAttribute("role", "status");
-    toast.textContent = text;
-    toastHost.append(toast);
-    // Trigger the enter transition on the next frame.
-    requestAnimationFrame(() => toast.classList.add("is-visible"));
-    const remove = () => {
-      toast.classList.remove("is-visible");
-      toast.addEventListener("transitionend", () => toast.remove(), { once: true });
-      // Fallback in case the transitionend never fires.
-      setTimeout(() => toast.remove(), 400);
-    };
-    setTimeout(remove, duration);
-  }
 
-  async function confirmAction(message) {
-    logDebug("action", "Confirm requested", String(message));
-    const result = await showConfirmDialog({ message: String(message) });
-    logDebug("response", `Confirm ${result ? "accepted" : "cancelled"}`, String(message));
-    return result;
-  }
-
-  async function promptForName(message, defaultValue = "", options = {}) {
-    logDebug("action", "Prompt requested", `${message} :: ${defaultValue}`);
-    const result = await showInputDialog({ title: message, message, value: defaultValue, submitLabel: "Save", ...options });
-    logDebug("response", result ? `Prompt value: ${result}` : "Prompt cancelled", message);
-    return result;
-  }
 
   return {
-    confirmAction, copyDebugLogToClipboard, copyTextToClipboard, flashStatusPanel,
-    forceAppUpgrade, formatEditorDebugValue, logDebug, notify, promptForName, renderDebugPanel,
-    showAcceptConnectionDialog, showBookmarkEntryDialog, showConfirmDialog, showNoticeDialog,
-    showToast, traceEditorEvent
+    copyDebugLogToClipboard, flashStatusPanel, forceAppUpgrade, formatEditorDebugValue, logDebug,
+    renderDebugPanel, showAcceptConnectionDialog, showBookmarkEntryDialog, traceEditorEvent
   };
 }

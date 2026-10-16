@@ -67,14 +67,14 @@ async def main():
         await pg.wait_for_selector('.tree-row[title="大纲.md"]', timeout=30000)
         # A per-file snapshot of 大纲.md (for the Snapshots part later).
         await pg.click('.tree-row[title="大纲.md"] .tree-label'); await pg.wait_for_timeout(500)
-        await pg.evaluate("() => document.querySelector('#create-snapshot-button').click()"); await pg.wait_for_timeout(800)
+        await pg.evaluate("() => document.querySelector('[data-command=\"history.create-snapshot\"]').click()"); await pg.wait_for_timeout(800)
         # Open Workspace History and back up by hand.
         async def confirm():
             await pg.wait_for_selector("#confirm-dialog[open]", timeout=10000)
             msg = await pg.locator("#confirm-dialog-message").inner_text()
             await pg.click("#confirm-dialog-accept-button"); return msg
         async def open_history():
-            await pg.evaluate("() => document.querySelector('#workspace-history-button').click()")
+            await pg.evaluate("() => document.querySelector('[data-command=\"history.workspace-history\"]').click()")
             await pg.wait_for_selector("#workspace-history-dialog[open]", timeout=10000); await pg.wait_for_timeout(600)
         await open_history()
         await pg.click("#workspace-history-backup-now"); await pg.wait_for_timeout(1000)
@@ -109,7 +109,7 @@ async def main():
         # Per-file Snapshots can bring back a deleted file too.
         op({"type": "delete-node", "path": "大纲.md"})
         await pg.wait_for_function("() => !document.querySelector('.tree-row[title=\"大纲.md\"]')", timeout=10000)
-        await pg.evaluate("() => document.querySelector('#snapshots-button').click()"); await pg.wait_for_timeout(1200)
+        await pg.evaluate("() => document.querySelector('[data-command=\"history.snapshots\"]').click()"); await pg.wait_for_timeout(1200)
         await pg.select_option("#snapshots-file-select", "大纲.md"); await pg.wait_for_timeout(800)
         await pg.locator("#snapshots-list .snapshot-item").first.click(); await pg.click("#snapshots-restore-btn"); print("     confirm:", await confirm()); await pg.wait_for_timeout(2500)
         files, _ = server_files(tok); assert files.get("大纲.md") == "大纲 v1", files; ok("Snapshots restores a file that was deleted")

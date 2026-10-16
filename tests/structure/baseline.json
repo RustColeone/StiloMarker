@@ -6,10 +6,10 @@
     "app/features/cloud-browser.js": 1004,
     "app/features/file-actions.js": 1239,
     "app/features/panes.js": 1048,
-    "app/main.js": 4839,
+    "app/main.js": 4759,
     "app/services/collaboration-service.js": 1108,
     "app/ui/bmap-view.js": 4025,
-    "server/mdnotes_server.py": 6496
+    "server/mdnotes_server.py": 6460
   },
   "spellings": {
     "file type .bmap": [

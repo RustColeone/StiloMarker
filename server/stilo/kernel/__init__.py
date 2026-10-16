@@ -1,0 +1,170 @@
+"""The kernel: starts modules in dependency order and hands each one only the
+public APIs it declared it uses. It holds no state of its own and knows no
+domain (docs/ARCHITECTURE.md, rule 8); a structure test keeps it that way.
+The browser has the same kernel in app/kernel/index.js.
+
+A module is a package under stilo/modules with a module.json manifest
+(name, level, uses, owns) and, in its __init__.py:
+
+    MODULE = define_module(__file__, start)
+
+    def start(ctx):          # ctx.use(name), ctx.registry(), ctx.emitter(), ctx.log()
+        ...
+        return api           # what other modules may call
+"""
+import json
+import re
+import threading
+import types
+from pathlib import Path
+
+_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+class Module:
+    __slots__ = ("name", "level", "uses", "owns", "start")
+
+    def __init__(self, name, level, uses, owns, start):
+        if not isinstance(name, str) or not _NAME.match(name):
+            raise ValueError(f"Bad module name: {name!r}")
+        if not isinstance(level, int) or level < 1:
+            raise ValueError(f"{name}: level must be a whole number from 1")
+        if not isinstance(uses, list) or not all(isinstance(u, str) for u in uses):
+            raise ValueError(f"{name}: uses must be a list of names")
+        if not isinstance(owns, dict):
+            raise ValueError(f"{name}: owns must be an object")
+        if not callable(start):
+            raise ValueError(f"{name}: start must be callable")
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "level", level)
+        object.__setattr__(self, "uses", tuple(uses))
+        object.__setattr__(self, "owns", owns)
+        object.__setattr__(self, "start", start)
+
+    def __setattr__(self, key, value):
+        raise AttributeError("module definitions are read-only")
+
+
+def define_module(init_path, start) -> Module:
+    """The module whose package holds init_path, described by the module.json
+    beside it (the one manifest; tests read the same one)."""
+    manifest = json.loads((Path(init_path).resolve().parent / "module.json").read_text(encoding="utf-8"))
+    for key in ("name", "level", "uses", "owns"):
+        if key not in manifest:
+            raise ValueError(f"{init_path}: module.json needs {key!r}")
+    return Module(manifest["name"], manifest["level"], manifest["uses"], manifest["owns"], start)
+
+
+class _Context:
+    def __init__(self, module, apis, log):
+        self._module = module
+        self._apis = apis
+        self._log = log
+        self.name = module.name
+
+    def use(self, name):
+        if name not in self._module.uses:
+            raise LookupError(f"{self._module.name} did not declare that it uses {name}")
+        return self._apis[name]
+
+    def registry(self, key="id", validate=None):
+        return Registry(key=key, validate=validate, owner=self._module.name)
+
+    def emitter(self):
+        return Emitter(owner=self._module.name, log=self._log)
+
+    def log(self, *parts):
+        self._log(self._module.name, *parts)
+
+
+def start_modules(modules, log=lambda *parts: None):
+    """Starts every module, lowest level first, and returns a read-only map of
+    name -> api. A module that raises while starting stops the whole start."""
+    by_name = {}
+    for module in modules:
+        if module.name in by_name:
+            raise ValueError(f"Two modules are called {module.name}")
+        by_name[module.name] = module
+    for module in modules:
+        for used in module.uses:
+            target = by_name.get(used)
+            if target is None:
+                raise LookupError(f"{module.name} uses {used}, which is not being started")
+            if target.level >= module.level:
+                raise ValueError(f"{module.name} (level {module.level}) may not use {used} (level {target.level})")
+    apis = {}
+    for module in sorted(modules, key=lambda m: (m.level, m.name)):
+        apis[module.name] = module.start(_Context(module, apis, log))
+        log("kernel", f"started {module.name}")
+    return types.MappingProxyType(dict(apis))
+
+
+class Registry:
+    """A list of entries one module offers others to add to (an extension
+    point). Each entry is a dict with a unique key; add() returns a function
+    that removes it again. Safe to use from several threads."""
+
+    def __init__(self, key="id", validate=None, owner=""):
+        self._key = key
+        self._validate = validate or (lambda entry: None)
+        self._owner = owner
+        self._entries = {}
+        self._listeners = []
+        self._lock = threading.Lock()
+
+    def add(self, entry):
+        ident = entry.get(self._key) if isinstance(entry, dict) else None
+        if not isinstance(ident, str) or not ident:
+            raise ValueError(f"{self._owner}: an entry needs a {self._key!r}")
+        self._validate(entry)
+        with self._lock:
+            if ident in self._entries:
+                raise ValueError(f"{self._owner}: {ident!r} is already registered")
+            self._entries[ident] = types.MappingProxyType(dict(entry))
+        self._changed()
+
+        def remove():
+            with self._lock:
+                gone = self._entries.pop(ident, None) is not None
+            if gone:
+                self._changed()
+        return remove
+
+    def get(self, ident):
+        return self._entries.get(ident)
+
+    def has(self, ident):
+        return ident in self._entries
+
+    def all(self):
+        with self._lock:
+            return list(self._entries.values())
+
+    def on_change(self, listener):
+        self._listeners.append(listener)
+        return lambda: self._listeners.remove(listener) if listener in self._listeners else None
+
+    def _changed(self):
+        for listener in list(self._listeners):
+            listener()
+
+
+class Emitter:
+    """Named events a module emits for the modules above it. A listener that
+    raises is logged and does not stop the others."""
+
+    def __init__(self, owner="", log=lambda *parts: None):
+        self._owner = owner
+        self._log = log
+        self._listeners = {}
+
+    def on(self, event, listener):
+        self._listeners.setdefault(event, []).append(listener)
+        return lambda: self._listeners.get(event, []).remove(listener) if listener in self._listeners.get(event, []) else None
+
+    def emit(self, event, payload=None):
+        for listener in list(self._listeners.get(event, [])):
+            try:
+                listener(payload)
+            except Exception as error:  # noqa: BLE001 - one listener never stops the rest
+                self._log(self._owner, f"a listener for {event} failed: {error}")

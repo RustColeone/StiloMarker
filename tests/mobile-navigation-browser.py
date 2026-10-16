@@ -96,7 +96,7 @@ async def main():
             await page.locator('#mobile-menu-button').click()
             await page.locator('#mobile-menu-button').click()
             await page.locator('#edit-menu-button').click()
-            await page.locator('#find-replace-menu-button').click()
+            await page.locator('[data-command="editor.find-replace"]').click()
             if await page.locator('#find-replace-row').is_hidden():
                 await page.locator('#find-toggle-replace').click()
             find = await page.locator('#editor-find-bar').evaluate('''el => {
@@ -190,7 +190,7 @@ async def main():
         # Menu actions on phones change visible panes, not saved desktop layout.
         before=await page.evaluate('localStorage.getItem("mdnotes.settings.v1")')
         await page.locator('#view-menu-button').click()
-        await page.locator('#toggle-chat-button').click()
+        await page.locator('[data-command="assistant.toggle-chat"]').click()
         await assert_pane('chat')
         await page.locator('#chat-collapse-button').click()
         await assert_pane('source')
@@ -202,7 +202,7 @@ async def main():
         await page.set_viewport_size({'width':390,'height':350})
         await page.locator('#mobile-menu-button').click()
         await page.locator('#settings-menu-button').click()
-        await page.locator('#open-settings-menu-button').click()
+        await page.locator('[data-command="shell.open-settings"]').click()
         dialog=await page.locator('#settings-dialog').evaluate('el=>({height:el.getBoundingClientRect().height,viewport:visualViewport.height,overflow:el.scrollWidth>el.clientWidth})')
         assert dialog['height'] <= dialog['viewport'] and not dialog['overflow'],dialog
         await page.screenshot(path='/tmp/stilomarker-mobile-settings-v0.1.15.png')

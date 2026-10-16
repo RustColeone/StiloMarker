@@ -1,0 +1,9 @@
+{
+  "name": "transport",
+  "level": 1,
+  "uses": [],
+  "owns": {
+    "registries": ["routes"],
+    "http": ["route matching", "CORS headers", "JSON responses", "errors to status codes"]
+  }
+}

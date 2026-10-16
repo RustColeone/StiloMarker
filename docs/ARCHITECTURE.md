@@ -16,13 +16,16 @@ reference that the structure tests enforce.
   | --- | --- |
   | 1 | Shell (browser) / Transport (server), Identity and access, File types, Models |
   | 2 | Workspace |
-  | 3 | Sync, History, Comments, Characters |
-  | 4 | Assistant, Chats |
+  | 3 | Editor (browser), Sync, Characters |
+  | 4 | History, Comments |
+  | 5 | Assistant, Chats |
 
-- **Inside every module**: `module.json` (name, level, uses, owns), `index`
-  (the public API and events), `model/` (pure rules), `service/` (state and
-  use cases), `adapters/` (all input and output: views, routes, storage,
-  network).
+- **Inside every module**: its definition (name, level, uses, owns: in a
+  browser module the `defineModule({...})` its `index.js` exports, in a server
+  module `module.json`), `index` (the public API and events), `model/` (pure
+  rules), `service/` (state and use cases), `adapters/` (all input and output:
+  views, routes, storage, network). Importing a browser module's `index.js`
+  never touches the page; adapters reach the page only once started.
 - **Between the ends**: each module's network messages live in
   `protocol/<module>.contract.json` with their own version. Until a module
   takes its share, everything is in `protocol/legacy.contract.json`.
@@ -53,3 +56,28 @@ is recorded in `tests/structure/baseline.json`: files over the size budget, and
 the files that spell a type name the future owner will hold. The baseline may
 only shrink. After a cleanup, `node tools/structure-baseline.mjs` lowers it; it
 refuses to record anything new.
+
+## Progress
+
+| Step | What | State |
+| --- | --- | --- |
+| 1 | Guard rails: `tests/structure`, `spec/`, `protocol/legacy.contract.json` | done |
+| 2 | Kernel (both ends), Shell (browser: commands, menus, shortcuts, dialogs), Transport (server: route table, CORS, JSON, error mapping) | done |
+| 3 | File types | next |
+| 4 | Workspace, with the one write path | |
+| 5 | Characters (author's notes, update rules, hidden Plans) | |
+| 6 | Assistant (`edit_file`) | |
+| 7 | Sync, History, Comments, Identity, Models, Chats, Editor | |
+| 8 | The URL album as an extension | |
+
+### Notes for module authors
+
+- Browser: a command id is `<owner>.<action>`; add it with
+  `shell.commands.add({ id, title, run, keys?, menu? })`. Menus are drawn
+  from commands, so `index.html` holds no menu items.
+- Server: a new route is `transport.add_route(method, path, run)`, where
+  `run(request)` returns the JSON payload and raises `PermissionError`,
+  `LookupError` or `ValueError` for 403, 404 and 400. `KeyError` and
+  `IndexError` stay 500: they are bugs. `LEGACY_ROUTES` in
+  `mdnotes_server.py` holds the routes from before the restructure and only
+  shrinks.
