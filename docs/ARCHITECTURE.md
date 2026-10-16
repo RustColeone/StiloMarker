@@ -39,7 +39,7 @@ This file is the short reference that the structure tests enforce.
 
 Arrows are "uses": a module calls only the modules it points at, always on a
 lower level. News travels the other way, as events or extension points, so it
-needs no arrow. Green modules exist (as of v0.1.32); the rest are still legacy
+needs no arrow. Green modules exist (as of v0.1.33); the rest are still legacy
 code. Modules marked *both* have a browser half and a server half that share a
 model and a contract.
 
@@ -82,7 +82,7 @@ flowchart TB
   L5 ~~~ L4 ~~~ L3 ~~~ L2 ~~~ L1
 
   classDef built fill:#d8f5dd,stroke:#2e8b47,color:#123;
-  class Shell,Transport,FileTypes,Kernel built;
+  class Shell,Transport,FileTypes,Workspace,Kernel built;
 ```
 
 ### Inside a module
@@ -158,7 +158,7 @@ flowchart TB
   Baseline[("tests/structure/baseline.json<br/>may only shrink")] -.records.-> LegacyB & LegacyS
 ```
 
-### The write path (step 4, planned)
+### The write path (step 4, done in v0.1.33)
 
 Every change to a file becomes a `patch-file` operation, whoever makes it:
 typing, the agent's Keep, preview edits, history restores and reconnects. The
@@ -213,7 +213,8 @@ refuses to record anything new.
 | 1 | Guard rails: `tests/structure`, `spec/`, `protocol/legacy.contract.json` | done |
 | 2 | Kernel (both ends), Shell (browser: commands, menus, shortcuts, dialogs), Transport (server: route table, CORS, JSON, error mapping) | done |
 | 3 | File types: `protocol/file-types.json` on both ends; every type check in the browser and on the server asks it | done |
-| 4 | Workspace, with the one write path | next |
+| 4 | Workspace, part 1: the one write path. Every text change travels as a patch; the agent is a collaborator (its edits merge, Drop undoes only its own) | done |
+| 4b | Workspace, part 2: the project tree and operations move into the module | next |
 | 5 | Characters (author's notes, update rules, hidden Plans) | |
 | 6 | Assistant (`edit_file`) | |
 | 7 | Sync, History, Comments, Identity, Models, Chats, Editor | |
@@ -237,3 +238,10 @@ refuses to record anything new.
   `node tools/protocol-sync.mjs` writes the browser's copy. Pages mark what
   they need (`data-file-accept`, `data-file-types`, `data-file-type-options`)
   and File types fills it in.
+- Writing a file: never send `update-file` for text and never call
+  `controller.updateContent` plus `publishOperation` yourself. Call
+  `workspace.write(path, text, { base?, source })`. With `base` (the text you
+  started from) your change is fitted into the file as it is now; a
+  `StaleWriteError` (`workspace.isStale(error)`) means it no longer fits and
+  nothing changed. A restore that chains on the server's confirmation uses
+  `workspace.asPatch(operation, revision)`.

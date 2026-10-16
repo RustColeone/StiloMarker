@@ -1,3 +1,6 @@
+// Text patches: the change one edit makes to a file, as the server applies
+// and rebases them (server/mdnotes_server.py, CollaborationBroker
+// _apply_text_patch and _rebase_patch are the twin). Pure.
 // Splice coordinates are UTF-16 offsets, matching browser selections.
 // Compares UTF-16 code units with charCodeAt, not text[i]: indexing a string of
 // CJK text allocates a one-character string per position, so finding the

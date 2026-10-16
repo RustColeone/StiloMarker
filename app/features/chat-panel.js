@@ -3,6 +3,7 @@
 // in Settings. Loaded the first time the panel (or Settings) is shown; the
 // app passes in what it needs through deps.
 
+import { undoSteps } from "./agent-undo.js";
 import { getNodeIdByPath, getPath, isImageFileName, isPersonaFileName } from "../domain/project-model.js";
 import { fetchChatStatus, fetchServerChatWorkspace, pushServerChatWorkspace, sendChatRequest } from "../services/chat-api-service.js";
 import { createChatMessage, createChatThread, deriveChatTitle, loadChatWorkspace, saveChatWorkspace } from "../services/chat-storage-service.js";
@@ -25,7 +26,7 @@ export function createChatPanel(deps) {
     chatConnectionInfo, chatWorkspaceKey, clearAgentDecorations, collaboration, controller,
     createFileInFolder, elements, escapeHtmlAttribute, getSelectedParent, isMobileLayout,
     jumpToAgentChange, logDebug, notify, openFileFromExplorer, openSettingsDialog,
-    personaAvatarSrc, promptForName, publishSnapshot, registerAgentDecorations, settings,
+    personaAvatarSrc, promptForName, registerAgentDecorations, settings, workspace,
     showConfirmDialog, showToast, storedProject, syncState, updateEditorAgentBar
   } = deps;
 
@@ -1202,7 +1203,7 @@ export function createChatPanel(deps) {
     chatState.abortController = new AbortController();
     const turn = { key: chatWorkspaceKey(project), threadId: thread.id,
       token: chatConnectionInfo()?.token, controller: chatState.abortController,
-      signature: agentDocumentSignature(project), baseRevision: collaboration.getRevision(),
+      baseRevision: collaboration.getRevision(),
       clientId: collaboration.getClientId() };
     chatState.turn = turn;
     const current = () => chatState.turn === turn && chatWorkspaceKey() === turn.key
@@ -1303,7 +1304,7 @@ export function createChatPanel(deps) {
       // were redundant; the user couldn't preview a proposal without applying it).
       if (proposals.length > 0) {
         await autoApplyProposals(assistantMessage, {
-          current: () => current() && !turn.controller.signal.aborted, signature: turn.signature, baseRevision: turn.baseRevision
+          current: () => current() && !turn.controller.signal.aborted, baseRevision: turn.baseRevision
         });
       }
     } catch (error) {
@@ -1357,28 +1358,16 @@ export function createChatPanel(deps) {
   /** Apply an agent batch immediately on arrival, then surface Keep/Drop review.
    *  Deletes still get a one-time confirm (Phase 7 safety) since they're destructive,
    *  but everything is recoverable via Drop (the checkpoint captures pre-apply state). */
-  function agentDocumentSignature(project) {
-    return JSON.stringify(Object.values(project.nodes).map(node => ({
-      path: getPath(project, node.id), kind: node.kind, content: node.kind === "file" ? node.content : undefined
-    })).sort((a, b) => a.path.localeCompare(b.path)));
-  }
-
   async function autoApplyProposals(message, guard) {
     const ops = message.proposedOperations ?? [];
     if (!ops.length) return;
-    const valid = () => guard.current() && agentDocumentSignature(controller.getProject()) === guard.signature;
     if (ops.some(op => op.type === "delete-node")) {
       const confirmed = await showConfirmDialog({ title: "Delete included",
         message: "Some of these changes delete files or folders. Apply them now? You can still Drop to undo.", acceptLabel: "Apply" });
       if (!guard.current()) return;
       if (!confirmed) { message.proposalState = "dropped"; persistChatWorkspaceState(); return; }
     }
-    if (!valid()) {
-      message.proposalState = "stale";
-      for (const op of ops) op.proposalState = "stale";
-      if (guard.current()) { showToast("The workspace changed while the agent was working. Its edits were not applied."); persistChatWorkspaceState(); }
-      return;
-    }
+    if (!guard.current()) return;
     await acceptAgentOperations(ops, message, guard);
     if (!guard.current()) return;
     message.proposalState = ops.some(op => op.proposalState === "accepted") ? "accepted" : "stale";
@@ -1408,15 +1397,17 @@ export function createChatPanel(deps) {
     });
   }
 
+  // The agent is a collaborator: each text edit goes through the Workspace
+  // write path and is placed into the file as it is now, so it merges with
+  // whatever anyone typed meanwhile. An edit that no longer fits is marked
+  // stale on its own; the rest still apply. Other changes (create, rename,
+  // move, delete) are sent one at a time, and the server refuses any that no
+  // longer make sense.
   async function acceptAgentOperations(ops, message, guard) {
     if (message.batchId) captureAgentCheckpoint(message.batchId, message.baseRevision);
-    let revision = guard.baseRevision;
-    let signature = guard.signature;
+    let unplaced = 0;
     for (const op of ops) {
-      if (!guard.current() || agentDocumentSignature(controller.getProject()) !== signature) {
-        op.proposalState = "stale"; continue;
-      }
-      const project = controller.getProject();
+      if (!guard.current()) return;
       const name = op.name ?? op.path?.split("/").pop() ?? "";
       // The agent cannot write image bytes itself; a generated image is fetched
       // from the server and saved like any image the user adds.
@@ -1424,10 +1415,15 @@ export function createChatPanel(deps) {
       if ((op.type === "update-file" || op.type === "create-file") && isImageFileName(name) && !generated) {
         op.proposalState = "stale"; continue;
       }
-      const nodeId = op.path ? getNodeIdByPath(project, op.path) : null;
-      if (op.path && !nodeId) { op.proposalState = "stale"; continue; }
-      if (op.type === "update-file" && project.nodes[nodeId]?.content !== op.preImage) {
-        op.proposalState = "stale"; continue;
+      if (op.type === "update-file") {
+        try {
+          await workspace.write(op.path, op.content, { base: op.preImage, source: "assistant" });
+          op.proposalState = "accepted";
+        } catch {
+          op.proposalState = "stale";
+          unplaced += 1;
+        }
+        continue;
       }
       const { proposalId, preImage, proposalState, generatedImage, ...cleanOp } = op;
       try {
@@ -1435,21 +1431,8 @@ export function createChatPanel(deps) {
           cleanOp.content = await fetchGeneratedImage(generatedImage);
           if (!guard.current()) return;
         }
-        if (collaboration.isConnected() && deps.workspaceMode === "synced") {
-          if (generated && collaboration.isDirectoryBacked?.()) {
-            // Cloud workspaces keep image bytes on disk, not in the operation log.
-            await collaboration.uploadAsset([cleanOp.parentPath, cleanOp.name].filter(Boolean).join("/"), cleanOp.content);
-            cleanOp.content = "";
-          }
-          const result = await collaboration.publishOperation({ ...cleanOp, baseRevision: revision, expectedRevision: revision }, { optimistic: false });
-          if (!result) throw new Error("Workspace connection changed");
-          revision = result.revision;
-        } else {
-          controller.applySyncOperation(cleanOp);
-        }
+        await applyAgentStructure(cleanOp, Boolean(generated));
         op.proposalState = "accepted";
-        if (!guard.current()) return;
-        signature = agentDocumentSignature(controller.getProject());
       } catch (error) {
         op.proposalState = "stale";
         for (const remaining of ops.slice(ops.indexOf(op) + 1)) remaining.proposalState = "stale";
@@ -1457,7 +1440,59 @@ export function createChatPanel(deps) {
         break;
       }
     }
+    if (unplaced && guard.current()) {
+      showToast(`${unplaced} agent edit${unplaced === 1 ? "" : "s"} no longer fit the file${unplaced === 1 ? "" : "s"} and ${unplaced === 1 ? "was" : "were"} not applied.`);
+    }
     if (guard.current() && message.batchId) registerAgentDecorations(ops, message.batchId);
+  }
+
+  // A create, rename, move or delete, sent for the server's confirmation (or
+  // applied here in a workspace kept in this browser). Image bytes in a cloud
+  // workspace upload first: they live on disk, not in the operation log.
+  async function applyAgentStructure(op, binary = false) {
+    if (collaboration.isConnected() && deps.workspaceMode === "synced") {
+      let operation = op;
+      if (binary && collaboration.isDirectoryBacked?.()) {
+        await collaboration.uploadAsset([op.parentPath, op.name].filter(Boolean).join("/"), op.content);
+        operation = { ...op, content: "" };
+      }
+      const result = await collaboration.publishOperation({ ...operation, baseRevision: collaboration.getRevision() }, { optimistic: false });
+      if (!result) throw new Error("Workspace connection changed");
+    } else {
+      controller.applySyncOperation(op);
+    }
+  }
+
+  // Drop after the edits were applied: undo the agent's own changes, newest
+  // first. Text through the write path (lines others changed stay), the rest
+  // by undoSteps(). Returns what could not be undone.
+  async function undoAgentBatch(msg, checkpoint) {
+    const failed = [];
+    for (const op of [...(msg.proposedOperations ?? [])].reverse()) {
+      if (op.proposalState !== "accepted") continue;
+      try {
+        if (op.type === "update-file") await workspace.write(op.path, op.preImage, { base: op.content, source: "assistant undo" });
+        else for (const step of undoSteps(op, checkpoint?.project)) await applyAgentStructure(step, step.type === "create-file" && isImageFileName(step.name));
+      } catch {
+        failed.push(op.path ?? [op.parentPath, op.name].filter(Boolean).join("/"));
+      }
+    }
+    return failed;
+  }
+
+  async function dropAgentBatch(batchId) {
+    const found = findBatchMessage(batchId);
+    if (!found) return;
+    const { msg } = found;
+    if (msg.proposalState === "accepted") {
+      const failed = await undoAgentBatch(msg, agentCheckpoints.get(batchId));
+      agentCheckpoints.delete(batchId);
+      if (failed.length) notify(`Dropped. These could not be undone because they changed too much since: ${failed.join(", ")}.`);
+    }
+    msg.proposalState = "dropped";
+    clearAgentDecorations(batchId);    // Phase 5: remove line tints on drop
+    persistChatWorkspaceState(controller.getProject());
+    renderChatPanel(controller.getProject());
   }
 
   document.addEventListener("click", (event) => {
@@ -1505,60 +1540,10 @@ export function createChatPanel(deps) {
       return;
     }
 
-    // Drop all (pre-accept dismiss) or Drop post-accept (revert)
-    const dropAllBtn = event.target.closest("[data-batch-drop-all]");
-    const dropFinalBtn = event.target.closest("[data-batch-drop-final]");
-    const dropTarget = dropAllBtn ?? dropFinalBtn;
+    // Drop all (pre-accept dismiss) or Drop post-accept (undo the agent's changes)
+    const dropTarget = event.target.closest("[data-batch-drop-all]") ?? event.target.closest("[data-batch-drop-final]");
     if (dropTarget) {
-      const batchId = dropTarget.dataset.batchDropAll ?? dropTarget.dataset.batchDropFinal;
-      const found = findBatchMessage(batchId);
-      if (!found) return;
-      const { msg } = found;
-      if (msg.proposalState === "accepted") {
-        const checkpoint = agentCheckpoints.get(batchId);
-        const isMaster = collaboration.getRole() === "master";
-        const isSynced = collaboration.isConnected() && deps.workspaceMode === "synced";
-        const soleAuthored = checkpoint?.soleAuthored ?? false;
-
-        if (isSynced && !isMaster && soleAuthored && msg.baseRevision != null) {
-          // Synced non-master sole-author path: server-authoritative revert (Phase 2).
-          collaboration.publishOperation({
-            type: "revert-to-revision",
-            targetRevision: msg.baseRevision
-          }).catch((err) => {
-            notify(`Drop failed: ${err.message}`);
-            return;
-          });
-        } else if (isSynced && !isMaster && !soleAuthored) {
-          notify("Drop unavailable: another collaborator has edited since this batch was applied.");
-          return;
-        } else {
-          // Local / master / offline path: restore from client checkpoint.
-          if (checkpoint) {
-            controller.replaceProject(checkpoint.project);
-          } else {
-            // Fallback: best-effort preImage revert (no checkpoint available).
-            const ops = [...(msg.proposedOperations ?? [])].reverse();
-            for (const op of ops) {
-              if (op.proposalState !== "accepted") continue;
-              if (op.type === "update-file" && typeof op.preImage === "string") {
-                try { controller.applySyncOperation({ type: "update-file", path: op.path, content: op.preImage }); } catch { /* best-effort */ }
-              } else if (op.type === "create-file" || op.type === "create-folder") {
-                try { controller.applySyncOperation({ type: "delete-node", path: op.parentPath ? `${op.parentPath}/${op.name}` : op.name }); } catch { /* best-effort */ }
-              }
-            }
-          }
-          if (isMaster && isSynced && msg.baseRevision != null) {
-            // Master in synced mode: push the reverted state as a replace.
-            publishSnapshot();
-          }
-        }
-        agentCheckpoints.delete(batchId);
-      }
-      msg.proposalState = "dropped";
-      clearAgentDecorations(batchId);    // Phase 5: remove line tints on drop
-      persistChatWorkspaceState(controller.getProject());
-      renderChatPanel(controller.getProject());
+      void dropAgentBatch(dropTarget.dataset.batchDropAll ?? dropTarget.dataset.batchDropFinal);
       return;
     }
   });

@@ -8,7 +8,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
-  ROOT, codeFiles, read, lineCount, oversized, spellings, jsImports, pyImports,
+  ROOT, codeFiles, codeOf, read, lineCount, oversized, spellings, jsImports, pyImports,
   loadModules, moduleOf, KERNEL_MAX_LINES, DOMAIN_WORDS, MAX_LINES
 } from "./scan.mjs";
 
@@ -111,7 +111,8 @@ test("what each module owns does not overlap (rule 4)", () => {
 });
 
 test("model and service code does no input or output (rule 5)", () => {
-  const jsIo = /\b(document|window|localStorage|sessionStorage|indexedDB|navigator)\b|\bfetch\(|new (WebSocket|EventSource|XMLHttpRequest)\b/;
+  // Uses, not words: "its document" in a message is fine, document.querySelector is not.
+  const jsIo = /\b(document|window|navigator)\.|\b(localStorage|sessionStorage|indexedDB)\b|\bfetch\(|new (WebSocket|EventSource|XMLHttpRequest)\b/;
   const pyIo = /^\s*(import|from)\s+(sqlite3|socket|subprocess|urllib|http|requests)\b|\bopen\(/m;
   const problems = [];
   for (const file of files) {
@@ -120,7 +121,7 @@ test("model and service code does no input or output (rule 5)", () => {
     const layer = file.slice(m.dir.length + 1).split("/")[0];
     if (layer !== "model" && layer !== "service") continue;
     const io = file.endsWith(".py") ? pyIo : jsIo;
-    if (io.test(read(file))) problems.push(`${file} does input or output; move that into ${m.dir}/adapters/ behind a port`);
+    if (io.test(codeOf(file))) problems.push(`${file} does input or output; move that into ${m.dir}/adapters/ behind a port`);
   }
   assert.deepEqual(problems, []);
 });

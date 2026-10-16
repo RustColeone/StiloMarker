@@ -57,9 +57,10 @@ function proposalHarness() {
   const apply=new Function(...Object.keys(deps),`${proposalSource};return autoApplyProposals;`)(...Object.values(deps));
   return {apply,confirm,applications,guard:{current:()=>current,signature:'original',baseRevision:1},change(){content='new';},switch(){current=false;}};
 }
-test('typing during generation prevents auto-application over the newer text', async () => {
+test('typing during generation no longer throws the agent\'s edits away: they go on to be placed into the newer text', async () => {
+  // Each edit is then fitted into the file as it is now (tests/workspace-write.test.mjs).
   const h=proposalHarness();h.change();const message={proposedOperations:[{type:'update-file'}]};
-  await h.apply(message,h.guard);assert.equal(h.applications.length,0);assert.equal(message.proposalState,'stale');
+  await h.apply(message,h.guard);assert.equal(h.applications.length,1);
 });
 test('a delayed delete confirmation cannot apply to a different workspace', async () => {
   const h=proposalHarness(), message={proposedOperations:[{type:'delete-node'}]};const applying=h.apply(message,h.guard);

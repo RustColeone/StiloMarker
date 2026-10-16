@@ -398,8 +398,7 @@ export function createFileActions(app) {
     const nextEntries = [...entries];
     nextEntries.splice(insertionIndex, 0, entryDraft);
     const nextContent = serializeUrlDb(nextEntries);
-    app.controller.updateContent(targetFile.id, nextContent);
-    app.publishOperation({ type: "update-file", path: getPath(project, targetFile.id), content: nextContent });
+    void app.workspace.write(getPath(project, targetFile.id), nextContent, { source: "url album" }).catch((error) => app.notify(error.message));
     const pastedEntry = app.getUrlDbEntries(nextContent).find((entry) => entry.name === entryDraft.name);
     if (pastedEntry) {
       app.setActiveSourceUrlDbEntry(targetFile.id, pastedEntry.id);
@@ -659,8 +658,7 @@ export function createFileActions(app) {
     }
 
     const content = await readFileAsProjectContent(file, targetFile.name);
-    app.controller.updateContent(targetFile.id, content);
-    app.publishOperation({ type: "update-file", path: getPath(project, targetFile.id), content });
+    await app.workspace.write(getPath(project, targetFile.id), content, { source: "replace file" });
     app.logDebug("action", "Image file replaced", getPath(project, targetFile.id));
   }
 
@@ -706,8 +704,7 @@ export function createFileActions(app) {
 
     try {
       const nextContent = appendUrlDbEntry(file.content, entryDraft);
-      app.controller.updateContent(file.id, nextContent);
-      app.publishOperation({ type: "update-file", path: getPath(project, file.id), content: nextContent });
+      void app.workspace.write(getPath(project, file.id), nextContent, { source: "url album" }).catch((error) => app.notify(error.message));
       const nextEntry = app.getUrlDbEntries(nextContent).find((entry) => entry.name === entryDraft.name);
       if (nextEntry) {
         app.setActiveSourceUrlDbEntry(file.id, nextEntry.id);
@@ -918,8 +915,7 @@ export function createFileActions(app) {
 
       try {
         const nextContent = updateUrlDbEntry(selectedEntry.file.content, selectedEntry.entry.id, { name: nextName });
-        app.controller.updateContent(selectedEntry.file.id, nextContent);
-        app.publishOperation({ type: "update-file", path: getPath(project, selectedEntry.file.id), content: nextContent });
+        void app.workspace.write(getPath(project, selectedEntry.file.id), nextContent, { source: "url album" }).catch((error) => app.notify(error.message));
         const nextEntry = app.getUrlDbEntries(nextContent).find((entry) => entry.name === nextName);
         if (nextEntry) {
           app.setActiveSourceUrlDbEntry(selectedEntry.file.id, nextEntry.id);
@@ -967,8 +963,7 @@ export function createFileActions(app) {
 
       try {
         const nextContent = removeUrlDbEntry(selectedEntry.file.content, selectedEntry.entry.id);
-        app.controller.updateContent(selectedEntry.file.id, nextContent);
-        app.publishOperation({ type: "update-file", path: getPath(project, selectedEntry.file.id), content: nextContent });
+        void app.workspace.write(getPath(project, selectedEntry.file.id), nextContent, { source: "url album" }).catch((error) => app.notify(error.message));
         app.sourceUrlDbEntry = null;
         app.previewUrlDbEntry = null;
         app.setActiveSourceFile(selectedEntry.file.id);
