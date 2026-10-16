@@ -260,7 +260,9 @@ export function createSnapshots(app) {
   async function applyHistoryOperations(ops) {
     let revision = app.collaboration.getRevision?.() ?? 0;
     for (const op of ops) {
-      let operation = op;
+      // A text file's restore travels as a patch against the file as it is now.
+      let operation = app.workspace.asPatch(op, revision);
+      if (!operation) continue; // already matches
       if (typeof operation.content === "string" && operation.content.startsWith("data:")
           && app.collaboration.isDirectoryBacked?.()) {
         const path = operation.type === "create-file"

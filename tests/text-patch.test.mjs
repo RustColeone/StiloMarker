@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { transformTextPatch, applyTextPatch } from '../app/services/text-patch-service.js';
+import { transformTextPatch, applyTextPatch } from '../app/modules/workspace/index.js';
 
 test('all short splice pairs either converge or reject the overlap on both sides', () => {
   const base = 'abcd';

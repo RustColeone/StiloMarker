@@ -42,6 +42,7 @@ function harness({ synced = false, directory = false, account = { token: 'acct' 
       isConnected: () => synced,
       isDirectoryBacked: () => directory,
       uploadAsset: async (path, content) => uploads.push({ path, content }),
+      getRevision: () => 7,
       publishOperation: async (op) => { published.push(op); return { revision: op.baseRevision + 1 }; }
     },
     deps: { workspaceMode: synced ? 'synced' : 'private' },
@@ -73,7 +74,7 @@ test('in a directory-backed cloud workspace the bytes are uploaded, not sent in 
   assert.deepEqual(h.uploads, [{ path: 'Art/mara.png', content: dataUrl }]);
   assert.equal(h.published[0].content, '');
   assert.equal(h.published[0].generatedImage, undefined);
-  assert.equal(h.published[0].expectedRevision, 7);
+  assert.equal(h.published[0].baseRevision, 7);
 });
 
 test('a PIN-shared (not directory-backed) session sends the image in the operation', async () => {

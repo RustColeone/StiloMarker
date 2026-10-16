@@ -1,6 +1,8 @@
 import { startModules } from "./kernel/index.js";
 import shellModule from "./modules/shell/index.js";
 import fileTypesModule from "./modules/file-types/index.js";
+import workspaceModule from "./modules/workspace/index.js";
+import { createWorkspacePorts } from "./features/workspace-ports.js";
 import { rememberedWorkspace, createSessionRecovery } from "./services/session-recovery-service.js";
 import { installMobileViewport } from "./services/chat-ui-service.js";
 import { snapshotProject, savedFileIds } from "./services/project-save-service.js";
@@ -279,10 +281,10 @@ const elements = {
 // ---- Modules (docs/ARCHITECTURE.md) ----
 // The app is moving into modules one step at a time. Code still in this file
 // reaches a module only through the public API the kernel hands back.
-const modules = await startModules([shellModule, fileTypesModule], {
+const modules = await startModules([shellModule, fileTypesModule, workspaceModule], {
   log: (owner, ...args) => { try { logDebug("action", `${owner}: ${args.join(" ")}`); } catch { /* log not ready yet */ } }
 });
-const shell = modules.shell;
+const { shell, workspace } = modules;
 
 const settings = loadSettings();
 const storedProject = loadProject();
@@ -778,7 +780,7 @@ function loadChat() {
       agentCheckpoints, agentPendingDecorations, buildTextDiffHunks, captureAgentCheckpoint, chatConnectionInfo,
       chatWorkspaceKey, clearAgentDecorations, collaboration, controller, createFileInFolder, elements,
       escapeHtmlAttribute, getSelectedParent, isMobileLayout, jumpToAgentChange, logDebug, notify,
-      openFileFromExplorer, openSettingsDialog, personaAvatarSrc, promptForName, publishSnapshot,
+      openFileFromExplorer, openSettingsDialog, personaAvatarSrc, promptForName, workspace,
       registerAgentDecorations, settings, showConfirmDialog, showToast, storedProject, syncState,
       updateEditorAgentBar,
       get workspaceMode() { return workspaceMode; }
@@ -1016,9 +1018,7 @@ async function forceAppUpgrade(...args) { return dialogs().forceAppUpgrade(...ar
 function formatEditorDebugValue(...args) { return dialogs().formatEditorDebugValue(...args); }
 function logDebug(...args) { return dialogs().logDebug(...args); }
 function notify(message) { return shell.notify(message); }
-async function promptForName(message, value = "", options = {}) {
-  return shell.input({ title: message, message, value, submitLabel: "Save", ...options });
-}
+async function promptForName(message, value = "", options = {}) { return shell.input({ title: message, message, value, submitLabel: "Save", ...options }); }
 function renderDebugPanel(...args) { return dialogs().renderDebugPanel(...args); }
 function showAcceptConnectionDialog(...args) { return dialogs().showAcceptConnectionDialog(...args); }
 function showBookmarkEntryDialog(...args) { return dialogs().showBookmarkEntryDialog(...args); }
@@ -1265,6 +1265,7 @@ function cloudWorkspaceTarget() {
 var snapshotsInstance;
 function snapshots() {
   return (snapshotsInstance ??= createSnapshots({
+    get workspace() { return workspace; },
     get DIFF_TAB_ID() { return DIFF_TAB_ID; },
     get cloudWorkspaceTarget() { return cloudWorkspaceTarget; },
     get collaboration() { return collaboration; },
@@ -1343,7 +1344,7 @@ async function openSnapshotsDialog() {
       controller, collaboration, getPath, getWorkspaceMode: () => workspaceMode, snapshotStore, ensureSnapshotsMigrated,
       setSnapshotBaselines, refreshSnapshotBaselines, createSnapshotNow, showFileDiff, showToast, notify,
       confirmAction, formatSnapshotTime, formatBytes, projectPaths, writeAtPathOperations,
-      applyHistoryOperations, isTextFileName, applyEditorEdit, publishOperation
+      applyHistoryOperations, workspace
     });
     return snapshotsDialog;
   }).catch((error) => {
@@ -1425,7 +1426,7 @@ if (elements.formatToolbarInput) elements.formatToolbarInput.checked = Boolean(s
 if (elements.autoSaveInput) elements.autoSaveInput.checked = settings.autoSave !== false;
 
 // Per-turn agent checkpoints (Phase 6 / subtask 6.1).
-// batchId → { project: deepClone, baseRevision: number, soleAuthored: boolean }
+// batchId → { project: deepClone, baseRevision: number }: what undoing a delete brings back
 // Capped at last 10 turns (subtask 6.5).
 const agentCheckpoints = new Map();
 const CHECKPOINT_MAX = 10;
@@ -1433,8 +1434,7 @@ const CHECKPOINT_MAX = 10;
 function captureAgentCheckpoint(batchId, baseRevision) {
   agentCheckpoints.set(batchId, {
     project: structuredClone(controller.getProject()),
-    baseRevision,
-    soleAuthored: true
+    baseRevision
   });
   // Trim to last CHECKPOINT_MAX entries.
   if (agentCheckpoints.size > CHECKPOINT_MAX) {
@@ -1460,13 +1460,6 @@ const collaboration = createCollaborationRuntime({
     if (view) restoreResumeState(view);
   },
   applyOperation(clientId, operation) {
-    // When a foreign peer op arrives, mark all open checkpoints as no-longer
-    // sole-authored so the Drop button can be disabled (Phase 6 / subtask 6.4).
-    if (clientId && clientId !== collaboration.getClientId()) {
-      for (const checkpoint of agentCheckpoints.values()) {
-        checkpoint.soleAuthored = false;
-      }
-    }
     // Comments are shared, so a COLLABORATOR's edit can move my commented lines
     // just as my own typing does. Re-anchor after remote ops too, or a teammate
     // inserting a paragraph above would strand every comment below it.
@@ -1651,6 +1644,9 @@ const collaboration = createCollaborationRuntime({
     chat?.receiveChatWorkspace(controller.getProject(), workspace);
   }
 });
+workspace.attach(createWorkspacePorts({ controller, collaboration, publishOperation, getEditorSelection, applyEditorEdit,
+  get workspaceMode() { return workspaceMode; },
+  editorShowsWholeFile: () => !sourceUrlDbEntry && isTextFileName(controller.getActiveFile()?.name ?? "") }));
 
 attachSelectionChangeListener();
 
@@ -1791,7 +1787,7 @@ function loadModuleMapTools() {
     moduleMapTools = createModuleMapTools({
       controller, getPath, getNode, findChildByName, notify, publishOperation,
       setActiveSourceFile, setPreviewFile, highlightMarkdownSource, renderMarkdown,
-      typesetPreview, handleIndentKeydown
+      typesetPreview, handleIndentKeydown, workspace
     });
     return moduleMapTools;
   }).catch((error) => {
@@ -1983,6 +1979,7 @@ async function typesetPreview(...args) { return panes().typesetPreview(...args);
 var fileActionsInstance;
 function fileActions() {
   return (fileActionsInstance ??= createFileActions({
+    get workspace() { return workspace; },
     get addFileState() { return addFileState; },
     get applyEditorEdit() { return applyEditorEdit; },
     get applyFileContentUpdates() { return applyFileContentUpdates; },
@@ -2430,9 +2427,7 @@ elements.debugSplitter.addEventListener("pointerdown", (event) => {
   });
 });
 
-function closeMenus() {
-  shell.closeMenus();
-}
+function closeMenus() { shell.closeMenus(); }
 
 document.addEventListener("click", async (event) => {
   const copyButton = event.target.closest("[data-copy-code]");
@@ -3048,19 +3043,14 @@ function updateFileContentFromPreview(fileId, nextContent, reason = "preview edi
     return;
   }
 
-  // The preview view already re-rendered itself for this edit; suppress the
-  // redundant preview re-render in the synchronous updateStatus that follows.
+  // The preview already re-rendered itself; suppress its redundant re-render
+  // in the synchronous updateStatus the write triggers (commit runs at once).
   _previewUpdating = true;
   try {
-    controller.updateContent(fileId, nextContent);
+    workspace.write(getPath(project, fileId), nextContent, { source: "preview" }).catch((error) => notify(error.message));
   } finally {
     _previewUpdating = false;
   }
-  publishOperation({
-    type: "update-file",
-    path: getPath(project, fileId),
-    content: nextContent
-  });
   logDebug("action", "Bmap preview updated", reason);
 }
 

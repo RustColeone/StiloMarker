@@ -9,7 +9,7 @@ export function createSnapshotsDialog(deps) {
     controller, collaboration, getPath, getWorkspaceMode, snapshotStore, ensureSnapshotsMigrated,
     setSnapshotBaselines, refreshSnapshotBaselines, createSnapshotNow, showFileDiff, showToast, notify,
     confirmAction, formatSnapshotTime, formatBytes, projectPaths, writeAtPathOperations,
-    applyHistoryOperations, isTextFileName, applyEditorEdit, publishOperation
+    applyHistoryOperations, workspace
   } = deps;
   const el = {
     dialog: query("#snapshots-dialog"),
@@ -182,13 +182,14 @@ export function createSnapshotsDialog(deps) {
     if (content === String(node.content ?? "")) { showToast("Already matches this version"); return; }
     const ok = await confirmAction(`Restore "${path.split("/").pop()}" to its ${formatSnapshotTime(createdAt)} snapshot? Current content is replaced (you can snapshot first to keep it).`);
     if (!ok) return;
-    if (project.activeFileId === node.id && isTextFileName(node.name)) {
-      // Active file: route through the editor so undo history + caret stay sane.
-      applyEditorEdit(content, 0, 0);
-    } else {
-      controller.updateContent(node.id, content);
+    // One write: the open file changes through the editor (undo works), and
+    // the change is sent as a patch that merges with anyone else's edits.
+    try {
+      await workspace.write(path, content, { source: "snapshot restore" });
+    } catch (error) {
+      notify(`Restore failed: ${error.message}`);
+      return;
     }
-    publishOperation({ type: "update-file", path, content });
     showToast(`Restored ${path.split("/").pop()}`);
   }
 

@@ -2,11 +2,11 @@
   "about": "Structure violations that existed when the rules were introduced (2026-10-16). They may only shrink; see tools/structure-baseline.mjs.",
   "oversized": {
     "app/editor/editor-core.js": 1655,
-    "app/features/chat-panel.js": 1693,
+    "app/features/chat-panel.js": 1678,
     "app/features/cloud-browser.js": 1004,
-    "app/features/file-actions.js": 1239,
+    "app/features/file-actions.js": 1234,
     "app/features/panes.js": 1048,
-    "app/main.js": 4758,
+    "app/main.js": 4748,
     "app/services/collaboration-service.js": 1107,
     "app/ui/bmap-view.js": 4025,
     "server/mdnotes_server.py": 6459
@@ -24,7 +24,6 @@
       "app/domain/project-model.js",
       "app/main.js",
       "app/services/collaboration-service.js",
-      "app/services/text-patch-service.js",
       "server/mdnotes_server.py"
     ],
     "operation replace-project": [
@@ -34,12 +33,8 @@
     "operation update-file": [
       "app/domain/project-model.js",
       "app/features/chat-panel.js",
-      "app/features/file-actions.js",
-      "app/features/module-map-tools.js",
-      "app/features/snapshots-dialog.js",
       "app/features/workspace-history.js",
       "app/main.js",
-      "app/services/collaboration-service.js",
       "server/mdnotes_server.py"
     ],
     "sync protocol number": [

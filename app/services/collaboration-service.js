@@ -1,4 +1,4 @@
-import { buildTextPatch, transformTextPatch, applyTextPatch } from "./text-patch-service.js";
+import { buildTextPatch, transformTextPatch, applyTextPatch } from "../modules/workspace/index.js";
 import { cloneModelData } from "../domain/project-model.js";
 import { builtinTypes } from "../modules/file-types/index.js";
 import { connectToServer, fetchSessionState, hostSession, openEventStream, openWorkspaceSession, renewSessionLease, leaveSession, pushCursor, pushOperation, pushSessionState, sanitizeProjectForSync, uploadAsset } from "./sync-service.js";
@@ -374,7 +374,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
         if (serverContent === undefined) {
           await pushOp({ type: "create-file", parentPath: file.parentPath, name: file.name, content: file.content });
         } else if (serverContent !== file.content) {
-          await pushOp({ type: "update-file", path: file.path, content: file.content, baseRevision });
+          await pushOp(buildTextPatch(file.path, serverContent, file.content, baseRevision));
         }
       }
     } catch (error) {

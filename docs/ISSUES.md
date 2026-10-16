@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-16 · release `v0.1.32` (deployed; public verification passed)
+Last updated: 2026-10-16 · release `v0.1.33`
 
 ---
 
@@ -30,6 +30,31 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.33: restructure step 4, part 1 (the one write path)
+
+Every change to a text file now leaves the browser as a patch, which merges
+with what other people are typing, instead of a whole-file write that either
+overwrote them or was refused. One function in the new Workspace module,
+`write()`, is used by everything that writes: the agent's edits, edits made in
+a diagram's preview, URL album changes, module maps, Snapshots and Workspace
+History restores, and reconnecting after being offline. Typing already sent
+patches and is unchanged.
+
+- **The agent is now a collaborator.** Before, any change anywhere in the
+  workspace while the agent was working threw its whole batch away, and Drop
+  either rewound the whole workspace on the server (`revert-to-revision`) or
+  was refused once anyone else had edited. Now each of its edits is fitted into
+  the file as it is now; only an edit to a line someone else changed is marked
+  stale. Drop undoes only the agent's own changes, newest first, and keeps
+  everyone else's.
+- **Placing safely.** A change is split into line-level pieces; each must be
+  found, with two lines of context, exactly once, or the write is refused and
+  nothing changes. The server also refuses any patch whose replaced text does
+  not match, so a misplaced edit cannot happen.
+- Fixed on the way: restoring the open file from Snapshots sent the change
+  twice (once from the editor, once as a whole file).
+- Images are still replaced whole; there is nothing to merge in bytes.
 
 ### v0.1.32: restructure step 3 (File types)
 

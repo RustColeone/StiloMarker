@@ -10,7 +10,7 @@ export function createModuleMapTools(deps) {
   const {
     controller, getPath, getNode, findChildByName, notify, publishOperation,
     setActiveSourceFile, setPreviewFile, highlightMarkdownSource, renderMarkdown,
-    typesetPreview, handleIndentKeydown
+    typesetPreview, handleIndentKeydown, workspace
   } = deps;
 
   const el = {
@@ -219,8 +219,7 @@ export function createModuleMapTools(deps) {
 
     const updateTarget = (target, label) => {
       const nextContent = replaceOrAppendModuleMap(target.content, draftSection);
-      controller.updateContent(target.id, nextContent);
-      publishOperation({ type: "update-file", path: getPath(project, target.id), content: nextContent });
+      void workspace.write(getPath(project, target.id), nextContent, { source: "module map" }).catch((error) => notify(error.message));
       setActiveSourceFile(target.id);
       setPreviewFile(target.id);
       el.dialog.close();
