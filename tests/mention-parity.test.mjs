@@ -5,7 +5,7 @@ import { findMentions, personaHandle } from '../app/services/persona-service.js'
 
 // The server decides which characters reply (server/conversations.py) and the
 // browser highlights mentions; both read this table so they agree.
-const table = JSON.parse(await readFile(new URL('./mention-cases.json', import.meta.url), 'utf8'));
+const table = JSON.parse(await readFile(new URL('../spec/characters/mentions.cases.json', import.meta.url), 'utf8'));
 
 test('browser mention parsing matches the shared table', () => {
   const members = table.handles.map((handle) => ({ handle }));

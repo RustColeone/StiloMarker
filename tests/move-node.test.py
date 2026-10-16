@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('mdnotes_server', ROOT / 'server/mdnotes_server.py')
 server = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(server)
-CASES = json.loads((ROOT / 'tests/move-node-cases.json').read_text(encoding='utf-8'))
+CASES = json.loads((ROOT / 'spec/workspace/move-node.cases.json').read_text(encoding='utf-8'))
 
 
 class MoveNodeTests(unittest.TestCase):
