@@ -22,7 +22,7 @@ test("project model: rejects unsupported binary, accepts images and urldb", () =
   project = projectModel.addFolder(project, projectModel.ROOT_ID, "docs");
   const docsFolder = Object.values(project.nodes).find((node) => node.kind === "folder" && node.name === "docs");
 
-  assert.throws(() => projectModel.addFile(project, docsFolder.id, "bad.txt", "x"), /supported image files/);
+  assert.throws(() => projectModel.addFile(project, docsFolder.id, "bad.txt", "x"), /files are allowed/);
 
   project = projectModel.addFile(project, docsFolder.id, "diagram.png", "data:image/png;base64,AAAA");
   assert.ok(Object.values(project.nodes).find((node) => node.kind === "file" && node.name === "diagram.png"));

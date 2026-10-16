@@ -3,7 +3,7 @@
 One SQLite database per project (``conversations.sqlite`` in the project
 folder) holds the conversations, who is in each, their messages, and each
 person's private notes about their contacts. Members are keys:
-``user:<account>`` for people and ``char:<path of a .persona.skill file>`` for
+``user:<account>`` for people and ``char:<path of a character file>`` for
 characters. A conversation of exactly two members is a *pair* and is unique for
 those two (starting a chat with someone reopens it); anything larger is a
 *group*. Inviting someone into a pair starts a new group, so the private chat
@@ -21,6 +21,8 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from stilo.modules.file_types import BUILTIN as FILE_TYPES
+
 DB_NAME = "conversations.sqlite"
 # SQLite's write-ahead log lives next to the database; all three must survive
 # a publish and never be shown or exported as project files.
@@ -31,7 +33,7 @@ MAX_ALIAS = 80
 MAX_NOTE = 4000
 MAX_MEMBERS = 24
 PAGE = 50
-PERSONA_SUFFIX = ".persona.skill"
+PERSONA_SUFFIX = FILE_TYPES.extensions_of("persona")[0]  # the File types module owns it
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (

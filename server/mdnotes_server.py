@@ -36,6 +36,7 @@ from conversations import (SIDE_FILES as CHAT_DB_FILES, ProjectChats, ReplyQueue
 from openai_support import IMAGE_FORMATS, IMAGE_SIZES, GeneratedImages, OpenAIProvider, is_openai_model, uses_fixed_temperature, uses_responses_api, to_responses_request, ResponsesStream
 from stilo.kernel import start_modules
 from stilo.modules import transport as transport_module
+from stilo.modules.file_types import BUILTIN as FILE_TYPES
 
 
 def start_server_modules():
@@ -1389,11 +1390,9 @@ class ChatProxy:
         }
 
 
-IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"})
-
-
 def is_image_name(name: str) -> bool:
-    return Path(str(name or "")).suffix.lower() in IMAGE_EXTENSIONS
+    """Image or not: the File types module decides (protocol/file-types.json)."""
+    return FILE_TYPES.is_image(name)
 
 
 class CollaborationBroker:
@@ -3868,14 +3867,14 @@ class WorkspaceRegistry:
                     if value:
                         return value[:80]
         base = path.rsplit("/", 1)[-1]
-        return base[: -len(".persona.skill")] if base.lower().endswith(".persona.skill") else base
+        return FILE_TYPES.base_name(base) if FILE_TYPES.is_type(base, "persona") else base
 
     def chat_characters(self, team: str, relpath: str, project: dict | None = None) -> list[dict]:
         project = project or self._project_snapshot(team, relpath)
         out = []
         for node_id, node in project.get("nodes", {}).items():
             name = node.get("name", "")
-            if node.get("kind") != "file" or not name.lower().endswith(".persona.skill"):
+            if node.get("kind") != "file" or not FILE_TYPES.is_type(name, "persona"):
                 continue
             path = self._node_path(project, node_id)
             out.append({"key": char_key(path), "path": path, "name": self._persona_name(node.get("content", ""), path),

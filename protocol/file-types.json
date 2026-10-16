@@ -1,0 +1,49 @@
+{
+  "about": "Every file type the app knows, in one place. Both ends load it: the server through server/stilo/modules/file_types, the browser through app/modules/file-types/model/builtin-types.js, which tools/protocol-sync.mjs writes from this file (never edit that copy). A name's type is the one whose extension is the longest match, so 'aria.persona.skill' is a character and 'notes.skill' a plain skill file. 'format' says how the file is edited, highlighted and previewed.",
+  "version": 1,
+  "types": [
+    {
+      "id": "md", "label": "Markdown", "kind": "text", "format": "markdown",
+      "extensions": { ".md": "text/markdown;charset=utf-8" },
+      "icon": "is-md", "filters": ["notes"],
+      "create": { "label": "New Markdown", "name": "new markdown", "order": 1 }
+    },
+    {
+      "id": "mtree", "label": "MTREE", "kind": "text", "format": "mtree",
+      "extensions": { ".mtree": "text/plain;charset=utf-8" },
+      "icon": "is-mtree", "filters": ["mtree"],
+      "create": { "label": "New MTREE", "name": "new mtree", "order": 2 }
+    },
+    {
+      "id": "urldb", "label": "URL Album", "kind": "text", "format": "urldb",
+      "extensions": { ".urldb": "text/plain;charset=utf-8" },
+      "icon": "is-urldb", "filters": ["images"], "expandable": true,
+      "create": { "label": "New URL Album", "name": "new url album", "order": 3 }
+    },
+    {
+      "id": "bmap", "label": "Diagram", "kind": "text", "format": "bmap",
+      "extensions": { ".bmap": "text/plain;charset=utf-8" },
+      "icon": "is-bmap", "filters": [],
+      "create": { "label": "New Diagram", "name": "new diagram", "order": 4 }
+    },
+    {
+      "id": "persona", "label": "Character", "kind": "text", "format": "markdown",
+      "extensions": { ".persona.skill": "text/markdown;charset=utf-8" },
+      "icon": "is-persona", "filters": ["notes"],
+      "create": { "label": "New Character", "name": "new character", "order": 5 }
+    },
+    {
+      "id": "skill", "label": "Skill", "kind": "text", "format": "markdown",
+      "extensions": { ".skill": "text/markdown;charset=utf-8" },
+      "icon": "is-file", "filters": ["notes"]
+    },
+    {
+      "id": "image", "label": "Image", "kind": "image", "format": "image",
+      "extensions": {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+        ".svg": "image/svg+xml", ".webp": "image/webp", ".bmp": "image/bmp"
+      },
+      "icon": "is-file", "filters": ["images"]
+    }
+  ]
+}

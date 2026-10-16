@@ -73,17 +73,19 @@ test("modules are reached only through their public API, and only if declared (r
 test("each owned name is spelled only by its owner, and the legacy spellings only shrink (rule 4)", () => {
   const now = spellings(files);
   const problems = [];
+  // A module's browser and server halves share its names, so ownership is per end.
   const owners = new Map();
   for (const m of all) {
     for (const name of m.owns.names ?? []) {
-      assert.ok(!owners.has(name), `"${name}" is owned by both ${owners.get(name)?.name} and ${m.name}`);
-      owners.set(name, m);
+      const key = `${m.root}:${name}`;
+      assert.ok(!owners.has(key), `"${name}" is owned by both ${owners.get(key)?.name} and ${m.name}`);
+      owners.set(key, m);
     }
   }
   for (const [name, spelled] of Object.entries(now)) {
     const allowed = new Set(baseline.spellings[name] ?? []);
-    const owner = owners.get(name);
     for (const file of spelled) {
+      const owner = owners.get(`${endOf(file)}:${name}`);
       if (owner && moduleOf(file, all) === owner) continue;
       if (!allowed.has(file)) {
         problems.push(`${file} spells ${name}. ` + (owner
@@ -180,6 +182,13 @@ test("the legacy contract matches the messages the code sends and handles (rule 
   assert.equal(Number(floor), contract.version, "the server's MIN_CLIENT_VERSION and the contract disagree on the version");
 });
 
+test("the browser's copies of protocol data are up to date", async () => {
+  const { COPIES, render } = await import("../../tools/protocol-sync.mjs");
+  for (const copy of COPIES) {
+    assert.equal(read(copy.to), render(copy), `${copy.to} is stale: run node tools/protocol-sync.mjs`);
+  }
+});
+
 test("files stay within the size budget, and the kernel stays small and domain-free (rule 8)", () => {
   const now = oversized(files);
   const problems = [];
@@ -205,6 +214,11 @@ test("the baseline lists nothing that has already been fixed", () => {
   }
   assert.deepEqual(stale, [], "run `node tools/structure-baseline.mjs` to lower the baseline after a cleanup");
 });
+
+// Which end a file belongs to, as a modules root.
+function endOf(file) {
+  return file.startsWith("server/") ? "server/stilo/modules" : "app/modules";
+}
 
 // Test files of one kind under a folder (for rule 6).
 function codeFilesIn(dir, ext) {

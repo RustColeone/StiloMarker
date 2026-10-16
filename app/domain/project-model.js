@@ -1,47 +1,29 @@
+import { builtinTypes } from "../modules/file-types/index.js";
+
 const ROOT_ID = "root";
-const TEXT_FILE_EXTENSIONS = [".md", ".mtree", ".urldb", ".bmap", ".skill"];
-const IMAGE_FILE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"];
-const ALLOWED_FILE_EXTENSIONS = [...TEXT_FILE_EXTENSIONS, ...IMAGE_FILE_EXTENSIONS];
+
+// File types belong to the File types module (protocol/file-types.json);
+// these helpers only ask it.
+const ALLOWED_MESSAGE = () => `Only ${builtinTypes.describe()} files are allowed.`;
 
 function createId(prefix) {
   return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2, 10)}`;
 }
 
-function getExtension(name) {
-  const index = name.lastIndexOf(".");
-  return index >= 0 ? name.slice(index).toLowerCase() : "";
-}
-
-function isAllowedFileName(name) {
-  return ALLOWED_FILE_EXTENSIONS.includes(getExtension(name));
-}
-
-function isTextFileName(name) {
-  return TEXT_FILE_EXTENSIONS.includes(getExtension(name));
-}
-
-function isBmapFileName(name) {
-  return getExtension(name) === ".bmap";
-}
-
-function isUrlDbFileName(name) {
-  return getExtension(name) === ".urldb";
-}
-
-function isImageFileName(name) {
-  return IMAGE_FILE_EXTENSIONS.includes(getExtension(name));
-}
-
-// Persona files (`aria.persona.skill`) are Markdown with a short header; they
-// edit and preview exactly like notes.
-function isMarkdownFileName(name) {
-  const extension = getExtension(name);
-  return extension === ".md" || extension === ".skill";
-}
-
-function isPersonaFileName(name) {
-  return String(name ?? "").toLowerCase().endsWith(".persona.skill");
-}
+const isAllowedFileName = (name) => builtinTypes.isKnown(name);
+const isTextFileName = (name) => builtinTypes.isText(name);
+const isBmapFileName = (name) => builtinTypes.is(name, "bmap");
+const isUrlDbFileName = (name) => builtinTypes.is(name, "urldb");
+const isMtreeFileName = (name) => builtinTypes.is(name, "mtree");
+const isImageFileName = (name) => builtinTypes.isImage(name);
+// Notes and character files edit and preview the same way.
+const isMarkdownFileName = (name) => builtinTypes.formatOf(name) === "markdown";
+const isPersonaFileName = (name) => builtinTypes.is(name, "persona");
+// For messages and file names: a type's extension, the list of allowed
+// extensions, and a name without its type's extension.
+const fileTypeExtension = (id) => builtinTypes.extensionsOf(id)[0] ?? "";
+const describeFileTypes = () => builtinTypes.describe();
+const fileBaseName = (name) => builtinTypes.baseName(name);
 
 function createFolder(name, parentId = ROOT_ID) {
   return {
@@ -56,7 +38,7 @@ function createFolder(name, parentId = ROOT_ID) {
 
 function createFile(name, parentId = ROOT_ID, content = "") {
   if (!isAllowedFileName(name)) {
-    throw new Error("Only .md, .mtree, .urldb, .bmap, .skill, and supported image files are allowed.");
+    throw new Error(ALLOWED_MESSAGE());
   }
 
   return {
@@ -287,7 +269,7 @@ function renameNode(project, nodeId, name) {
   const next = cloneProject(project);
   const node = getNode(next, nodeId);
   if (node.kind === "file" && !isAllowedFileName(name)) {
-    throw new Error("Only .md, .mtree, .urldb, .bmap, .skill, and supported image files are allowed.");
+    throw new Error(ALLOWED_MESSAGE());
   }
 
   ensureUniqueName(next, node.parentId, name, node.id);
@@ -379,12 +361,12 @@ function toggleFolder(project, nodeId) {
     return next;
   }
 
-  if (node.kind === "file" && isUrlDbFileName(node.name)) {
+  if (node.kind === "file" && builtinTypes.typeOf(node.name)?.expandable) {
     node.expanded = !node.expanded;
     return next;
   }
 
-  throw new Error("Only folders and .urldb files can be expanded.");
+  throw new Error("Only folders and expandable files (such as URL albums) can be expanded.");
 }
 
 function setActiveFile(project, fileId) {
@@ -509,11 +491,11 @@ function applySyncOperation(project, operation) {
 }
 
 export {
-  ALLOWED_FILE_EXTENSIONS,
   cloneModelData,
-  IMAGE_FILE_EXTENSIONS,
+  describeFileTypes,
+  fileBaseName,
+  fileTypeExtension,
   ROOT_ID,
-  TEXT_FILE_EXTENSIONS,
   applyTextPatch,
   applySyncOperation,
   applyHostCounters,
@@ -529,6 +511,7 @@ export {
   isImageFileName,
   isAllowedFileName,
   isMarkdownFileName,
+  isMtreeFileName,
   isPersonaFileName,
   isBmapFileName,
   isTextFileName,

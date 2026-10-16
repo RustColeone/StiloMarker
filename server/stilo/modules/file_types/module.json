@@ -1,0 +1,9 @@
+{
+  "name": "file_types",
+  "level": 1,
+  "uses": [],
+  "owns": {
+    "names": ["file type .urldb", "file type .mtree", "file type .bmap", "file type .persona.skill", "image extension list"],
+    "data": ["protocol/file-types.json"]
+  }
+}

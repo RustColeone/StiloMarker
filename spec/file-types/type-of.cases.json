@@ -1,0 +1,20 @@
+{
+  "about": "What type a name has (both ends must agree): the longest matching extension wins, case does not matter, and a name that is only an extension has no type.",
+  "cases": [
+    { "name": "notes.md", "type": "md", "extension": ".md", "base": "notes", "image": false, "text": true, "format": "markdown" },
+    { "name": "Notes.MD", "type": "md", "extension": ".md", "base": "Notes", "image": false, "text": true, "format": "markdown" },
+    { "name": "aria.persona.skill", "type": "persona", "extension": ".persona.skill", "base": "aria", "image": false, "text": true, "format": "markdown" },
+    { "name": "Captain Aria.PERSONA.Skill", "type": "persona", "extension": ".persona.skill", "base": "Captain Aria", "image": false, "text": true, "format": "markdown" },
+    { "name": "helper.skill", "type": "skill", "extension": ".skill", "base": "helper", "image": false, "text": true, "format": "markdown" },
+    { "name": "map.mtree", "type": "mtree", "extension": ".mtree", "base": "map", "image": false, "text": true, "format": "mtree" },
+    { "name": "refs.urldb", "type": "urldb", "extension": ".urldb", "base": "refs", "image": false, "text": true, "format": "urldb" },
+    { "name": "plot.bmap", "type": "bmap", "extension": ".bmap", "base": "plot", "image": false, "text": true, "format": "bmap" },
+    { "name": "portrait.JPEG", "type": "image", "extension": ".jpeg", "base": "portrait", "image": true, "text": false, "format": "image" },
+    { "name": "logo.svg", "type": "image", "extension": ".svg", "base": "logo", "image": true, "text": false, "format": "image" },
+    { "name": "archive.tar.gz", "type": null, "extension": ".gz", "base": "archive.tar", "image": false, "text": false, "format": null },
+    { "name": "README", "type": null, "extension": "", "base": "README", "image": false, "text": false, "format": null },
+    { "name": ".md", "type": null, "extension": "", "base": ".md", "image": false, "text": false, "format": null },
+    { "name": "persona.skill", "type": "skill", "extension": ".skill", "base": "persona", "image": false, "text": true, "format": "markdown" },
+    { "name": "x.mdx", "type": null, "extension": ".mdx", "base": "x", "image": false, "text": false, "format": null }
+  ]
+}

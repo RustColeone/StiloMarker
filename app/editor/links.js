@@ -4,6 +4,7 @@
 // shared values in `app`.
 import { getNodeIdByPath, getPath, isImageFileName, isMarkdownFileName } from "../domain/project-model.js";
 import { extractMarkdownLinks, renderMarkdown } from "../services/markdown-service.js";
+import { builtinTypes } from "../modules/file-types/index.js";
 
 export function createLinks(app) {
   let _linkTooltipTimer = null;
@@ -51,7 +52,7 @@ export function createLinks(app) {
       if (/^https?:\/\//i.test(href)) {
         app.editorLinkTooltip.nameEl.className = "editor-link-tooltip-name";
         app.editorLinkTooltip.hintEl.textContent = "External — Ctrl+Click to open in browser";
-        if (/\.(png|jpe?g|gif|webp|svg|bmp)(\?.*)?$/i.test(href)) {
+        if (builtinTypes.isImage(href.split(/[?#]/)[0])) {
           app.editorLinkTooltip.previewEl.innerHTML = `<img src="${app.escapeHtmlAttribute(href)}" alt="" style="max-width:100%;height:auto">`;
           app.editorLinkTooltip.previewEl.hidden = false;
         } else {

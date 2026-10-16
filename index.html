@@ -36,8 +36,8 @@
           <button id="mobile-menu-button" class="topbar-mobile-btn" type="button" aria-label="Open menu" title="Menu" aria-expanded="false">&#8942;</button>
         </div>
 
-        <input id="import-file-input" type="file" accept=".md,.mtree,.urldb,.bmap,.skill,.png,.jpg,.jpeg,.gif,.svg,.webp,.bmp,.zip" hidden>
-        <input id="replace-file-input" type="file" accept=".png,.jpg,.jpeg,.gif,.svg,.webp,.bmp" hidden>
+        <input id="import-file-input" type="file" data-file-accept="all" data-file-accept-extra=".zip" hidden>
+        <input id="replace-file-input" type="file" data-file-accept="images" hidden>
       </header>
 
       <div id="workspace-shell" class="workspace-shell">
@@ -142,7 +142,7 @@
                        contenteditable="true" spellcheck="false"
                        role="textbox" aria-multiline="true" aria-label="Source editor"
                        autocorrect="off" autocapitalize="off"
-                       data-placeholder="Select or create a .md or .mtree file"></div>
+                       data-placeholder="Select or create a file"></div>
                   <div id="editor-drop-caret" class="editor-drop-caret" aria-hidden="true" hidden></div>
                   <div id="editor-cursors" class="editor-cursors" aria-hidden="true"></div>
                   <div id="editor-search-highlights" class="editor-search-highlights" aria-hidden="true"></div>
@@ -684,7 +684,7 @@
             <div class="eyebrow">MTREE Tools</div>
             <h2>Module Map</h2>
           </div>
-          <p id="mtree-source-text" class="subtle-label">Choose a .mtree file from the explorer to generate a module map.</p>
+          <p id="mtree-source-text" class="subtle-label">Choose an MTREE file from the explorer to generate a module map.</p>
           <button class="dialog-close-corner" type="submit" value="cancel" formnovalidate aria-label="Close">&#215;</button>
         </header>
 
@@ -801,7 +801,7 @@
               <p class="subtle-label">You can also paste an image, paste a URL, or choose a local file.</p>
               <p id="add-file-source-text" class="subtle-label">No staged file yet.</p>
               <button id="add-file-picker-button" type="button">Choose File</button>
-              <input id="add-file-picker-input" type="file" accept=".md,.mtree,.urldb,.bmap,.skill,.png,.jpg,.jpeg,.gif,.svg,.webp,.bmp" hidden>
+              <input id="add-file-picker-input" type="file" data-file-accept="all" hidden>
             </div>
           </section>
 
@@ -812,7 +812,7 @@
             </label>
 
             <div class="settings-status-panel">
-              <p id="add-file-status-text" class="subtle-label">Supported: .md, .mtree, .urldb, .png, .jpg, .jpeg, .gif, .svg, .webp, .bmp.</p>
+              <p id="add-file-status-text" class="subtle-label" data-file-types="supported"></p>
             </div>
           </section>
         </div>
@@ -905,13 +905,7 @@
         </header>
         <label>
           <span>Type</span>
-          <select id="new-file-type">
-            <option value="md">Markdown (.md)</option>
-            <option value="mtree">MTREE (.mtree)</option>
-            <option value="urldb">URL Album (.urldb)</option>
-            <option value="bmap">Diagram (.bmap)</option>
-            <option value="persona">Character (.persona.skill)</option>
-          </select>
+          <select id="new-file-type" data-file-type-options="create"></select>
         </label>
         <label>
           <span>Folder</span>

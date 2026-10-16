@@ -2,7 +2,7 @@
 // drag files in), which file each pane shows, resuming the last view, and
 // the preview itself (Markdown, images, URL albums, diagrams, PDF printing).
 // main.js creates this on first use and passes its shared values in `app`.
-import { getNodeIdByPath, getPath, isBmapFileName, isImageFileName, isMarkdownFileName, isPersonaFileName, isUrlDbFileName } from "../domain/project-model.js";
+import { getNodeIdByPath, getPath, isBmapFileName, isImageFileName, isMarkdownFileName, isMtreeFileName, isPersonaFileName, isUrlDbFileName } from "../domain/project-model.js";
 import { renderMarkdown } from "../services/markdown-service.js";
 import { parsePersona, personaAvatarHtml } from "../services/persona-service.js";
 import { normalizeServerUrl, saveUserState } from "../services/sync-service.js";
@@ -820,7 +820,7 @@ export function createPanes(app) {
       return renderUrlDbTable(target, file);
     }
 
-    if (file.name.endsWith(".mtree")) {
+    if (isMtreeFileName(file.name)) {
       target.innerHTML = `<pre><code>${app.escapeEditorHtml(file.content)}</code></pre>`;
       return { shouldTypeset: false, content: "" };
     }
@@ -972,7 +972,7 @@ export function createPanes(app) {
       ? `<div class="asset-preview"><img src="${app.escapeHtmlAttribute(previewFile.content)}" alt="${app.escapeHtmlAttribute(previewFile.name)}"></div>`
       : isUrlDbFileName(previewFile.name)
         ? app.elements.preview.innerHTML
-      : previewFile.name.endsWith(".mtree")
+      : isMtreeFileName(previewFile.name)
         ? `<pre><code>${app.escapeEditorHtml(previewFile.content)}</code></pre>`
       : renderMarkdown(previewFile.content, {
         resolveUrl(url) {

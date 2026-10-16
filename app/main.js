@@ -1,5 +1,6 @@
 import { startModules } from "./kernel/index.js";
 import shellModule from "./modules/shell/index.js";
+import fileTypesModule from "./modules/file-types/index.js";
 import { rememberedWorkspace, createSessionRecovery } from "./services/session-recovery-service.js";
 import { installMobileViewport } from "./services/chat-ui-service.js";
 import { snapshotProject, savedFileIds } from "./services/project-save-service.js";
@@ -278,10 +279,8 @@ const elements = {
 // ---- Modules (docs/ARCHITECTURE.md) ----
 // The app is moving into modules one step at a time. Code still in this file
 // reaches a module only through the public API the kernel hands back.
-const modules = await startModules([shellModule], {
-  log: (owner, ...args) => {
-    try { logDebug("action", `${owner}: ${args.join(" ")}`); } catch { /* the log is not ready yet */ }
-  }
+const modules = await startModules([shellModule, fileTypesModule], {
+  log: (owner, ...args) => { try { logDebug("action", `${owner}: ${args.join(" ")}`); } catch { /* log not ready yet */ } }
 });
 const shell = modules.shell;
 
@@ -2681,7 +2680,7 @@ function updateStatus(project) {
   elements.editorContent.contentEditable = isTextFile && !readOnly ? "true" : "false";
   elements.editorContent.dataset.readonly = readOnly ? "true" : "false";
   elements.editorContent.dataset.placeholder = isTextFile
-    ? "Select or create a .md, .mtree, .urldb, or image file"
+    ? "Select or create a file"
     : "Image assets are preview-only in the source pane.";
   const nextText = isTextFile
     ? selectedEntry

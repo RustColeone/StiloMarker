@@ -1,5 +1,6 @@
 import { buildTextPatch, transformTextPatch, applyTextPatch } from "./text-patch-service.js";
 import { cloneModelData } from "../domain/project-model.js";
+import { builtinTypes } from "../modules/file-types/index.js";
 import { connectToServer, fetchSessionState, hostSession, openEventStream, openWorkspaceSession, renewSessionLease, leaveSession, pushCursor, pushOperation, pushSessionState, sanitizeProjectForSync, uploadAsset } from "./sync-service.js";
 
 function fingerprintProject(project) {
@@ -54,9 +55,7 @@ function createCollaborationRuntime({ getProject, replaceProject, applyOperation
   let leaseTimer = null;
   const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 15000, 30000];
 
-  function isImageName(name) {
-    return /\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(String(name || ""));
-  }
+  const isImageName = (name) => builtinTypes.isImage(name);
 
   // Flatten a project into ordered folder + text-file lists with full paths
   // (root name excluded), used to diff the local tree against the server's.

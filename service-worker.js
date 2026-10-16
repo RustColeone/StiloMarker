@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v0.1.31";
+const CACHE_NAME = "mdnotes-shell-v0.1.32";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -39,6 +39,10 @@ const APP_SHELL = [
   "./app/ui/table-grid-picker.js",
   "./app/kernel/index.js",
   "./app/modules/shell/index.js",
+  "./app/modules/file-types/index.js",
+  "./app/modules/file-types/model/types.js",
+  "./app/modules/file-types/model/builtin-types.js",
+  "./app/modules/file-types/adapters/page.js",
   "./app/modules/shell/model/keys.js",
   "./app/modules/shell/model/menu-layout.js",
   "./app/modules/shell/service/commands.js",
