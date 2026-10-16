@@ -522,3 +522,27 @@ in the folder store), the backend self-test, fourteen browser suites.
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261016T212510Z-v0.1.35`.
 Nine project manifests valid, 166/166 files.
 
+
+## Verified release: v0.1.36
+
+Deployed on 2026-10-16 at 21:54 UTC. Module restructure step 5: the
+Characters module on both ends, with author's notes (hidden unless
+`notes: hints`) and files characters cannot read (`Plans/`, `*.plan.md`).
+App version `0.1.36`; sync compatibility unchanged at `117`.
+
+Public checks: ping (`0.1.36`), the journal shows the kernel starting
+characters, no errors. Live test with the real model (deepseek-flash, signed in
+as `test`, the project sent with the request, nothing stored): Mara's sheet
+had an author's note marked with a code word, and a `Plans/act-two.md` held
+another. Asked about her eyes in chapter nine, she listed the files, read
+`chapter1.md` and her own character file, and knew nothing of the note (her
+read returned the file without it). Asked to read `Plans/act-two.md`, she saw
+only `chapter1.md` and her own file and said no such file exists. Neither code
+word appeared in any reply. Validation: 212 Node tests (new: character
+parity), all Python suites (new: character parity; notes and Plans in persona
+turns), the backend self-test, fifteen browser suites (new:
+`characters-browser.py`).
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261016T215406Z-v0.1.36`.
+Nine project manifests valid, 170/170 files.
+
