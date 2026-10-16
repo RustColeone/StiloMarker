@@ -694,7 +694,7 @@ function updateEditorAgentBar() {
     const { batchId } = activeDecoration;
     const found = findBatchMessage(batchId);
     if (!found) { elements.editorAgentBar.hidden = true; return; }
-    const isOriginator = !found.msg.originatorId || found.msg.originatorId === collaboration.getClientId();
+    const isOriginator = chat?.isOwnBatch?.(found.msg) ?? true;
     const attr = isOriginator ? "" : " disabled";
     const bid = escapeHtmlAttribute(batchId);
     elements.editorAgentBar.innerHTML =

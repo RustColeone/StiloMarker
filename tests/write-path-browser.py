@@ -138,8 +138,11 @@ async def main():
         await converge([a, bb], merged)
         ok("an agent edit made before Bob typed merges with his typing, in both browsers and on disk")
 
-        # Drop undoes only the agent's line.
-        await a.click('[data-batch-drop-final="b1"]')
+        # Drop undoes only the agent's line. Both Drop buttons (the chat card's
+        # and the editor bar's) belong to the asker; the editor bar's is used.
+        disabled = await a.evaluate('[...document.querySelectorAll(\'[data-batch-drop-final="b1"]\')].map((b) => b.disabled)')
+        assert disabled and not any(disabled), disabled
+        await a.click('.agent-bar-drop[data-batch-drop-final="b1"]')
         await converge([a, bb], ORIGINAL.replace("five", "five (bob)"))
         ok("Drop undoes only the agent's change and keeps Bob's")
 

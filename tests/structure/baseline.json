@@ -2,7 +2,7 @@
   "about": "Structure violations that existed when the rules were introduced (2026-10-16). They may only shrink; see tools/structure-baseline.mjs.",
   "oversized": {
     "app/editor/editor-core.js": 1655,
-    "app/features/chat-panel.js": 1678,
+    "app/features/chat-panel.js": 1676,
     "app/features/cloud-browser.js": 1004,
     "app/features/file-actions.js": 1234,
     "app/features/panes.js": 1048,

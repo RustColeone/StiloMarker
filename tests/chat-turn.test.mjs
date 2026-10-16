@@ -20,7 +20,7 @@ function harness() {
     renderChatPanel:()=>{},buildAgentProjectSnapshot:p=>p, agentRequestOverride:()=>({}),sortChatThreads:()=>{},
     createChatMessage:(role,content,extra)=>({role,content,...extra}), describeAgentActivity:()=>'',
     sendChatRequest:(_,body,callback)=>{payload=body;progress=callback;return gate.promise;},
-    autoApplyProposals:async(message,guard)=>applications.push({message,guard}),
+    autoApplyProposals:async(message,guard)=>applications.push({message,guard}), TAB_ID:'tab-A',
   };
   const api = new Function(...Object.keys(dependencies),`${turnSource}\n${cancelSource}\nreturn {runAgentTurn,cancelChatForWorkspaceChange};`)(...Object.values(dependencies));
   return {state,thread,gate,applications,saves,api,get payload(){return payload;},emit:e=>progress(e),run:()=>api.runAgentTurn(thread,project),switch(){project={id:'B',name:'B',content:'other'};token='token-B';},changeText(){project.content='new typing';}};
