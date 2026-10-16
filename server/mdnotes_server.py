@@ -35,20 +35,20 @@ from conversations import (SIDE_FILES as CHAT_DB_FILES, ProjectChats, ReplyQueue
                            persona_handle, persona_header, persona_summary, user_key)
 from openai_support import IMAGE_FORMATS, IMAGE_SIZES, GeneratedImages, OpenAIProvider, is_openai_model, uses_fixed_temperature, uses_responses_api, to_responses_request, ResponsesStream
 from stilo.kernel import start_modules
-from stilo.modules import transport as transport_module
+from stilo.modules import file_types as file_types_module, transport as transport_module, workspace as workspace_module
 from stilo.modules.file_types import BUILTIN as FILE_TYPES
+from stilo.kernel.log import log as _log
+from stilo.modules.workspace import (append_node, atomic_write as _atomic_write, create_id, decode_data_url, default_project,
+                                     find_child_by_name, fsync_directory as _fsync_directory, node_id_by_path, path_of,
+                                     remove_node_recursive, subtree_paths, utf16_index as _utf16_index,
+                                     utf16_length as _utf16_length)
 
 
 def start_server_modules():
     """The server's modules (docs/ARCHITECTURE.md); more join as the restructure moves code."""
-    return start_modules([transport_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"))
+    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"))
 
 
-def _log(tag: str, message: str, **fields):
-    """Print a timestamped log line to stdout."""
-    ts = time.strftime("%H:%M:%S", time.localtime())
-    extras = "  " + "  ".join(f"{k}={v!r}" for k, v in fields.items()) if fields else ""
-    print(f"[{ts}] [{tag}] {message}{extras}", flush=True)
 
 
 def _truthy(value: str | None) -> bool:
@@ -92,50 +92,12 @@ MIN_CLIENT_VERSION = _read_int_env("MDNOTES_MIN_CLIENT_VERSION", 117, 0, 1_000_0
 EDIT_SESSION_GAP_SECONDS = _read_int_env("MDNOTES_EDIT_SESSION_GAP", 600, 30, 86_400)
 
 
-def _fsync_directory(path: Path):
-    if os.name == "nt":
-        return  # Windows does not expose directory fsync through os.open.
-    fd = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
 
 
-def _atomic_write(path: Path, data: bytes):
-    """Flush a sibling temporary file, then replace the destination atomically."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(fd, "wb") as handle:
-            if path.exists():
-                os.chmod(name, path.stat().st_mode & 0o777)
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(name, path)
-        _fsync_directory(path.parent)
-    finally:
-        if os.path.exists(name):
-            os.unlink(name)
 
 
-def _utf16_length(text: str) -> int:
-    return len(text.encode("utf-16-le", errors="surrogatepass")) // 2
 
 
-def _utf16_index(text: str, offset: int) -> int:
-    """Translate a browser offset, refusing ranges that split a surrogate pair."""
-    units = 0
-    for index, char in enumerate(text):
-        if units == offset:
-            return index
-        units += 2 if ord(char) > 0xffff else 1
-        if units > offset:
-            raise ValueError("Text patch range splits a Unicode character")
-    if units == offset:
-        return len(text)
-    raise ValueError("Text patch range exceeds content length")
 
 
 class ChatProxy:
@@ -472,23 +434,7 @@ class ChatProxy:
 
     @staticmethod
     def _get_node_id_by_path_in(project: dict, path: str):
-        """Resolve a slash-separated path string to a node id within the given project snapshot."""
-        nodes = project.get("nodes", {})
-        root_id = project.get("rootId", "root")
-        segments = [s for s in path.split("/") if s]
-        current_id = root_id
-        for segment in segments:
-            parent = nodes.get(current_id, {})
-            found = None
-            for child_id in parent.get("children", []):
-                child = nodes.get(child_id, {})
-                if child.get("name") == segment:
-                    found = child_id
-                    break
-            if not found:
-                return None
-            current_id = found
-        return current_id
+        return node_id_by_path(project, path)
 
     def _extract_tool_calls(self, response_payload: dict) -> list:
         """Extract the tool_calls list from a chat completion response, or [] if none."""
@@ -1450,23 +1396,7 @@ class CollaborationBroker:
             self.chat_workspace = json.loads(self.chat_file.read_text(encoding="utf-8"))
 
     def _default_project(self):
-        return {
-            "id": "server-project",
-            "name": "Workspace",
-            "sourceMode": "memory",
-            "rootId": "root",
-            "activeFileId": None,
-            "nodes": {
-                "root": {
-                    "id": "root",
-                    "kind": "folder",
-                    "name": "Workspace",
-                    "parentId": None,
-                    "children": [],
-                    "expanded": True,
-                }
-            },
-        }
+        return default_project()
 
     # ---- directory-backed storage helpers (workspace_dir mode) -----------------
     def _abs_path(self, node_id: str) -> Path:
@@ -1475,14 +1405,7 @@ class CollaborationBroker:
 
     @staticmethod
     def _decode_data_url(url: str) -> bytes | None:
-        """Decode a base64 data: URL to raw bytes; None if it isn't one."""
-        value = str(url or "")
-        if not value.startswith("data:") or ";base64," not in value:
-            return None
-        try:
-            return base64.b64decode(value.split(";base64,", 1)[1])
-        except (ValueError, base64.binascii.Error):
-            return None
+        return decode_data_url(url)
 
     def _write_node_file(self, node_id: str) -> None:
         """Write a single file node to disk. Images externalize their data URL to
@@ -1554,21 +1477,10 @@ class CollaborationBroker:
             _log("BACKUP", f"pre-change hook failed: {error}")
 
     def _subtree_paths(self, node_id: str) -> list[str]:
-        """Paths of a node and everything beneath it, in the current tree."""
-        out, stack = [], [node_id]
-        while stack:
-            current = stack.pop()
-            out.append(self._path_in(self.project, current))
-            stack.extend(self.project["nodes"].get(current, {}).get("children", []))
-        return out
+        return subtree_paths(self.project, node_id)
 
     def _path_in(self, project: dict, node_id: str) -> str:
-        segments = []
-        current = project["nodes"].get(node_id)
-        while current and current.get("parentId"):
-            segments.insert(0, current["name"])
-            current = project["nodes"].get(current["parentId"])
-        return "/".join(segments)
+        return path_of(project, node_id)
 
     def resolve_asset(self, rel_path: str) -> Path | None:
         """Map a workspace-relative file path to an on-disk file, refusing any
@@ -1768,33 +1680,16 @@ class CollaborationBroker:
         })
 
     def _find_child_by_name(self, parent_id: str, name: str):
-        parent = self.project["nodes"][parent_id]
-        for child_id in parent.get("children", []):
-            child = self.project["nodes"][child_id]
-            if child["name"] == name:
-                return child
-        return None
+        return find_child_by_name(self.project, parent_id, name)
 
     def _get_node_id_by_path(self, path: str):
-        segments = [segment for segment in path.split("/") if segment]
-        current_id = self.project["rootId"]
-        for segment in segments:
-            child = self._find_child_by_name(current_id, segment)
-            if not child:
-                return None
-            current_id = child["id"]
-        return current_id
+        return node_id_by_path(self.project, path)
 
     def _get_path(self, node_id: str):
-        segments = []
-        current = self.project["nodes"][node_id]
-        while current and current.get("parentId"):
-            segments.insert(0, current["name"])
-            current = self.project["nodes"][current["parentId"]]
-        return "/".join(segments)
+        return path_of(self.project, node_id, strict=True)
 
     def _create_id(self, prefix: str):
-        return f"{prefix}-{uuid.uuid4().hex[:12]}"
+        return create_id(prefix)
 
     @staticmethod
     def _transform_range(start, end, a_start, a_end, inserted):
@@ -1930,18 +1825,10 @@ class CollaborationBroker:
         return f"{content[:py_start]}{insert_text}{content[py_end:]}", start, end
 
     def _append_node(self, parent_id: str, node: dict):
-        parent = self.project["nodes"][parent_id]
-        parent.setdefault("children", []).append(node["id"])
-        self.project["nodes"][node["id"]] = node
+        append_node(self.project, parent_id, node)
 
     def _remove_node_recursive(self, node_id: str):
-        node = self.project["nodes"].get(node_id)
-        if not node:
-            return
-        if node["kind"] == "folder":
-            for child_id in list(node.get("children", [])):
-                self._remove_node_recursive(child_id)
-        del self.project["nodes"][node_id]
+        remove_node_recursive(self.project, node_id)
 
     def _wipe_workspace_dir(self):
         """Remove all files/dirs inside the workspace dir (keep the dir itself).
@@ -2178,51 +2065,6 @@ class CollaborationBroker:
     # ------------------------------------------------------------------
     # Sole-author revert infrastructure (Phase 2)
     # ------------------------------------------------------------------
-
-    def _trim_snapshot_history(self):
-        """Discard old snapshots while honoring the retention floor (Decision Q4)."""
-        floor = max(0, self.revision - self.SNAPSHOT_HISTORY_N)
-        # Never trim a snapshot that a pending agent batch's baseRevision points to.
-        if self._pinned_base_revisions:
-            floor = min(floor, min(self._pinned_base_revisions))
-        self.snapshot_history = [
-            entry for entry in self.snapshot_history if entry[0] >= floor
-        ]
-
-    def pin_base_revision(self, base_revision: int):
-        """Record that a client batch was accepted at base_revision (keep snapshot)."""
-        with self.lock:
-            self._pinned_base_revisions.add(base_revision)
-
-    def unpin_base_revision(self, base_revision: int):
-        """Remove a pending-batch pin once kept or dropped."""
-        with self.lock:
-            self._pinned_base_revisions.discard(base_revision)
-
-    def _authorize_sole_author_revert(self, token: str, target_revision: int):
-        """
-        Raise PermissionError unless every revision in (target_revision, self.revision]
-        was authored by the client identified by token.
-        Also validates target_revision is within snapshot_history.
-        """
-        client_id = self.tokens.get(token)
-        if not client_id:
-            raise PermissionError("Invalid or expired session token")
-        # Validate target is within the retained window.
-        known_revisions = {rev for rev, _ in self.snapshot_history}
-        if target_revision not in known_revisions:
-            raise PermissionError(
-                f"Target revision {target_revision} is outside the snapshot history window. "
-                "The batch is too old to drop — it has already been incorporated by other edits."
-            )
-        # Check that every revision in the range belongs to this client.
-        for rev in range(target_revision + 1, self.revision + 1):
-            author = self.revision_authors.get(rev)
-            if author != client_id:
-                raise PermissionError(
-                    f"Revision {rev} was authored by a different collaborator. "
-                    "Drop is only allowed when you are the sole author of all edits since the target."
-                )
 
     def _admit(self, display_name: str, role: str, identity: str | None = None, device: str | None = None, leased: bool = False):
         """Mint a session token + presence for an already-authorized joiner.
