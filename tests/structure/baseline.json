@@ -9,7 +9,7 @@
     "app/main.js": 4747,
     "app/services/collaboration-service.js": 1107,
     "app/ui/bmap-view.js": 4025,
-    "server/mdnotes_server.py": 6300
+    "server/mdnotes_server.py": 6163
   },
   "spellings": {
     "file type .bmap": [],

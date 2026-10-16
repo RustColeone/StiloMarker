@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-16 · release `v0.1.34` (deployed; public verification passed)
+Last updated: 2026-10-16 · release `v0.1.35`
 
 ---
 
@@ -30,6 +30,26 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.35: restructure step 4, part 2 (the project in the Workspace module)
+
+The project model and the store holding the open project moved into the
+Workspace module in the browser; on the server, the project tree, UTF-16
+offsets and the folder storage (with its crash-safe commit) moved into the
+server's Workspace module, which CollaborationBroker now calls. No behaviour
+change except one fix:
+
+- **Unknown file types on the server.** The browser refuses a file type the
+  app does not know, but the server accepted one (for example `notes.txt`)
+  through an operation, and every browser receiving it then failed to apply
+  it. The server now refuses it on create and rename. Found by the new shared
+  case table for operations (`spec/workspace/operations.cases.json`), which
+  both ends run.
+- Removed on the way: four broker methods that were defined twice (Python used
+  the second copy), and a second JavaScript copy of the text-patch rule.
+- A reliability test had silently stopped checking anything after the move
+  (it watched writes in the old place); it now watches the new place and also
+  checks that the changed file was written.
 
 ### v0.1.34: the person who asked the agent could lose Keep and Drop
 
