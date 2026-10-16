@@ -429,3 +429,25 @@ removing and a broken file. Validation: 166 Node tests, the Python suites
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261014T192408Z-v0.1.30`.
 Nine project manifests valid, 165/165 files.
 
+
+## Verified release: v0.1.31
+
+Deployed on 2026-10-16 at 04:49 UTC. Module restructure steps 1 and 2: the
+structure guard rails, the kernel on both ends, the Shell module (menus drawn
+from commands, the Mod+S shortcut, dialogs) and the Transport module (one route
+table for all 49 routes, CORS, JSON, error mapping). No feature changes. App
+version `0.1.31`; sync compatibility unchanged at `117`.
+
+Public checks: ping (`0.1.31`, accounts on), the `mdnotes-shell-v0.1.31` cache
+label, five assets byte-identical (including the kernel and Shell files),
+server package files answered only by the app shell, `/api/chats` signed out
+403, an unknown POST 404, `test` and `test1` sign in, the journal shows
+`kernel: started transport`. In a real browser on the public site the five
+menus and the nine File items are drawn by Shell, with no page errors.
+Validation: 183 Node tests (new: kernel, Shell, nine structure rules), all
+Python suites (new: kernel and Transport, mention parity), the backend
+self-test, and thirteen browser suites (new: `shell-browser.py`).
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261016T044953Z-v0.1.31`.
+Nine project manifests valid, 166/166 files.
+
