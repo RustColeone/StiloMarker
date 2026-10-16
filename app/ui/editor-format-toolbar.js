@@ -13,17 +13,12 @@
 //   { kind: "block",  snippet, caret }             multi-line block insert
 //   { kind: "table" }                              opens the table grid-picker
 
-import { isBmapFileName, isMarkdownFileName, isTextFileName, isUrlDbFileName } from "../domain/project-model.js";
+import { builtinTypes } from "../modules/file-types/index.js";
 
 /** Map a file name to its toolbar format, or null when no toolbar applies. */
 function getEditorToolbarFormat(fileName) {
   const name = String(fileName ?? "");
-  if (!isTextFileName(name)) return null;
-  if (isBmapFileName(name)) return "bmap";
-  if (isUrlDbFileName(name)) return "urldb";
-  if (name.toLowerCase().endsWith(".mtree")) return "mtree";
-  if (isMarkdownFileName(name)) return "markdown";
-  return null;
+  return builtinTypes.isText(name) ? builtinTypes.formatOf(name) : null;
 }
 
 const BMAP_NODE_RECT_SNIPPET = `.node {

@@ -1,7 +1,7 @@
 // Source-pane syntax highlighting for Markdown, .mtree, .urldb and .bmap
 // files, with a per-line memo so typing re-highlights only changed lines.
 // main.js creates this on first use and passes its shared values in `app`.
-import { isBmapFileName } from "../domain/project-model.js";
+import { builtinTypes } from "../modules/file-types/index.js";
 
 export function createHighlighter(app) {
   function escapeEditorHtml(value) {
@@ -293,11 +293,12 @@ export function createHighlighter(app) {
   // doubt — new file, different highlighter, stray text nodes, a count mismatch
   // afterwards — falls back to the old full rebuild.
 
+  // The highlighter follows the file's format (File types module); anything
+  // else highlights as Markdown.
+  const HIGHLIGHTED_FORMATS = new Set(["mtree", "urldb", "bmap"]);
   function editorHighlightKind(name) {
-    if (name?.endsWith(".mtree")) return "mtree";
-    if (name?.endsWith(".urldb")) return "urldb";
-    if (isBmapFileName(name ?? "")) return "bmap";
-    return "markdown";
+    const format = builtinTypes.formatOf(name ?? "");
+    return HIGHLIGHTED_FORMATS.has(format) ? format : "markdown";
   }
 
   function highlightEditorLines(kind, normalized) {

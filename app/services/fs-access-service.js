@@ -2,6 +2,7 @@ import { createProjectSaveQueue } from "./project-save-service.js";
 import { ROOT_ID, addFile, addFolder, createProject, getNode, getPath, isImageFileName, listVisibleNodes } from "../domain/project-model.js";
 import { bytesToDataUrl, dataUrlToBlob, decodeTextBytes, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent } from "./file-content-service.js";
 import { extractZipEntries } from "./zip-service.js";
+import { builtinTypes } from "../modules/file-types/index.js";
 
 function findChildByName(project, parentId, name, kind) {
   const parent = getNode(project, parentId);
@@ -104,7 +105,7 @@ async function buildProjectFromDirectoryHandle(directoryHandle, name, sourceMode
         await walk(entry, folderNode.id);
       }
 
-      if (entry.kind === "file" && /\.(md|mtree|urldb|bmap|skill|png|jpe?g|gif|svg|webp|bmp)$/i.test(entry.name)) {
+      if (entry.kind === "file" && builtinTypes.isKnown(entry.name)) {
         const file = await entry.getFile();
         project = addFile(project, parentId, entry.name, await readFileAsProjectContent(file, entry.name));
         const fileNode = Object.values(project.nodes).find(
@@ -215,7 +216,7 @@ async function importSingleFile(file) {
 
 async function importZipArchive(file) {
   const zipEntries = await extractZipEntries(file);
-  const supportedEntries = zipEntries.filter((entry) => /\.(md|mtree|urldb|bmap|skill|png|jpe?g|gif|svg|webp|bmp)$/i.test(entry.path));
+  const supportedEntries = zipEntries.filter((entry) => builtinTypes.isKnown(entry.path));
 
   if (supportedEntries.length === 0) {
     throw new Error("ZIP archive does not contain any supported markdown, mtree, urldb, or image files.");

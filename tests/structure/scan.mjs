@@ -19,9 +19,10 @@ export const KERNEL_MAX_LINES = 300;
 // the files that spell it today are recorded in baseline.json and may only
 // shrink. The patterns skip look-alikes such as the CSS class ".bmap-node".
 export const OWNED_NAMES = {
-  "file type .urldb": /\.urldb\b(?!-)/,
-  "file type .mtree": /\.mtree\b(?!-)/,
-  "file type .bmap": /\.bmap\b(?![-\w])/,
+  // (?<!…): a property such as `state.bmap` or `view?.mtree` is not the extension.
+  "file type .urldb": /(?<![\w$?)\]])\.urldb\b(?!-)/,
+  "file type .mtree": /(?<![\w$?)\]])\.mtree\b(?!-)/,
+  "file type .bmap": /(?<![\w$?)\]])\.bmap\b(?![-\w])/,
   "file type .persona.skill": /persona\\?\.skill/,
   "image extension list": /webp/,
   "operation update-file": /["']update-file["']/,
@@ -74,11 +75,22 @@ export function oversized(files = codeFiles()) {
   return out;
 }
 
-// For each owned name, the files that spell it.
+// A file's code without its comments: a comment that explains "the .bmap
+// format" is not knowledge of the format, a string like "Select a .mtree
+// file" is. Approximate on purpose (a "//" inside a string survives only when
+// it follows a ":" as in a URL), which errs towards counting.
+export function codeOf(file) {
+  const text = read(file);
+  if (file.endsWith(".py")) return text.replace(/^\s*#.*$/gm, "").replace(/\s#\s.*$/gm, "");
+  if (file.endsWith(".html")) return text.replace(/<!--[\s\S]*?-->/g, "");
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
+}
+
+// For each owned name, the files whose code spells it.
 export function spellings(files = codeFiles()) {
   const out = {};
   for (const [name, pattern] of Object.entries(OWNED_NAMES)) {
-    out[name] = files.filter((file) => pattern.test(read(file)));
+    out[name] = files.filter((file) => pattern.test(codeOf(file)));
   }
   return out;
 }

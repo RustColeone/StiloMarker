@@ -12,6 +12,12 @@
       "js": "app/domain/project-model.js: applySyncOperation (move-node)",
       "py": "server/mdnotes_server.py: CollaborationBroker._apply_operation (move-node)",
       "cases": "spec/workspace/move-node.cases.json"
+    },
+    {
+      "name": "file types (which type a name has, its extension, base name, kind, format)",
+      "js": "app/modules/file-types/model/types.js: createTypeTable",
+      "py": "server/stilo/modules/file_types/model.py: TypeTable",
+      "cases": "spec/file-types/type-of.cases.json"
     }
   ],
   "uncovered": [
@@ -39,11 +45,6 @@
       "name": "character summary for the cast",
       "js": "app/services/persona-service.js: personaSummary",
       "py": "server/conversations.py: persona_summary"
-    },
-    {
-      "name": "which file names are images",
-      "js": "app/domain/project-model.js: isImageFileName (and two private copies)",
-      "py": "server/mdnotes_server.py: is_image_name"
     }
   ]
 }

@@ -6,68 +6,17 @@
     "app/features/cloud-browser.js": 1004,
     "app/features/file-actions.js": 1239,
     "app/features/panes.js": 1048,
-    "app/main.js": 4759,
-    "app/services/collaboration-service.js": 1108,
+    "app/main.js": 4758,
+    "app/services/collaboration-service.js": 1107,
     "app/ui/bmap-view.js": 4025,
-    "server/mdnotes_server.py": 6460
+    "server/mdnotes_server.py": 6459
   },
   "spellings": {
-    "file type .bmap": [
-      "app/domain/project-model.js",
-      "app/editor/autocomplete.js",
-      "app/editor/editor-core.js",
-      "app/editor/highlight.js",
-      "app/features/file-actions.js",
-      "app/features/panes.js",
-      "app/services/bmap-service.js",
-      "app/services/file-content-service.js",
-      "app/styles.css",
-      "app/ui/bmap-view.js",
-      "app/ui/explorer-view.js",
-      "index.html"
-    ],
-    "file type .mtree": [
-      "app/domain/project-model.js",
-      "app/editor/highlight.js",
-      "app/features/file-actions.js",
-      "app/features/module-map-tools.js",
-      "app/features/panes.js",
-      "app/main.js",
-      "app/services/file-content-service.js",
-      "app/ui/editor-format-toolbar.js",
-      "app/ui/explorer-view.js",
-      "index.html"
-    ],
-    "file type .persona.skill": [
-      "app/domain/project-model.js",
-      "app/features/chat-panel.js",
-      "app/main.js",
-      "app/services/persona-service.js",
-      "app/ui/chats-view.js",
-      "index.html",
-      "server/conversations.py",
-      "server/mdnotes_server.py"
-    ],
-    "file type .urldb": [
-      "app/domain/project-model.js",
-      "app/editor/highlight.js",
-      "app/features/file-actions.js",
-      "app/main.js",
-      "app/services/file-content-service.js",
-      "app/ui/explorer-view.js",
-      "index.html"
-    ],
+    "file type .bmap": [],
+    "file type .mtree": [],
+    "file type .persona.skill": [],
+    "file type .urldb": [],
     "image extension list": [
-      "app/domain/project-model.js",
-      "app/editor/links.js",
-      "app/features/file-actions.js",
-      "app/services/collaboration-service.js",
-      "app/services/file-content-service.js",
-      "app/services/fs-access-service.js",
-      "app/services/snapshot-service.js",
-      "app/ui/bmap-view.js",
-      "app/ui/explorer-view.js",
-      "index.html",
       "server/mdnotes_server.py",
       "server/openai_support.py"
     ],
@@ -100,5 +49,5 @@
       "server/mdnotes_server.py"
     ]
   },
-  "uncoveredTwins": 6
+  "uncoveredTwins": 5
 }

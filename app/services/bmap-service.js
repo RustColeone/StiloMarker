@@ -392,14 +392,6 @@ function createDefaultBmap() {
 }`;
 }
 
-/**
- * @param {string} name
- * @returns {boolean}
- */
-function isBmapFileName(name) {
-  return name.toLowerCase().endsWith(".bmap");
-}
-
 export {
   BMAP_DEFAULT_CIRCLE_SIZE,
   BMAP_DEFAULT_RECT_HEIGHT,
@@ -409,7 +401,6 @@ export {
   createBmapNode,
   createDefaultBmap,
   getBmapNodeDimensions,
-  isBmapFileName,
   normalizeBmapAst,
   parseBmap,
   serializeBmap,

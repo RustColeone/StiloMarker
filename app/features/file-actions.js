@@ -2,7 +2,7 @@
 // the Add File dialog (and files dropped into the editor), create / rename /
 // delete / export, and the explorer's context-menu actions.
 // main.js creates this on first use and passes its shared values in `app`.
-import { ROOT_ID, findChildByName, getPath, isAllowedFileName, isBmapFileName, isImageFileName, isMarkdownFileName, isTextFileName, isUrlDbFileName } from "../domain/project-model.js";
+import { ROOT_ID, describeFileTypes, fileBaseName, fileTypeExtension, findChildByName, getPath, isAllowedFileName, isBmapFileName, isImageFileName, isMarkdownFileName, isTextFileName, isUrlDbFileName } from "../domain/project-model.js";
 import { normalizeBmapAst, parseBmap } from "../services/bmap-service.js";
 import { dataUrlToBlob, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent } from "../services/file-content-service.js";
 import { appendUrlDbEntry, moveUrlDbEntry, moveUrlDbEntryBetweenFiles, removeUrlDbEntry, serializeUrlDb, updateUrlDbEntry } from "../services/urldb-service.js";
@@ -437,7 +437,7 @@ export function createFileActions(app) {
     app.elements.addFileUrlInput.value = "";
     app.elements.addFileNameInput.value = "";
     app.elements.addFileSourceText.textContent = "No staged file yet.";
-    setAddFileStatus("Supported: .md, .mtree, .urldb, .png, .jpg, .jpeg, .gif, .svg, .webp, .bmp.");
+    setAddFileStatus(`Supported: ${describeFileTypes()}.`);
   }
 
   function stageAddFileContent({ name, content, sourceLabel }) {
@@ -478,7 +478,7 @@ export function createFileActions(app) {
       response = await fetch(url);
     } catch {
       if (isImageFileName(suggestedName)) {
-        throw new Error("Remote image download was blocked by the source host or browser policy. Add that URL to a .urldb album instead.");
+        throw new Error(`Remote image download was blocked by the source host or browser policy. Add that URL to a ${fileTypeExtension("urldb")} album instead.`);
       }
       throw new Error("Unable to fetch file from URL.");
     }
@@ -680,7 +680,7 @@ export function createFileActions(app) {
     const project = app.controller.getProject();
     const file = project.nodes[fileId];
     if (!file || file.kind !== "file" || !isUrlDbFileName(file.name)) {
-      app.notify("Bookmark entries can only be added to .urldb files.");
+      app.notify(`Bookmark entries can only be added to ${fileTypeExtension("urldb")} files.`);
       return;
     }
 
@@ -1079,7 +1079,7 @@ export function createFileActions(app) {
     const project = app.controller.getProject();
     const node = project.nodes[nodeId];
     if (!node || node.kind !== "file" || !isBmapFileName(node.name)) {
-      app.notify("Export As is only available for .bmap diagrams.");
+      app.notify(`Export As is only available for ${fileTypeExtension("bmap")} diagrams.`);
       return;
     }
     try {
@@ -1090,7 +1090,7 @@ export function createFileActions(app) {
       }
       const { renderBmapToSvg } = await app.loadBmapView();
       const svgString = renderBmapToSvg(ast);
-      const baseName = node.name.replace(/\.bmap$/i, "");
+      const baseName = fileBaseName(node.name);
 
       if (format === "svg") {
         downloadBlob(new Blob([svgString], { type: "image/svg+xml" }), `${baseName}.svg`);

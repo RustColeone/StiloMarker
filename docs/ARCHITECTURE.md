@@ -63,8 +63,8 @@ refuses to record anything new.
 | --- | --- | --- |
 | 1 | Guard rails: `tests/structure`, `spec/`, `protocol/legacy.contract.json` | done |
 | 2 | Kernel (both ends), Shell (browser: commands, menus, shortcuts, dialogs), Transport (server: route table, CORS, JSON, error mapping) | done |
-| 3 | File types | next |
-| 4 | Workspace, with the one write path | |
+| 3 | File types: `protocol/file-types.json` on both ends; every type check in the browser and on the server asks it | done |
+| 4 | Workspace, with the one write path | next |
 | 5 | Characters (author's notes, update rules, hidden Plans) | |
 | 6 | Assistant (`edit_file`) | |
 | 7 | Sync, History, Comments, Identity, Models, Chats, Editor | |
@@ -81,3 +81,10 @@ refuses to record anything new.
   `IndexError` stay 500: they are bugs. `LEGACY_ROUTES` in
   `mdnotes_server.py` holds the routes from before the restructure and only
   shrinks.
+- File types: never spell an extension. Ask the module (`typeOf`, `is(name,
+  id)`, `formatOf`, `extensionOf`, `mimeOf`...; code from before the
+  restructure uses `builtinTypes` or the helpers in `project-model.js`). A new
+  type is one entry in `protocol/file-types.json`, then
+  `node tools/protocol-sync.mjs` writes the browser's copy. Pages mark what
+  they need (`data-file-accept`, `data-file-types`, `data-file-type-options`)
+  and File types fills it in.

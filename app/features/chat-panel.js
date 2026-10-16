@@ -784,7 +784,7 @@ export function createChatPanel(deps) {
   /** The project's characters, as the local store and replies need them. */
   function projectCharacters(project) {
     return Object.values(project.nodes ?? {})
-      .filter((node) => node?.kind === "file" && /\.persona\.skill$/i.test(node.name))
+      .filter((node) => node?.kind === "file" && isPersonaFileName(node.name))
       .map((node) => {
         const path = getPath(project, node.id);
         const persona = parsePersona(node.content ?? "", path);

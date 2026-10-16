@@ -10,13 +10,20 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { ROOT, codeFiles, oversized, spellings } from "../tests/structure/scan.mjs";
+import { ROOT, codeFiles, loadModules, moduleOf, oversized, spellings } from "../tests/structure/scan.mjs";
 
 const path = join(ROOT, "tests/structure/baseline.json");
 const init = process.argv.includes("--init");
 const files = codeFiles();
 const twins = JSON.parse(readFileSync(join(ROOT, "spec/twins.json"), "utf8"));
-const now = { oversized: oversized(files), spellings: spellings(files), uncoveredTwins: twins.uncovered.length };
+// A name spelled inside the module that owns it is not a violation.
+const modules = await loadModules();
+const ownedBy = (file, name) => {
+  const m = moduleOf(file, modules);
+  return Boolean(m && (m.owns.names ?? []).includes(name));
+};
+const legacy = Object.fromEntries(Object.entries(spellings(files)).map(([name, list]) => [name, list.filter((file) => !ownedBy(file, name))]));
+const now = { oversized: oversized(files), spellings: legacy, uncoveredTwins: twins.uncovered.length };
 
 if (!init) {
   if (!existsSync(path)) {

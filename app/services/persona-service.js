@@ -3,7 +3,10 @@
 // keys mean anything to the app; the rest of the file is the character sheet
 // and is sent to the model exactly as written.
 
-const PERSONA_SUFFIX = ".persona.skill";
+import { builtinTypes } from "../modules/file-types/index.js";
+
+// The extension belongs to the File types module.
+const PERSONA_SUFFIX = builtinTypes.extensionsOf("persona")[0];
 const MAX_TEMPERATURE = 1.5;
 
 function personaBaseName(path) {

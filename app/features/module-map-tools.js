@@ -4,6 +4,7 @@
 
 import { buildModuleMapSection, replaceOrAppendModuleMap } from "../services/mtree-module-map-service.js";
 import { query } from "../ui/dom.js";
+import { builtinTypes } from "../modules/file-types/index.js";
 
 export function createModuleMapTools(deps) {
   const {
@@ -45,7 +46,7 @@ export function createModuleMapTools(deps) {
   };
 
   function defaultName(fileName) {
-    const baseName = fileName.replace(/\.mtree$/i, "") || "module-map";
+    const baseName = builtinTypes.baseName(fileName) || "module-map";
     return `${baseName}.module-map.md`;
   }
 
@@ -140,8 +141,8 @@ export function createModuleMapTools(deps) {
   function generate() {
     const project = controller.getProject();
     const sourceFile = state.sourceFileId ? project.nodes[state.sourceFileId] : null;
-    if (!sourceFile || sourceFile.kind !== "file" || !sourceFile.name.endsWith(".mtree")) {
-      throw new Error("Select a .mtree file before generating a module map.");
+    if (!sourceFile || sourceFile.kind !== "file" || !builtinTypes.is(sourceFile.name, "mtree")) {
+      throw new Error(`Select a ${builtinTypes.extensionsOf("mtree")[0]} file before generating a module map.`);
     }
     const result = buildModuleMapSection(sourceFile.content, {
       simplify: el.simplify.checked,
@@ -167,8 +168,8 @@ export function createModuleMapTools(deps) {
   function open(fileId) {
     const project = controller.getProject();
     const file = project.nodes[fileId];
-    if (!file || file.kind !== "file" || !file.name.endsWith(".mtree")) {
-      notify("Module map tools are only available for .mtree files.");
+    if (!file || file.kind !== "file" || !builtinTypes.is(file.name, "mtree")) {
+      notify(`Module map tools are only available for ${builtinTypes.extensionsOf("mtree")[0]} files.`);
       return;
     }
     Object.assign(state, { sourceFileId: fileId, generatedSection: "", draftSection: "", warnings: [], quality: null, selectedTargetFileId: "__new__" });
@@ -199,7 +200,7 @@ export function createModuleMapTools(deps) {
   function write() {
     const project = controller.getProject();
     const sourceFile = state.sourceFileId ? project.nodes[state.sourceFileId] : null;
-    if (!sourceFile || sourceFile.kind !== "file" || !sourceFile.name.endsWith(".mtree")) {
+    if (!sourceFile || sourceFile.kind !== "file" || !builtinTypes.is(sourceFile.name, "mtree")) {
       notify("Module map source file is no longer available.");
       return;
     }

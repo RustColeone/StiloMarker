@@ -67,7 +67,8 @@ test("index.html exposes required element ids", async () => {
   ids.forEach((id) => {
     assert.match(page, new RegExp(`id="${id}"`), `Missing element id: ${id}`);
   });
-  assert.match(page, /accept="\.md,\.mtree,\.urldb,\.bmap,\.skill,\.png,\.jpg,\.jpeg,\.gif,\.svg,\.webp,\.bmp,\.zip"/);
+  // File inputs ask the File types module for their accept list (no type is spelled here).
+  assert.match(page, /id="import-file-input" type="file" data-file-accept="all" data-file-accept-extra=".zip"/);
   assert.ok(!/id="mtree-generate-button"/.test(page));
 });
 

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { loadModules } from "./helpers/mocks.mjs";
 import { renderBmapToSvg } from "../app/ui/bmap-view.js";
+import { builtinTypes } from "../app/modules/file-types/index.js";
 
 const { bmapService } = await loadModules();
 
@@ -66,7 +67,8 @@ test("bmap: serialization and filename detection", () => {
   const serializedBmap = bmapService.serializeBmap({ nodes: [node], connectors: [connector] });
   assert.match(serializedBmap, /height: 101/);
   assert.match(serializedBmap, /thickness: 3/);
-  assert.equal(bmapService.isBmapFileName("diagram.bmap"), true);
+  // Which names are diagrams is the File types module's job (tests/file-types.test.mjs).
+  assert.equal(builtinTypes.is("diagram.bmap", "bmap"), true);
 });
 
 test("bmap: SVG export wraps text (CJK, English, long words)", () => {

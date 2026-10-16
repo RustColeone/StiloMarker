@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-16 · release `v0.1.31` (deployed; public verification passed)
+Last updated: 2026-10-16 · release `v0.1.32`
 
 ---
 
@@ -30,6 +30,23 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.32: restructure step 3 (File types)
+
+Every kind of file is now defined once, in `protocol/file-types.json`, which
+both ends load: extensions, text or image, label, MIME type, icon, explorer
+filters, whether the row expands, and how a new one is created. Before, the
+same knowledge was typed into 9 browser files and 2 server files (`.urldb`
+alone in 9). The browser and the server answer "what type is this name" the
+same way, checked by one shared case table.
+
+- Found while moving it: the Add File dialog's "Supported" line had fallen
+  behind and left out `.bmap` and `.skill`. It, the file pickers' accept
+  lists and the new-file type picker are now filled from the one list.
+- `index.html` no longer names a file type; pages mark what they need and the
+  File types module fills it in.
+- Legacy type spellings in the code went from 43 to 3 (the image model's
+  output formats, which move with the Models step).
 
 ### v0.1.31: restructure steps 1 and 2 (guard rails, kernel, Shell, Transport)
 

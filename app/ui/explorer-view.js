@@ -1,31 +1,12 @@
-import { ROOT_ID, isMarkdownFileName, isPersonaFileName, isUrlDbFileName, listVisibleNodes } from "../domain/project-model.js";
+import { ROOT_ID, isUrlDbFileName, listVisibleNodes } from "../domain/project-model.js";
+import { builtinTypes } from "../modules/file-types/index.js";
 
 function getFileIconClass(node) {
   if (node.kind === "folder") {
     return node.expanded ? "is-folder-open" : "is-folder";
   }
 
-  if (isPersonaFileName(node.name)) {
-    return "is-persona";
-  }
-
-  if (node.name.endsWith(".md")) {
-    return "is-md";
-  }
-
-  if (node.name.endsWith(".mtree")) {
-    return "is-mtree";
-  }
-
-  if (node.name.endsWith(".urldb")) {
-    return "is-urldb";
-  }
-
-  if (node.name.endsWith(".bmap")) {
-    return "is-bmap";
-  }
-
-  return "is-file";
+  return builtinTypes.typeOf(node.name)?.icon ?? "is-file";
 }
 
 function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenUrlDbEntry, onToggleFolder, onSelectNode, onAction, canPasteTarget, canPreviewFile, canManagePreview, onDragNodeStart, onDragUrlDbEntryStart, getFilterMode, getAssetPreviewSrc, getUrlDbEntries, getSelectedTarget }) {
@@ -62,14 +43,8 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       });
     }
 
-    if (mode === "notes") {
-      return isMarkdownFileName(node.name);
-    }
-    if (mode === "mtree") {
-      return node.name.endsWith(".mtree");
-    }
-    if (mode === "images") {
-      return /\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(node.name) || isUrlDbFileName(node.name);
+    if (mode === "notes" || mode === "mtree" || mode === "images") {
+      return (builtinTypes.typeOf(node.name)?.filters ?? []).includes(mode);
     }
 
     return true;
@@ -127,15 +102,16 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       }
 
       let typeEntries;
-      if (isMarkdownFileName(node.name)) {
+      const format = builtinTypes.formatOf(node.name);
+      if (format === "markdown") {
         typeEntries = [["Copy", "copy"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
-      } else if (node.name.endsWith(".mtree")) {
+      } else if (format === "mtree") {
         typeEntries = [["Copy", "copy"], ["Generate Module Map", "generate-module-map"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
-      } else if (isUrlDbFileName(node.name)) {
+      } else if (format === "urldb") {
         typeEntries = [["Copy", "copy"], ["Add Bookmark Entry", "add-bookmark-entry"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
-      } else if (/\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(node.name)) {
+      } else if (format === "image") {
         typeEntries = [["Copy", "copy"], ["Replace File", "replace-file"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
-      } else if (node.name.endsWith(".bmap")) {
+      } else if (format === "bmap") {
         typeEntries = [
           ["Copy", "copy"],
           ["Export", "export"],
@@ -442,7 +418,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
     const parts = [project?.name ?? "", filterMode, selected.nodeId ?? "", selected.entryId ?? ""];
     for (const { node, depth, path } of rows) {
       parts.push(node.id, node.kind, node.name, depth, path, node.expanded ? 1 : 0, pendingPaths.has(path) ? 1 : 0);
-      if (/\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(node.name)) {
+      if (builtinTypes.isImage(node.name)) {
         // Data-URL sources can be huge; their length and ends identify them.
         const src = String(getAssetPreviewSrc?.(node.id) ?? "");
         parts.push(`${src.length}:${src.slice(0, 80)}:${src.slice(-40)}`);
@@ -523,7 +499,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       label.textContent = node.name;
       row.append(label);
 
-      if (/\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(node.name)) {
+      if (builtinTypes.isImage(node.name)) {
         attachAssetPreview(row, getAssetPreviewSrc?.(node.id), node.name);
       }
 

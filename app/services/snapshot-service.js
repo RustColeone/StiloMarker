@@ -4,6 +4,8 @@
 // (CompressionStream) and everything lives in IndexedDB (far larger than the
 // ~5 MB localStorage ceiling). Retention: last N versions per file + a total-
 // bytes backstop. Entirely client-side — the server stores nothing.
+import { builtinTypes } from "../modules/file-types/index.js";
+
 const DB_NAME = "mdnotes-snapshots";
 const DB_VERSION = 1;
 const MAX_VERSIONS_PER_FILE = 30;
@@ -13,9 +15,7 @@ const TOTAL_BYTES_KEY = "totalBytes";
 // Reclaim the old project-level, full-content localStorage snapshots (now unused).
 try { globalThis.localStorage?.removeItem("mdnotes.snapshots.v1"); } catch { /* ignore */ }
 
-function isImageName(name) {
-  return /\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(String(name || ""));
-}
+const isImageName = (name) => builtinTypes.isImage(name);
 
 // ---- IndexedDB plumbing ----------------------------------------------------
 let dbPromise = null;

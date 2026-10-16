@@ -1,30 +1,12 @@
 import { isImageFileName } from "../domain/project-model.js";
+import { builtinTypes } from "../modules/file-types/index.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-const MIME_TYPES = {
-  ".md": "text/markdown;charset=utf-8",
-  ".mtree": "text/plain;charset=utf-8",
-  ".urldb": "text/plain;charset=utf-8",
-  ".bmap": "text/plain;charset=utf-8",
-  ".skill": "text/markdown;charset=utf-8",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".svg": "image/svg+xml",
-  ".webp": "image/webp",
-  ".bmp": "image/bmp"
-};
-
-function getExtension(name) {
-  const index = name.lastIndexOf(".");
-  return index >= 0 ? name.slice(index).toLowerCase() : "";
-}
-
+// MIME types come from the File types module (protocol/file-types.json).
 function getMimeTypeForFileName(name) {
-  return MIME_TYPES[getExtension(name)] ?? "application/octet-stream";
+  return builtinTypes.mimeOf(name);
 }
 
 function encodeBase64(bytes) {

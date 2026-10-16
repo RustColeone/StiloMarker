@@ -13,6 +13,7 @@
 // arrive through receive(event). Everything the view needs from the app comes
 // in through `deps`. Loaded the first time the tab opens.
 
+import { fileTypeExtension } from "../domain/project-model.js";
 import { colorFor, findMentions, initialsFor, parsePersona, personaAvatarHtml } from "../services/persona-service.js";
 
 const MENTION_BEFORE_CARET = /(^|[^\p{L}\p{N}_@.])@([\p{L}\p{N}_-]*)$/u;
@@ -209,7 +210,7 @@ export function createChatsView(deps) {
     return `<div class="cv-list">${localNote}
       ${section("Chats", chatsHtml, q ? "No chats match." : "No chats yet. Start one with a person or a character below.")}
       ${ui.store.kind === "cloud" ? section("People", peopleHtml, q ? "Nobody matches." : "Nobody else has access to this project yet.") : ""}
-      ${section("Characters", charactersHtml, q ? "No characters match." : "No characters yet: create a <strong>.persona.skill</strong> file (Create → New Character).")}
+      ${section("Characters", charactersHtml, q ? "No characters match." : `No characters yet: create a <strong>${fileTypeExtension("persona")}</strong> file (Create → New Character).`)}
     </div>`;
   }
 

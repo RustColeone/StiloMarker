@@ -1,5 +1,6 @@
-"""Browser regression for the Shell module (app/modules/shell): the menu bar
-is drawn from registered commands, shortcuts run commands, dialogs work.
+"""Browser regression for the first modules in the page: Shell (the menu bar
+is drawn from registered commands, shortcuts run commands, dialogs work) and
+File types (the page's lists of file types are filled from one list).
 
 Checks: five menus in order with their items; a menu item runs its command;
 live titles ("Show Chat" / "Hide Chat"); Ctrl+S runs Save from anywhere;
@@ -58,6 +59,16 @@ async def main():
             options['executable_path'] = os.environ['STILO_BROWSER']
         browser = await pw.chromium.launch(**options)
         context, page, errors = await open_page(browser, {'width': 1280, 'height': 800})
+
+        # File types fills every list of types the page shows.
+        accept = await page.get_attribute('#import-file-input', 'accept')
+        assert accept.split(',')[:2] == ['.md', '.mtree'] and '.persona.skill' in accept and accept.endswith('.zip'), accept
+        assert await page.get_attribute('#replace-file-input', 'accept') == '.png,.jpg,.jpeg,.gif,.svg,.webp,.bmp'
+        supported = await page.locator('#add-file-status-text').text_content()
+        assert supported.startswith('Supported: .md') and '.bmap' in supported and '.skill' in supported, supported
+        options = await page.evaluate('[...document.querySelectorAll("#new-file-type option")].map((o) => [o.value, o.textContent])')
+        assert options == [['md', 'Markdown (.md)'], ['mtree', 'MTREE (.mtree)'], ['urldb', 'URL Album (.urldb)'],
+                           ['bmap', 'Diagram (.bmap)'], ['persona', 'Character (.persona.skill)']], options
 
         # Five menus, in order, each with its items.
         labels = await page.locator('.menu-bar .menu-trigger').all_inner_texts()
@@ -122,7 +133,7 @@ async def main():
         assert not errors, errors
         await context.close()
         await browser.close()
-        print(json.dumps({'checks': ['five menus with their items', 'one menu open at a time', 'live titles',
+        print(json.dumps({'checks': ['file-type lists from File types', 'five menus with their items', 'one menu open at a time', 'live titles',
                                      'menu item runs its command', 'Ctrl+S runs Save', 'rename keeps the extension',
                                      'late menus and commands appear', 'phone menu panel'], 'runtimeErrors': 0}))
 

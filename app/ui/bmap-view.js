@@ -15,6 +15,7 @@ import {
   serializeBmap,
 } from "../services/bmap-service.js";
 import { renderMarkdown } from "../services/markdown-service.js";
+import { builtinTypes } from "../modules/file-types/index.js";
 
 const GRID_BASE = 5;
 const GRID_MIN_SCREEN_STEP = 4;
@@ -2514,7 +2515,6 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     return status;
   }
 
-  const IMAGE_EXT_RE = /\.(png|jpe?g|gif|svg|webp|bmp)$/i;
 
   function getConnectedNodeIds(nodeId) {
     const ids = new Set();
@@ -2575,7 +2575,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
         continue;
       }
       seen.add(filePath);
-      const isImage = IMAGE_EXT_RE.test(filePath);
+      const isImage = builtinTypes.isImage(filePath);
       const content = isImage ? "" : (activeOptions.resolveFileContent?.(filePath) ?? null);
       if (!isImage && content == null) {
         continue;
