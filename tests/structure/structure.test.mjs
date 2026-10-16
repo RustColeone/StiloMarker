@@ -9,19 +9,19 @@ import { join } from "node:path";
 
 import {
   ROOT, codeFiles, read, lineCount, oversized, spellings, jsImports, pyImports,
-  modules, moduleOf, KERNEL_MAX_LINES, DOMAIN_WORDS, MAX_LINES
+  loadModules, moduleOf, KERNEL_MAX_LINES, DOMAIN_WORDS, MAX_LINES
 } from "./scan.mjs";
 
 const json = (path) => JSON.parse(readFileSync(join(ROOT, path), "utf8"));
 const baseline = json("tests/structure/baseline.json");
 const files = codeFiles();
-const all = modules();
+const all = await loadModules();
 
 test("module manifests are complete and their uses are acyclic and point down (rule 2)", () => {
   const byName = new Map();
   for (const m of all) {
     for (const key of ["name", "level", "uses", "owns"]) {
-      assert.ok(key in m, `${m.dir}/module.json needs "${key}"`);
+      assert.ok(m[key] !== undefined, `${m.dir}: the module definition needs "${key}"`);
     }
     assert.ok(Number.isInteger(m.level) && m.level >= 1, `${m.dir}: level must be a whole number from 1`);
     const key = `${m.root}:${m.name}`;
@@ -50,7 +50,7 @@ test("modules are reached only through their public API, and only if declared (r
         problems.push(`${file} imports ${target}: import ${to.dir}/index.js instead (rule 1)`);
       }
       if (from && !from.uses.includes(to.name)) {
-        problems.push(`${file} imports ${to.name}, which ${from.name}/module.json does not list in "uses" (rule 2)`);
+        problems.push(`${file} imports ${to.name}, which the ${from.name} module does not list in "uses" (rule 2)`);
       }
     }
   }
@@ -63,7 +63,7 @@ test("modules are reached only through their public API, and only if declared (r
       if (!to || to === from) continue;
       if (match[2]) problems.push(`${file} imports ${name}: import stilo.modules.${match[1]} instead (rule 1)`);
       if (from && !from.uses.includes(to.name)) {
-        problems.push(`${file} imports ${to.name}, which ${from.name}/module.json does not list in "uses" (rule 2)`);
+        problems.push(`${file} imports ${to.name}, which the ${from.name} module does not list in "uses" (rule 2)`);
       }
     }
   }

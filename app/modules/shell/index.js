@@ -1,0 +1,71 @@
+// Shell: the app's frame. Owns the menu bar, app-wide shortcuts and the modal
+// dialogs, and offers two extension points: commands and menus.
+//
+// API:
+//   commands.add({ id: "owner.action", title, run, keys?: ["Mod+S"],
+//                  menu?: { id, group?, order? }, enabled?: () => bool, danger? })
+//   menus.add({ id, label, order })
+//   run(id, ...args)              -> Promise<boolean>
+//   closeMenus()
+//   notice(message, title?)       a blocking message, also logged
+//   notify(message)               the same, titled "Message"
+//   confirm(message | {title, message, acceptLabel}) -> Promise<boolean>
+//   input({title, message, label, value, submitLabel, suffix}) -> Promise<string|null>
+//   toast(message, {duration})
+//   copyText(text)
+import { defineModule } from "../../kernel/index.js";
+import { createCommands } from "./service/commands.js";
+import { createDialogs } from "./adapters/dialogs.js";
+import { createKeyboard } from "./adapters/keyboard.js";
+import { createMenuBar } from "./adapters/menu-bar.js";
+
+export default defineModule({
+  name: "shell",
+  level: 1,
+  uses: [],
+  owns: {
+    registries: ["commands", "menus"],
+    elements: ["menu bar", "notice dialog", "confirm dialog", "input dialog", "toasts"]
+  },
+  start(ctx) {
+    const { commands, menus, run } = createCommands(ctx);
+    const dialogs = createDialogs();
+
+    function notice(message, title = "Message") {
+      ctx.log(`notice: ${message}`);
+      dialogs.showNotice(message, title);
+    }
+    const report = (error) => notice(error?.message ?? String(error));
+    const root = document.querySelector(".menu-bar");
+    const menuBar = root ? createMenuBar({ root, commands, menus, run, report }) : { close() {} };
+    createKeyboard({ commands, run, report });
+
+    async function confirm(request) {
+      const options = typeof request === "string" ? { message: request } : request;
+      ctx.log(`confirm requested: ${options.message}`);
+      const accepted = await dialogs.showConfirm(options);
+      ctx.log(`confirm ${accepted ? "accepted" : "cancelled"}: ${options.message}`);
+      return accepted;
+    }
+
+    async function input(options) {
+      ctx.log(`input requested: ${options.title ?? ""} :: ${options.value ?? ""}`);
+      const value = await dialogs.showInput(options);
+      ctx.log(value ? `input value: ${value}` : "input cancelled");
+      return value;
+    }
+
+    return {
+      commands: { add: commands.add, get: commands.get, all: commands.all, onChange: commands.onChange },
+      menus: { add: menus.add, all: menus.all },
+      run,
+      closeMenus: () => menuBar.close(),
+      notice,
+      notify: (message) => notice(message),
+      confirm,
+      input,
+      toast: dialogs.showToast,
+      copyText: dialogs.copyText
+    };
+  }
+});

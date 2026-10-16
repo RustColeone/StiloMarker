@@ -1,3 +1,5 @@
+import { startModules } from "./kernel/index.js";
+import shellModule from "./modules/shell/index.js";
 import { rememberedWorkspace, createSessionRecovery } from "./services/session-recovery-service.js";
 import { installMobileViewport } from "./services/chat-ui-service.js";
 import { snapshotProject, savedFileIds } from "./services/project-save-service.js";
@@ -104,22 +106,6 @@ const elements = {
   addFileStatusText: query("#add-file-status-text"),
   addFileSubmitButton: query("#add-file-submit-button"),
   replaceFileInput: query("#replace-file-input"),
-  noticeDialog: query("#notice-dialog"),
-  noticeDialogTitle: query("#notice-dialog-title"),
-  noticeDialogMessage: query("#notice-dialog-message"),
-  confirmDialog: query("#confirm-dialog"),
-  confirmDialogTitle: query("#confirm-dialog-title"),
-  confirmDialogMessage: query("#confirm-dialog-message"),
-  confirmDialogAcceptButton: query("#confirm-dialog-accept-button"),
-  inputDialog: query("#input-dialog"),
-  inputDialogTitle: query("#input-dialog-title"),
-  inputDialogMessage: query("#input-dialog-message"),
-  inputDialogLabel: query("#input-dialog-label"),
-  inputDialogInput: query("#input-dialog-input"),
-  inputDialogAutoExt: query("#input-dialog-auto-ext"),
-  inputDialogAutoExtRow: query(".input-dialog-ext-row"),
-  inputDialogSubmitButton: query("#input-dialog-submit-button"),
-  inputDialogCancelButton: query("#input-dialog-cancel-button"),
   editorEmptyState: query("#editor-empty-state"),
   welcomeResume: query("#welcome-resume"),
   welcomeNewFile: query("#welcome-new-file"),
@@ -153,14 +139,6 @@ const elements = {
   agentRunnerNote: query("#agent-runner-note"),
   agentStatusLine: query("#agent-status-line"),
   accountLockedNote: query("#account-locked-note"),
-  settingsMenuButton: query("#settings-menu-button"),
-  settingsMenu: query("#settings-menu"),
-  openSettingsMenuButton: query("#open-settings-menu-button"),
-  toggleDebugMenuButton: query("#toggle-debug-menu-button"),
-  clearCacheMenuButton: query("#clear-cache-menu-button"),
-  resetWorkspaceMenuButton: query("#reset-workspace-menu-button"),
-  emptyWorkspaceMenuButton: query("#empty-workspace-menu-button"),
-  toggleLogButton: query("#toggle-log-button"),
   themeSelect: query("#theme-select"),
   explorerSelect: query("#explorer-select"),
   explorerAnchorSelect: query("#explorer-anchor-select"),
@@ -241,29 +219,8 @@ const elements = {
   mobileChatToggle: query("#mobile-chat-toggle"),
   mobileMenuButton: query("#mobile-menu-button"),
   menuBar: query(".menu-bar"),
-  fileMenuButton: query("#file-menu-button"),
-  editMenuButton: query("#edit-menu-button"),
-  selectionMenuButton: query("#selection-menu-button"),
-  viewMenuButton: query("#view-menu-button"),
-  fileMenu: query("#file-menu"),
-  editMenu: query("#edit-menu"),
-  selectionMenu: query("#selection-menu"),
-  viewMenu: query("#view-menu"),
-  newProjectButton: query("#new-project-button"),
-  openDirectoryButton: query("#open-directory-button"),
-  openProjectButton: query("#open-project-button"),
-  fileManagerButton: query("#file-manager-button"),
   openServerDialog: query("#open-server-dialog"),
-  importFileButton: query("#import-file-button"),
   importFileInput: query("#import-file-input"),
-  saveButton: query("#save-button"),
-  savePdfButton: query("#save-pdf-button"),
-  exportButton: query("#export-button"),
-  renameSelectedButton: query("#rename-selected-button"),
-  findReplaceMenuButton: query("#find-replace-menu-button"),
-  createSnapshotButton: query("#create-snapshot-button"),
-  snapshotsButton: query("#snapshots-button"),
-  workspaceHistoryButton: query("#workspace-history-button"),
   previewDiffView: query("#preview-diff-view"),
   diffBody: query("#diff-body"),
   diffRuler: query("#diff-ruler"),
@@ -271,17 +228,6 @@ const elements = {
   diffNextChange: query("#diff-next-change"),
   previewDiffLabel: query("#preview-diff-label"),
   previewDiffStats: query("#preview-diff-stats"),
-  deleteSelectedButton: query("#delete-selected-button"),
-  newMarkdownButton: query("#new-markdown-button"),
-  newMtreeButton: query("#new-mtree-button"),
-  newUrlDbButton: query("#new-urldb-button"),
-  newBmapButton: query("#new-bmap-button"),
-  newPersonaButton: query("#new-persona-button"),
-  exportSelectedButton: query("#export-selected-button"),
-  toggleExplorerMenuButton: query("#toggle-explorer-menu-button"),
-  togglePreviewButton: query("#toggle-preview-button"),
-  toggleSourceButton: query("#toggle-source-button"),
-  toggleChatButton: query("#toggle-chat-button"),
   previewCollapseButton: query("#preview-collapse-button"),
   sourceCollapseButton: query("#source-collapse-button"),
   sourceToggleActivityButton: query("#source-toggle-activity-button"),
@@ -328,6 +274,16 @@ const elements = {
   chatHistoryPane: query("#chat-history-pane"),
   chatHistorySearch: query("#chat-history-search")
 };
+
+// ---- Modules (docs/ARCHITECTURE.md) ----
+// The app is moving into modules one step at a time. Code still in this file
+// reaches a module only through the public API the kernel hands back.
+const modules = await startModules([shellModule], {
+  log: (owner, ...args) => {
+    try { logDebug("action", `${owner}: ${args.join(" ")}`); } catch { /* the log is not ready yet */ }
+  }
+});
+const shell = modules.shell;
 
 const settings = loadSettings();
 const storedProject = loadProject();
@@ -1041,6 +997,7 @@ function getNextUrlDbEntryName(fileContent) {
 var dialogsInstance;
 function dialogs() {
   return (dialogsInstance ??= createDialogs({
+    get shell() { return shell; },
     get controller() { return controller; },
     get debugState() { return debugState; },
     get debugTabs() { return debugTabs; },
@@ -1052,21 +1009,23 @@ function dialogs() {
     get settings() { return settings; }
   }));
 }
-async function confirmAction(...args) { return dialogs().confirmAction(...args); }
+async function confirmAction(message) { return shell.confirm(String(message)); }
 async function copyDebugLogToClipboard(...args) { return dialogs().copyDebugLogToClipboard(...args); }
-async function copyTextToClipboard(...args) { return dialogs().copyTextToClipboard(...args); }
+async function copyTextToClipboard(text) { return shell.copyText(text); }
 function flashStatusPanel(...args) { return dialogs().flashStatusPanel(...args); }
 async function forceAppUpgrade(...args) { return dialogs().forceAppUpgrade(...args); }
 function formatEditorDebugValue(...args) { return dialogs().formatEditorDebugValue(...args); }
 function logDebug(...args) { return dialogs().logDebug(...args); }
-function notify(...args) { return dialogs().notify(...args); }
-async function promptForName(...args) { return dialogs().promptForName(...args); }
+function notify(message) { return shell.notify(message); }
+async function promptForName(message, value = "", options = {}) {
+  return shell.input({ title: message, message, value, submitLabel: "Save", ...options });
+}
 function renderDebugPanel(...args) { return dialogs().renderDebugPanel(...args); }
 function showAcceptConnectionDialog(...args) { return dialogs().showAcceptConnectionDialog(...args); }
 function showBookmarkEntryDialog(...args) { return dialogs().showBookmarkEntryDialog(...args); }
-function showConfirmDialog(...args) { return dialogs().showConfirmDialog(...args); }
-function showNoticeDialog(...args) { return dialogs().showNoticeDialog(...args); }
-function showToast(...args) { return dialogs().showToast(...args); }
+function showConfirmDialog(options) { return shell.confirm(options); }
+function showNoticeDialog(message, title) { return shell.notice(message, title); }
+function showToast(message, options) { return shell.toast(message, options); }
 function traceEditorEvent(...args) { return dialogs().traceEditorEvent(...args); }
 
 
@@ -1818,13 +1777,11 @@ const explorer = createExplorerView({
   }
 });
 
-const menuPairs = [
-  [elements.fileMenuButton, elements.fileMenu],
-  [elements.editMenuButton, elements.editMenu],
-  [elements.selectionMenuButton, elements.selectionMenu],
-  [elements.viewMenuButton, elements.viewMenu],
-  [elements.settingsMenuButton, elements.settingsMenu]
-];
+shell.menus.add({ id: "file", label: "File", order: 1 });
+shell.menus.add({ id: "edit", label: "Edit", order: 2 });
+shell.menus.add({ id: "create", label: "Create", order: 3 });
+shell.menus.add({ id: "view", label: "View", order: 4 });
+shell.menus.add({ id: "settings", label: "Settings", order: 5 });
 
 // Module map tools (.mtree → Markdown) load the first time their dialog opens.
 let moduleMapTools = null;
@@ -2347,8 +2304,6 @@ function applyWorkspaceSettings() {
   refreshFormatToolbar();
   elements.chatPanel.hidden = settings.chatPanel === "hidden";
   elements.chatToggleActivityButton.classList.toggle("is-active", settings.chatPanel === "shown");
-  elements.toggleDebugMenuButton.textContent = settings.debugPanel ? "Hide Log Panel" : "Show Log Panel";
-  elements.toggleChatButton.textContent = settings.chatPanel === "shown" ? "Hide Chat" : "Show Chat";
   elements.explorerFilterButton.classList.toggle("is-active", settings.explorerFilter !== "all");
   if (elements.explorerAnchorSelect) elements.explorerAnchorSelect.value = settings.explorerAnchor;
   if (elements.explorerAnchorButton) {
@@ -2477,26 +2432,8 @@ elements.debugSplitter.addEventListener("pointerdown", (event) => {
 });
 
 function closeMenus() {
-  menuPairs.forEach(([button, menu]) => {
-    button.classList.remove("is-open");
-    menu.hidden = true;
-  });
+  shell.closeMenus();
 }
-
-function toggleMenu(button, menu) {
-  const shouldOpen = menu.hidden;
-  closeMenus();
-  if (shouldOpen) {
-    button.classList.add("is-open");
-    menu.hidden = false;
-  }
-}
-
-document.addEventListener("click", (event) => {
-  if (!event.target.closest(".menu-group")) {
-    closeMenus();
-  }
-});
 
 document.addEventListener("click", async (event) => {
   const copyButton = event.target.closest("[data-copy-code]");
@@ -2521,16 +2458,6 @@ document.addEventListener("click", async (event) => {
   } catch {
     notify("Could not copy code block.");
   }
-});
-
-menuPairs.forEach(([button, menu]) => {
-  button.addEventListener("click", (event) => {
-    event.stopPropagation();
-    toggleMenu(button, menu);
-  });
-  menu.querySelectorAll("button").forEach((menuButton) => {
-    menuButton.addEventListener("click", closeMenus);
-  });
 });
 
 function setStatusDot(node, kind) {
@@ -3548,15 +3475,15 @@ elements.editorScroll.addEventListener("wheel", (event) => {
   forwardEditorWheel(event);
 }, { passive: false });
 
-elements.saveButton.addEventListener("click", async () => {
+shell.commands.add({ id: "workspace.save", title: "Save", menu: { id: "file", group: 0, order: 6 }, keys: ["Mod+S"], run: async () => {
   await handleSaveCommand();
-});
+} });
 
-elements.savePdfButton.addEventListener("click", printPreviewAsPdf);
-elements.exportButton.addEventListener("click", () => exportNode(controller.getProject().rootId));
-elements.exportSelectedButton.addEventListener("click", () => exportNode(getSelectedNode(controller.getProject())?.id ?? controller.getProject().rootId));
+shell.commands.add({ id: "preview.save-pdf", title: "Save as PDF", menu: { id: "file", group: 0, order: 7 }, run: printPreviewAsPdf });
+shell.commands.add({ id: "workspace.export", title: "Export Project Zipped", menu: { id: "file", group: 0, order: 8 }, run: () => exportNode(controller.getProject().rootId) });
+shell.commands.add({ id: "workspace.export-selected", title: "Export Selected", menu: { id: "file", group: 0, order: 9 }, run: () => exportNode(getSelectedNode(controller.getProject())?.id ?? controller.getProject().rootId) });
 
-elements.newProjectButton.addEventListener("click", async () => {
+shell.commands.add({ id: "workspace.new-project", title: "New Project", menu: { id: "file", group: 0, order: 1 }, run: async () => {
   logDebug("action", "New project requested");
   closeMenus();
   // No local store and no server account: keep the legacy in-browser workspace.
@@ -3571,9 +3498,9 @@ elements.newProjectButton.addEventListener("click", async () => {
   // Otherwise open the unified browser so the user can pick where it lives
   // (this device or a team folder) and create it there.
   openFileBrowser({ side: supportsOpfs() ? "local" : "server", intent: "create" });
-});
+} });
 
-elements.openDirectoryButton.addEventListener("click", async () => {
+shell.commands.add({ id: "workspace.import-folder", title: "Import Local Folder", menu: { id: "file", group: 0, order: 4 }, run: async () => {
   if (!supportsDirectoryAccess()) {
     notify("Folder import is only available in Chromium-based browsers.");
     return;
@@ -3598,23 +3525,23 @@ elements.openDirectoryButton.addEventListener("click", async () => {
     if (error?.name === "AbortError") return; // user dismissed the picker
     notify(error.message);
   }
-});
+} });
 
-elements.openProjectButton?.addEventListener("click", () => {
+shell.commands.add({ id: "cloud.open-project", title: "Open Project…", menu: { id: "file", group: 0, order: 2 }, run: () => {
   closeMenus();
   logDebug("action", "Open project browser");
   // Default to the server side when signed in (it replaces the old "Open Server
   // Directory"), else start on this device. The in-dialog toggle switches sides.
   openFileBrowser({ side: syncState.account ? "server" : "local", intent: "open" });
-});
+} });
 
-elements.fileManagerButton?.addEventListener("click", () => {
+shell.commands.add({ id: "cloud.file-manager", title: "File Manager", menu: { id: "file", group: 0, order: 3 }, run: () => {
   closeMenus();
   logDebug("action", "Open file manager");
   openFileBrowser({ side: syncState.account ? "server" : "local", mode: "manage" });
-});
+} });
 
-elements.importFileButton.addEventListener("click", () => elements.importFileInput.click());
+shell.commands.add({ id: "workspace.import-file", title: "Import File or Zip", menu: { id: "file", group: 0, order: 5 }, run: () => elements.importFileInput.click() });
 
 elements.importFileInput.addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
@@ -3669,10 +3596,10 @@ elements.explorerFilterButton.addEventListener("click", (event) => {
   logDebug("action", opened ? "Explorer filter menu opened" : "Explorer filter menu closed", settings.explorerFilter);
 });
 
-elements.findReplaceMenuButton?.addEventListener("click", () => openFindBar(true));
-elements.createSnapshotButton?.addEventListener("click", () => void createSnapshotNow());
-elements.snapshotsButton?.addEventListener("click", () => void openSnapshotsDialog());
-elements.workspaceHistoryButton?.addEventListener("click", () => void openWorkspaceHistory());
+shell.commands.add({ id: "editor.find-replace", title: "Find & Replace", menu: { id: "edit", group: 0, order: 1 }, run: () => openFindBar(true) });
+shell.commands.add({ id: "history.create-snapshot", title: "Create Snapshot", menu: { id: "create", group: 1, order: 1 }, run: () => void createSnapshotNow() });
+shell.commands.add({ id: "history.snapshots", title: "Snapshots…", menu: { id: "edit", group: 0, order: 2 }, run: () => void openSnapshotsDialog() });
+shell.commands.add({ id: "history.workspace-history", title: "Workspace History…", menu: { id: "edit", group: 0, order: 3 }, run: () => void openWorkspaceHistory() });
 // Click a gutter line number to add/edit that line's comment (breakpoint-style).
 elements.editorGutter?.addEventListener("click", (event) => {
   const row = event.target.closest?.(".editor-gutter-line");
@@ -3701,17 +3628,17 @@ document.addEventListener("click", (event) => {
 });
 elements.diffNextChange?.addEventListener("click", () => gotoChange(1));
 elements.diffPrevChange?.addEventListener("click", () => gotoChange(-1));
-elements.renameSelectedButton.addEventListener("click", () => {
+shell.commands.add({ id: "workspace.rename-selected", title: "Rename Selected", menu: { id: "edit", group: 0, order: 4 }, run: () => {
   void renameSelected();
-});
-elements.deleteSelectedButton.addEventListener("click", () => {
+} });
+shell.commands.add({ id: "workspace.delete-selected", title: "Delete Selected", menu: { id: "edit", group: 0, order: 5 }, run: () => {
   void deleteSelected();
-});
-elements.newMarkdownButton.addEventListener("click", () => createItem("md"));
-elements.newMtreeButton.addEventListener("click", () => createItem("mtree"));
-elements.newUrlDbButton.addEventListener("click", () => createItem("urldb"));
-elements.newBmapButton.addEventListener("click", () => createItem("bmap"));
-elements.newPersonaButton.addEventListener("click", () => createItem("persona"));
+} });
+shell.commands.add({ id: "file-types.new-markdown", title: "New Markdown", menu: { id: "create", group: 0, order: 1 }, run: () => createItem("md") });
+shell.commands.add({ id: "file-types.new-mtree", title: "New MTREE", menu: { id: "create", group: 0, order: 2 }, run: () => createItem("mtree") });
+shell.commands.add({ id: "file-types.new-urldb", title: "New URL Album", menu: { id: "create", group: 0, order: 3 }, run: () => createItem("urldb") });
+shell.commands.add({ id: "file-types.new-bmap", title: "New Diagram", menu: { id: "create", group: 0, order: 4 }, run: () => createItem("bmap") });
+shell.commands.add({ id: "file-types.new-persona", title: "New Character", menu: { id: "create", group: 0, order: 5 }, run: () => createItem("persona") });
 elements.addFilePickerButton.addEventListener("click", () => elements.addFilePickerInput.click());
 elements.addFilePickerInput.addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
@@ -3764,13 +3691,6 @@ elements.addFileDropzone.addEventListener("paste", (event) => {
 elements.addFileDialog.addEventListener("close", () => {
   elements.addFileDropzone.classList.remove("is-active");
   resetAddFileState();
-});
-document.addEventListener("keydown", (event) => {
-  if (event.key.toLowerCase() !== "s" || (!event.ctrlKey && !event.metaKey) || event.altKey) {
-    return;
-  }
-  event.preventDefault();
-  void handleSaveCommand();
 });
 
 bindPaneDropTarget(elements.sourcePane, "source");
@@ -3896,7 +3816,7 @@ async function resetToDefaultWorkspace() {
     logDebug("response", "Workspace reset cancelled");
     return;
   }
-  elements.settingsMenu.hidden = true;
+  closeMenus();
   const removed = clearAllAppStorage();
   logDebug("action", "Workspace reset to default", `keysRemoved=${removed}`);
   window.location.reload();
@@ -3914,7 +3834,7 @@ async function emptyEverything() {
     logDebug("response", "Empty everything cancelled");
     return;
   }
-  elements.settingsMenu.hidden = true;
+  closeMenus();
   clearAllAppStorage();
   // Persist an empty project so the boot path doesn't fall back to loading the
   // default Template welcome workspace.
@@ -3936,7 +3856,7 @@ async function clearAllCache() {
     return;
   }
 
-  elements.settingsMenu.hidden = true;
+  closeMenus();
   clearViewStates(); // also drop cached resume positions
   viewStates = {};
   try {
@@ -3954,11 +3874,11 @@ async function clearAllCache() {
   }
 }
 
-elements.toggleExplorerMenuButton.addEventListener("click", toggleExplorer);
-elements.togglePreviewButton.addEventListener("click", togglePreview);
-elements.toggleSourceButton?.addEventListener("click", toggleSource);
-elements.toggleChatButton.addEventListener("click", toggleChat);
-elements.toggleLogButton.addEventListener("click", toggleLogPanel);
+shell.commands.add({ id: "shell.toggle-explorer", title: "Toggle Explorer", menu: { id: "view", group: 0, order: 1 }, run: toggleExplorer });
+shell.commands.add({ id: "editor.toggle-preview", title: "Toggle Preview", menu: { id: "view", group: 0, order: 3 }, run: togglePreview });
+shell.commands.add({ id: "editor.toggle-source", title: "Toggle Source", menu: { id: "view", group: 0, order: 2 }, run: toggleSource });
+shell.commands.add({ id: "assistant.toggle-chat", title: () => (settings.chatPanel === "shown" ? "Hide Chat" : "Show Chat"), menu: { id: "view", group: 0, order: 4 }, run: toggleChat });
+shell.commands.add({ id: "shell.toggle-log", title: "Toggle Log", menu: { id: "view", group: 0, order: 5 }, run: toggleLogPanel });
 elements.explorerToggleButton.addEventListener("click", toggleExplorer);
 // Touch gestures. touchmove must be non-passive: once a drag is claimed we
 // preventDefault it to suppress the scroll/selection the browser would
@@ -4017,7 +3937,7 @@ function renderWelcomeState() {
 }
 
 elements.welcomeNewFile?.addEventListener("click", openNewFileDialog);
-elements.welcomeOpenLocal?.addEventListener("click", () => elements.openDirectoryButton?.click());
+elements.welcomeOpenLocal?.addEventListener("click", () => void shell.run("workspace.import-folder"));
 elements.welcomeOpenServer?.addEventListener("click", () => elements.openServerDirectoryButton?.click());
 elements.welcomeResume?.addEventListener("click", () => {
   void sessionRestorer.run({ manual: true });
@@ -4061,15 +3981,15 @@ elements.settingsButton.addEventListener("click", () => {
   openSettingsDialog("appearance");
 });
 
-elements.openSettingsMenuButton.addEventListener("click", () => {
+shell.commands.add({ id: "shell.open-settings", title: "Open Settings", menu: { id: "settings", group: 0, order: 1 }, run: () => {
   logDebug("action", "Settings dialog opened from menu");
   openSettingsDialog("appearance");
-});
+} });
 
 // Status-bar footer items double as shortcuts to their related menus/panels.
 elements.statusSourceItem.addEventListener("click", () => {
   logDebug("action", "Status bar: open directory");
-  elements.openDirectoryButton.click();
+  void shell.run("workspace.import-folder");
 });
 elements.statusBrowserItem.addEventListener("click", () => {
   const supported = supportsDirectoryAccess();
@@ -4182,16 +4102,16 @@ elements.statusPresenceItem.addEventListener("click", () => {
   logDebug("action", "Status bar: reveal session panel");
 });
 
-elements.toggleDebugMenuButton.addEventListener("click", toggleLogPanel);
-elements.resetWorkspaceMenuButton.addEventListener("click", () => {
+shell.commands.add({ id: "shell.log-panel", title: () => (settings.debugPanel ? "Hide Log Panel" : "Show Log Panel"), menu: { id: "settings", group: 0, order: 2 }, run: toggleLogPanel });
+shell.commands.add({ id: "workspace.reset", title: "Reset to Default Workspace", menu: { id: "settings", group: 0, order: 3 }, run: () => {
   void resetToDefaultWorkspace();
-});
-elements.emptyWorkspaceMenuButton.addEventListener("click", () => {
+} });
+shell.commands.add({ id: "workspace.empty-everything", title: "Empty Everything", menu: { id: "settings", group: 0, order: 4 }, danger: true, run: () => {
   void emptyEverything();
-});
-elements.clearCacheMenuButton.addEventListener("click", () => {
+} });
+shell.commands.add({ id: "shell.clear-cache", title: "Clear All Cache", menu: { id: "settings", group: 0, order: 5 }, danger: true, run: () => {
   void clearAllCache();
-});
+} });
 
 debugTabs.forEach((tab) => {
   tab.element.addEventListener("click", () => {

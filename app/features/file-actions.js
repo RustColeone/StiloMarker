@@ -814,7 +814,7 @@ export function createFileActions(app) {
       return;
     }
     const currentPath = getPath(project, node.id);
-    const name = await app.promptForName("Rename file", node.name, { extension: app.fileExtensionOf(node.name) });
+    const name = await app.promptForName("Rename file", node.name, { suffix: app.fileExtensionOf(node.name) });
     if (!name || name === node.name) {
       return;
     }
