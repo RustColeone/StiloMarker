@@ -87,7 +87,7 @@ END;
 """
 
 # Mirrors app/services/persona-service.js (personaHandle / findMentions); the
-# shared case table in tests/mention-cases.json keeps the two in step.
+# shared case table in spec/characters/mentions.cases.json keeps the two in step.
 _HANDLE_STRIP = re.compile(r"[^\w-]", re.UNICODE)
 _MENTION = re.compile(r"(^|[^\w@.])@([\w-]+)", re.UNICODE)
 

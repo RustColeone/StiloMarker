@@ -1,0 +1,49 @@
+{
+  "about": "Rules implemented in both languages (rule 6). Each covered twin has one case table that a JavaScript test and a Python test both run. Uncovered twins still lack a table; this list may only shrink (tests/structure/baseline.json records its length).",
+  "covered": [
+    {
+      "name": "@mentions and character handles",
+      "js": "app/services/persona-service.js: findMentions, personaHandle",
+      "py": "server/conversations.py: find_mentions, persona_handle",
+      "cases": "spec/characters/mentions.cases.json"
+    },
+    {
+      "name": "move-node",
+      "js": "app/domain/project-model.js: applySyncOperation (move-node)",
+      "py": "server/mdnotes_server.py: CollaborationBroker._apply_operation (move-node)",
+      "cases": "spec/workspace/move-node.cases.json"
+    }
+  ],
+  "uncovered": [
+    {
+      "name": "the other operations (create, rename, delete, update, replace)",
+      "js": "app/domain/project-model.js: applySyncOperation",
+      "py": "server/mdnotes_server.py: CollaborationBroker._apply_operation"
+    },
+    {
+      "name": "applying a text patch",
+      "js": "app/services/text-patch-service.js: applyTextPatch",
+      "py": "server/mdnotes_server.py: CollaborationBroker._apply_text_patch"
+    },
+    {
+      "name": "rebasing a text patch over another",
+      "js": "app/services/text-patch-service.js: transformTextPatch",
+      "py": "server/mdnotes_server.py: CollaborationBroker._transform_range, _rebase_patch"
+    },
+    {
+      "name": "character file header",
+      "js": "app/services/persona-service.js: parsePersona",
+      "py": "server/conversations.py: persona_header"
+    },
+    {
+      "name": "character summary for the cast",
+      "js": "app/services/persona-service.js: personaSummary",
+      "py": "server/conversations.py: persona_summary"
+    },
+    {
+      "name": "which file names are images",
+      "js": "app/domain/project-model.js: isImageFileName (and two private copies)",
+      "py": "server/mdnotes_server.py: is_image_name"
+    }
+  ]
+}

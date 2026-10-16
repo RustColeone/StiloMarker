@@ -1,0 +1,104 @@
+{
+  "about": "Structure violations that existed when the rules were introduced (2026-10-16). They may only shrink; see tools/structure-baseline.mjs.",
+  "oversized": {
+    "app/editor/editor-core.js": 1655,
+    "app/features/chat-panel.js": 1693,
+    "app/features/cloud-browser.js": 1004,
+    "app/features/file-actions.js": 1239,
+    "app/features/panes.js": 1048,
+    "app/main.js": 4839,
+    "app/services/collaboration-service.js": 1108,
+    "app/ui/bmap-view.js": 4025,
+    "server/mdnotes_server.py": 6496
+  },
+  "spellings": {
+    "file type .bmap": [
+      "app/domain/project-model.js",
+      "app/editor/autocomplete.js",
+      "app/editor/editor-core.js",
+      "app/editor/highlight.js",
+      "app/features/file-actions.js",
+      "app/features/panes.js",
+      "app/services/bmap-service.js",
+      "app/services/file-content-service.js",
+      "app/styles.css",
+      "app/ui/bmap-view.js",
+      "app/ui/explorer-view.js",
+      "index.html"
+    ],
+    "file type .mtree": [
+      "app/domain/project-model.js",
+      "app/editor/highlight.js",
+      "app/features/file-actions.js",
+      "app/features/module-map-tools.js",
+      "app/features/panes.js",
+      "app/main.js",
+      "app/services/file-content-service.js",
+      "app/ui/editor-format-toolbar.js",
+      "app/ui/explorer-view.js",
+      "index.html"
+    ],
+    "file type .persona.skill": [
+      "app/domain/project-model.js",
+      "app/features/chat-panel.js",
+      "app/main.js",
+      "app/services/persona-service.js",
+      "app/ui/chats-view.js",
+      "index.html",
+      "server/conversations.py",
+      "server/mdnotes_server.py"
+    ],
+    "file type .urldb": [
+      "app/domain/project-model.js",
+      "app/editor/highlight.js",
+      "app/features/file-actions.js",
+      "app/main.js",
+      "app/services/file-content-service.js",
+      "app/ui/explorer-view.js",
+      "index.html"
+    ],
+    "image extension list": [
+      "app/domain/project-model.js",
+      "app/editor/links.js",
+      "app/features/file-actions.js",
+      "app/services/collaboration-service.js",
+      "app/services/file-content-service.js",
+      "app/services/fs-access-service.js",
+      "app/services/snapshot-service.js",
+      "app/ui/bmap-view.js",
+      "app/ui/explorer-view.js",
+      "index.html",
+      "server/mdnotes_server.py",
+      "server/openai_support.py"
+    ],
+    "operation patch-file": [
+      "app/domain/project-model.js",
+      "app/main.js",
+      "app/services/collaboration-service.js",
+      "app/services/text-patch-service.js",
+      "server/mdnotes_server.py"
+    ],
+    "operation replace-project": [
+      "app/domain/project-model.js",
+      "server/mdnotes_server.py"
+    ],
+    "operation update-file": [
+      "app/domain/project-model.js",
+      "app/features/chat-panel.js",
+      "app/features/file-actions.js",
+      "app/features/module-map-tools.js",
+      "app/features/snapshots-dialog.js",
+      "app/features/workspace-history.js",
+      "app/main.js",
+      "app/services/collaboration-service.js",
+      "server/mdnotes_server.py"
+    ],
+    "sync protocol number": [
+      "app/services/chat-api-service.js",
+      "app/services/sync-service.js",
+      "app/version.js",
+      "server/mdnotes_server.py"
+    ]
+  },
+  "uncoveredTwins": 6
+}

@@ -7,7 +7,7 @@ import { addFile, addFolder, applySyncOperation, createProject, getNodeIdByPath,
 // The same table the server's tests/move-node.test.py uses: a broadcast
 // move-node is applied with this moveNode() in every peer, so the two must
 // agree on the resulting order case for case.
-const CASES = JSON.parse(readFileSync(new URL("./move-node-cases.json", import.meta.url), "utf8"));
+const CASES = JSON.parse(readFileSync(new URL("../spec/workspace/move-node.cases.json", import.meta.url), "utf8"));
 
 function seeded() {
   let project = createProject("X");
