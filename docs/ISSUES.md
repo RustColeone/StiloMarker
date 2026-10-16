@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-14 · release `v0.1.30` (deployed; public verification passed)
+Last updated: 2026-10-14 · release `v0.1.31`
 
 ---
 
@@ -30,6 +30,24 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.31: restructure steps 1 and 2 (guard rails, kernel, Shell, Transport)
+
+The module restructure decided on 2026-10-16 (docs/ARCHITECTURE.md) began.
+No feature changes; what users can notice is that the menus are now drawn
+by the Shell module from registered commands (same items, same order).
+
+- **Guard rails.** `tests/structure` checks the eight architecture rules;
+  today's violations are recorded in a baseline that may only shrink. The
+  shared mention table was found to be run by the browser only; the
+  server's half now runs it too. `protocol/legacy.contract.json` records
+  every operation and event in use and is checked against the code.
+- **Kernel** on both ends, **Shell** in the browser (commands, menus,
+  the Mod+S shortcut, dialogs, toasts) and **Transport** on the server (the
+  route table that replaced 49 if-routes, CORS, JSON responses, errors to
+  status codes).
+- Fixed on the way: a malformed shortcut ("Mod+") was accepted; a
+  `KeyError` in a new-style route would have been reported as 404.
 
 ### v0.1.30: the account file is re-read when it changes; a broken one keeps the last good accounts
 
