@@ -7,8 +7,7 @@ import { rememberedWorkspace, createSessionRecovery } from "./services/session-r
 import { installMobileViewport } from "./services/chat-ui-service.js";
 import { snapshotProject, savedFileIds } from "./services/project-save-service.js";
 import { APP_VERSION } from "./version.js";
-import { ROOT_ID, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isBmapFileName, isImageFileName, isMarkdownFileName, isPersonaFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
-import { createProjectController, seedDefaultProject } from "./domain/project-service.js";
+import { ROOT_ID, seedDefaultProject, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isBmapFileName, isImageFileName, isMarkdownFileName, isPersonaFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
 import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
 import { supportsOpfs, listOpfsDir, mkdirOpfs, createProjectOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs, deleteOpfsEntry, exportProjectModelOpfs, importProjectModelOpfs } from "./services/opfs-service.js";
 import { createCollaborationRuntime } from "./services/collaboration-service.js";
@@ -288,7 +287,7 @@ const { shell, workspace } = modules;
 
 const settings = loadSettings();
 const storedProject = loadProject();
-const controller = createProjectController(storedProject ?? seedDefaultProject());
+const controller = workspace.openProject(storedProject ?? seedDefaultProject());
 let sourceOpenTabIds = controller.getProject().activeFileId ? [controller.getProject().activeFileId] : [];
 let previewOpenTabIds = controller.getProject().activeFileId ? [controller.getProject().activeFileId] : [];
 let previewFileId = controller.getProject().activeFileId ?? null;

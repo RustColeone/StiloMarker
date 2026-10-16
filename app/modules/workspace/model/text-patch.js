@@ -62,10 +62,16 @@ export function transformTextPatch(op, applied, insertAfter = false) {
   return shift(b <= start ? delta : 0);
 }
 
-export function applyTextPatch(content, op) {
-  if (op.start < 0 || op.end < op.start || op.end > content.length
-      || content.slice(op.start, op.end) !== String(op.removedText ?? "")) {
+// Applies a patch. The removed text must match, unless skipConflictCheck
+// (a patch rebased over local typing legitimately covers different text; the
+// sync runtime checks it strictly before that).
+export function applyTextPatch(content, op, { skipConflictCheck = false } = {}) {
+  const start = Number(op.start), end = Number(op.end);
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || end > content.length) {
+    throw new Error("Invalid text patch range");
+  }
+  if (!skipConflictCheck && content.slice(start, end) !== String(op.removedText ?? "")) {
     throw new Error("Text patch no longer matches its document");
   }
-  return content.slice(0, op.start) + op.text + content.slice(op.end);
+  return content.slice(0, start) + String(op.text ?? "") + content.slice(end);
 }

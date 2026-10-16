@@ -19,14 +19,14 @@ export class StaleWriteError extends Error {
   }
 }
 
-// ports.read(path)                      -> { content } | null
+// read(path) -> { content } | null       the project's file (from the module)
 // ports.commit(path, previous, next, source)   update the text and send the patch
 // ports.replace(operation, source)           replace a binary file whole
-export function createWriter({ types, emit }) {
+export function createWriter({ types, emit, read }) {
   let ports = null;
 
   function attach(implementation) {
-    for (const name of ["read", "commit", "replace"]) {
+    for (const name of ["commit", "replace"]) {
       if (typeof implementation?.[name] !== "function") throw new Error(`workspace ports need ${name}()`);
     }
     ports = implementation;
@@ -36,7 +36,7 @@ export function createWriter({ types, emit }) {
   // when the file does not exist.
   async function write(path, text, { base, source = "app" } = {}) {
     if (!ports) throw new Error("The workspace is not ready yet");
-    const file = ports.read(path);
+    const file = read(path);
     if (!file) throw new Error(`No file at ${path}`);
     const current = file.content ?? "";
     if (types.isImage(path)) {
@@ -60,14 +60,14 @@ export function createWriter({ types, emit }) {
 
   // Would this write still fit? (For a review card, before anyone presses Keep.)
   function fits(path, text, base) {
-    const file = ports?.read(path);
+    const file = read(path);
     if (!file) return false;
     const current = file.content ?? "";
     return base === undefined || base === current || placeHunks(diffHunks(base, text), base, current) !== null;
   }
 
   function patchOperation(path, text, baseRevision) {
-    const file = ports?.read(path);
+    const file = read(path);
     if (!file) throw new Error(`No file at ${path}`);
     return buildTextPatch(path, file.content ?? "", text, baseRevision);
   }

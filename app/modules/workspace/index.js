@@ -1,6 +1,6 @@
-// Workspace: owns how files change. This first part of the module is the one
-// write path; the project tree and operations move here in later steps
-// (docs/ARCHITECTURE.md).
+// Workspace: owns the project (its tree of folders and files, the operations
+// that change it) and how files change (the one write path). Saving the
+// project and syncing it are other modules' jobs (docs/ARCHITECTURE.md).
 //
 // API:
 //   write(path, text, { base?, source? }) -> Promise<{ changed, text }>
@@ -16,25 +16,44 @@
 //       text file's whole-file update becomes a patch (null if nothing changes)
 //   isStale(error) -> boolean
 //   events.on("written", ({ path, source }) => …)
-//   attach(ports)   for code from before the restructure, which still holds
-//                   the project: { read(path), commit(path, previous, next, source),
-//                   replace(operation, source) }
+//   openProject(project) -> the project store (once): getProject(), subscribe(),
+//                   getActiveFile(), and the changes (updateContent, applySyncOperation…)
+//   project()       -> that store
+//   attach(ports)   for code from before the restructure, which still edits and
+//                   syncs: { commit(path, previous, next, source), replace(operation, source) }
+// Static, for code from before the restructure: the pure project model
+// (applySyncOperation, getPath, isImageFileName…), seedDefaultProject, and
+// the text-patch rules.
 import { defineModule } from "../../kernel/index.js";
 import { createWriter, StaleWriteError } from "./service/writer.js";
+import { createProjectController } from "./service/project-store.js";
+import { getNodeByPath } from "./model/project.js";
 
-// The text-patch rules, for code from before the restructure (the sync
-// runtime) that builds and rebases patches itself. Pure.
-export { applyTextPatch, buildTextPatch, transformTextPatch } from "./model/text-patch.js";
+export * from "./model/project.js";
+export { seedDefaultProject } from "./service/project-store.js";
+export { buildTextPatch, transformTextPatch } from "./model/text-patch.js";
 
 export default defineModule({
   name: "workspace",
   level: 2,
   uses: ["file-types"],
-  owns: { events: ["written"], names: ["operation update-file", "operation patch-file"] },
+  owns: { events: ["written"], names: ["operation update-file", "operation patch-file", "operation replace-project"] },
   start(ctx) {
     const events = ctx.emitter();
-    const writer = createWriter({ types: ctx.use("file-types"), emit: events.emit });
+    let store = null;
+    const read = (path) => {
+      const node = store ? getNodeByPath(store.getProject(), path) : null;
+      return node?.kind === "file" ? { content: node.content ?? "" } : null;
+    };
+    const writer = createWriter({ types: ctx.use("file-types"), emit: events.emit, read });
+    function openProject(project) {
+      if (store) throw new Error("The workspace already has a project open; use project().replaceProject()");
+      store = createProjectController(project);
+      return store;
+    }
     return {
+      openProject,
+      project: () => store,
       write: writer.write,
       patchOperation: writer.patchOperation,
       asPatch: writer.asPatch,

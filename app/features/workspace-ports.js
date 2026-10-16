@@ -9,21 +9,12 @@
 // in the project, and the change is sent as a text patch through the same
 // queue typing uses. replace(): Workspace hands over the operation that
 // replaces a binary file (an image) whole; this applies and sends it.
-import { getNodeByPath, getNodeIdByPath } from "../domain/project-model.js";
+import { getNodeIdByPath } from "../domain/project-model.js";
 
 export function createWorkspacePorts(app) {
-  const fileAt = (path) => {
-    const node = getNodeByPath(app.controller.getProject(), path);
-    return node?.kind === "file" ? node : null;
-  };
   const synced = () => app.collaboration.isConnected() && app.workspaceMode === "synced";
 
   return {
-    read(path) {
-      const node = fileAt(path);
-      return node ? { content: node.content ?? "" } : null;
-    },
-
     commit(path, previous, next, source) {
       const project = app.controller.getProject();
       const id = getNodeIdByPath(project, path);

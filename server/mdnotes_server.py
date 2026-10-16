@@ -1390,11 +1390,6 @@ class ChatProxy:
         }
 
 
-def is_image_name(name: str) -> bool:
-    """Image or not: the File types module decides (protocol/file-types.json)."""
-    return FILE_TYPES.is_image(name)
-
-
 class CollaborationBroker:
     def __init__(self, pin: str, state_file: Path | None, master_pin: str | None = None,
                  workspace_dir: Path | None = None):
@@ -1497,7 +1492,7 @@ class CollaborationBroker:
             return
         path = self._abs_path(node_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        if is_image_name(node.get("name", "")):
+        if FILE_TYPES.is_image(node.get("name", "")):
             data = self._decode_data_url(node.get("content", ""))
             if data is not None:
                 _atomic_write(path, data)
@@ -1521,7 +1516,7 @@ class CollaborationBroker:
         adopting a whole project, e.g. a publish/replace-project)."""
         nodes = project.get("nodes", {})
         for node_id, node in nodes.items():
-            if node.get("kind") == "file" and is_image_name(node.get("name", "")):
+            if node.get("kind") == "file" and FILE_TYPES.is_image(node.get("name", "")):
                 data = self._decode_data_url(node.get("content", ""))
                 if data is not None:
                     # Compute path within this project (not yet self.project).
@@ -1638,7 +1633,7 @@ class CollaborationBroker:
         self._path_change_floor = self.revision  # in-memory map is empty after a load
         # Re-hydrate text content from real files; leave images empty (served by URL).
         for node_id, node in self.project.get("nodes", {}).items():
-            if node.get("kind") != "file" or is_image_name(node.get("name", "")):
+            if node.get("kind") != "file" or FILE_TYPES.is_image(node.get("name", "")):
                 continue
             path = self._abs_path(node_id)
             node["content"] = path.read_text(encoding="utf-8") if path.exists() else ""
@@ -1676,7 +1671,7 @@ class CollaborationBroker:
         # journal must contain their bytes too, so a crash halfway through a
         # rename/swap never makes recovery depend on an already-deleted source.
         for node_id, node in project.get("nodes", {}).items():
-            if node.get("kind") != "file" or not is_image_name(node.get("name", "")):
+            if node.get("kind") != "file" or not FILE_TYPES.is_image(node.get("name", "")):
                 continue
             if self._decode_data_url(node.get("content", "")) is not None:
                 continue
@@ -1710,7 +1705,7 @@ class CollaborationBroker:
                 dest.mkdir(parents=True, exist_ok=True)
                 _fsync_directory(dest.parent)
                 continue
-            if is_image_name(node.get("name", "")):
+            if FILE_TYPES.is_image(node.get("name", "")):
                 data = self._decode_data_url(node.get("content", ""))
                 if data is not None:
                     _atomic_write(dest, data)
@@ -1998,6 +1993,8 @@ class CollaborationBroker:
                 raise ValueError(f"Parent path not found: {parent_path}")
             if self._find_child_by_name(parent_id, operation["name"]):
                 raise ValueError("create conflict: a file or folder with that name already exists")
+            if not FILE_TYPES.is_known(operation["name"]):  # as the browser refuses it: peers could not apply it
+                raise ValueError(f"Unsupported file type: {operation['name']}")
             node = {
                 "id": self._create_id("file"),
                 "kind": "file",
@@ -2011,7 +2008,7 @@ class CollaborationBroker:
                 "lastEditAt": 0,
             }
             self._append_node(parent_id, node)
-            if self.workspace_dir is not None and is_image_name(node["name"]):
+            if self.workspace_dir is not None and FILE_TYPES.is_image(node["name"]):
                 operation["content"] = ""
             return
 
@@ -2023,6 +2020,8 @@ class CollaborationBroker:
             sibling = self._find_child_by_name(node["parentId"], operation["name"])
             if sibling and sibling["id"] != node_id:
                 raise ValueError("rename conflict: a file or folder with that name already exists")
+            if node["kind"] == "file" and not FILE_TYPES.is_known(operation["name"]):
+                raise ValueError(f"Unsupported file type: {operation['name']}")
             node["name"] = operation["name"]
             return
 
@@ -2129,7 +2128,7 @@ class CollaborationBroker:
             node["content"] = operation.get("content", "")
             node["dirty"] = False
             operation["counters"] = self._bump_edit_counters(node)
-            if self.workspace_dir is not None and is_image_name(node["name"]):
+            if self.workspace_dir is not None and FILE_TYPES.is_image(node["name"]):
                 operation["content"] = ""
             return
 
@@ -3396,7 +3395,7 @@ class WorkspaceRegistry:
                 continue
             content = node.get("content") or ""
             raw = None
-            if is_image_name(node.get("name", "")):
+            if FILE_TYPES.is_image(node.get("name", "")):
                 data = broker._decode_data_url(content) if content else None
                 if data is not None:
                     raw = data
@@ -3407,7 +3406,7 @@ class WorkspaceRegistry:
             else:
                 raw = str(content).encode("utf-8")
             if len(raw) <= self.BACKUP_MAX_FILE_BYTES:
-                files.append((path, raw, is_image_name(node.get("name", ""))))
+                files.append((path, raw, FILE_TYPES.is_image(node.get("name", ""))))
         return revision, sorted(folders), sorted(files, key=lambda item: item[0])
 
     def backup_workspace(self, team, relpath, kind="daily", label="", now=None):
@@ -4102,8 +4101,8 @@ class WorkspaceRegistry:
             node_id = ChatProxy._get_node_id_by_path_in(project, path)
             node = project.get("nodes", {}).get(node_id) if node_id else None
             if node and node.get("kind") == "file":
-                context_files.append({"path": path, "kind": "image" if is_image_name(node.get("name", "")) else "text",
-                                      "content": "" if is_image_name(node.get("name", "")) else node.get("content", "")})
+                context_files.append({"path": path, "kind": "image" if FILE_TYPES.is_image(node.get("name", "")) else "text",
+                                      "content": "" if FILE_TYPES.is_image(node.get("name", "")) else node.get("content", "")})
         header = persona_header(character["content"])["header"]
         return {"store": store, "project": project, "character": character, "transcript": transcript, "cast": cast,
                 "context_files": context_files,
@@ -4245,7 +4244,7 @@ class WorkspaceRegistry:
             project = copy.deepcopy(broker.project)
         # Inline image bytes as data: URLs so the payload is self-contained.
         for node_id, node in project.get("nodes", {}).items():
-            if node.get("kind") == "file" and is_image_name(node.get("name", "")):
+            if node.get("kind") == "file" and FILE_TYPES.is_image(node.get("name", "")):
                 rel = broker._path_in(project, node_id)
                 fpath = (proj / rel) if rel else None
                 if fpath and fpath.is_file():

@@ -6,10 +6,10 @@
     "app/features/cloud-browser.js": 1004,
     "app/features/file-actions.js": 1234,
     "app/features/panes.js": 1048,
-    "app/main.js": 4748,
+    "app/main.js": 4747,
     "app/services/collaboration-service.js": 1107,
     "app/ui/bmap-view.js": 4025,
-    "server/mdnotes_server.py": 6459
+    "server/mdnotes_server.py": 6458
   },
   "spellings": {
     "file type .bmap": [],
@@ -21,17 +21,14 @@
       "server/openai_support.py"
     ],
     "operation patch-file": [
-      "app/domain/project-model.js",
       "app/main.js",
       "app/services/collaboration-service.js",
       "server/mdnotes_server.py"
     ],
     "operation replace-project": [
-      "app/domain/project-model.js",
       "server/mdnotes_server.py"
     ],
     "operation update-file": [
-      "app/domain/project-model.js",
       "app/features/chat-panel.js",
       "app/features/workspace-history.js",
       "app/main.js",
@@ -44,5 +41,5 @@
       "server/mdnotes_server.py"
     ]
   },
-  "uncoveredTwins": 5
+  "uncoveredTwins": 3
 }

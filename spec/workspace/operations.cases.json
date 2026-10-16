@@ -1,0 +1,305 @@
+{
+  "about": "Applying operations to a project, which the browser (applySyncOperation) and the server (CollaborationBroker._apply_operation) both do. Each case starts from an empty project named W, applies `ops` in order, and expects the tree (folders end in '/', files are 'path=content', in tree order) or, with `error`, that the last operation is refused. Run by tests/operations-parity.test.mjs and tests/operations-parity.test.py. A patch's removed text is checked by the server when it applies it, and by the browser's sync runtime before it applies a remote patch (the browser's apply itself skips the check, because a patch rebased over local typing legitimately covers different text); the browser half runs that same check.",
+  "cases": [
+    {
+      "name": "folders and files, in creation order",
+      "ops": [
+        {
+          "type": "create-folder",
+          "parentPath": "",
+          "name": "Notes"
+        },
+        {
+          "type": "create-file",
+          "parentPath": "Notes",
+          "name": "a.md",
+          "content": "alpha"
+        },
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "b.md",
+          "content": ""
+        }
+      ],
+      "tree": [
+        "Notes/",
+        "Notes/a.md=alpha",
+        "b.md="
+      ]
+    },
+    {
+      "name": "a duplicate name is refused",
+      "ops": [
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "a.md",
+          "content": "1"
+        },
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "a.md",
+          "content": "2"
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "a file in a missing folder is refused",
+      "ops": [
+        {
+          "type": "create-file",
+          "parentPath": "Nowhere",
+          "name": "a.md",
+          "content": ""
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "renaming a folder carries its files",
+      "ops": [
+        {
+          "type": "create-folder",
+          "parentPath": "",
+          "name": "Old"
+        },
+        {
+          "type": "create-file",
+          "parentPath": "Old",
+          "name": "x.md",
+          "content": "x"
+        },
+        {
+          "type": "rename-node",
+          "path": "Old",
+          "name": "New"
+        }
+      ],
+      "tree": [
+        "New/",
+        "New/x.md=x"
+      ]
+    },
+    {
+      "name": "renaming onto an existing name is refused",
+      "ops": [
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "a.md",
+          "content": ""
+        },
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "b.md",
+          "content": ""
+        },
+        {
+          "type": "rename-node",
+          "path": "a.md",
+          "name": "b.md"
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "deleting a folder deletes what is inside",
+      "ops": [
+        {
+          "type": "create-folder",
+          "parentPath": "",
+          "name": "F"
+        },
+        {
+          "type": "create-file",
+          "parentPath": "F",
+          "name": "in.md",
+          "content": ""
+        },
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "out.md",
+          "content": "o"
+        },
+        {
+          "type": "delete-node",
+          "path": "F"
+        }
+      ],
+      "tree": [
+        "out.md=o"
+      ]
+    },
+    {
+      "name": "deleting a missing path changes nothing",
+      "ops": [
+        {
+          "type": "delete-node",
+          "path": "ghost.md"
+        }
+      ],
+      "tree": []
+    },
+    {
+      "name": "a whole-file update replaces the text",
+      "ops": [
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "a.md",
+          "content": "old"
+        },
+        {
+          "type": "update-file",
+          "path": "a.md",
+          "content": "new text",
+          "baseRevision": 0
+        }
+      ],
+      "tree": [
+        "a.md=new text"
+      ]
+    },
+    {
+      "name": "a text patch replaces the span it names",
+      "ops": [
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "a.md",
+          "content": "one two three"
+        },
+        {
+          "type": "patch-file",
+          "path": "a.md",
+          "start": 4,
+          "end": 7,
+          "removedText": "two",
+          "text": "2",
+          "baseRevision": 0
+        }
+      ],
+      "tree": [
+        "a.md=one 2 three"
+      ]
+    },
+    {
+      "name": "patch offsets count UTF-16 units, so an emoji is two",
+      "ops": [
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "a.md",
+          "content": "🙂x"
+        },
+        {
+          "type": "patch-file",
+          "path": "a.md",
+          "start": 2,
+          "end": 3,
+          "removedText": "x",
+          "text": "y",
+          "baseRevision": 0
+        }
+      ],
+      "tree": [
+        "a.md=🙂y"
+      ]
+    },
+    {
+      "name": "a patch whose removed text does not match is refused",
+      "ops": [
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "a.md",
+          "content": "one two"
+        },
+        {
+          "type": "patch-file",
+          "path": "a.md",
+          "start": 0,
+          "end": 3,
+          "removedText": "ONE",
+          "text": "1",
+          "baseRevision": 0
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "a patch to a missing file is refused",
+      "ops": [
+        {
+          "type": "patch-file",
+          "path": "ghost.md",
+          "start": 0,
+          "end": 0,
+          "removedText": "",
+          "text": "x",
+          "baseRevision": 0
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "moving a file into a folder",
+      "ops": [
+        {
+          "type": "create-folder",
+          "parentPath": "",
+          "name": "F"
+        },
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "a.md",
+          "content": "a"
+        },
+        {
+          "type": "move-node",
+          "path": "a.md",
+          "parentPath": "F"
+        }
+      ],
+      "tree": [
+        "F/",
+        "F/a.md=a"
+      ]
+    },
+    {
+      "name": "a file type the app does not know is refused",
+      "ops": [
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "notes.txt",
+          "content": ""
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "renaming a file to a type the app does not know is refused",
+      "ops": [
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "a.md",
+          "content": ""
+        },
+        {
+          "type": "rename-node",
+          "path": "a.md",
+          "name": "a.txt"
+        }
+      ],
+      "error": true
+    }
+  ]
+}
