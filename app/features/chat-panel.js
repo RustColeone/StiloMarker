@@ -20,6 +20,10 @@ import { normalizeServerUrl } from "../services/sync-service.js";
 import { query } from "../ui/dom.js";
 
 export function createChatPanel(deps) {
+  // Who asked for an agent batch: this tab while it is open (not the sync client id,
+  // which changes on every reconnect and locked the asker out of Keep and Drop).
+  const TAB_ID = globalThis.crypto?.randomUUID?.() ?? `tab-${Math.random().toString(36).slice(2)}`;
+  const isOwnBatch = (message) => !message.originatorId || message.originatorId === TAB_ID;
   const {
     cloudWorkspaceTarget,
     agentCheckpoints, agentPendingDecorations, buildTextDiffHunks, captureAgentCheckpoint,
@@ -615,7 +619,7 @@ export function createChatPanel(deps) {
               ).join("")
             }</div>`
           : "";
-        const isOriginator = !message.originatorId || message.originatorId === collaboration.getClientId();
+        const isOriginator = isOwnBatch(message);
         const proposalCardHtml = message.role === "assistant" && message.proposedOperations?.length
           ? renderProposalCard(message, isOriginator)
           : "";
@@ -1203,8 +1207,7 @@ export function createChatPanel(deps) {
     chatState.abortController = new AbortController();
     const turn = { key: chatWorkspaceKey(project), threadId: thread.id,
       token: chatConnectionInfo()?.token, controller: chatState.abortController,
-      baseRevision: collaboration.getRevision(),
-      clientId: collaboration.getClientId() };
+      baseRevision: collaboration.getRevision() };
     chatState.turn = turn;
     const current = () => chatState.turn === turn && chatWorkspaceKey() === turn.key
       && chatConnectionInfo()?.token === turn.token;
@@ -1292,7 +1295,7 @@ export function createChatPanel(deps) {
         msgExtra.batchId = response.batchId ?? null;
         msgExtra.baseRevision = turn.baseRevision;
         msgExtra.proposalState = "pending";
-        msgExtra.originatorId = turn.clientId ?? null;
+        msgExtra.originatorId = TAB_ID;
       }
       const assistantMessage = createChatMessage("assistant", response.message, msgExtra);
       thread.messages.push(assistantMessage);
@@ -1416,13 +1419,8 @@ export function createChatPanel(deps) {
         op.proposalState = "stale"; continue;
       }
       if (op.type === "update-file") {
-        try {
-          await workspace.write(op.path, op.content, { base: op.preImage, source: "assistant" });
-          op.proposalState = "accepted";
-        } catch {
-          op.proposalState = "stale";
-          unplaced += 1;
-        }
+        try { await workspace.write(op.path, op.content, { base: op.preImage, source: "assistant" }); op.proposalState = "accepted"; }
+        catch { op.proposalState = "stale"; unplaced += 1; }
         continue;
       }
       const { proposalId, preImage, proposalState, generatedImage, ...cleanOp } = op;
@@ -1673,6 +1671,6 @@ export function createChatPanel(deps) {
     receiveChatEvent,
     receiveChatWorkspace, renderChatPanel, refreshChatStatus, findBatchMessage,
     remapPersonaPaths, applyAgentSettingsStatus, ensureChatWorkspaceLoaded, chatState,
-    mcpControls
+    mcpControls, isOwnBatch
   };
 }

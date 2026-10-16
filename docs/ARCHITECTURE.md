@@ -39,7 +39,7 @@ This file is the short reference that the structure tests enforce.
 
 Arrows are "uses": a module calls only the modules it points at, always on a
 lower level. News travels the other way, as events or extension points, so it
-needs no arrow. Green modules exist (as of v0.1.33); the rest are still legacy
+needs no arrow. Green modules exist (as of v0.1.34); the rest are still legacy
 code. Modules marked *both* have a browser half and a server half that share a
 model and a contract.
 
