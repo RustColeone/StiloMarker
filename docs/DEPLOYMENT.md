@@ -743,3 +743,23 @@ Python suites, the backend self-test, seventeen browser suites.
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T122456Z-v0.1.45`.
 Nine project manifests valid, 171/171 files.
+
+## Verified release: v0.1.46
+
+Deployed on 2026-10-17 at 12:45 UTC. Module restructure step 7g-1: the
+Editor module (the source editor split into six parts sharing one editor
+object; highlighting, find and replace, autocomplete, links, the formatting
+toolbar, table picker and Markdown renderer); the comments popover moved
+into Comments. App version `0.1.46`; sync compatibility unchanged at `117`.
+
+Public checks: ping (`0.1.46`), no errors in the journal. Live, in a headless
+browser signed in as `test`, in a throwaway project in team red (deleted
+afterwards): text typed with the keyboard at the end of a line reached the
+server; Ctrl+Z took back the last character; with the editor focused,
+Ctrl+F opened the find bar and found the one match; no page errors.
+Validation: 225 Node tests, all Python suites, the backend self-test,
+seventeen browser suites (including typing, caret and mobile-caret, whose
+per-key churn budget still holds).
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T124522Z-v0.1.46`.
+Nine project manifests valid, 171/171 files.
