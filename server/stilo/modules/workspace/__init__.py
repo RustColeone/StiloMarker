@@ -12,7 +12,7 @@ from .adapters.files import atomic_write, decode_data_url, fsync_directory  # no
 from .adapters.folder_store import FolderStore  # noqa: F401
 from .model.text import utf16_index, utf16_length  # noqa: F401
 from .model.tree import (append_node, create_id, default_project, find_child_by_name,  # noqa: F401
-                         node_id_by_path, path_of, remove_node_recursive, subtree_paths)
+                         node_id_by_path, path_of, remove_node_recursive, subtree_paths, update_file_operation)
 
 
 def start(ctx):

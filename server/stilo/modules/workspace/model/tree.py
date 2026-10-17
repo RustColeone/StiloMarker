@@ -73,3 +73,11 @@ def remove_node_recursive(project: dict, node_id: str) -> None:
         for child_id in list(node.get("children", [])):
             remove_node_recursive(project, child_id)
     del project["nodes"][node_id]
+
+
+def update_file_operation(path: str, content: str, base: str | None = None, **extra) -> dict:
+    """A whole-file update as it travels; `base` is the text it was made from."""
+    operation = {"type": "update-file", "path": path, "content": content}
+    if base is not None:
+        operation["preImage"] = base
+    return {**operation, **extra}

@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-16 · release `v0.1.36` (deployed; public verification passed)
+Last updated: 2026-10-16 · release `v0.1.37`
 
 ---
 
@@ -30,6 +30,28 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.37: restructure step 6 (Assistant): the agent edits passages, not whole files
+
+The agent has a new tool, `edit_file`: it names exact passages of a file and
+what each becomes, and everything else stays exactly as the author wrote it.
+Before, every change to an existing file meant the model retyping the whole
+file, so a one-line fix to a long character sheet could quietly reword other
+lines and took as long as writing the file.
+
+- Each passage must occur exactly once and edits may not overlap; otherwise
+  the server tells the model which edit failed and why (several matches, not
+  found, overlapping), and it retries. Edits in one turn build on each other.
+- The proposal travels as a whole-file update with the text it started from
+  and its list of edits, so older tabs still apply it, and the browser places
+  it into the file as it is now (the write path): it merges with whatever
+  anyone typed meanwhile, and Drop undoes only it.
+- The review card shows each edit as the text that goes and the text that
+  comes ("1 edit"), not a diff of the whole file.
+- The agent is told to prefer `edit_file` for any change smaller than most of
+  a file, and always for character files; the manual's character update rules
+  say so.
+- The agent's tool definitions moved into the server's Assistant module.
 
 ### v0.1.36: restructure step 5 (Characters): author's notes and hidden plans
 

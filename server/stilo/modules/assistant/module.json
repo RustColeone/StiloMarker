@@ -1,0 +1,6 @@
+{
+  "name": "assistant",
+  "level": 5,
+  "uses": ["file_types", "workspace", "characters"],
+  "owns": { "tools": ["edit_file"] }
+}
