@@ -611,3 +611,25 @@ fix), the backend self-test, sixteen browser suites.
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T060232Z-v0.1.39`.
 Nine project manifests valid, 170/170 files.
+
+## Verified release: v0.1.40
+
+Deployed on 2026-10-17 at 07:18 UTC. Module restructure step 7c-1: Sync on
+the server (sessions and roles, presence, leases, event streams, the rebase
+log, one path for every change) and Workspace's pure operations and open
+project; revert-to-revision removed. App version `0.1.40`; sync
+compatibility unchanged at `117`.
+
+Public checks: ping (`0.1.40`), the journal shows the kernel starting sync,
+no errors. Live, with `test` and `test1` in a throwaway project in team red
+(deleted afterwards): both opened it, `test` created a note, both patched it
+from the same revision (one at the start, one at the end); the text merged
+to ">> hello world!", `test1`'s patch was rebased to offset 14, and `test1`'s
+event stream received ready, then both operations in revision order. A
+whole-file write from the older revision was refused (409). The real
+red/Novel project opened with all 27 files (about 300,000 characters).
+Validation: 220 Node tests (new: the shared rebase cases), all Python suites
+(new: `sync`), the backend self-test, sixteen browser suites.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T071809Z-v0.1.40`.
+Nine project manifests valid, 170/170 files.
