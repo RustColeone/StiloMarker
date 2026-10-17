@@ -9,7 +9,7 @@ test("required workspace files exist", () => {
   const requiredFiles = [
     "index.html",
     "app/main.js",
-    "app/services/collaboration-service.js",
+    "app/modules/sync/service/runtime.js",
     "app/services/file-content-service.js",
     "app/services/mtree-module-map-service.js",
     "app/services/urldb-service.js",
@@ -180,8 +180,10 @@ test("chat-api-service.js exposes generation request", async () => {
   assert.match(chatApiSource, /\/api\/generate/);
 });
 
-test("collaboration-service.js wires transport and OT", async () => {
-  const collaborationSource = await readFile(resolveFromRoot("app/services/collaboration-service.js"), "utf8");
+test("the sync runtime wires transport and OT", async () => {
+  const collaborationSource = await readFile(resolveFromRoot("app/modules/sync/service/runtime.js"), "utf8")
+    + await readFile(resolveFromRoot("app/modules/sync/model/rebase.js"), "utf8")
+    + await readFile(resolveFromRoot("app/modules/sync/service/patches.js"), "utf8");
   const symbols = [
     /publishOperation/,
     /openEventStream/,
@@ -189,7 +191,7 @@ test("collaboration-service.js wires transport and OT", async () => {
     /reloadFromServer/,
     /baseRevision/,
     /localRevision/,
-    /inFlightPatches/,
+    /inFlight/,
     /transformTextPatch/,
     /scheduleAwareness/,
     /getRole/,
@@ -208,7 +210,10 @@ test("backend exposes collaboration + OT endpoints", async () => {
   // Sharing a workspace live is the Sync module's (step 7c).
   const backendSource = await readFile(resolveFromRoot("server/mdnotes_server.py"), "utf8")
     + await readFile(resolveFromRoot("server/stilo/modules/sync/service/shared.py"), "utf8")
-    + await readFile(resolveFromRoot("server/stilo/modules/sync/model/rebase.py"), "utf8");
+    + await readFile(resolveFromRoot("server/stilo/modules/sync/model/rebase.py"), "utf8")
+    + await readFile(resolveFromRoot("server/stilo/modules/sync/adapters/routes.py"), "utf8")
+    + await readFile(resolveFromRoot("server/stilo/modules/sync/__init__.py"), "utf8")
+    + await readFile(resolveFromRoot("tests/backend-selftest.py"), "utf8");
   const symbols = [
     /api\/events\/stream/,
     /api\/operations/,

@@ -29,7 +29,9 @@ This file is the short reference that the structure tests enforce.
   never touches the page; adapters reach the page only once started.
 - **Between the ends**: each module's network messages live in
   `protocol/<module>.contract.json` with their own version (Identity's was
-  the first, in v0.1.38). Until a module takes its share, everything is in
+  the first, in v0.1.38). Sync's version is the old single sync number (117):
+  both ends read it from `protocol/sync.contract.json`, and other modules'
+  events ride Sync's stream. What no module has taken yet is in
   `protocol/legacy.contract.json`.
 - **Why Identity and Models sit on level 2** (changed 2026-10-17; the design
   had them on level 1): they need the frame below them, Transport for their
@@ -45,7 +47,7 @@ This file is the short reference that the structure tests enforce.
 
 Arrows are "uses": a module calls only the modules it points at, always on a
 lower level. News travels the other way, as events or extension points, so it
-needs no arrow. Green modules exist (as of v0.1.40; Sync's browser half is still legacy); the rest are still legacy
+needs no arrow. Green modules exist (as of v0.1.41); the rest are still legacy
 code. Modules marked *both* have a browser half and a server half that share a
 model and a contract.
 
@@ -229,8 +231,8 @@ refuses to record anything new.
 | 7a | Identity and access on both ends: accounts and the account file, sign-in tokens, who may open a project and in what role (`can(role, action)`), per-account preferences; in the browser the signed-in account and its stored sign-in. Shell gains the server connection. Identity's routes get the first module contract | done |
 | 7b | Models: the providers (DeepSeek or another OpenAI-compatible endpoint, OpenAI, a user's own key), which models are offered and what each request carries, both streams (chat completions and the Responses API), image generation and generated images, MCP connections; in the browser a model called straight from the browser and the picker's grouping. A request gets an explicit route instead of provider fields on shared state | done |
 | 7c-1 | Sync on the server: sessions and roles, presence, leases, event streams, the rebase log; every change checked against its revision before Workspace applies it. Workspace gains the pure `apply_operation`, the open project (`LiveProject`) and the one-file store. The last uncovered twin (rebasing a text patch) gets its case table. Dead code removed: revert-to-revision with its 40 project copies per workspace, the folder wipe | done |
-| 7c-2 | Sync in the browser (the collaboration runtime and its server calls), Sync's routes, and a sync contract with its own version in place of 117 | next |
-| 7d | History: snapshots, backups, restore (through `write`) | |
+| 7c-2 | Sync in the browser (the collaboration runtime, split into the runtime, the patch queue and pure rules; its server calls), Sync's routes on the server (Transport gained stream routes and refusals with a status), and `protocol/sync.contract.json` with the sync version both ends read. The backend self-test moved out of `mdnotes_server.py` into `tests/backend-selftest.py` | done |
+| 7d | History: snapshots, backups, restore (through `write`) | next |
 | 7e | Comments: line comments and their anchors | |
 | 7f | Chats: conversations, members, notes, search, the reply queue | |
 | 7g | Editor (browser): the source editor, preview, tabs within panes, find and replace | |
@@ -274,6 +276,13 @@ refuses to record anything new.
   types)`, which only changes the tree. Operation names are Workspace's
   (`PATCH_FILE`, `UPDATE_FILE`, `REPLACE_PROJECT`); the paths an operation
   touches are `touched_paths(operation)`.
+- Server routes that answer with their own status: raise
+  `transport.Refusal(status, payload)` (Sync's 409 conflicts, 426 out-of-date
+  tabs, 503 storage). A server-sent event stream is
+  `transport.add_stream_route(method, path, run)`.
+- Events of your own on the live stream: the server broadcasts through the
+  shared workspace; in the browser, Sync hands every event it does not own to
+  the runtime's `onEvent(event, { ownClientId })`.
 - A module's network messages: list each route in
   `protocol/<module>.contract.json`. The structure test checks that the
   server half serves exactly those and that nothing outside the module calls

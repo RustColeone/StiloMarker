@@ -186,7 +186,7 @@ class PersonaTurnTests(unittest.TestCase):
         self.assertIn(b'"type": "result"', b''.join(written))
 
     def test_stale_tabs_are_refused(self):
-        self.assertEqual(server.MIN_CLIENT_VERSION, 117)
+        self.assertEqual(server.SYNC_LEVEL, 117)
         handler = object.__new__(server.MDNotesRequestHandler)
         results = []
         handler._write_json = lambda status, body: results.append((status, body))

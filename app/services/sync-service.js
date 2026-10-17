@@ -1,15 +1,6 @@
 import { dataUrlToBytes } from "./file-content-service.js";
 
-import { SYNC_PROTOCOL_VERSION } from "../version.js";
 import { normalizeServerUrl, parseResponse, throwForResponse } from "../modules/shell/index.js";
-
-// The numeric wire gate deliberately stays separate from the app release label.
-// Identifies THIS page load. Sent with every workspace open so the server log can
-// tell apart the two very different causes of repeated opens: many distinct
-// pageIds means the page itself keeps reloading, while one pageId opening over and
-// over means a single tab is reconnecting (a network / stream problem).
-const PAGE_ID = `pg-${Math.random().toString(36).slice(2, 10)}`;
-const PAGE_LOADED_AT = Date.now();
 
 async function pingServer(serverUrl) {
   const baseUrl = normalizeServerUrl(serverUrl);
@@ -23,29 +14,6 @@ async function pingServer(serverUrl) {
 
   if (!response.ok) {
     await throwForResponse("Ping failed.", response);
-  }
-
-  return parseResponse(response);
-}
-
-async function connectToServer(serverUrl, pin, displayName = "") {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const trimmedPin = pin.trim();
-  if (!trimmedPin) {
-    throw new Error("PIN is required.");
-  }
-
-  const response = await fetch(`${baseUrl}/api/session/connect`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      accept: "application/json, text/plain;q=0.9"
-    },
-    body: JSON.stringify({ pin: trimmedPin, displayName: displayName.trim(), lease: true })
-  });
-
-  if (!response.ok) {
-    await throwForResponse("Connect failed.", response);
   }
 
   return parseResponse(response);
@@ -95,38 +63,6 @@ async function uploadAsset(serverUrl, token, path, dataUrl) {
     }
     offset += CHUNK;
   } while (offset < bytes.length);
-}
-
-async function hostSession(serverUrl, displayName) {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const response = await fetch(`${baseUrl}/api/session/host`, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({ displayName: String(displayName ?? "").trim(), lease: true })
-  });
-  if (!response.ok) {
-    await throwForResponse("Could not start hosting.", response);
-  }
-  return parseResponse(response);
-}
-
-async function openWorkspaceSession(serverUrl, accountToken, team, path, device, reason = "unspecified") {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const response = await fetch(`${baseUrl}/api/workspaces/open?token=${encodeURIComponent(accountToken)}`, {
-    signal: AbortSignal.timeout(15000),
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({
-      team, path, device, lease: true, version: SYNC_PROTOCOL_VERSION,
-      // Diagnostics: which code path asked, from which page load, how long that
-      // page has been alive. Enough to explain any repeated-open pattern.
-      reason, pageId: PAGE_ID, uptimeMs: Date.now() - PAGE_LOADED_AT
-    })
-  });
-  if (!response.ok) {
-    await throwForResponse("Could not open workspace.", response);
-  }
-  return parseResponse(response);
 }
 
 // ---- File-browser navigation (nested folders + per-project access) -----------
@@ -342,130 +278,12 @@ async function importProjectServer(serverUrl, accountToken, team, path, name, pr
   return parseResponse(response);
 }
 
-function sanitizeProjectForSync(project) {
-  const syncProject = structuredClone(project);
-  delete syncProject.handles;
-  delete syncProject.sourceIndex;
-  if (syncProject.sourceMode === "filesystem") {
-    syncProject.sourceMode = "memory";
-  }
-  return syncProject;
-}
-
-async function fetchSessionState(serverUrl, token) {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const response = await fetch(`${baseUrl}/api/session/state?token=${encodeURIComponent(token)}`, {
-    signal: AbortSignal.timeout(15000),
-    method: "GET",
-    headers: {
-      accept: "application/json"
-    }
-  });
-
-  if (!response.ok) {
-    await throwForResponse("State fetch failed.", response);
-  }
-
-  return parseResponse(response);
-}
-
-async function pushSessionState(serverUrl, token, project, baseRevision) {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const response = await fetch(`${baseUrl}/api/session/state?token=${encodeURIComponent(token)}`, {
-    signal: AbortSignal.timeout(15000),
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      accept: "application/json"
-    },
-    body: JSON.stringify({ project: sanitizeProjectForSync(project), baseRevision, version: SYNC_PROTOCOL_VERSION })
-  });
-
-  if (!response.ok) {
-    await throwForResponse("State push failed.", response);
-  }
-
-  return parseResponse(response);
-}
-
-async function pushOperation(serverUrl, token, operation) {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const response = await fetch(`${baseUrl}/api/operations?token=${encodeURIComponent(token)}`, {
-    signal: AbortSignal.timeout(15000),
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      accept: "application/json"
-    },
-    body: JSON.stringify({ operation, version: SYNC_PROTOCOL_VERSION })
-  });
-
-  if (!response.ok) {
-    await throwForResponse("Operation push failed.", response);
-  }
-
-  return parseResponse(response);
-}
-
-// Best-effort cursor/selection broadcast. MUST go through normalizeServerUrl like
-// pushOperation — otherwise, on a same-origin subpath deploy (serverUrl === ""),
-// a raw `${serverUrl}/api/...` becomes a root-absolute "/api/..." that skips the
-// app's base path (e.g. /stilomarker/) and never reaches the backend, silently
-// killing cursor sync while content sync keeps working.
-async function pushCursor(serverUrl, token, { fileId, selStart, selEnd }) {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const response = await fetch(`${baseUrl}/api/session/presence?token=${encodeURIComponent(token)}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ fileId, selStart, selEnd })
-  });
-  return response.ok;
-}
-
-async function renewSessionLease(serverUrl, token) {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const response = await fetch(`${baseUrl}/api/session/lease?token=${encodeURIComponent(token)}`, {
-    method: "POST", signal: AbortSignal.timeout(10000)
-  });
-  if (!response.ok) await throwForResponse("Connection check failed.", response);
-}
-
-function leaveSession(serverUrl, token) {
-  if (!token) return;
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const url = `${baseUrl}/api/session/leave?token=${encodeURIComponent(token)}`;
-  // pagehide is the last reliable callback on many phones. Beacon may still be
-  // dropped when the OS kills a tab; the server lease bounds that case.
-  if (typeof navigator !== "undefined" && navigator.sendBeacon?.(url)) return;
-  void fetch(url, { method: "POST", keepalive: true }).catch(() => {});
-}
-
-function openEventStream(serverUrl, token, onEvent, onError) {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const eventSource = new EventSource(`${baseUrl}/api/events/stream?token=${encodeURIComponent(token)}&lease=1`);
-
-  eventSource.onmessage = (event) => {
-    try {
-      onEvent(JSON.parse(event.data));
-    } catch (error) {
-      onError?.(error);
-    }
-  };
-
-  eventSource.onerror = (event) => {
-    onError?.(event);
-  };
-
-  return eventSource;
-}
-
 export {
   createWorkspaceBackup,
   getWorkspaceBackupContent,
   listWorkspaceBackupFiles,
   listWorkspaceBackups,
   browseServer,
-  connectToServer,
   createProjectServer,
   createServerSnapshot,
   createWorkspace,
@@ -473,9 +291,7 @@ export {
   deleteComment,
   deleteServerSnapshot,
   exportProjectServer,
-  fetchSessionState,
   getServerSnapshotContent,
-  hostSession,
   importProjectServer,
   listComments,
   listServerSnapshotPaths,
@@ -483,17 +299,9 @@ export {
   listWorkspaces,
   mkdirServer,
   normalizeServerUrl,
-  openEventStream,
-  openWorkspaceSession,
-  renewSessionLease,
-  leaveSession,
   pingServer,
-  pushCursor,
-  pushOperation,
-  pushSessionState,
   reanchorComments,
   saveComment,
-  sanitizeProjectForSync,
   saveUserState,
   uploadAsset
 };

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { transformTextPatch } from "../app/modules/workspace/index.js";
+import { transformTextPatch } from "../app/modules/sync/index.js";
 
 // The browser's half of spec/sync/rebase.cases.json (the server's is sync.test.py).
 const { cases } = JSON.parse(readFileSync(new URL("../spec/sync/rebase.cases.json", import.meta.url), "utf8"));

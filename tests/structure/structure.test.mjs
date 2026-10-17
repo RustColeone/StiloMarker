@@ -141,9 +141,13 @@ test("every twin rule has a shared case table that both languages run (rule 6)",
 });
 
 test("the legacy contract matches the messages the code sends and handles (rule 7)", () => {
+  // Operations and events: the legacy contract's, and each module contract's.
   const contract = json("protocol/legacy.contract.json");
-  const ops = new Set(contract.operations.types);
-  const events = new Set([...contract.workspaceEvents.types, ...contract.agentTurnEvents.types]);
+  const modules = readdirSync(join(ROOT, "protocol")).filter((f) => f.endsWith(".contract.json") && f !== "legacy.contract.json")
+    .map((f) => json(`protocol/${f}`));
+  const ops = new Set(modules.flatMap((m) => m.operations?.types ?? []));
+  const events = new Set([...contract.workspaceEvents.types, ...contract.agentTurnEvents.types,
+    ...modules.flatMap((m) => m.events?.types ?? [])]);
   const server = files.filter((f) => f.startsWith("server/") && f.endsWith(".py"));
 
   // Operations the server applies: exactly the contract's.
@@ -180,11 +184,9 @@ test("the legacy contract matches the messages the code sends and handles (rule 
   const unknownChecked = [...checked].filter((t) => !ops.has(t) && !events.has(t)).sort();
   assert.deepEqual(unknownChecked, [], "the browser handles message types that protocol/legacy.contract.json does not list");
 
-  // One protocol number, the same in all three places, until each module has its own.
-  const client = /SYNC_PROTOCOL_VERSION = (\d+)/.exec(read("app/version.js"))?.[1];
-  const floor = /MIN_CLIENT_VERSION = _read_int_env\("MDNOTES_MIN_CLIENT_VERSION", (\d+)/.exec(read("server/mdnotes_server.py"))?.[1];
-  assert.equal(Number(client), contract.version, "app/version.js and protocol/legacy.contract.json disagree on the version");
-  assert.equal(Number(floor), contract.version, "the server's MIN_CLIENT_VERSION and the contract disagree on the version");
+  // Sync's version is read from its contract on both ends (the browser's copy is
+  // checked below with the other protocol copies); nobody else writes it down.
+  assert.ok(Number.isInteger(json("protocol/sync.contract.json").version));
 });
 
 test("each module's contract lists exactly the routes it serves, and only that module calls them (rule 7)", () => {
@@ -199,12 +201,12 @@ test("each module's contract lists exactly the routes it serves, and only that m
     const listed = new Set(contract.routes.map((r) => `${r.method} ${r.path}`));
     const served = new Set();
     for (const file of files.filter((f) => f.startsWith(`${serverDir}/`))) {
-      for (const m of codeOf(file).matchAll(/add_route\(\s*"(GET|POST)",\s*"([^"]+)"/g)) served.add(`${m[1]} ${m[2]}`);
+      for (const m of codeOf(file).matchAll(/add_(?:stream_)?route\(\s*"(GET|POST)",\s*"([^"]+)"/g)) served.add(`${m[1]} ${m[2]}`);
     }
     const missing = [...listed].filter((r) => !served.has(r)), extra = [...served].filter((r) => !listed.has(r));
     if (missing.length || extra.length) problems.push(`${serverDir} serves ${[...served].join(", ") || "nothing"} but ${where} lists ${[...listed].join(", ")}`);
     for (const path of new Set(contract.routes.map((r) => r.path))) {
-      const quoted = new RegExp(`["'\`]${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'\`?]`);
+      const quoted = new RegExp(`["'\`}]${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'\`?]`);
       const spelled = files.filter((f) => quoted.test(codeOf(f)));
       const outside = spelled.filter((f) => !f.startsWith(`${serverDir}/`) && !f.startsWith(`${browserDir}/`));
       if (outside.length) problems.push(`${outside.join(", ")} call ${path}, which belongs to ${contract.module}: use its API`);

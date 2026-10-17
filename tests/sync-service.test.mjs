@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 
 import { loadModules } from "./helpers/mocks.mjs";
+import * as syncApi from "../app/modules/sync/adapters/api.js";
 
 const { projectModel, syncService } = await loadModules();
 
@@ -72,7 +73,7 @@ function startSyncServer() {
   return server;
 }
 
-test("sync-service: ping, connect, fetch, push state and operations", async () => {
+test("ping (sync-service), then Sync's calls: connect, fetch, push state and operations", async () => {
   const syncServer = startSyncServer();
   const port = await new Promise((resolvePort) => {
     syncServer.listen(0, () => resolvePort(syncServer.address().port));
@@ -84,18 +85,18 @@ test("sync-service: ping, connect, fetch, push state and operations", async () =
     assert.equal(pingResult.message, "pong");
     assert.equal(pingResult.transport, "sse-text-ops");
 
-    const connectResult = await syncService.connectToServer(serverUrl, "2468", "Tester");
+    const connectResult = await syncApi.connectToServer(serverUrl, "2468", "Tester");
     assert.equal(connectResult.token, "good-token");
     assert.equal(connectResult.displayName, "Tester");
 
-    const stateResult = await syncService.fetchSessionState(serverUrl, connectResult.token);
+    const stateResult = await syncApi.fetchSessionState(serverUrl, connectResult.token);
     assert.equal(stateResult.revision, 0);
     assert.equal(stateResult.sessionId, "default");
 
-    const pushResult = await syncService.pushSessionState(serverUrl, connectResult.token, projectModel.createProject("Push"));
+    const pushResult = await syncApi.pushSessionState(serverUrl, connectResult.token, projectModel.createProject("Push"));
     assert.equal(pushResult.revision, 1);
 
-    const operationResult = await syncService.pushOperation(serverUrl, connectResult.token, {
+    const operationResult = await syncApi.pushOperation(serverUrl, connectResult.token, {
       type: "patch-file",
       path: "docs/readme.md",
       start: 0,
