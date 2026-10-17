@@ -633,3 +633,26 @@ Validation: 220 Node tests (new: the shared rebase cases), all Python suites
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T071809Z-v0.1.40`.
 Nine project manifests valid, 170/170 files.
+
+## Verified release: v0.1.41
+
+Deployed on 2026-10-17 at 07:47 UTC. Module restructure step 7c-2: Sync in
+the browser (the runtime split into runtime, patch queue and pure rules),
+Sync's routes on the server (Transport stream routes and refusals), and
+`protocol/sync.contract.json` with the sync version both ends read; the
+backend self-test moved to `tests/backend-selftest.py`. App version
+`0.1.41`; sync compatibility unchanged at `117`.
+
+Public checks: ping (`0.1.41`, minSyncVersion 117 from Sync), the journal
+shows the kernel starting sync, no errors. Live, in a throwaway project in
+team red (deleted afterwards): a workspace open claiming sync 116 was refused
+with 426; `test1` (over HTTP) created a note; a headless browser signed in as
+`test` opened the project, and text it wrote reached the server through
+Sync's routes; a patch `test1` sent then arrived in the browser over the
+event stream (through nginx) and merged with the browser's text, with no page
+errors. `test`'s remembered workspace was set back to red/Novel afterwards.
+Validation: 220 Node tests, all Python suites, the backend self-test (now
+`tests/backend-selftest.py`), sixteen browser suites.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T074709Z-v0.1.41`.
+Nine project manifests valid, 171/171 files.
