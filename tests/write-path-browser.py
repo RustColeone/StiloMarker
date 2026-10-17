@@ -118,8 +118,10 @@ async def main():
     anna = api("POST", "/api/auth/login", {"username": "anna", "password": "pw"})["token"]
     api("POST", "/api/workspaces/create", {"team": "qa", "name": WS, "shareTeam": True}, token=anna)
     session = api("POST", "/api/workspaces/open", {"team": "qa", "path": WS}, token=anna)["token"]
-    api("POST", "/api/operations", {"operation": {"type": "create-file", "parentPath": "", "name": "notes.md", "content": ORIGINAL,
-                                                  "baseRevision": api("GET", "/api/session/state", token=session)["revision"]}}, token=session)
+    for name, content in (("notes.md", ORIGINAL), ("refs.urldb", "[Castle]\nurl = https://img.example/castle.png\n\n[River]\nurl = https://img.example/river.png"),
+                          ("more.urldb", "[Forest]\nurl = https://img.example/forest.png")):
+        api("POST", "/api/operations", {"operation": {"type": "create-file", "parentPath": "", "name": name, "content": content,
+                                                      "baseRevision": api("GET", "/api/session/state", token=session)["revision"]}}, token=session)
     api("POST", "/api/session/leave", {}, token=session)
 
     async with async_playwright() as pw:
@@ -169,6 +171,23 @@ async def main():
         replaced = await a.locator('.proposal-edit ins').last.text_content() if await a.locator('.proposal-edit ins').count() else None
         assert (summary, found, replaced) == ("1 edit", "four", "FOUR (edited)"), (summary, found, replaced)
         ok("an edit_file proposal shows each edit in its card and merges with Bob's typing")
+
+        # A part dragged between two files (an album entry) is a write like any
+        # other: it reaches the server and the other browser. It used to change
+        # only the dragging browser's copy.
+        for name in ("refs.urldb", "more.urldb"):
+            await bb.locator(f'.tree-row[title="{name}"] .icon-button').click()
+        await bb.locator('.tree-row-derived:has(.tree-label:text-is("River"))').drag_to(bb.locator('.tree-row-derived:has(.tree-label:text-is("Forest"))'))
+        data = Path(TMP.name) / "data" / "team_qa" / WS
+        moved = lambda: "[River]" in (data / "more.urldb").read_text(encoding="utf-8") and "[River]" not in (data / "refs.urldb").read_text(encoding="utf-8")
+        end = time.time() + 15
+        while time.time() < end and not moved():
+            await asyncio.sleep(0.2)
+        assert moved(), [op["path"] for op in sent_b]
+        await a.wait_for_function('Object.values(window.__w.project.nodes).find((n) => n.name === "more.urldb")?.content.includes("[River]")', timeout=15000)
+        ok("a part dragged between files reaches the server and the other browser")
+        await bb.click('.tree-row[title="notes.md"]')
+        await bb.wait_for_function('window.__w.controller.getActiveFile()?.name === "notes.md"')
 
         # A Snapshots-style restore (a whole text) goes out as a patch too.
         await a.evaluate(f'window.__w.workspace.write("notes.md", {json.dumps(ORIGINAL)}, {{ source: "snapshot restore" }})')

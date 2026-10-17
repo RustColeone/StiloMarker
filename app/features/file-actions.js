@@ -195,6 +195,9 @@ export function createFileActions(app) {
       return false;
     }
 
+    // Through the write path, the target first: a refused second write leaves the part in both files, not neither.
+    const write = (file, text) => app.workspace.write(getPath(project, file.id), text, { source: "file part" });
+    const report = (error) => app.notify(error.message);
     let nextTargetContent;
     try {
       if (sourceFileId === targetNodeId) {
@@ -204,19 +207,16 @@ export function createFileActions(app) {
           return false;
         }
         nextTargetContent = parts.insert(parts.remove(source.file.content, sourcePartId), moving, normalizedIndex);
-        app.applyFileContentUpdates([{ fileId: sourceFileId, content: nextTargetContent }]);
+        void write(source.file, nextTargetContent).catch(report);
       } else {
         nextTargetContent = parts.insert(target.file.content, moving, targetIndex);
-        app.applyFileContentUpdates([
-          { fileId: sourceFileId, content: parts.remove(source.file.content, sourcePartId) },
-          { fileId: targetNodeId, content: nextTargetContent }
-        ]);
+        const nextSourceContent = parts.remove(source.file.content, sourcePartId);
+        void write(target.file, nextTargetContent).then(() => write(source.file, nextSourceContent)).catch(report);
       }
     } catch (error) {
-      app.notify(error.message);
+      report(error);
       return false;
     }
-
     showMovedPart(targetNodeId, parts, nextTargetContent, moving.name, app.previewFileId === sourceFileId || app.previewFileId === targetNodeId);
     app.logDebug("action", "Part moved", `${getPath(app.controller.getProject(), targetNodeId)} :: ${moving.name}`);
     return true;

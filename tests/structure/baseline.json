@@ -4,7 +4,7 @@
     "app/features/chat-panel.js": 1670,
     "app/features/cloud-browser.js": 993,
     "app/features/file-actions.js": 1188,
-    "app/main.js": 4686,
+    "app/main.js": 4672,
     "app/ui/bmap-view.js": 4025,
     "server/mdnotes_server.py": 2591
   },

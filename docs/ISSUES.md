@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-17 · release `v0.1.48`
+Last updated: 2026-10-17 · release `v0.1.49`
 
 ---
 
@@ -39,6 +39,22 @@ delete should remove them, keep them for a while, or offer them for restore.
 ---
 
 ## Fixed
+
+### v0.1.49: dragging an album entry between albums now syncs
+
+In a cloud workspace, an entry dragged to another album, or to a new place
+in its own album, used to change only the browser that dragged it. Nothing
+reached the server, so other people never saw the move, and the next reload
+brought the old order back.
+
+- Found by the live check of v0.1.48. The bug dates from the first explorer
+  drag-and-drop: moves wrote straight into the browser's copy of the project
+  instead of going through the write path.
+- Both files now change through `workspace.write`, the target first. If the
+  second write is refused, the entry ends up in both albums rather than in
+  neither.
+- `write-path-browser.py` now drags an entry between albums with a real
+  server and two browsers, and checks the disk and the other browser.
 
 ### v0.1.48: restructure step 8 (the URL album as an extension)
 

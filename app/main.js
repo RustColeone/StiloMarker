@@ -1930,7 +1930,6 @@ function fileActions() {
     get workspace() { return workspace; },
     get addFileState() { return addFileState; },
     get applyEditorEdit() { return applyEditorEdit; },
-    get applyFileContentUpdates() { return applyFileContentUpdates; },
     get clearEditorDropCaret() { return clearEditorDropCaret; },
     get collaboration() { return collaboration; },
     get confirmAction() { return confirmAction; },
@@ -2011,19 +2010,6 @@ function setAddFileStatus(...args) { return fileActions().setAddFileStatus(...ar
 function setExplorerDropState(...args) { return fileActions().setExplorerDropState(...args); }
 async function stageAddFileFromLocalFile(...args) { return fileActions().stageAddFileFromLocalFile(...args); }
 async function submitAddFile(...args) { return fileActions().submitAddFile(...args); }
-
-function applyFileContentUpdates(updates) {
-  const nextProject = structuredClone(controller.getProject());
-  updates.forEach(({ fileId, content }) => {
-    const file = nextProject.nodes[fileId];
-    if (!file || file.kind !== "file") {
-      throw new Error(`File not found: ${fileId}`);
-    }
-    file.content = content;
-    file.dirty = true;
-  });
-  controller.replaceProject(nextProject);
-}
 
 function bindExplorerDropTarget() {
   elements.explorerTree.addEventListener("dragover", (event) => {
