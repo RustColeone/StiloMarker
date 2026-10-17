@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v0.1.40";
+const CACHE_NAME = "mdnotes-shell-v0.1.41";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -13,7 +13,6 @@ const APP_SHELL = [
   "./app/services/session-recovery-service.js",
   "./app/services/chat-storage-service.js",
   "./app/services/bmap-service.js",
-  "./app/services/collaboration-service.js",
   "./app/services/project-save-service.js",
   "./app/services/file-content-service.js",
   "./app/services/fs-access-service.js",
@@ -67,6 +66,15 @@ const APP_SHELL = [
   "./app/ui/chats-view.js",
   "./app/services/chats-api-service.js",
   "./app/services/local-chats-service.js",
+  "./app/modules/sync/index.js",
+  "./app/modules/sync/model/contract.js",
+  "./app/modules/sync/model/rebase.js",
+  "./app/modules/sync/model/paths.js",
+  "./app/modules/sync/model/errors.js",
+  "./app/modules/sync/service/runtime.js",
+  "./app/modules/sync/service/patches.js",
+  "./app/modules/sync/adapters/api.js",
+  "./app/modules/sync/adapters/page.js",
   "./app/modules/models/index.js",
   "./app/modules/models/model/stream.js",
   "./app/modules/models/model/catalog.js",
@@ -122,11 +130,9 @@ self.addEventListener("fetch", (event) => {
   // respondWith(fetch(...)), that termination aborts the stream and forces the
   // EventSource to reconnect — a ~30s reconnect loop that drops realtime sync and
   // reverts in-progress edits. Returning (no respondWith) lets the browser own the
-  // stream directly, independent of the SW lifecycle.
-  if (
-    url.pathname.endsWith("/api/events/stream") ||
-    event.request.headers.get("accept") === "text/event-stream"
-  ) {
+  // stream directly, independent of the SW lifecycle. (EventSource always
+  // asks for text/event-stream.)
+  if (event.request.headers.get("accept") === "text/event-stream") {
     return;
   }
 

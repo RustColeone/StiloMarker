@@ -172,7 +172,11 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(self.content(), 'A😀BC')
 
     def test_existing_broker_regressions(self):
-        server.run_broker_selftest(Path(self.tmp.name) / 'legacy.json')
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('backend_selftest', Path(__file__).resolve().parent / 'backend-selftest.py')
+        selftest = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(selftest)
+        selftest.run_broker_selftest(Path(self.tmp.name) / 'legacy.json')
 
     def test_unicode_insert_delete_replace_and_append(self):
         for start, end, removed, text, expected in [

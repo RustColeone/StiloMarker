@@ -31,7 +31,7 @@ import { getNodeByPath } from "./model/project.js";
 
 export * from "./model/project.js";
 export { seedDefaultProject } from "./service/project-store.js";
-export { buildTextPatch, transformTextPatch } from "./model/text-patch.js";
+export { buildTextPatch, isTextPatch } from "./model/text-patch.js";
 
 export default defineModule({
   name: "workspace",

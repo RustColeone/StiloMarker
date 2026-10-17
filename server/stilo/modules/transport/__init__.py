@@ -6,6 +6,9 @@ API:
     add_route(method, path, run, prefix=False, allow_headers=())
         A data route: run(request) returns the JSON payload. Raise
         PermissionError (403), LookupError (404) or ValueError (400).
+    add_stream_route(method, path, run, allow_headers=())
+        A server-sent event stream; see adapters/http.py run_stream_route.
+    Refusal(status, payload)  raise from a route to answer with that status
     add_legacy_route(method, path, run, prefix=False, allow_headers=())
         Code from before the restructure: run(handler, parsed) writes its own
         response. Shrinks as modules move; new code uses add_route.
@@ -16,6 +19,7 @@ API:
 """
 from stilo.kernel import define_module
 from .adapters import http
+from .adapters.http import Refusal  # noqa: F401
 from .model.routes import check_route, match, route_key
 
 
@@ -32,6 +36,9 @@ def start(ctx):
     def add_legacy_route(method, path, run, prefix=False, allow_headers=()):
         return _add(method, path, "legacy", run, prefix, allow_headers)
 
+    def add_stream_route(method, path, run, allow_headers=()):
+        return _add(method, path, "stream", run, False, allow_headers)
+
     def find(method, path):
         return match(routes.all(), method, path)
 
@@ -41,6 +48,8 @@ def start(ctx):
             return False
         if route["kind"] == "legacy":
             route["run"](handler, parsed)
+        elif route["kind"] == "stream":
+            http.run_stream_route(handler, parsed, route, ctx.log)
         else:
             http.run_data_route(handler, parsed, route, ctx.log)
         return True
@@ -52,6 +61,8 @@ def start(ctx):
     return type("Transport", (), {
         "add_route": staticmethod(add_route),
         "add_legacy_route": staticmethod(add_legacy_route),
+        "add_stream_route": staticmethod(add_stream_route),
+        "Refusal": Refusal,
         "find": staticmethod(find),
         "handle": staticmethod(handle),
         "send_cors": staticmethod(lambda handler, path: http.send_cors(handler, allowed_headers(path))),

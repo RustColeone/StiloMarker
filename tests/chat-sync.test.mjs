@@ -114,12 +114,12 @@ test('mobile viewport follows keyboard height and resets on desktop or pinch zoo
 
 test('chat transport sends both the compatibility version and chat base revision', async t => {
   const { pushServerChatWorkspace } = await import('../app/services/chat-api-service.js');
-  const { SYNC_PROTOCOL_VERSION } = await import('../app/version.js');
+  const { syncVersion } = await import('../app/modules/sync/index.js');
   const old = globalThis.fetch; t.after(() => globalThis.fetch = old);
   let body;
   globalThis.fetch = async (_, options) => { body = JSON.parse(options.body); return Response.json({ revision: 8, threads: [] }); };
   const saved = await pushServerChatWorkspace('https://example.test', 'test-token', { baseRevision: 7, threads: [] });
-  assert.equal(body.version, SYNC_PROTOCOL_VERSION); assert.equal(body.baseRevision, 7); assert.equal(saved.revision, 8);
+  assert.equal(body.version, syncVersion); assert.equal(body.baseRevision, 7); assert.equal(saved.revision, 8);
 });
 
 test('roleplay group chats keep their cast, speakers and authors through save, merge and reload', (t) => {

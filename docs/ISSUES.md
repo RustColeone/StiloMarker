@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-17 · release `v0.1.40` (deployed; public verification passed)
+Last updated: 2026-10-17 · release `v0.1.41`
 
 ---
 
@@ -30,6 +30,28 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.41: restructure step 7c-2 (Sync in the browser, Sync's routes and contract)
+
+Nothing changes for users.
+
+- Browser: the 1,100-line collaboration runtime is the Sync module, split by
+  job: the runtime (joining, applying everyone's changes in order, reconnects,
+  keeping unconfirmed typing safe), the patch queue (coalescing and
+  serializing typing per file), and pure rules (rebasing an incoming patch,
+  the project's paths, what an error means). Events Sync does not own
+  (comments, Chats, the agent's threads) go to one `onEvent` hook instead of
+  being named inside Sync.
+- Server: Sync serves its own routes (joining, state, presence, leases,
+  changes, the event stream). Transport gained server-sent event streams and
+  refusals with a status of the route's choosing (409 conflicts, 426
+  out-of-date tabs, 503 storage).
+- `protocol/sync.contract.json` holds Sync's routes, operations, events and
+  the sync version (still 117, with its history). Both ends read the version
+  from it; it is no longer written down in three places.
+- The backend self-test (640 lines of test code) moved out of the server into
+  `tests/backend-selftest.py`. `mdnotes_server.py` is now 3,782 lines (6,047
+  when step 7 began).
 
 ### v0.1.40: restructure step 7c-1 (Sync on the server)
 

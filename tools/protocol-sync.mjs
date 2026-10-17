@@ -2,6 +2,7 @@
 // Writes the browser's copies of the shared protocol data, which plain
 // browsers cannot import as JSON:
 //   protocol/file-types.json -> app/modules/file-types/model/builtin-types.js
+//   protocol/sync.contract.json -> app/modules/sync/model/contract.js (its version)
 // Run after editing a protocol file; tests/structure fails while a copy is stale.
 //   node tools/protocol-sync.mjs           write the copies
 //   node tools/protocol-sync.mjs --check   exit 1 if a copy is stale
@@ -11,7 +12,8 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const COPIES = [
-  { from: "protocol/file-types.json", to: "app/modules/file-types/model/builtin-types.js", pick: (data) => data.types }
+  { from: "protocol/file-types.json", to: "app/modules/file-types/model/builtin-types.js", pick: (data) => data.types },
+  { from: "protocol/sync.contract.json", to: "app/modules/sync/model/contract.js", pick: (data) => ({ version: data.version }) }
 ];
 
 export function render(copy) {

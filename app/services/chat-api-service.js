@@ -1,4 +1,4 @@
-import { SYNC_PROTOCOL_VERSION } from "../version.js";
+import { syncVersion } from "../modules/sync/index.js";
 import { normalizeServerUrl } from "./sync-service.js";
 
 async function parseResponse(response) {
@@ -54,7 +54,7 @@ async function pushServerChatWorkspace(serverUrl, token, workspace) {
   const response = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({ ...workspace, version: SYNC_PROTOCOL_VERSION })
+    body: JSON.stringify({ ...workspace, version: syncVersion })
   });
   if (!response.ok) {
     await throwForResponse("Chat workspace push failed.", response);

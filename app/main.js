@@ -11,7 +11,7 @@ import { APP_VERSION } from "./version.js";
 import { ROOT_ID, seedDefaultProject, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isBmapFileName, isImageFileName, isMarkdownFileName, isPersonaFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
 import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
 import { supportsOpfs, listOpfsDir, mkdirOpfs, createProjectOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs, deleteOpfsEntry, exportProjectModelOpfs, importProjectModelOpfs } from "./services/opfs-service.js";
-import { createCollaborationRuntime } from "./services/collaboration-service.js";
+import { createCollaborationRuntime } from "./modules/sync/index.js";
 import { sendGenerationRequest } from "./services/chat-api-service.js";
 import { renderMarkdown } from "./services/markdown-service.js";
 import { PERSONA_SUFFIX, parsePersona, personaTemplate } from "./services/persona-service.js";
@@ -19,7 +19,7 @@ import { clearOfflineShellData, registerOfflineShell } from "./services/offline-
 import { applyEditorFont, applyTheme, clampSourceFontSize, loadSettings, patchStoredSettings, saveSettings, signInSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
 import { clearViewStates, loadViewStates, saveViewStates } from "./services/view-state-service.js";
-import { browseServer, createProjectServer, deleteServer, exportProjectServer, importProjectServer, mkdirServer, normalizeServerUrl } from "./services/sync-service.js";
+import { browseServer, createProjectServer, deleteServer, exportProjectServer, importProjectServer, mkdirServer, normalizeServerUrl, uploadAsset } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { formatUrlDbEntryBody, parseUrlDb } from "./services/urldb-service.js";
 import { query } from "./ui/dom.js";
@@ -1628,19 +1628,19 @@ const collaboration = createCollaborationRuntime({
       return null;
     }
   },
-  onCommentsUpdate(files) {
-    if (!commentsAvailable()) return;
-    lineComments.byFile = new Map(Object.entries(files ?? {}));
-    renderEditorFromModel();
+  // Other modules' events on Sync's stream: comments, Chats, the agent's threads.
+  onEvent(event, { ownClientId }) {
+    if (event.type === "comments") {
+      if (!commentsAvailable()) return;
+      lineComments.byFile = new Map(Object.entries(event.files ?? {}));
+      renderEditorFromModel();
+    } else if (event.type === "chat-message" || event.type === "chat-typing" || event.type === "chat-update") {
+      chat?.receiveChatEvent(event);
+    } else if (event.type === "chat-workspace-update" && event.clientId !== ownClientId) {
+      chat?.receiveChatWorkspace(controller.getProject(), event.workspace); // nothing listens until the panel loads
+    }
   },
-  onChatEvent(event) {
-    // Chats: a message, a character's reply being written, or a change.
-    chat?.receiveChatEvent(event);
-  },
-  onChatWorkspaceUpdate(workspace) {
-    // Without the panel loaded nothing listens; it fetches the latest on load.
-    chat?.receiveChatWorkspace(controller.getProject(), workspace);
-  }
+  uploadAsset
 });
 workspace.attach(createWorkspacePorts({ controller, collaboration, publishOperation, getEditorSelection, applyEditorEdit,
   get workspaceMode() { return workspaceMode; },

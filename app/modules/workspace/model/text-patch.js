@@ -44,24 +44,6 @@ export function buildTextPatch(path, previousContent, nextContent, baseRevision)
 
 }
 
-export function transformTextPatch(op, applied, insertAfter = false) {
-  let { start, end } = op;
-  const a = applied.start, b = applied.end, n = String(applied.text ?? "").length;
-  const delta = n - (b - a);
-  const shift = (amount) => ({ ...op, start: start + amount, end: end + amount });
-  if (start === end && a === b) return shift(a < start || (a === start && insertAfter) ? n : 0);
-  if (start === end) {
-    if (a < start && start < b) throw new Error("Concurrent insertion inside removed text");
-    return shift(start >= b ? delta : 0);
-  }
-  if (a === b) {
-    if (start < a && a < end) throw new Error("Concurrent insertion inside removed text");
-    return shift(a <= start ? n : 0);
-  }
-  if (start < b && a < end) throw new Error("Overlapping concurrent replacements");
-  return shift(b <= start ? delta : 0);
-}
-
 // Applies a patch. The removed text must match, unless skipConflictCheck
 // (a patch rebased over local typing legitimately covers different text; the
 // sync runtime checks it strictly before that).
@@ -75,3 +57,6 @@ export function applyTextPatch(content, op, { skipConflictCheck = false } = {}) 
   }
   return content.slice(0, start) + String(op.text ?? "") + content.slice(end);
 }
+
+// Whether an operation is a text patch (Workspace owns the operation names).
+export const isTextPatch = (operation) => operation?.type === "patch-file";

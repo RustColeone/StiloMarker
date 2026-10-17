@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCollaborationRuntime } from '../app/services/collaboration-service.js';
+import { createCollaborationRuntime } from '../app/modules/sync/index.js';
 import { applySyncOperation as applyModelOperation } from '../app/domain/project-model.js';
 
 function project(content = 'original') {

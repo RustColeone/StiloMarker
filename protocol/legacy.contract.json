@@ -1,16 +1,27 @@
 {
   "about": "Every network message in use before the module restructure, in one place. Each module will take its own part of this file into protocol/<module>.contract.json with its own version (rule 7); this file shrinks to nothing. tests/structure checks it against the code.",
-  "version": 117,
-  "operations": {
-    "endpoint": "POST /api/operations",
-    "types": ["create-file", "create-folder", "delete-node", "move-node", "patch-file", "rename-node", "replace-project", "update-file"]
-  },
   "workspaceEvents": {
-    "endpoint": "GET /api/events/stream (server-sent events)",
-    "types": ["chat-message", "chat-typing", "chat-update", "chat-workspace-update", "comments", "cursor", "operation", "presence", "ready", "state"]
+    "endpoint": "Sync's event stream (protocol/sync.contract.json), for modules that have not taken their events yet",
+    "types": [
+      "chat-message",
+      "chat-typing",
+      "chat-update",
+      "chat-workspace-update",
+      "comments"
+    ]
   },
   "agentTurnEvents": {
     "endpoint": "POST /api/chat (one JSON object per line)",
-    "types": ["delta", "error", "heartbeat", "mcp-status", "reasoning", "result", "status", "tool", "writing"]
+    "types": [
+      "delta",
+      "error",
+      "heartbeat",
+      "mcp-status",
+      "reasoning",
+      "result",
+      "status",
+      "tool",
+      "writing"
+    ]
   }
 }
