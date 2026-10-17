@@ -697,3 +697,31 @@ seventeen browser suites (new: `comments-browser.py`).
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T083347Z-v0.1.43`.
 Nine project manifests valid, 174/174 files.
+
+## Verified release: v0.1.44
+
+Deployed on 2026-10-17 at 08:51 UTC. Module restructure step 7f-1: Chats on
+the server (the chat store, who answers, the reply queue and claims, Chats'
+routes); `conversations.py` removed. App version `0.1.44`; sync
+compatibility unchanged at `117`.
+
+A slip: one Node test was failing when this was deployed, because the
+release command printed the counts and went on. It was the structure test's
+"the baseline lists nothing already fixed" check (the server file had shrunk
+again since the baseline was lowered); nothing at run time. The baseline was
+lowered right after (225 of 225 pass), and the release command now stops
+unless the Node run reports no failures.
+
+Public checks: ping (`0.1.44`), the journal shows the kernel starting chats,
+no errors. Live, with `test` and `test1` in a throwaway project in team red
+(deleted afterwards) holding one character file: the contacts listed the
+team's people and "Mara Quill" (her name read through Characters); `test`
+started a private chat with `test1` and `test1` read the message; `test1`
+invited Mara, which started a new group (the pair kept); asked "@mara how
+old are you?" on deepseek-flash, Mara answered in character, and `test1`'s
+event stream showed her reply being written and then the message.
+Validation: 225 Node tests (after the baseline fix), all Python suites, the
+backend self-test, seventeen browser suites.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T085158Z-v0.1.44`.
+Nine project manifests valid, 171/171 files.
