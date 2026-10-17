@@ -430,19 +430,20 @@ def run_broker_selftest(state_file):
     # --- Server-side snapshots ---------------------------------------------
     _P = "workspaces/Alpha"
     _f = "第一卷/第一回试写.md"  # CJK path: must NOT go through safe_component
-    _r1 = _reg.create_snapshot(_alice, "qa", _P, _f, "第一版 content", "first")
+    _r1 = _reg.history.create_snapshot(_alice, "qa", _P, _f, "第一版 content", "first")
     assert _r1["created"] and _r1["version"]["author"] == "alice", "snapshot not created"
-    assert not _reg.create_snapshot(_alice, "qa", _P, _f, "第一版 content")["created"], "identical content must dedup"
-    _r2 = _reg.create_snapshot(_alice, "qa", _P, _f, "第二版 content")
-    _vers = _reg.list_snapshot_versions(_alice, "qa", _P, _f)["versions"]
+    assert not _reg.history.create_snapshot(_alice, "qa", _P, _f, "第一版 content")["created"], "identical content must dedup"
+    _r2 = _reg.history.create_snapshot(_alice, "qa", _P, _f, "第二版 content")
+    _vers = _reg.history.list_snapshot_versions(_alice, "qa", _P, _f)["versions"]
     assert [v["id"] for v in _vers] == [_r2["version"]["id"], _r1["version"]["id"]], "versions must be newest first"
-    assert _reg.get_snapshot_content(_alice, "qa", _P, _r1["version"]["id"])["content"] == "第一版 content", "CJK content round-trip"
-    assert _reg.list_snapshot_paths(_alice, "qa", _P)["paths"] == [_f], "path listing"
+    assert _reg.history.get_snapshot_content(_alice, "qa", _P, _r1["version"]["id"])["content"] == "第一版 content", "CJK content round-trip"
+    assert _reg.history.list_snapshot_paths(_alice, "qa", _P)["paths"] == [_f], "path listing"
 
     # Identical content in another file shares one blob (content-addressed).
-    _reg.create_snapshot(_alice, "qa", _P, "大纲.md", "第二版 content")
-    _snapdir = _reg._snapshot_dir("qa", _P)
-    _idx = _reg._snapshot_load(_snapdir)
+    _reg.history.create_snapshot(_alice, "qa", _P, "大纲.md", "第二版 content")
+    _snapstore = _reg.history.snapshots.store("qa", _P)
+    _snapdir = _snapstore.folder
+    _idx = _snapstore.load()
     assert _idx["refs"][_r2["version"]["blob"]] == 2, "shared blob should be refcounted twice"
     assert len(list((_snapdir / "blobs").glob("*.gz"))) == 2, "dedup: two distinct contents -> two blobs"
 
@@ -450,35 +451,35 @@ def run_broker_selftest(state_file):
     assert not any("_snapshots" in str(x) for x in _alpha_dir.rglob("*")), "snapshots must not live in the project dir"
     _alpha_broker._apply_operation({"type": "replace-project", "baseRevision": _alpha_broker.revision, "project": _alpha_broker._default_project()})
     _alpha_broker._persist_state()
-    assert _reg.list_snapshot_paths(_alice, "qa", _P)["paths"] == ["大纲.md", _f], "snapshots lost on publish"
+    assert _reg.history.list_snapshot_paths(_alice, "qa", _P)["paths"] == ["大纲.md", _f], "snapshots lost on publish"
 
     # Per-file cap of 30; pruned blobs are actually deleted from disk.
     for _i in range(35):
-        _reg.create_snapshot(_alice, "qa", _P, "churn.md", f"rev {_i}")
-    _churn = _reg.list_snapshot_versions(_alice, "qa", _P, "churn.md")["versions"]
+        _reg.history.create_snapshot(_alice, "qa", _P, "churn.md", f"rev {_i}")
+    _churn = _reg.history.list_snapshot_versions(_alice, "qa", _P, "churn.md")["versions"]
     assert len(_churn) == 30, f"expected 30 versions, got {len(_churn)}"
     assert _churn[0]["byteSize"] == len("rev 34"), "newest version kept"
-    _live_blobs = {v["blob"] for vs in _reg._snapshot_load(_snapdir)["files"].values() for v in vs}
+    _live_blobs = {v["blob"] for vs in _snapstore.load()["files"].values() for v in vs}
     assert {b.stem for b in (_snapdir / "blobs").glob("*.gz")} == _live_blobs, "orphan blobs left behind"
 
     # Delete drops the version; its unshared blob goes with it.
-    _reg.delete_snapshot(_alice, "qa", _P, _r1["version"]["id"])
-    assert _r1["version"]["blob"] not in _reg._snapshot_load(_snapdir)["refs"], "released blob still referenced"
+    _reg.history.delete_snapshot(_alice, "qa", _P, _r1["version"]["id"])
+    assert _r1["version"]["blob"] not in _snapstore.load()["refs"], "released blob still referenced"
     assert not (_snapdir / "blobs" / f"{_r1['version']['blob']}.gz").exists(), "unreferenced blob not deleted"
 
     # Import (migration) keeps the original timestamp and is idempotent.
     _t = 1700000000000
-    _imp = _reg.create_snapshot(_alice, "qa", _P, "migrated.md", "old text", created_at=_t)
+    _imp = _reg.history.create_snapshot(_alice, "qa", _P, "migrated.md", "old text", created_at=_t)
     assert _imp["created"] and _imp["version"]["createdAt"] == _t, "import must keep its timestamp"
-    assert not _reg.create_snapshot(_alice, "qa", _P, "migrated.md", "old text", created_at=_t)["created"], "re-import must be a no-op"
-    _reg.create_snapshot(_alice, "qa", _P, "migrated.md", "newer text")
+    assert not _reg.history.create_snapshot(_alice, "qa", _P, "migrated.md", "old text", created_at=_t)["created"], "re-import must be a no-op"
+    _reg.history.create_snapshot(_alice, "qa", _P, "migrated.md", "newer text")
     # An older import whose content equals the newest is still real history.
-    assert _reg.create_snapshot(_alice, "qa", _P, "migrated.md", "newer text", created_at=_t - 1000)["created"], "historical import dropped"
-    assert len(_reg.list_snapshot_versions(_alice, "qa", _P, "migrated.md")["versions"]) == 3
+    assert _reg.history.create_snapshot(_alice, "qa", _P, "migrated.md", "newer text", created_at=_t - 1000)["created"], "historical import dropped"
+    assert len(_reg.history.list_snapshot_versions(_alice, "qa", _P, "migrated.md")["versions"]) == 3
 
     # Access control follows the project: bob is not on Alpha's whitelist.
-    for _call in (lambda: _reg.list_snapshot_paths(_bob, "qa", _P),
-                  lambda: _reg.create_snapshot(_bob, "qa", _P, "x.md", "nope")):
+    for _call in (lambda: _reg.history.list_snapshot_paths(_bob, "qa", _P),
+                  lambda: _reg.history.create_snapshot(_bob, "qa", _P, "x.md", "nope")):
         try:
             _call()
             assert False, "non-whitelisted user must not reach snapshots"
@@ -487,12 +488,12 @@ def run_broker_selftest(state_file):
     # Traversal / bad keys are rejected.
     for _bad in ("../../etc", ""):
         try:
-            _reg.list_snapshot_paths(_alice, "qa", _bad)
+            _reg.history.list_snapshot_paths(_alice, "qa", _bad)
             assert False, f"bad project path accepted: {_bad!r}"
         except (ValueError, PermissionError):
             pass
     try:
-        _reg.create_snapshot(_alice, "qa", _P, "/../", "x")
+        _reg.history.create_snapshot(_alice, "qa", _P, "/../", "x")
         assert False, "empty file key accepted"
     except ValueError:
         pass
@@ -583,7 +584,7 @@ def run_broker_selftest(state_file):
     assert (_snap_node["editSessions"], _snap_node["sessionEdits"]) == (1, 4), _snap_node
     _rev_at_snapshot = _wb.revision
     _changed_at = dict(_wb.rebase.changed_at)
-    _made = _reg.create_snapshot(_alice, "qa", _RP, "sen.md", "xxxx", "first cut")
+    _made = _reg.history.create_snapshot(_alice, "qa", _RP, "sen.md", "xxxx", "first cut")
     assert _made["created"], "snapshot should be created"
     assert _made["version"]["editSessions"] == 1 and _made["version"]["sessionEdits"] == 4, _made["version"]
     assert _wb.revision == _rev_at_snapshot, "a snapshot must not bump the revision"
@@ -593,7 +594,7 @@ def run_broker_selftest(state_file):
     _wb.apply_operation(_ws["token"], {"type": "update-file", "path": "sen.md",
                                        "content": "xxxxy", "baseRevision": _rev_at_snapshot})
     # The listing hands the client S and the baseline in one call.
-    _listing = _reg.list_snapshot_paths(_alice, "qa", _RP)
+    _listing = _reg.history.list_snapshot_paths(_alice, "qa", _RP)
     _base = _listing["baselines"]["sen.md"]
     assert _base == {"count": 1, "editSessions": 1, "sessionEdits": 4}, _base
     assert "sen.md" in _listing["paths"], _listing["paths"]
@@ -624,7 +625,7 @@ def run_broker_selftest(state_file):
     _t.start()
     try:
         for _i in range(25):
-            _v = _reg.create_snapshot(_alice, "qa", _RP, "sen.md", f"concurrent {_i}")
+            _v = _reg.history.create_snapshot(_alice, "qa", _RP, "sen.md", f"concurrent {_i}")
             _ver = _v.get("version") or {}
             if "sessionEdits" in _ver:
                 assert _ver["sessionEdits"] <= _ver["sourceVersion"], _ver
@@ -641,7 +642,7 @@ def run_broker_selftest(state_file):
     _done = _th.Event()
 
     def _read_baseline():
-        _reg._snapshot_counter_baseline("qa", _RP, "sen.md")
+        _reg.history.snapshots.counters("qa", _RP, "sen.md")
         _done.set()
 
     with _wb.lock:

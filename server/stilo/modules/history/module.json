@@ -1,0 +1,10 @@
+{
+  "name": "history",
+  "level": 4,
+  "uses": ["transport", "file_types", "workspace"],
+  "owns": {
+    "data": ["data/_snapshots", "data/_backups"],
+    "rules": ["snapshot retention", "backup retention"],
+    "routes": ["/api/snapshots*", "/api/backups*"]
+  }
+}

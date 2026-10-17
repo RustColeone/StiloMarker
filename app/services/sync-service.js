@@ -147,83 +147,6 @@ function reanchorComments(serverUrl, accountToken, team, path, file, moves) {
 // ---- Server-side snapshots (per-file version history for a cloud workspace) --
 // Stored on the server so history follows the user across devices, instead of
 // living in one browser's IndexedDB.
-async function snapshotGet(serverUrl, accountToken, route, params, failure) {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const query = new URLSearchParams({ token: accountToken, ...params });
-  const response = await fetch(`${baseUrl}/api/snapshots${route}?${query.toString()}`, {
-    method: "GET",
-    headers: { accept: "application/json" }
-  });
-  if (!response.ok) {
-    await throwForResponse(failure, response);
-  }
-  return parseResponse(response);
-}
-
-async function snapshotPost(serverUrl, accountToken, route, body, failure) {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const response = await fetch(`${baseUrl}/api/snapshots${route}?token=${encodeURIComponent(accountToken)}`, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify(body)
-  });
-  if (!response.ok) {
-    await throwForResponse(failure, response);
-  }
-  return parseResponse(response);
-}
-
-function listServerSnapshotPaths(serverUrl, accountToken, team, path) {
-  return snapshotGet(serverUrl, accountToken, "", { team, path }, "Could not list snapshots.");
-}
-
-function listServerSnapshotVersions(serverUrl, accountToken, team, path, file) {
-  return snapshotGet(serverUrl, accountToken, "/versions", { team, path, file }, "Could not list snapshot versions.");
-}
-
-function getServerSnapshotContent(serverUrl, accountToken, team, path, id) {
-  return snapshotGet(serverUrl, accountToken, "/content", { team, path, id }, "Could not read snapshot.");
-}
-
-// `createdAt` is only sent when migrating a historical local snapshot, so the
-// server keeps its original time and treats a re-upload as a no-op.
-function createServerSnapshot(serverUrl, accountToken, team, path, file, content, label = "", createdAt = undefined) {
-  return snapshotPost(serverUrl, accountToken, "", { team, path, file, content, label, createdAt }, "Could not save snapshot.");
-}
-
-function deleteServerSnapshot(serverUrl, accountToken, team, path, id) {
-  return snapshotPost(serverUrl, accountToken, "/delete", { team, path, id }, "Could not delete snapshot.");
-}
-
-// ---- Workspace backups (whole-workspace history, one per day it changed) ----
-async function backupRequest(serverUrl, accountToken, route, params, body, failure) {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const query = new URLSearchParams({ token: accountToken, ...(body ? {} : params) });
-  const response = await fetch(`${baseUrl}/api/backups${route}?${query.toString()}`, body
-    ? { method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify(body) }
-    : { method: "GET", headers: { accept: "application/json" } });
-  if (!response.ok) {
-    await throwForResponse(failure, response);
-  }
-  return parseResponse(response);
-}
-
-function listWorkspaceBackups(serverUrl, accountToken, team, path) {
-  return backupRequest(serverUrl, accountToken, "", { team, path }, null, "Could not list backups.");
-}
-
-function listWorkspaceBackupFiles(serverUrl, accountToken, team, path, id) {
-  return backupRequest(serverUrl, accountToken, "/files", { team, path, id }, null, "Could not read that backup.");
-}
-
-function getWorkspaceBackupContent(serverUrl, accountToken, team, path, id, file) {
-  return backupRequest(serverUrl, accountToken, "/content", { team, path, id, file }, null, "Could not read that file from the backup.");
-}
-
-function createWorkspaceBackup(serverUrl, accountToken, team, path, label = "") {
-  return backupRequest(serverUrl, accountToken, "", null, { team, path, label }, "Could not create a backup.");
-}
-
 // Persist which files the user has open in a cloud workspace, so they can be
 // restored on the next open/reconnect (per-user, server-side resume state).
 async function saveUserState(serverUrl, accountToken, team, path, openFiles, activeFile) {
@@ -279,23 +202,14 @@ async function importProjectServer(serverUrl, accountToken, team, path, name, pr
 }
 
 export {
-  createWorkspaceBackup,
-  getWorkspaceBackupContent,
-  listWorkspaceBackupFiles,
-  listWorkspaceBackups,
   browseServer,
   createProjectServer,
-  createServerSnapshot,
   createWorkspace,
   deleteServer,
   deleteComment,
-  deleteServerSnapshot,
   exportProjectServer,
-  getServerSnapshotContent,
   importProjectServer,
   listComments,
-  listServerSnapshotPaths,
-  listServerSnapshotVersions,
   listWorkspaces,
   mkdirServer,
   normalizeServerUrl,

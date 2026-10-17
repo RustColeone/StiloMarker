@@ -254,7 +254,7 @@ class RegistryTests(RegistryBase):
         pair = self.call('leo', 'chats_start', [AMY])['conversation']
         self.call('leo', 'chats_send', pair['id'], 'one')
         self.reg._backup_chats(now=time.mktime((2026, 10, 1, 12, 0, 0, 0, 0, 0)))
-        folder = self.reg._backup_dir('qa', self.path) / 'chats'
+        folder = self.reg.history.backups.store('qa', self.path).folder / 'chats'
         self.assertEqual([p.name for p in folder.glob('*.sqlite')], ['2026-10-01.sqlite'])
         self.reg._backup_chats(now=time.mktime((2026, 10, 2, 12, 0, 0, 0, 0, 0)))
         self.assertEqual(len(list(folder.glob('*.sqlite'))), 1, 'no change: no new copy')
