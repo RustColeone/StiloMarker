@@ -656,3 +656,25 @@ Validation: 220 Node tests, all Python suites, the backend self-test (now
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T074709Z-v0.1.41`.
 Nine project manifests valid, 171/171 files.
+
+## Verified release: v0.1.42
+
+Deployed on 2026-10-17 at 08:10 UTC. Module restructure step 7d: History on
+both ends (snapshots and backups in one blob store implementation, retention
+rules, History's routes and contract; in the browser the local snapshot
+store, History's calls and the line diff). App version `0.1.42`; sync
+compatibility unchanged at `117`.
+
+Public checks: ping (`0.1.42`), the journal shows the kernel starting history,
+no errors. Live, as `test`, reading red/Novel's existing history through the
+new routes: its 3 daily backups listed, the newest (27 files) read back a
+file; its snapshots (14 files, about 600 KB) listed and one read back. In a
+throwaway project (deleted afterwards): a snapshot was made (with its S.E.N
+baseline), a manual backup taken, and a deletion right after it added no
+second copy (the burst rule); the snapshot was deleted. `test`'s remembered
+workspace was set back to red/Novel. Validation: 222 Node tests (new:
+History in the browser), all Python suites (new: `history`), the backend
+self-test, sixteen browser suites.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T081005Z-v0.1.42`.
+Nine project manifests valid, 171/171 files.
