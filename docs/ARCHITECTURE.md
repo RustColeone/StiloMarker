@@ -47,7 +47,7 @@ This file is the short reference that the structure tests enforce.
 
 Arrows are "uses": a module calls only the modules it points at, always on a
 lower level. News travels the other way, as events or extension points, so it
-needs no arrow. Green modules exist (as of v0.1.46; the panes and previews are still legacy); the rest are still legacy
+needs no arrow. Every module exists (as of v0.1.47); legacy code still wires them together; the rest are still legacy
 code. Modules marked *both* have a browser half and a server half that share a
 model and a contract.
 
@@ -237,8 +237,8 @@ refuses to record anything new.
 | 7f-1 | Chats on the server: the chat store (SQLite per project), who answers, the reply queue, claims for replies written in a member's own browser, its routes; a character's name comes from Characters' header rules (a fourth copy of them went) | done |
 | 7f-2 | Chats in the browser (the chats view, this browser's own chat store, the server calls) and `protocol/chats.contract.json` with the chat events | done |
 | 7g-1 | Editor (browser): the source editor, split by job into parts that share one editor object (text and DOM, rendering, edits and undo, others' cursors, the toolbar, keys), highlighting, find and replace, autocomplete, links, the formatting toolbar and table picker, and the Markdown renderer as its model. The gutter popover for comments moved into Comments. The URL album entry editing is a port the app provides (it becomes an extension in step 8) | done |
-| 7g-2 | The panes and their previews, with a preview extension point (the character preview registers through it) | next |
-| 8 | The URL album as an extension | |
+| 7g-2 | The tab strips and panes (and resuming the last view, through a port) and the preview pane with a `previews` extension point: images, Markdown and mind-map trees are built in; URL albums, diagrams and character sheets add theirs from `app/features/previews.js` | done |
+| 8 | The URL album as an extension | next |
 
 ### Notes for module authors
 
@@ -285,6 +285,11 @@ refuses to record anything new.
 - Events of your own on the live stream: the server broadcasts through the
   shared workspace; in the browser, Sync hands every event it does not own to
   the runtime's `onEvent(event, { ownClientId })`.
+- A preview for a kind of file: `editor.previews.add({ id, matches(file),
+  render(target, project, file, tools), cacheable?, printHtml? })`;
+  `tools.markdownHtml(project, file, text)` renders Markdown with the
+  project's links and images. A cacheable preview is a pure function of the
+  file's text, the project's paths and the connection.
 - A module's network messages: list each route in
   `protocol/<module>.contract.json`. The structure test checks that the
   server half serves exactly those and that nothing outside the module calls

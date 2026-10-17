@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-17 · release `v0.1.46` (deployed; public verification passed)
+Last updated: 2026-10-17 · release `v0.1.47`
 
 ---
 
@@ -39,6 +39,25 @@ delete should remove them, keep them for a while, or offer them for restore.
 ---
 
 ## Fixed
+
+### v0.1.47: restructure step 7g-2 (panes and previews); step 7 complete
+
+The panes and the preview pane are the Editor's. Nothing changes for users.
+
+- `panes.js` (1,046 lines) is the tab strips and panes (with resuming the
+  last view through a port) and the preview pane.
+- The preview pane has an extension point: images, Markdown and mind-map
+  trees are built in; URL albums, diagrams and character sheets add their
+  previews from `app/features/previews.js`, so the Editor no longer knows
+  those file types. Printing asks the preview for its HTML (or prints what is
+  shown).
+- With this, every module of the design exists on its end. What is left is
+  step 8 (the URL album as the first extension) and legacy code that still
+  wires the modules together (`main.js`, the registry in the server).
+- Caught before release by `session-recovery-browser.py`: after the split,
+  remembering a cloud workspace's open file locally failed silently (an
+  import was left behind, inside a try that swallowed the error), so a
+  suspended phone tab would not have restored its file. Fixed.
 
 ### v0.1.46: restructure step 7g-1 (the Editor)
 
