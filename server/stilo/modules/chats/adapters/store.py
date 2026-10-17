@@ -1,4 +1,4 @@
-"""Chats: per-project conversations between people and characters.
+"""The chat store: per-project conversations between people and characters.
 
 One SQLite database per project (``conversations.sqlite`` in the project
 folder) holds the conversations, who is in each, their messages, and each
@@ -17,11 +17,9 @@ import re
 import sqlite3
 import threading
 import time
-from collections import deque
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from stilo.modules.file_types import BUILTIN as FILE_TYPES
+from ..model.members import char_key, clean_member as _clean_member, user_key  # noqa: F401
 
 DB_NAME = "conversations.sqlite"
 # SQLite's write-ahead log lives next to the database; all three must survive
@@ -87,25 +85,6 @@ CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE OF content ON messages BEG
 END;
 """
 
-# Character rules belong to the Characters module (server/stilo/modules/characters).
-from stilo.modules.characters import PERSONA_SUFFIX, find_mentions, persona_handle, persona_header, persona_summary  # noqa: E402,F401
-
-
-def user_key(username: str) -> str:
-    return f"user:{username}"
-
-
-def char_key(path: str) -> str:
-    return f"char:{path}"
-
-
-def _clean_member(key) -> str:
-    key = str(key or "").strip()
-    if key.startswith("user:") and len(key) > 5:
-        return key
-    if key.startswith("char:") and key.lower().endswith(PERSONA_SUFFIX):
-        return key
-    raise ValueError(f"Not a chat member: {key!r}")
 
 
 class ProjectChats:
@@ -461,64 +440,3 @@ class _Transaction:
             if not exc_type:
                 self.store.version += 1
         return False
-
-
-class ReplyQueue:
-    """Characters' replies, run in worker threads: one at a time per
-    conversation (so each character sees the replies before theirs), never the
-    same (message, character) twice, and stoppable per conversation."""
-
-    def __init__(self, run, workers: int = 2):
-        self.run = run  # run(job, cancelled: () -> bool) -> None
-        self.lock = threading.Lock()
-        self.pending: dict[str, deque] = {}
-        self.active: set[str] = set()
-        self.cancelled: set[str] = set()
-        self.seen: set[tuple] = set()
-        self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="chat-reply")
-
-    def submit(self, conversation: str, jobs) -> list:
-        accepted = []
-        with self.lock:
-            for job in jobs:
-                key = (conversation, job["trigger"], job["character"])
-                if key in self.seen:
-                    continue
-                self.seen.add(key)
-                self.pending.setdefault(conversation, deque()).append(job)
-                accepted.append(job)
-            if accepted and conversation not in self.active:
-                self.active.add(conversation)
-                self.cancelled.discard(conversation)
-                self.pool.submit(self._drain, conversation)
-        return accepted
-
-    def busy(self, conversation: str) -> bool:
-        with self.lock:
-            return conversation in self.active
-
-    def cancel(self, conversation: str) -> bool:
-        with self.lock:
-            if conversation not in self.active:
-                return False
-            self.pending.pop(conversation, None)
-            self.cancelled.add(conversation)
-            return True
-
-    def _drain(self, conversation: str) -> None:
-        while True:
-            with self.lock:
-                queue = self.pending.get(conversation)
-                if not queue or conversation in self.cancelled:
-                    self.pending.pop(conversation, None)
-                    self.active.discard(conversation)
-                    self.cancelled.discard(conversation)
-                    return
-                job = queue.popleft()
-            try:
-                self.run(job, lambda: conversation in self.cancelled)
-            except Exception:  # noqa: BLE001 — the runner reports its own failures
-                pass
-
-    def shutdown(self) -> None:
-        self.pool.shutdown(wait=False, cancel_futures=True)

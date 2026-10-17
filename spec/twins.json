@@ -3,8 +3,8 @@
   "covered": [
     {
       "name": "@mentions and character handles",
-      "js": "app/services/persona-service.js: findMentions, personaHandle",
-      "py": "server/conversations.py: find_mentions, persona_handle",
+      "js": "app/modules/characters/model/persona.js: findMentions, personaHandle",
+      "py": "server/stilo/modules/characters/model.py: find_mentions, persona_handle",
       "cases": "spec/characters/mentions.cases.json"
     },
     {

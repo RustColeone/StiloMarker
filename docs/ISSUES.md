@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-17 · release `v0.1.43` (deployed; public verification passed)
+Last updated: 2026-10-17 · release `v0.1.44`
 
 ---
 
@@ -27,9 +27,32 @@ Migration only adopts files whose paths exist in the workspace being opened, so 
 two workspaces contain a **same-named file**, a snapshot could migrate to the wrong
 one. Affects only pre-existing local history.
 
+### 3. Deleting a project keeps its history
+**Confidence:** confirmed, intended so far · **Severity:** low (a decision)
+
+Snapshots and backups live outside the project folder (so publishing over a
+project never erases them), and deleting a project leaves them in
+`data/_snapshots` and `data/_backups`. That keeps a way back after deleting
+the wrong project, but nothing lists or removes them later. Decide whether a
+delete should remove them, keep them for a while, or offer them for restore.
+
 ---
 
 ## Fixed
+
+### v0.1.44: restructure step 7f-1 (Chats on the server)
+
+Chats' server side is the Chats module. Nothing changes for users.
+
+- `conversations.py` is gone: the chat store (one SQLite database per
+  project), who answers in a chat, the reply queue, and the claims for
+  replies written in a member's own browser are the Chats module, which
+  serves its own routes and tells only a conversation's members.
+- A character's name in Chats is read with Characters' header rules; the
+  registry had its own fourth copy of that parsing.
+- The registry keeps only Chats' port (a copy of the project, who may open
+  it) and the hooks (a renamed character file, the daily backup of the chat
+  databases). `mdnotes_server.py` is 2,590 lines.
 
 ### v0.1.43: restructure step 7e (Comments)
 

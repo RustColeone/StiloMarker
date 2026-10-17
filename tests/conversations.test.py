@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'server'))
-import conversations as chats  # noqa: E402
+from stilo.modules.chats.adapters import store as chats  # noqa: E402
 
 spec = importlib.util.spec_from_file_location('mdnotes_server', ROOT / 'server/mdnotes_server.py')
 server = importlib.util.module_from_spec(spec)
@@ -159,7 +159,7 @@ class RegistryBase(unittest.TestCase):
         accounts.users['eve'] = {'password': 'pw', 'teams': ['other']}
         self.data = Path(self.tmp.name) / 'data'
         self.reg = server.WorkspaceRegistry('2468', Path(self.tmp.name) / 'state.json', accounts=accounts, data_dir=self.data)
-        self.addCleanup(self.reg._close_chat_stores)
+        self.addCleanup(self.reg.chats.close)
         self.tokens = {name: self.reg.identity.login(name, 'pw')['token'] for name in ('leo', 'amy', 'ben', 'eve')}
         self.reg.create_workspace(self.tokens['leo'], 'qa', 'Novel', share_team=True)
         self.path = 'workspaces/Novel'
@@ -176,7 +176,7 @@ class RegistryBase(unittest.TestCase):
         return self.broker.apply_operation(self.sessions['leo'], {**operation, 'baseRevision': self.broker.revision})
 
     def call(self, name, method, *args):
-        return getattr(self.reg, method)(self.tokens[name], 'qa', self.path, *args)
+        return getattr(self.reg.chats, method)(self.tokens[name], 'qa', self.path, *args)
 
     def events(self, name, kind):
         out, q = [], self.queues[name]
@@ -190,28 +190,28 @@ class RegistryBase(unittest.TestCase):
 
 class RegistryTests(RegistryBase):
     def test_contacts_are_people_with_access_and_the_project_characters(self):
-        overview = self.call('leo', 'chats_overview')
+        overview = self.call('leo', 'overview')
         self.assertEqual(overview['me'], LEO)
         self.assertEqual([p['username'] for p in overview['people']], ['amy', 'ben', 'leo'])
         self.assertTrue(all(p['online'] for p in overview['people']))
         self.assertEqual(overview['characters'], [{'key': ARIA, 'path': 'Cast/aria.persona.skill',
                                                    'name': 'Captain Aria Voss', 'handle': 'aria'}])
         with self.assertRaises(PermissionError):
-            self.call('eve', 'chats_overview')  # not in the team
+            self.call('eve', 'overview')  # not in the team
 
     def test_only_project_people_and_real_characters_can_join(self):
         with self.assertRaises(ValueError):
-            self.call('leo', 'chats_start', ['user:eve'])
+            self.call('leo', 'start', ['user:eve'])
         with self.assertRaises(ValueError):
-            self.call('leo', 'chats_start', ['char:Cast/ghost.persona.skill'])
-        result = self.call('leo', 'chats_start', [AMY])
+            self.call('leo', 'start', ['char:Cast/ghost.persona.skill'])
+        result = self.call('leo', 'start', [AMY])
         self.assertTrue(result['created'])
 
     def test_messages_go_live_to_members_only(self):
-        pair = self.call('leo', 'chats_start', [AMY])['conversation']
+        pair = self.call('leo', 'start', [AMY])['conversation']
         self.assertEqual(len(self.events('amy', 'chat-update')), 1)  # amy sees the new chat
         self.assertEqual(self.events('ben', 'chat-update'), [])
-        self.call('leo', 'chats_send', pair['id'], 'hello amy')
+        self.call('leo', 'send', pair['id'], 'hello amy')
         [event] = self.events('amy', 'chat-message')
         self.assertEqual(event['message']['content'], 'hello amy')
         self.assertEqual(event['conversationId'], pair['id'])
@@ -220,16 +220,16 @@ class RegistryTests(RegistryBase):
 
     def test_send_hands_new_messages_to_the_reply_hook(self):
         seen = []
-        self.reg.on_chat_message = lambda reg, team, relpath, conversation, message, identity, options: seen.append(
+        self.reg.chats.on_message = lambda reg, team, relpath, conversation, message, identity, options: seen.append(
             (conversation['id'], message['content'], identity['username'], options['model']))
-        pair = self.call('leo', 'chats_start', [ARIA])['conversation']
-        self.reg.chats_send(self.tokens['leo'], 'qa', self.path, pair['id'], 'Ahoy', [], {'model': 'gpt-5.5'})
+        pair = self.call('leo', 'start', [ARIA])['conversation']
+        self.reg.chats.send(self.tokens['leo'], 'qa', self.path, pair['id'], 'Ahoy', [], {'model': 'gpt-5.5'})
         self.assertEqual(seen, [(pair['id'], 'Ahoy', 'leo', 'gpt-5.5')])
 
     def test_moving_a_character_file_moves_it_in_chats(self):
-        pair = self.call('leo', 'chats_start', [ARIA])['conversation']
+        pair = self.call('leo', 'start', [ARIA])['conversation']
         self.op({'type': 'rename-node', 'path': 'Cast/aria.persona.skill', 'name': 'captain.persona.skill'})
-        members = lambda: [m for m in self.reg.chat_store('qa', self.path).members(pair['id']) if m.startswith('char:')]
+        members = lambda: [m for m in self.reg.chats.store('qa', self.path).members(pair['id']) if m.startswith('char:')]
         self.assertEqual(members(), ['char:Cast/captain.persona.skill'])
         self.op({'type': 'move-node', 'path': 'Cast', 'parentPath': '', 'index': 0})  # a no-op path: same place
         self.op({'type': 'create-folder', 'parentPath': '', 'name': 'People'})
@@ -237,8 +237,8 @@ class RegistryTests(RegistryBase):
         self.assertEqual(members(), ['char:People/Cast/captain.persona.skill'])
 
     def test_the_database_survives_a_publish_and_is_never_a_project_file(self):
-        pair = self.call('leo', 'chats_start', [AMY])['conversation']
-        self.call('leo', 'chats_send', pair['id'], 'still here')
+        pair = self.call('leo', 'start', [AMY])['conversation']
+        self.call('leo', 'send', pair['id'], 'still here')
         folder = self.data / 'team_qa' / 'workspaces' / 'Novel'
         self.assertTrue((folder / chats.DB_NAME).is_file())
         # Publishing replaces the whole tree: the folder is wiped and rewritten.
@@ -246,24 +246,24 @@ class RegistryTests(RegistryBase):
         self.broker.apply_operation(self.sessions['leo'], {'type': 'replace-project', 'project': project,
                                                           'baseRevision': self.broker.revision})
         self.assertTrue((folder / chats.DB_NAME).is_file())
-        self.assertEqual(self.call('amy', 'chats_messages', pair['id'])['messages'][0]['content'], 'still here')
+        self.assertEqual(self.call('amy', 'messages', pair['id'])['messages'][0]['content'], 'still here')
         self.assertNotIn(chats.DB_NAME, json.dumps(self.broker.project))
         self.assertTrue(set(chats.SIDE_FILES) <= self.reg._RESERVED_NAMES)
 
     def test_chats_get_a_daily_backup_only_when_they_changed(self):
-        pair = self.call('leo', 'chats_start', [AMY])['conversation']
-        self.call('leo', 'chats_send', pair['id'], 'one')
-        self.reg._backup_chats(now=time.mktime((2026, 10, 1, 12, 0, 0, 0, 0, 0)))
+        pair = self.call('leo', 'start', [AMY])['conversation']
+        self.call('leo', 'send', pair['id'], 'one')
+        self.reg.backup_sweep(now=time.mktime((2026, 10, 1, 12, 0, 0, 0, 0, 0)))
         folder = self.reg.history.backups.store('qa', self.path).folder / 'chats'
         self.assertEqual([p.name for p in folder.glob('*.sqlite')], ['2026-10-01.sqlite'])
-        self.reg._backup_chats(now=time.mktime((2026, 10, 2, 12, 0, 0, 0, 0, 0)))
+        self.reg.backup_sweep(now=time.mktime((2026, 10, 2, 12, 0, 0, 0, 0, 0)))
         self.assertEqual(len(list(folder.glob('*.sqlite'))), 1, 'no change: no new copy')
-        self.call('amy', 'chats_send', pair['id'], 'two')
-        self.reg._backup_chats(now=time.mktime((2026, 10, 3, 12, 0, 0, 0, 0, 0)))
+        self.call('amy', 'send', pair['id'], 'two')
+        self.reg.backup_sweep(now=time.mktime((2026, 10, 3, 12, 0, 0, 0, 0, 0)))
         self.assertEqual(len(list(folder.glob('*.sqlite'))), 2)
 
     def test_old_roleplay_threads_import_as_groups(self):
-        result = self.call('leo', 'chats_import', 'Storm', ['Cast/aria.persona.skill', 'Cast/ghost.persona.skill'], [
+        result = self.call('leo', 'import_group', 'Storm', ['Cast/aria.persona.skill', 'Cast/ghost.persona.skill'], [
             {'role': 'user', 'content': 'The lamp is out', 'authorName': 'Leo', 'createdAt': 1_700_000_000_000},
             {'role': 'assistant', 'content': 'Bail faster.', 'speaker': 'Cast/aria.persona.skill', 'speakerName': 'Aria'},
             {'role': 'assistant', 'content': 'ghost line', 'speaker': 'Cast/ghost.persona.skill'},
@@ -272,23 +272,23 @@ class RegistryTests(RegistryBase):
         conversation = result['conversation']
         self.assertEqual((conversation['kind'], conversation['title']), ('group', 'Storm'))
         self.assertEqual(sorted(conversation['members']), sorted([LEO, ARIA]))  # the missing character is dropped
-        messages = self.call('leo', 'chats_messages', conversation['id'])['messages']
+        messages = self.call('leo', 'messages', conversation['id'])['messages']
         self.assertEqual([(m['author'], m['content'], m['state']) for m in messages],
                          [(LEO, 'The lamp is out', 'done'), (ARIA, 'Bail faster.', 'done'), (ARIA, 'half a', 'interrupted')])
         self.assertAlmostEqual(messages[0]['createdAt'], 1_700_000_000)
         self.assertEqual(conversation['unread'], 0)
         with self.assertRaises(LookupError):
-            self.call('amy', 'chats_messages', conversation['id'])  # imported for the importer only
+            self.call('amy', 'messages', conversation['id'])  # imported for the importer only
 
     def test_notes_and_search_through_the_registry(self):
-        pair = self.call('leo', 'chats_start', [AMY])['conversation']
-        self.call('leo', 'chats_send', pair['id'], 'The lamp went dark')
-        self.call('leo', 'chats_note', AMY, 'Captain', 'plays Aria')
-        self.assertEqual(self.call('leo', 'chats_overview')['notes'][AMY]['alias'], 'Captain')
-        self.assertEqual(self.call('amy', 'chats_overview')['notes'], {})
-        self.assertEqual(len(self.call('amy', 'chats_search', pair['id'], 'lamp')['results']), 1)
+        pair = self.call('leo', 'start', [AMY])['conversation']
+        self.call('leo', 'send', pair['id'], 'The lamp went dark')
+        self.call('leo', 'note', AMY, 'Captain', 'plays Aria')
+        self.assertEqual(self.call('leo', 'overview')['notes'][AMY]['alias'], 'Captain')
+        self.assertEqual(self.call('amy', 'overview')['notes'], {})
+        self.assertEqual(len(self.call('amy', 'search', pair['id'], 'lamp')['results']), 1)
         with self.assertRaises(LookupError):
-            self.call('ben', 'chats_search', pair['id'], 'lamp')
+            self.call('ben', 'search', pair['id'], 'lamp')
 
 
 
@@ -319,26 +319,26 @@ class ReplyTests(RegistryBase):
         super().setUp()
         self.op({'type': 'create-file', 'parentPath': 'Cast', 'name': 'bram.persona.skill',
                  'content': '## Who\nA nervous cook.'})
-        self.reg.chat_proxy = FakeProxy()
-        self.reg.TYPING_INTERVAL = 0
+        self.reg.chats.runner = FakeProxy()
+        self.reg.chats.typing_interval = 0
 
     def wait(self, pair_id):
         key = f'qa/{self.path}#{pair_id}'
         for _ in range(200):
-            if not self.reg.chat_replies.busy(key):
+            if not self.reg.chats.replies.busy(key):
                 return
             time.sleep(0.02)
         self.fail('replies did not finish')
 
     def test_a_private_chat_with_a_character_gets_a_reply_to_every_message(self):
-        pair = self.call('leo', 'chats_start', [ARIA])['conversation']
-        sent = self.reg.chats_send(self.tokens['leo'], 'qa', self.path, pair['id'], 'Ahoy', [], {'model': 'gpt-5.5'})
+        pair = self.call('leo', 'start', [ARIA])['conversation']
+        sent = self.reg.chats.send(self.tokens['leo'], 'qa', self.path, pair['id'], 'Ahoy', [], {'model': 'gpt-5.5'})
         self.assertEqual(sent['replies'], [ARIA])
         self.wait(pair['id'])
-        messages = self.call('leo', 'chats_messages', pair['id'])['messages']
+        messages = self.call('leo', 'messages', pair['id'])['messages']
         self.assertEqual([(m['author'], m['content'], m['state']) for m in messages],
                          [(LEO, 'Ahoy', 'done'), (ARIA, 'Captain Aria Voss says hi', 'done')])
-        turn = self.reg.chat_proxy.turns[0]
+        turn = self.reg.chats.runner.turns[0]
         self.assertEqual(turn['persona']['name'], 'Captain Aria Voss')
         self.assertEqual(turn['messages'], [{'name': 'leo', 'content': 'Ahoy', 'self': False}])
         self.assertEqual(turn['model'], 'gpt-5.5')
@@ -348,93 +348,93 @@ class ReplyTests(RegistryBase):
         self.assertEqual(self.events('amy', 'chat-typing'), [])  # a private chat stays private, live too
 
     def test_in_a_group_only_mentioned_characters_reply_in_order(self):
-        group = self.call('leo', 'chats_start', [AMY, ARIA, 'char:Cast/bram.persona.skill'])['conversation']
-        self.assertEqual(self.reg.chats_send(self.tokens['leo'], 'qa', self.path, group['id'], 'The storm hits.')['replies'], [])
-        sent = self.reg.chats_send(self.tokens['amy'], 'qa', self.path, group['id'], '@bram then @aria: what now?')
+        group = self.call('leo', 'start', [AMY, ARIA, 'char:Cast/bram.persona.skill'])['conversation']
+        self.assertEqual(self.reg.chats.send(self.tokens['leo'], 'qa', self.path, group['id'], 'The storm hits.')['replies'], [])
+        sent = self.reg.chats.send(self.tokens['amy'], 'qa', self.path, group['id'], '@bram then @aria: what now?')
         self.assertEqual(sent['replies'], ['char:Cast/bram.persona.skill', ARIA])
         self.wait(group['id'])
-        authors = [m['author'] for m in self.call('leo', 'chats_messages', group['id'])['messages']]
+        authors = [m['author'] for m in self.call('leo', 'messages', group['id'])['messages']]
         self.assertEqual(authors, [LEO, AMY, 'char:Cast/bram.persona.skill', ARIA])
-        second = self.reg.chat_proxy.turns[1]  # Aria sees Bram's reply
+        second = self.reg.chats.runner.turns[1]  # Aria sees Bram's reply
         self.assertEqual(second['messages'][-1], {'name': 'bram', 'content': 'bram says hi', 'self': False})
         self.assertEqual({c['name'] for c in second['cast']}, {'Captain Aria Voss', 'bram'})
         self.assertTrue(self.events('amy', 'chat-typing'))  # every member watches it being written
-        sent = self.reg.chats_send(self.tokens['leo'], 'qa', self.path, group['id'], '@all')
+        sent = self.reg.chats.send(self.tokens['leo'], 'qa', self.path, group['id'], '@all')
         self.assertEqual(len(sent['replies']), 2)
         self.wait(group['id'])
 
     def test_a_reply_is_never_queued_twice(self):
-        pair = self.call('leo', 'chats_start', [ARIA])['conversation']
-        message = self.reg.chat_store('qa', self.path).send(LEO, pair['id'], 'hi', 'leo')
-        conversation = self.reg.chat_store('qa', self.path).get(LEO, pair['id'])
-        first = self.reg._queue_chat_replies(self.reg, 'qa', self.path, conversation, message, {'username': 'leo'}, {})
-        again = self.reg._queue_chat_replies(self.reg, 'qa', self.path, conversation, message, {'username': 'leo'}, {})
+        pair = self.call('leo', 'start', [ARIA])['conversation']
+        message = self.reg.chats.store('qa', self.path).send(LEO, pair['id'], 'hi', 'leo')
+        conversation = self.reg.chats.store('qa', self.path).get(LEO, pair['id'])
+        first = self.reg.chats._queue_replies(self.reg.chats, 'qa', self.path, conversation, message, {'username': 'leo'}, {})
+        again = self.reg.chats._queue_replies(self.reg.chats, 'qa', self.path, conversation, message, {'username': 'leo'}, {})
         self.assertEqual((first, again), ([ARIA], []))
         self.wait(pair['id'])
-        self.assertEqual(len(self.reg.chat_proxy.turns), 1)
+        self.assertEqual(len(self.reg.chats.runner.turns), 1)
 
     def test_stop_keeps_what_was_written(self):
         import threading
         hold = threading.Event()
-        self.reg.chat_proxy = FakeProxy(reply=lambda p, m: 'one two three four', hold=hold)
-        pair = self.call('leo', 'chats_start', [ARIA])['conversation']
-        self.reg.chats_send(self.tokens['leo'], 'qa', self.path, pair['id'], 'Talk')
+        self.reg.chats.runner = FakeProxy(reply=lambda p, m: 'one two three four', hold=hold)
+        pair = self.call('leo', 'start', [ARIA])['conversation']
+        self.reg.chats.send(self.tokens['leo'], 'qa', self.path, pair['id'], 'Talk')
         time.sleep(0.1)
-        self.assertTrue(self.call('leo', 'chats_stop', pair['id'])['stopped'])
+        self.assertTrue(self.call('leo', 'stop', pair['id'])['stopped'])
         hold.set()
         self.wait(pair['id'])
-        last = self.call('leo', 'chats_messages', pair['id'])['messages'][-1]
+        last = self.call('leo', 'messages', pair['id'])['messages'][-1]
         self.assertEqual((last['author'], last['state']), (ARIA, 'interrupted'))
         self.assertTrue(last['content'].startswith('one'))
         with self.assertRaises(LookupError):
-            self.call('ben', 'chats_stop', pair['id'])  # only members can stop it
+            self.call('ben', 'stop', pair['id'])  # only members can stop it
 
     def test_a_failed_reply_is_a_visible_message(self):
-        self.reg.chat_proxy = FakeProxy(fail='Sign in to use the agent')
-        pair = self.call('leo', 'chats_start', [ARIA])['conversation']
-        self.reg.chats_send(self.tokens['leo'], 'qa', self.path, pair['id'], 'Hi')
+        self.reg.chats.runner = FakeProxy(fail='Sign in to use the agent')
+        pair = self.call('leo', 'start', [ARIA])['conversation']
+        self.reg.chats.send(self.tokens['leo'], 'qa', self.path, pair['id'], 'Hi')
         self.wait(pair['id'])
-        last = self.call('leo', 'chats_messages', pair['id'])['messages'][-1]
+        last = self.call('leo', 'messages', pair['id'])['messages'][-1]
         self.assertEqual(last['state'], 'error')
         self.assertIn('could not reply', last['content'])
         # Errors are not fed back to the next turn as things the character said.
-        self.reg.chat_proxy = FakeProxy()
-        self.reg.chats_send(self.tokens['leo'], 'qa', self.path, pair['id'], 'Again')
+        self.reg.chats.runner = FakeProxy()
+        self.reg.chats.send(self.tokens['leo'], 'qa', self.path, pair['id'], 'Again')
         self.wait(pair['id'])
-        self.assertEqual([m['content'] for m in self.reg.chat_proxy.turns[0]['messages']], ['Hi', 'Again'])
+        self.assertEqual([m['content'] for m in self.reg.chats.runner.turns[0]['messages']], ['Hi', 'Again'])
 
     def test_a_browser_can_write_the_reply_itself(self):
-        group = self.call('leo', 'chats_start', [AMY, ARIA])['conversation']
-        sent = self.reg.chats_send(self.tokens['leo'], 'qa', self.path, group['id'], '@aria hello', [], {'runner': 'client'})
+        group = self.call('leo', 'start', [AMY, ARIA])['conversation']
+        sent = self.reg.chats.send(self.tokens['leo'], 'qa', self.path, group['id'], '@aria hello', [], {'runner': 'client'})
         self.assertEqual(sent['claims'], [{'character': ARIA, 'trigger': sent['message']['id'], 'name': 'Captain Aria Voss'}])
-        self.assertEqual(self.reg.chat_proxy.turns, [])  # the server did not call a model
+        self.assertEqual(self.reg.chats.runner.turns, [])  # the server did not call a model
         self.assertEqual([e['state'] for e in self.events('amy', 'chat-typing')], ['queued'])
         trigger = sent['message']['id']
-        self.reg.chat_proxy = server.ChatProxy()  # builds the prompt; never calls a model here
-        prompt = self.call('leo', 'chats_prompt', group['id'], ARIA, trigger)
+        self.reg.chats.runner = server.ChatProxy()  # builds the prompt; never calls a model here
+        prompt = self.call('leo', 'prompt', group['id'], ARIA, trigger)
         self.assertIn('You are playing Captain Aria Voss', prompt['payload']['messages'][0]['content'])
         self.assertEqual(prompt['payload']['messages'][-1], {'role': 'user', 'content': 'leo: @aria hello'})
         self.assertNotIn('model', prompt['payload'])
         self.assertEqual(sorted(t['function']['name'] for t in prompt['payload']['tools']), ['list_files', 'read_file'])
         with self.assertRaises(LookupError):
-            self.call('amy', 'chats_prompt', group['id'], ARIA, trigger)  # not amy's to write
-        self.call('leo', 'chats_typing', group['id'], ARIA, trigger, 'Hel')
+            self.call('amy', 'prompt', group['id'], ARIA, trigger)  # not amy's to write
+        self.call('leo', 'typing', group['id'], ARIA, trigger, 'Hel')
         self.assertEqual(self.events('amy', 'chat-typing')[-1]['text'], 'Hel')
         with self.assertRaises(LookupError):
-            self.call('amy', 'chats_reply', group['id'], ARIA, trigger, 'forged')
-        reply = self.call('leo', 'chats_reply', group['id'], ARIA, trigger, 'Hello there.')['message']
+            self.call('amy', 'reply', group['id'], ARIA, trigger, 'forged')
+        reply = self.call('leo', 'reply', group['id'], ARIA, trigger, 'Hello there.')['message']
         self.assertEqual((reply['author'], reply['content'], reply['state']), (ARIA, 'Hello there.', 'done'))
         self.assertEqual(self.events('amy', 'chat-message')[-1]['message']['content'], 'Hello there.')
         with self.assertRaises(LookupError):
-            self.call('leo', 'chats_reply', group['id'], ARIA, trigger, 'twice')  # a claim is used once
+            self.call('leo', 'reply', group['id'], ARIA, trigger, 'twice')  # a claim is used once
 
     def test_a_reply_whose_browser_went_away_is_closed(self):
-        pair = self.call('leo', 'chats_start', [ARIA])['conversation']
-        sent = self.reg.chats_send(self.tokens['leo'], 'qa', self.path, pair['id'], 'Hi', [], {'runner': 'client'})
-        self.call('leo', 'chats_typing', pair['id'], ARIA, sent['message']['id'], 'Half a th')
-        self.assertEqual(self.reg.expire_chat_claims(), 0)  # still fresh
-        self.assertEqual(self.reg.expire_chat_claims(now=time.monotonic() + 120), 1)
-        last = self.call('leo', 'chats_messages', pair['id'])['messages'][-1]
+        pair = self.call('leo', 'start', [ARIA])['conversation']
+        sent = self.reg.chats.send(self.tokens['leo'], 'qa', self.path, pair['id'], 'Hi', [], {'runner': 'client'})
+        self.call('leo', 'typing', pair['id'], ARIA, sent['message']['id'], 'Half a th')
+        self.assertEqual(self.reg.chats.expire_claims(), 0)  # still fresh
+        self.assertEqual(self.reg.chats.expire_claims(now=time.monotonic() + 120), 1)
+        last = self.call('leo', 'messages', pair['id'])['messages'][-1]
         self.assertEqual((last['author'], last['content'], last['state']), (ARIA, 'Half a th', 'interrupted'))
 
     def test_the_stateless_prompt_needs_no_key(self):
@@ -451,8 +451,8 @@ class ReplyTests(RegistryBase):
         self.assertNotIn('tools', body['payload'])  # no project sent, so no file tools
 
     def test_people_in_a_pair_get_no_automatic_replies(self):
-        pair = self.call('leo', 'chats_start', [AMY])['conversation']
-        self.assertEqual(self.reg.chats_send(self.tokens['leo'], 'qa', self.path, pair['id'], '@aria?')['replies'], [])
+        pair = self.call('leo', 'start', [AMY])['conversation']
+        self.assertEqual(self.reg.chats.send(self.tokens['leo'], 'qa', self.path, pair['id'], '@aria?')['replies'], [])
 
 
 if __name__ == '__main__':
