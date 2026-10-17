@@ -8,12 +8,13 @@
     "app/features/panes.js": 1046,
     "app/main.js": 4738,
     "app/ui/bmap-view.js": 4025,
-    "server/mdnotes_server.py": 3252
+    "server/mdnotes_server.py": 3080
   },
   "spellings": {
     "access file": [],
     "account file": [],
     "account prefs file": [],
+    "comments file": [],
     "file type .bmap": [],
     "file type .mtree": [],
     "file type .persona.skill": [],

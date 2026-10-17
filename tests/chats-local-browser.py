@@ -118,7 +118,8 @@ async def main():
 
         # A private chat with a character answers every message.
         await page.click('[data-chats-start="char:aria.persona.skill"]')
-        assert await page.locator('#chat-input').get_attribute('placeholder') == 'Message Captain Aria Voss'
+        # The browser's chat store opens asynchronously: wait for the chat to show.
+        await page.wait_for_function('document.querySelector("#chat-input").placeholder === "Message Captain Aria Voss"', timeout=10000)
         await send(page, 'Ahoy')
         await page.wait_for_selector('.cv-message.rp-message:has-text("Captain Aria Voss answers #1")', timeout=15000)
         assert requests[0]['mode'] == 'persona' and requests[0]['persona']['name'] == 'Captain Aria Voss'

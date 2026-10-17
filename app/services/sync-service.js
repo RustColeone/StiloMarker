@@ -108,45 +108,6 @@ async function createProjectServer(serverUrl, accountToken, team, path, name) {
   return parseResponse(response);
 }
 
-// ---- Line comments (notes anchored to a line, stored beside the project) -----
-function listComments(serverUrl, accountToken, team, path) {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const query = new URLSearchParams({ token: accountToken, team, path });
-  return fetch(`${baseUrl}/api/comments?${query.toString()}`, { method: "GET", headers: { accept: "application/json" } })
-    .then(async (response) => {
-      if (!response.ok) await throwForResponse("Could not load comments.", response);
-      return parseResponse(response);
-    });
-}
-
-function commentPost(serverUrl, accountToken, route, body, failure) {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  return fetch(`${baseUrl}/api/comments${route}?token=${encodeURIComponent(accountToken)}`, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify(body)
-  }).then(async (response) => {
-    if (!response.ok) await throwForResponse(failure, response);
-    return parseResponse(response);
-  });
-}
-
-function saveComment(serverUrl, accountToken, team, path, comment) {
-  return commentPost(serverUrl, accountToken, "", { team, path, ...comment }, "Could not save the comment.");
-}
-
-function deleteComment(serverUrl, accountToken, team, path, id) {
-  return commentPost(serverUrl, accountToken, "/delete", { team, path, id }, "Could not delete the comment.");
-}
-
-// Tell the server where comments ended up after edits moved their lines.
-function reanchorComments(serverUrl, accountToken, team, path, file, moves) {
-  return commentPost(serverUrl, accountToken, "/reanchor", { team, path, file, moves }, "Could not update comment anchors.");
-}
-
-// ---- Server-side snapshots (per-file version history for a cloud workspace) --
-// Stored on the server so history follows the user across devices, instead of
-// living in one browser's IndexedDB.
 // Persist which files the user has open in a cloud workspace, so they can be
 // restored on the next open/reconnect (per-user, server-side resume state).
 async function saveUserState(serverUrl, accountToken, team, path, openFiles, activeFile) {
@@ -206,16 +167,12 @@ export {
   createProjectServer,
   createWorkspace,
   deleteServer,
-  deleteComment,
   exportProjectServer,
   importProjectServer,
-  listComments,
   listWorkspaces,
   mkdirServer,
   normalizeServerUrl,
   pingServer,
-  reanchorComments,
-  saveComment,
   saveUserState,
   uploadAsset
 };

@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-17 · release `v0.1.42` (deployed; public verification passed)
+Last updated: 2026-10-17 · release `v0.1.43`
 
 ---
 
@@ -30,6 +30,24 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.43: restructure step 7e (Comments)
+
+Line comments are the Comments module on each end. Nothing changes for users.
+
+- Server: the rules for adding, editing, moving and deleting a comment are
+  pure functions; the comments file belongs to Comments (the structure test
+  fails if other code names it); Comments serves its routes
+  (`protocol/comments.contract.json`) and tells the live workspace through
+  Sync's broadcast. Its writes are now crash-safe (atomic and synced), like
+  the rest of the project folder.
+- Browser: keeping a comment on its line is a pure function, and the server
+  calls are Comments'; the gutter popover stays in `app/editor/comments.js`.
+- New browser test: a comment from the gutter reaches a second browser at
+  once, follows its line when lines are added above, and is removed for
+  everyone. There was none before.
+- `chats-local-browser.py` read the chat's placeholder before the browser's
+  chat store had opened (a race that showed under load); it now waits.
 
 ### v0.1.42: restructure step 7d (History)
 

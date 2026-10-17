@@ -2,7 +2,7 @@
 // their lines as the text changes, and the gutter popover to add, edit or
 // remove one. main.js creates this on first use and passes its shared values in `app`.
 import { getPath, isTextFileName } from "../domain/project-model.js";
-import { deleteComment, listComments, reanchorComments, saveComment } from "../services/sync-service.js";
+import { deleteComment, listComments, reanchor, reanchorComments, saveComment, withComment } from "../modules/comments/index.js";
 
 export function createLineComments(app) {
   function commentsAvailable() {
@@ -57,9 +57,8 @@ export function createLineComments(app) {
     app.setEditorSelection(start, end);
   }
 
-  // Follow the text: if a commented line moved, find it again by its own content.
-  // Searching OUTWARD from the old position lands on the nearest match, which is
-  // what you want when lines were inserted or removed above it.
+  // Follow the text: a commented line that moved is found again by its own
+  // content (Comments' reanchor).
   let reanchorTimer = null;
   function scheduleCommentReanchor() {
     if (!commentsAvailable() || reanchorTimer) return;
@@ -78,26 +77,7 @@ export function createLineComments(app) {
     const list = commentsForPath(path);
     if (!list.length) return;
 
-    const lines = String(activeFile.content ?? "").split("\n");
-    const moves = [];
-    for (const comment of list) {
-      const anchor = String(comment.anchorText ?? "");
-      // A blank anchor can't be matched (every empty line looks alike), so leave it.
-      if (!anchor.trim()) continue;
-      if (lines[comment.line] === anchor) continue; // still where we left it
-      let found = -1;
-      for (let distance = 1; distance <= lines.length; distance += 1) {
-        const above = comment.line - distance;
-        const below = comment.line + distance;
-        if (above >= 0 && lines[above] === anchor) { found = above; break; }
-        if (below < lines.length && lines[below] === anchor) { found = below; break; }
-        if (above < 0 && below >= lines.length) break;
-      }
-      if (found >= 0 && found !== comment.line) {
-        comment.line = found;
-        moves.push({ id: comment.id, line: found, anchorText: anchor });
-      }
-    }
+    const moves = reanchor(list, activeFile.content);
     if (!moves.length) return;
     renderEditorFromModel();
     try {
@@ -165,10 +145,7 @@ export function createLineComments(app) {
       const result = await saveComment(target.serverUrl, target.token, target.team, target.path, {
         file: path, id, line: commentPopoverLine, anchorText: lines[commentPopoverLine] ?? "", text
       });
-      const list = commentsForPath(path).filter((c) => c.id !== result.comment.id);
-      list.push(result.comment);
-      list.sort((a, b) => a.line - b.line);
-      app.lineComments.byFile.set(path, list);
+      app.lineComments.byFile.set(path, withComment(commentsForPath(path), result.comment));
       closeCommentPopover();
       renderEditorFromModel();
       app.showToast(id ? "Comment updated" : "Comment added");

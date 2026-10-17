@@ -1,0 +1,15 @@
+{
+  "about": "Comments' network messages (rule 7): line comments of a project. The server half serves exactly these routes (server/stilo/modules/comments/adapters/routes.py); only the browser half (app/modules/comments/adapters/api.js) calls them. A change reaches everyone in the live workspace as a `comments` event on Sync's stream, carrying the whole list.",
+  "module": "comments",
+  "version": 1,
+  "routes": [
+    { "method": "GET", "path": "/api/comments", "query": ["token", "team", "path"], "reply": ["files"] },
+    { "method": "POST", "path": "/api/comments", "query": ["token"], "body": ["team", "path", "file", "id", "line", "anchorText", "text"], "reply": ["comment"] },
+    { "method": "POST", "path": "/api/comments/delete", "query": ["token"], "body": ["team", "path", "id"], "reply": ["deleted"] },
+    { "method": "POST", "path": "/api/comments/reanchor", "query": ["token"], "body": ["team", "path", "file", "moves"], "reply": ["updated"] }
+  ],
+  "events": {
+    "endpoint": "Sync's event stream",
+    "types": ["comments"]
+  }
+}
