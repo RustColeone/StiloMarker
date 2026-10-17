@@ -238,7 +238,7 @@ URL album entries appear as children of the `.urldb` file node in the explorer. 
 - Clicked to open an image preview.
 - Dragged to reorder within the same album.
 - Dragged to a different `.urldb` file to move or copy them.
-- Added via the explorer context menu ("Add Bookmark Entry").
+- Added via the explorer context menu ("Add Album Entry").
 - Copied and pasted between albums.
 
 ### Preview
@@ -342,7 +342,7 @@ The explorer shows the project tree as a collapsible file/folder list.
 - **Click** a file to open it in the source pane.
 - **Click** a folder arrow to expand/collapse.
 - **Double-click** a node label to rename it inline.
-- **Right-click** a node for the context menu: Rename, Delete, Export, Copy, Paste, New File, New Folder, Add Bookmark Entry (for `.urldb` files).
+- **Right-click** a node for the context menu: Rename, Delete, Export, Copy, Paste, New File, New Folder, Add Album Entry (for `.urldb` files).
 - **Drag a file or folder** to reorder it or move it into a folder.
 - **Drag a URL album entry** to reorder within its album or move to another album.
 - **Drag a file from the Explorer into the Chat compose area** to attach it as context for the AI assistant.

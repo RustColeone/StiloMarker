@@ -1,15 +1,16 @@
 import { startModules } from "./kernel/index.js";
 import shellModule from "./modules/shell/index.js";
-import fileTypesModule from "./modules/file-types/index.js";
+import fileTypesModule, { builtinTypes } from "./modules/file-types/index.js";
 import workspaceModule from "./modules/workspace/index.js";
 import identityModule from "./modules/identity/index.js";
 import historyModule from "./modules/history/index.js";
+import extensionModules from "./extensions.js";
 import { createWorkspacePorts } from "./features/workspace-ports.js";
 import { rememberedWorkspace, createSessionRecovery } from "./services/session-recovery-service.js";
 import { installMobileViewport } from "./services/chat-ui-service.js";
 import { snapshotProject, savedFileIds } from "./services/project-save-service.js";
 import { APP_VERSION } from "./version.js";
-import { ROOT_ID, seedDefaultProject, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isBmapFileName, isImageFileName, isMarkdownFileName, isPersonaFileName, isTextFileName, isUrlDbFileName } from "./domain/project-model.js";
+import { ROOT_ID, seedDefaultProject, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isBmapFileName, isImageFileName, isMarkdownFileName, isPersonaFileName, isTextFileName } from "./domain/project-model.js";
 import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
 import { supportsOpfs, listOpfsDir, mkdirOpfs, createProjectOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs, deleteOpfsEntry, exportProjectModelOpfs, importProjectModelOpfs } from "./services/opfs-service.js";
 import { createCollaborationRuntime } from "./modules/sync/index.js";
@@ -21,7 +22,6 @@ import { loadProject, saveProject } from "./services/storage-service.js";
 import { clearViewStates, loadViewStates, saveViewStates } from "./services/view-state-service.js";
 import { browseServer, createProjectServer, deleteServer, exportProjectServer, importProjectServer, mkdirServer, normalizeServerUrl, saveUserState, uploadAsset } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
-import { formatUrlDbEntryBody, parseUrlDb, parseUrlDbEntryBody, updateUrlDbEntry } from "./services/urldb-service.js";
 import { query } from "./ui/dom.js";
 import { createExplorerView } from "./ui/explorer-view.js";
 import { createDefaultBmap } from "./services/bmap-service.js";
@@ -117,13 +117,6 @@ const elements = {
   newFileStatus: query("#new-file-status"),
   newFileCancelButton: query("#new-file-cancel-button"),
   newFileSubmitButton: query("#new-file-submit-button"),
-  bookmarkEntryDialog: query("#bookmark-entry-dialog"),
-  bookmarkEntryDialogTitle: query("#bookmark-entry-dialog-title"),
-  bookmarkEntryDialogMessage: query("#bookmark-entry-dialog-message"),
-  bookmarkEntryNameInput: query("#bookmark-entry-name-input"),
-  bookmarkEntryUrlInput: query("#bookmark-entry-url-input"),
-  bookmarkEntryDescriptionInput: query("#bookmark-entry-description-input"),
-  bookmarkEntrySubmitButton: query("#bookmark-entry-submit-button"),
   settingsButton: query("#settings-button"),
   settingsDialog: query("#settings-dialog"),
   settingsTabStrip: query("#settings-tab-strip"),
@@ -277,7 +270,7 @@ const elements = {
 // ---- Modules (docs/ARCHITECTURE.md) ----
 // The app is moving into modules one step at a time. Code still in this file
 // reaches a module only through the public API the kernel hands back.
-const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, historyModule], {
+const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, historyModule, ...extensionModules], {
   log: (owner, ...args) => { try { logDebug("action", `${owner}: ${args.join(" ")}`); } catch { /* log not ready yet */ } }
 });
 const { shell, workspace, identity } = modules;
@@ -313,6 +306,7 @@ let recoverySavePending = null;
 var editorCoreInstance;
 function editorCore() {
   return (editorCoreInstance ??= createEditorCore({
+    toolbars: modules.editor.toolbars,
     get _editorUpdating() { return _editorUpdating; },
     set _editorUpdating(value) { _editorUpdating = value; },
     get acceptEditorAutocomplete() { return acceptEditorAutocomplete; },
@@ -330,10 +324,10 @@ function editorCore() {
     get elements() { return elements; },
     get escapeHtmlAttribute() { return escapeHtmlAttribute; },
     get formatEditorDebugValue() { return formatEditorDebugValue; },
-    get getSelectedUrlDbEntry() { return getSelectedUrlDbEntry; },
-    fileContentFromEditor(file, text) { // a URL album entry: the edited entry goes back into the whole file
-      const entry = getSelectedUrlDbEntry(controller.getProject());
-      return entry ? updateUrlDbEntry(file.content, entry.entry.id, parseUrlDbEntryBody(text)) : text;
+    get getSelectedPart() { return getSelectedPart; },
+    fileContentFromEditor(file, text) { // one part of a file (Workspace's `parts`): the edited part goes back into the whole file
+      const selected = getSelectedPart(controller.getProject());
+      return selected ? selected.parts.withBody(file.content, selected.part.id, text) : text;
     },
     get hideEditorAutocomplete() { return hideEditorAutocomplete; },
     get highlightEditorLinesMemo() { return highlightEditorLinesMemo; },
@@ -424,8 +418,8 @@ let snapshotBaselinesInFlight = null;
 const fontInstalledCache = new Map();
 let fontProbeContext = null;
 const fontProbeBase = {};
-let previewUrlDbEntry = null;
-let sourceUrlDbEntry = null;
+let previewPart = null;
+let sourcePart = null;
 // Per-document view state (bmap pan/zoom, editor scroll), cached so users resume
 // where they left off; persisted to localStorage.
 let viewStates = loadViewStates();
@@ -593,8 +587,8 @@ function initializePaneState(project) {
   sourceOpenTabIds = project.activeFileId ? [project.activeFileId] : [];
   previewOpenTabIds = project.activeFileId ? [project.activeFileId] : [];
   previewFileId = project.activeFileId ?? null;
-  sourceUrlDbEntry = null;
-  previewUrlDbEntry = null;
+  sourcePart = null;
+  previewPart = null;
 }
 
 function escapeHtmlAttribute(value) {
@@ -871,7 +865,8 @@ function applyAgentSettingsControls() {
 }
 
 function isPreviewableFileName(name) {
-  return isMarkdownFileName(name) || isImageFileName(name) || isUrlDbFileName(name) || isBmapFileName(name);
+  return isMarkdownFileName(name) || isImageFileName(name) || isBmapFileName(name)
+    || modules.editor.previews.all().some((preview) => preview.matches({ name, content: "" }));
 }
 
 function looksLikeUrl(value) {
@@ -918,14 +913,6 @@ function inferNameFromUrl(value) {
   }
 }
 
-function getUrlDbEntries(fileContent) {
-  return parseUrlDb(fileContent);
-}
-
-function getUrlDbEntryById(fileContent, entryId) {
-  return getUrlDbEntries(fileContent).find((entry) => entry.id === entryId) ?? null;
-}
-
 function createMarkdownImageReference(name, url) {
   return `![${name}](${url})`;
 }
@@ -945,16 +932,8 @@ function getNextDefaultFolderName(project, parentId) {
 }
 
 function getNextDefaultFileName(project, parentId, kind) {
-  const label = kind === "md"
-    ? "new markdown"
-    : kind === "mtree"
-      ? "new mtree"
-      : kind === "bmap"
-        ? "new diagram"
-        : kind === "persona"
-          ? "new character"
-          : "new url album";
-  const extension = fileExtensionForKind(kind);
+  const label = builtinTypes.creatable().find((type) => type.id === kind)?.create.name ?? "new file";
+  const extension = builtinTypes.extensionsOf(kind)[0] ?? "";
   let index = 1;
   let candidate = slugTitle(label, index, extension);
   while (findChildByName(project, parentId, candidate)) {
@@ -962,10 +941,6 @@ function getNextDefaultFileName(project, parentId, kind) {
     candidate = slugTitle(label, index, extension);
   }
   return candidate;
-}
-
-function fileExtensionForKind(kind) {
-  return kind === "persona" ? PERSONA_SUFFIX : `.${kind}`;
 }
 
 // Starting content for a new file of `kind`: a default diagram, a character
@@ -979,16 +954,6 @@ function initialContentForKind(kind, name) {
   return "";
 }
 
-function getNextUrlDbEntryName(fileContent) {
-  const entries = getUrlDbEntries(fileContent);
-  let index = 1;
-  let candidate = `reference image ${index}`;
-  while (entries.some((entry) => entry.name.toLowerCase() === candidate.toLowerCase())) {
-    index += 1;
-    candidate = `reference image ${index}`;
-  }
-  return candidate;
-}
 // ---- Dialogs, toasts and the debug log (./ui/dialogs.js) ----
 // Created on first use. The module reads main's shared values through this
 // context, so it always sees their current values. `var`: a forwarding
@@ -1019,7 +984,6 @@ function notify(message) { return shell.notify(message); }
 async function promptForName(message, value = "", options = {}) { return shell.input({ title: message, message, value, submitLabel: "Save", ...options }); }
 function renderDebugPanel(...args) { return dialogs().renderDebugPanel(...args); }
 function showAcceptConnectionDialog(...args) { return dialogs().showAcceptConnectionDialog(...args); }
-function showBookmarkEntryDialog(...args) { return dialogs().showBookmarkEntryDialog(...args); }
 function showConfirmDialog(options) { return shell.confirm(options); }
 function showNoticeDialog(message, title) { return shell.notice(message, title); }
 function showToast(message, options) { return shell.toast(message, options); }
@@ -1080,10 +1044,10 @@ function getEditorLineIndexAtOffset(textOffset) {
 }
 
 function getSelectedTarget() {
-  if (sourceUrlDbEntry) {
-    return { nodeId: sourceUrlDbEntry.fileId, entryId: sourceUrlDbEntry.entryId };
+  if (sourcePart) {
+    return { nodeId: sourcePart.fileId, partId: sourcePart.partId };
   }
-  return { nodeId: selectionNodeId, entryId: null };
+  return { nodeId: selectionNodeId, partId: null };
 }
 
 // The extension to manage for a filename ("" for folders / no extension).
@@ -1381,17 +1345,6 @@ function suggestUniqueFolderName(project, parentId, name) {
   return candidate;
 }
 
-function suggestUniqueUrlDbEntryName(entries, name) {
-  let candidate = name;
-  let counter = 2;
-  const normalized = () => candidate.toLowerCase();
-  while (entries.some((entry) => entry.name.toLowerCase() === normalized())) {
-    candidate = `${name}-${counter}`;
-    counter += 1;
-  }
-  return candidate;
-}
-
 function createMarkdownReference(activeFile, targetFile) {
   const activePath = getPath(controller.getProject(), activeFile.id);
   const targetPath = getPath(controller.getProject(), targetFile.id);
@@ -1638,7 +1591,7 @@ const collaboration = createCollaborationRuntime({
 });
 workspace.attach(createWorkspacePorts({ controller, collaboration, publishOperation, getEditorSelection, applyEditorEdit,
   get workspaceMode() { return workspaceMode; },
-  editorShowsWholeFile: () => !sourceUrlDbEntry && isTextFileName(controller.getActiveFile()?.name ?? "") }));
+  editorShowsWholeFile: () => !sourcePart && isTextFileName(controller.getActiveFile()?.name ?? "") }));
 
 attachSelectionChangeListener();
 
@@ -1675,26 +1628,26 @@ const explorer = createExplorerView({
   onOpenFile(fileId) {
     openFileFromExplorer(fileId);
   },
-  onOpenUrlDbEntry(fileId, entryId) {
+  onOpenPart(fileId, partId) {
     const project = controller.getProject();
     const file = project.nodes[fileId];
-    if (!file || file.kind !== "file" || !isUrlDbFileName(file.name)) {
+    if (!file || file.kind !== "file" || !modules.workspace.parts.of(file.name)) {
       return;
     }
-    setActiveSourceUrlDbEntry(fileId, entryId);
+    setActiveSourcePart(fileId, partId);
     openPreviewTab(fileId);
     previewFileId = fileId;
-    previewUrlDbEntry = entryId;
+    previewPart = partId;
     updateStatus(project);
   },
   onToggleFolder(nodeId) {
     selectionNodeId = nodeId;
-    sourceUrlDbEntry = null;
+    sourcePart = null;
     controller.toggleFolder(nodeId);
   },
   onSelectNode(target) {
     selectionNodeId = target.nodeId;
-    sourceUrlDbEntry = target.entryId ? { fileId: target.nodeId, entryId: target.entryId } : null;
+    sourcePart = target.partId ? { fileId: target.nodeId, partId: target.partId } : null;
     render(controller.getProject());
   },
   canPasteTarget(target) {
@@ -1712,7 +1665,7 @@ const explorer = createExplorerView({
   },
   onAction(action, target, options) {
     selectionNodeId = target.nodeId;
-    sourceUrlDbEntry = target.entryId ? { fileId: target.nodeId, entryId: target.entryId } : null;
+    sourcePart = target.partId ? { fileId: target.nodeId, partId: target.partId } : null;
     return handleExplorerAction(action, target, options);
   },
   onDragNodeStart(nodeId, event) {
@@ -1731,15 +1684,16 @@ const explorer = createExplorerView({
     }
     logDebug("action", "Explorer drag started", getPath(project, nodeId));
   },
-  onDragUrlDbEntryStart(fileId, entryId, event) {
+  onDragPartStart(fileId, partId, event) {
     const project = controller.getProject();
     const file = project.nodes[fileId];
-    const entry = file?.kind === "file" ? getUrlDbEntryById(file.content, entryId) : null;
-    if (!entry) {
+    const parts = file?.kind === "file" ? modules.workspace.parts.of(file.name) : null;
+    const part = parts?.list(file.content).find((candidate) => candidate.id === partId);
+    if (!part) {
       return;
     }
-    event.dataTransfer?.setData("text/mdnotes-urldb-entry", JSON.stringify({ fileId, entryId }));
-    event.dataTransfer?.setData("text/plain", entry.url);
+    event.dataTransfer?.setData("text/stilo-file-part", JSON.stringify({ fileId, partId }));
+    event.dataTransfer?.setData("text/plain", part.image || part.name);
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = "copyMove";
     }
@@ -1752,12 +1706,14 @@ const explorer = createExplorerView({
     const file = project.nodes[fileId];
     return file?.kind === "file" && isImageFileName(file.name) ? imageSrcFor(project, file) : "";
   },
-  getUrlDbEntries(fileId) {
+  listParts(fileId) {
     const file = controller.getProject().nodes[fileId];
-    if (!file || file.kind !== "file" || !isUrlDbFileName(file.name)) {
-      return [];
-    }
-    return getUrlDbEntries(file.content);
+    const parts = file?.kind === "file" ? modules.workspace.parts.of(file.name) : null;
+    return parts ? parts.list(file.content) : null;
+  },
+  getPartAdder(fileId) {
+    const file = controller.getProject().nodes[fileId];
+    return file?.kind === "file" ? modules.workspace.parts.of(file.name)?.add?.label ?? null : null;
   },
   getSelectedTarget() {
     return getSelectedTarget();
@@ -1803,6 +1759,7 @@ async function openMtreeToolsDialog(fileId) {
 var highlighterInstance;
 function highlighter() {
   return (highlighterInstance ??= createHighlighter({
+    highlighters: modules.editor.highlighters,
     get escapeHtmlAttribute() { return escapeHtmlAttribute; }
   }));
 }
@@ -1883,7 +1840,7 @@ const backlinksListEl = document.getElementById("backlinks-list");
 // context, so it always sees their current values. `var`: a forwarding
 // function can run during startup, before this line is reached.
 var panesInstance;
-function panes() { // the Editor's panes; URL albums, diagrams and character sheets add their previews
+function panes() { // the Editor's panes; diagrams and character sheets add their previews here, extensions their own
   return (panesInstance ??= createPanes(registerPreviews(modules.editor.previews, {
     saveUserState: (ws, openFiles, activeFile) => saveUserState(settings.serverUrl, identity.token(), ws.team, ws.path, openFiles, activeFile),
     get DIFF_TAB_ID() { return DIFF_TAB_ID; },
@@ -1901,8 +1858,7 @@ function panes() { // the Editor's panes; URL albums, diagrams and character she
     get escapeHtmlAttribute() { return escapeHtmlAttribute; },
     get formatSnapshotTime() { return formatSnapshotTime; },
     get getRelativeProjectPath() { return getRelativeProjectPath; },
-    get getUrlDbEntries() { return getUrlDbEntries; },
-    get getUrlDbEntryById() { return getUrlDbEntryById; },
+    get parts() { return modules.workspace.parts; },
     get getViewState() { return getViewState; },
     get imageSrcFor() { return imageSrcFor; },
     get isPreviewableFileName() { return isPreviewableFileName; },
@@ -1919,8 +1875,8 @@ function panes() { // the Editor's panes; URL albums, diagrams and character she
     set previewFileId(value) { previewFileId = value; },
     get previewOpenTabIds() { return previewOpenTabIds; },
     set previewOpenTabIds(value) { previewOpenTabIds = value; },
-    get previewUrlDbEntry() { return previewUrlDbEntry; },
-    set previewUrlDbEntry(value) { previewUrlDbEntry = value; },
+    get previewPart() { return previewPart; },
+    set previewPart(value) { previewPart = value; },
     get quickGenerateBmapFile() { return quickGenerateBmapFile; },
     get render() { return render; },
     get resolveProjectAssetUrl() { return resolveProjectAssetUrl; },
@@ -1931,8 +1887,8 @@ function panes() { // the Editor's panes; URL albums, diagrams and character she
     get showToast() { return showToast; },
     get sourceOpenTabIds() { return sourceOpenTabIds; },
     set sourceOpenTabIds(value) { sourceOpenTabIds = value; },
-    get sourceUrlDbEntry() { return sourceUrlDbEntry; },
-    set sourceUrlDbEntry(value) { sourceUrlDbEntry = value; },
+    get sourcePart() { return sourcePart; },
+    set sourcePart(value) { sourcePart = value; },
     get identity() { return identity; },
     get togglePreview() { return togglePreview; },
     get updateFileContentFromPreview() { return updateFileContentFromPreview; },
@@ -1958,7 +1914,7 @@ function renderPreviewContent(...args) { return panes().renderPreviewContent(...
 function renderTabs(...args) { return panes().renderTabs(...args); }
 function restoreResumeState(...args) { return panes().restoreResumeState(...args); }
 function setActiveSourceFile(...args) { return panes().setActiveSourceFile(...args); }
-function setActiveSourceUrlDbEntry(...args) { return panes().setActiveSourceUrlDbEntry(...args); }
+function setActiveSourcePart(...args) { return panes().setActiveSourcePart(...args); }
 function setPreviewFile(...args) { return panes().setPreviewFile(...args); }
 function showResumedFile(...args) { return panes().showResumedFile(...args); }
 function tabOverflowButton(...args) { return panes().tabOverflowButton(...args); }
@@ -1984,16 +1940,13 @@ function fileActions() {
     get editorDragState() { return editorDragState; },
     get elements() { return elements; },
     get explorerClipboard() { return explorerClipboard; },
-    get fileExtensionForKind() { return fileExtensionForKind; },
     get fileExtensionOf() { return fileExtensionOf; },
     get getEditorSelection() { return getEditorSelection; },
     get getEditorText() { return getEditorText; },
     get getEditorTextOffsetFromPoint() { return getEditorTextOffsetFromPoint; },
     get getNextDefaultFileName() { return getNextDefaultFileName; },
     get getNextDefaultFolderName() { return getNextDefaultFolderName; },
-    get getNextUrlDbEntryName() { return getNextUrlDbEntryName; },
-    get getUrlDbEntries() { return getUrlDbEntries; },
-    get getUrlDbEntryById() { return getUrlDbEntryById; },
+    get parts() { return modules.workspace.parts; },
     get inferNameFromUrl() { return inferNameFromUrl; },
     get initialContentForKind() { return initialContentForKind; },
     get isPreviewableFileName() { return isPreviewableFileName; },
@@ -2008,8 +1961,8 @@ function fileActions() {
     get persistSettings() { return persistSettings; },
     get previewFileId() { return previewFileId; },
     set previewFileId(value) { previewFileId = value; },
-    get previewUrlDbEntry() { return previewUrlDbEntry; },
-    set previewUrlDbEntry(value) { previewUrlDbEntry = value; },
+    get previewPart() { return previewPart; },
+    set previewPart(value) { previewPart = value; },
     get promptForName() { return promptForName; },
     get publishOperation() { return publishOperation; },
     get publishSnapshot() { return publishSnapshot; },
@@ -2021,17 +1974,15 @@ function fileActions() {
     get selectionNodeId() { return selectionNodeId; },
     set selectionNodeId(value) { selectionNodeId = value; },
     get setActiveSourceFile() { return setActiveSourceFile; },
-    get setActiveSourceUrlDbEntry() { return setActiveSourceUrlDbEntry; },
+    get setActiveSourcePart() { return setActiveSourcePart; },
     get setEditorSelection() { return setEditorSelection; },
     get setPreviewFile() { return setPreviewFile; },
     get settings() { return settings; },
-    get showBookmarkEntryDialog() { return showBookmarkEntryDialog; },
     get showToast() { return showToast; },
-    get sourceUrlDbEntry() { return sourceUrlDbEntry; },
-    set sourceUrlDbEntry(value) { sourceUrlDbEntry = value; },
+    get sourcePart() { return sourcePart; },
+    set sourcePart(value) { sourcePart = value; },
     get suggestUniqueFileName() { return suggestUniqueFileName; },
     get suggestUniqueFolderName() { return suggestUniqueFolderName; },
-    get suggestUniqueUrlDbEntryName() { return suggestUniqueUrlDbEntryName; }
   }));
 }
 function canPasteIntoExplorerTarget(...args) { return fileActions().canPasteIntoExplorerTarget(...args); }
@@ -2044,13 +1995,13 @@ function getExplorerDropPayloadKind(...args) { return fileActions().getExplorerD
 function getExplorerDropPlacement(...args) { return fileActions().getExplorerDropPlacement(...args); }
 function getSelectedNode(...args) { return fileActions().getSelectedNode(...args); }
 function getSelectedParent(...args) { return fileActions().getSelectedParent(...args); }
-function getSelectedUrlDbEntry(...args) { return fileActions().getSelectedUrlDbEntry(...args); }
+function getSelectedPart(...args) { return fileActions().getSelectedPart(...args); }
 async function handleAddFileTransfer(...args) { return fileActions().handleAddFileTransfer(...args); }
 async function handleEditorDrop(...args) { return fileActions().handleEditorDrop(...args); }
 async function handleExplorerAction(...args) { return fileActions().handleExplorerAction(...args); }
 function handleNewFileSubmit(...args) { return fileActions().handleNewFileSubmit(...args); }
 function moveExplorerNode(...args) { return fileActions().moveExplorerNode(...args); }
-function moveExplorerUrlDbEntry(...args) { return fileActions().moveExplorerUrlDbEntry(...args); }
+function moveExplorerPart(...args) { return fileActions().moveExplorerPart(...args); }
 function openNewFileDialog(...args) { return fileActions().openNewFileDialog(...args); }
 async function renameFileById(...args) { return fileActions().renameFileById(...args); }
 async function renameSelected(...args) { return fileActions().renameSelected(...args); }
@@ -2103,7 +2054,7 @@ function bindExplorerDropTarget() {
       return;
     }
 
-    const placement = getExplorerDropPlacement(row, node, row.dataset.entryId || null, payloadKind, event);
+    const placement = getExplorerDropPlacement(row, node, row.dataset.partId || null, payloadKind, event);
     if (!placement) {
       clearExplorerDropState();
       return;
@@ -2127,18 +2078,18 @@ function bindExplorerDropTarget() {
     clearExplorerDropState();
     const nodeId = event.dataTransfer?.getData("text/mdnotes-node-id");
     const fileId = event.dataTransfer?.getData("text/mdnotes-file-id");
-    const entryPayload = event.dataTransfer?.getData("text/mdnotes-urldb-entry");
-    if (!nodeId && !entryPayload) {
+    const partPayload = event.dataTransfer?.getData("text/stilo-file-part");
+    if (!nodeId && !partPayload) {
       return;
     }
 
     const row = event.target.closest(".tree-row");
     const project = controller.getProject();
     const targetNodeId = row?.dataset.nodeId ?? null;
-    const targetEntryId = row?.dataset.entryId ?? null;
+    const targetPartId = row?.dataset.partId ?? null;
     const targetNode = targetNodeId ? project.nodes[targetNodeId] : null;
     const placement = row && targetNode
-      ? getExplorerDropPlacement(row, targetNode, targetEntryId, entryPayload ? "urldb-entry" : "node", event)
+      ? getExplorerDropPlacement(row, targetNode, targetPartId, partPayload ? "part" : "node", event)
       : (nodeId ? "into" : null);
 
     if (!placement) {
@@ -2152,8 +2103,8 @@ function bindExplorerDropTarget() {
         return;
       }
 
-      const parsed = JSON.parse(entryPayload);
-      moveExplorerUrlDbEntry(parsed.fileId, parsed.entryId, targetNodeId, targetEntryId, placement);
+      const parsed = JSON.parse(partPayload);
+      moveExplorerPart(parsed.fileId, parsed.partId, targetNodeId, targetPartId, placement);
     } catch (error) {
       notify(error.message);
     }
@@ -2634,7 +2585,7 @@ function updateStatus(project) {
 
   const activeFile = project.activeFileId ? project.nodes[project.activeFileId] : null;
   const previewFile = previewFileId ? project.nodes[previewFileId] : null;
-  const selectedEntry = getSelectedUrlDbEntry(project);
+  const selectedPart = getSelectedPart(project);
   if (!activeFile) {
     // No file open: make the pane non-editable and show the create-a-file overlay
     // instead of a plain (typable) placeholder.
@@ -2669,8 +2620,8 @@ function updateStatus(project) {
     ? "Select or create a file"
     : "Image assets are preview-only in the source pane.";
   const nextText = isTextFile
-    ? selectedEntry
-      ? formatUrlDbEntryBody(selectedEntry.entry)
+    ? selectedPart
+      ? selectedPart.parts.body(selectedPart.file.content, selectedPart.part.id)
       : activeFile.content
     : `[${activeFile.name}]\n\nThis image asset is preview-only in the source pane.\nUse the preview pane to inspect it or Explorer > Add File to replace it.`;
   // Cache the total for the footer counter — the source text the editor holds
@@ -3422,9 +3373,9 @@ elements.editorContent.addEventListener("dragover", (event) => {
 
   const activeFile = controller.getActiveFile();
   const supportsTextDrop = Boolean(activeFile && isTextFileName(activeFile.name));
-  const supportsImageUrlDrop = Boolean(activeFile && isMarkdownFileName(activeFile.name) && types.includes("text/mdnotes-urldb-entry"));
+  const supportsPartDrop = Boolean(activeFile && isMarkdownFileName(activeFile.name) && types.includes("text/stilo-file-part"));
   const supportsTextPayload = types.includes("text/plain") || types.includes("text/mdnotes-editor-selection");
-  if ((!supportsTextDrop || !supportsTextPayload) && !supportsImageUrlDrop) {
+  if ((!supportsTextDrop || !supportsTextPayload) && !supportsPartDrop) {
     clearEditorDropCaret();
     return;
   }
@@ -3614,11 +3565,9 @@ shell.commands.add({ id: "workspace.rename-selected", title: "Rename Selected", 
 shell.commands.add({ id: "workspace.delete-selected", title: "Delete Selected", menu: { id: "edit", group: 0, order: 5 }, run: () => {
   void deleteSelected();
 } });
-shell.commands.add({ id: "file-types.new-markdown", title: "New Markdown", menu: { id: "create", group: 0, order: 1 }, run: () => createItem("md") });
-shell.commands.add({ id: "file-types.new-mtree", title: "New MTREE", menu: { id: "create", group: 0, order: 2 }, run: () => createItem("mtree") });
-shell.commands.add({ id: "file-types.new-urldb", title: "New URL Album", menu: { id: "create", group: 0, order: 3 }, run: () => createItem("urldb") });
-shell.commands.add({ id: "file-types.new-bmap", title: "New Diagram", menu: { id: "create", group: 0, order: 4 }, run: () => createItem("bmap") });
-shell.commands.add({ id: "file-types.new-persona", title: "New Character", menu: { id: "create", group: 0, order: 5 }, run: () => createItem("persona") });
+for (const type of builtinTypes.creatable()) { // New Markdown, New Diagram…: every type that says how to create one
+  shell.commands.add({ id: `file-types.new-${type.id}`, title: type.create.label, menu: { id: "create", group: 0, order: type.create.order }, run: () => createItem(type.id) });
+}
 elements.addFilePickerButton.addEventListener("click", () => elements.addFilePickerInput.click());
 elements.addFilePickerInput.addEventListener("change", async (event) => {
   const file = event.target.files?.[0];

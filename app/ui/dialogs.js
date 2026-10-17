@@ -1,5 +1,5 @@
 // Legacy (before the module restructure): the debug log panel and editor
-// tracing, the bookmark-entry and accept-connection dialogs, and the forced app
+// tracing, the accept-connection dialog, and the forced app
 // upgrade. Notices, confirms, inputs and toasts moved to the Shell module.
 // main.js creates this on first use and passes its shared values in `app`.
 
@@ -106,35 +106,6 @@ export function createDialogs(app) {
 
 
 
-  function showBookmarkEntryDialog({ title = "New Bookmark Entry", message = "Add a named image bookmark to this URL album.", name = "", url = "", description = "", submitLabel = "Save" }) {
-    return new Promise((resolve) => {
-      app.elements.bookmarkEntryDialogTitle.textContent = title;
-      app.elements.bookmarkEntryDialogMessage.textContent = message;
-      app.elements.bookmarkEntryNameInput.value = name;
-      app.elements.bookmarkEntryUrlInput.value = url;
-      app.elements.bookmarkEntryDescriptionInput.value = description;
-      app.elements.bookmarkEntrySubmitButton.textContent = submitLabel;
-
-      const handleClose = () => {
-        app.elements.bookmarkEntryDialog.removeEventListener("close", handleClose);
-        if (app.elements.bookmarkEntryDialog.returnValue !== "accept") {
-          resolve(null);
-          return;
-        }
-        resolve({
-          name: app.elements.bookmarkEntryNameInput.value.trim(),
-          url: app.elements.bookmarkEntryUrlInput.value.trim(),
-          description: app.elements.bookmarkEntryDescriptionInput.value.trim()
-        });
-      };
-
-      app.elements.bookmarkEntryDialog.addEventListener("close", handleClose, { once: true });
-      app.elements.bookmarkEntryDialog.showModal();
-      app.elements.bookmarkEntryNameInput.focus();
-      app.elements.bookmarkEntryNameInput.select();
-    });
-  }
-
   function getVisibleDebugEntries() {
     if (app.debugState.activeTab === "actions") {
       return app.debugState.entries.filter((entry) => entry.kind === "action");
@@ -223,6 +194,6 @@ export function createDialogs(app) {
 
   return {
     copyDebugLogToClipboard, flashStatusPanel, forceAppUpgrade, formatEditorDebugValue, logDebug,
-    renderDebugPanel, showAcceptConnectionDialog, showBookmarkEntryDialog, traceEditorEvent
+    renderDebugPanel, showAcceptConnectionDialog, traceEditorEvent
   };
 }

@@ -33,7 +33,8 @@ node --test tests/       # raw test runner
 | `project-model.test.mjs` | Project tree, file/folder ops, sync operations. |
 | `rendering.test.mjs` | Markdown rendering + mtree module map. |
 | `bmap-service.test.mjs` | `.bmap` node/connector parsing, normalization, serialization. |
-| `urldb-service.test.mjs` | `.urldb` serialize/parse/update/remove round-trips. |
+| `url-album.test.mjs` | The URL album extension: its text format, the parts it offers Workspace, and what it registers. |
+| `url-album-browser.py` | The URL album in the page, end to end, and the app running without the extension. |
 | `zip-fs.test.mjs` | ZIP import/export and File System Access persistence. |
 | `collaboration-runtime.test.mjs` | Production sync runtime: reconnect conflicts, recovery snapshots, request races, patch rejection, join gaps, Unicode. |
 | `collaboration-broker.test.mjs` | Two real clients + the Python broker over stdio, both send/ack orders. |

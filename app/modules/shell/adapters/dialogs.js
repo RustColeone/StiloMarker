@@ -1,4 +1,4 @@
-// The app's modal dialogs (notice, confirm, input), toasts and copying text.
+// The app's modal dialogs (notice, confirm, input, form), toasts and copying text.
 // Shell owns these page elements; nothing else queries them.
 
 export function createDialogs(doc = document) {
@@ -70,6 +70,63 @@ export function createDialogs(doc = document) {
     });
   }
 
+  // Asks for several values at once. Each field: { name, label, value?,
+  // type?: "text" | "url", multiline?: true, placeholder? }. The dialog is made on
+  // first use; field elements are #form-dialog-field-<name>. Resolves to
+  // { name: trimmed text } or null when cancelled.
+  let form = null;
+  function makeForm() {
+    const dialog = doc.createElement("dialog");
+    dialog.id = "form-dialog";
+    dialog.className = "app-dialog";
+    dialog.innerHTML = `<form method="dialog" class="app-dialog-form form-dialog-form">
+        <header class="dialog-header"><div><div class="eyebrow"></div><h2 id="form-dialog-title"></h2></div>
+          <p id="form-dialog-message" class="subtle-label"></p></header>
+        <div class="form-dialog-fields"></div>
+        <menu class="dialog-actions"><button value="cancel" type="submit" formnovalidate>Cancel</button>
+          <button id="form-dialog-submit-button" value="accept" type="submit">Save</button></menu>
+      </form>`;
+    doc.body.append(dialog);
+    const pick = (selector) => dialog.querySelector(selector);
+    return { dialog, eyebrow: pick(".eyebrow"), title: pick("h2"), message: pick("p"), fields: pick(".form-dialog-fields"), submit: pick("#form-dialog-submit-button") };
+  }
+
+  function showForm({ eyebrow = "", title, message = "", fields, submitLabel = "Save" }) {
+    form ??= makeForm();
+    return new Promise((resolve) => {
+      form.eyebrow.textContent = eyebrow;
+      form.eyebrow.hidden = !eyebrow;
+      form.title.textContent = title;
+      form.message.textContent = message;
+      form.message.hidden = !message;
+      form.submit.textContent = submitLabel;
+      const inputs = fields.map((field) => {
+        const label = doc.createElement("label");
+        const caption = doc.createElement("span");
+        caption.textContent = field.label;
+        const control = doc.createElement(field.multiline ? "textarea" : "input");
+        if (field.multiline) control.rows = 4;
+        else control.type = field.type ?? "text";
+        control.id = `form-dialog-field-${field.name}`;
+        control.autocomplete = "off";
+        control.placeholder = field.placeholder ?? "";
+        control.value = field.value ?? "";
+        label.append(caption, control);
+        return { name: field.name, label, control };
+      });
+      form.fields.replaceChildren(...inputs.map((input) => input.label));
+      form.dialog.addEventListener("close", () => {
+        resolve(form.dialog.returnValue === "accept"
+          ? Object.fromEntries(inputs.map((input) => [input.name, input.control.value.trim()]))
+          : null);
+      }, { once: true });
+      form.dialog.returnValue = "";
+      form.dialog.showModal();
+      inputs[0]?.control.focus();
+      inputs[0]?.control.select?.();
+    });
+  }
+
   // Short feedback that never blocks; errors still use a notice.
   function showToast(message, { duration = 2200 } = {}) {
     const text = String(message ?? "").trim();
@@ -104,5 +161,5 @@ export function createDialogs(doc = document) {
     fallback.remove();
   }
 
-  return { showNotice, showConfirm, showInput, showToast, copyText };
+  return { showNotice, showConfirm, showInput, showForm, showToast, copyText };
 }

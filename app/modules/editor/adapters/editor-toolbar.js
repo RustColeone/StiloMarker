@@ -200,7 +200,7 @@ export function installToolbar(ed, app) {
       toolbar.replaceChildren();
       return;
     }
-    renderEditorFormatToolbar(toolbar, format, { onAction: applyToolbarAction });
+    renderEditorFormatToolbar(toolbar, format, { onAction: applyToolbarAction, toolbars: app.toolbars });
   }
 
   Object.assign(ed, { applyTextareaValue, dispatchTextareaInput, replaceTextareaRange, wrapEditorSelection, prefixEditorLines, insertEditorBlock, getMtreeIndentLevel, insertMtreeChild, ensureTableGridPicker, applyToolbarAction, clearEditorDropCaret, showEditorDropCaret, refreshFormatToolbar });

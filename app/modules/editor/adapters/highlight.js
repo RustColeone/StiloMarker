@@ -1,5 +1,7 @@
-// Source-pane syntax highlighting for Markdown, .mtree, .urldb and .bmap
-// files, with a per-line memo so typing re-highlights only changed lines.
+// Source-pane syntax highlighting for Markdown, .mtree and .bmap files, and
+// for formats added to the `highlighters` extension point (app.highlighters:
+// { id: format, line(rawLine, { escape, blank }) -> one `editor-line` div }),
+// with a per-line memo so typing re-highlights only changed lines.
 // main.js creates this on first use and passes its shared values in `app`.
 import { builtinTypes } from "../../file-types/index.js";
 
@@ -89,38 +91,6 @@ export function createHighlighter(app) {
         : "";
 
       return `<div class="editor-line">${chainHtml}${descriptionHtml}</div>`;
-    });
-  }
-
-  function highlightUrlDbLines(value) {
-    const lines = value.replace(/\r\n/g, "\n").split("\n");
-
-    return lines.map((rawLine) => {
-      const escaped = escapeEditorHtml(rawLine);
-      const trimmed = rawLine.trimStart();
-
-      if (!trimmed) {
-        return renderWhitespaceOnlyEditorLine(rawLine);
-      }
-
-      if (trimmed.startsWith("#")) {
-        return `<div class="editor-line"><span class="token-mtree-comment">${escaped}</span></div>`;
-      }
-
-      if (/^\[[^\]]+\]$/.test(trimmed)) {
-        const [, name] = trimmed.match(/^\[([^\]]+)\]$/);
-        const indent = escapeEditorHtml(rawLine.slice(0, rawLine.indexOf("[")));
-        return `<div class="editor-line">${indent}<span class="token-urldb-bracket">[</span><span class="token-urldb-name">${escapeEditorHtml(name)}</span><span class="token-urldb-bracket">]</span></div>`;
-      }
-
-      const keyValueMatch = rawLine.match(/^(\s*)(url|description)(\s*=\s*)(.*)$/i);
-      if (keyValueMatch) {
-        const [, indent, key, separator, valuePart] = keyValueMatch;
-        const valueClass = key.toLowerCase() === "url" ? "token-link" : "token-urldb-description";
-        return `<div class="editor-line">${escapeEditorHtml(indent)}<span class="token-urldb-key">${escapeEditorHtml(key)}</span><span class="token-urldb-separator">${escapeEditorHtml(separator)}</span><span class="${valueClass}">${escapeEditorHtml(valuePart)}</span></div>`;
-      }
-
-      return `<div class="editor-line">${escaped}</div>`;
     });
   }
 
@@ -295,16 +265,19 @@ export function createHighlighter(app) {
 
   // The highlighter follows the file's format (File types module); anything
   // else highlights as Markdown.
-  const HIGHLIGHTED_FORMATS = new Set(["mtree", "urldb", "bmap"]);
+  const HIGHLIGHTED_FORMATS = new Set(["mtree", "bmap"]);
+  const added = (format) => app.highlighters?.get(format) ?? null;
   function editorHighlightKind(name) {
     const format = builtinTypes.formatOf(name ?? "");
-    return HIGHLIGHTED_FORMATS.has(format) ? format : "markdown";
+    return HIGHLIGHTED_FORMATS.has(format) || added(format) ? format : "markdown";
   }
 
+  const lineTools = { escape: escapeEditorHtml, blank: renderWhitespaceOnlyEditorLine };
   function highlightEditorLines(kind, normalized) {
     if (kind === "mtree") return highlightMtreeLines(normalized);
-    if (kind === "urldb") return highlightUrlDbLines(normalized);
     if (kind === "bmap") return highlightBmapLines(normalized);
+    const highlighter = added(kind);
+    if (highlighter) return normalized.replace(/\r\n/g, "\n").split("\n").map((line) => highlighter.line(line, lineTools));
     return highlightMarkdownLines(normalized);
   }
 

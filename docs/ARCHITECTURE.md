@@ -20,6 +20,7 @@ This file is the short reference that the structure tests enforce.
   | 3 | Editor (browser), Sync, Characters |
   | 4 | History, Comments |
   | 5 | Assistant, Chats |
+  | 6 | Extensions (`extensions/<name>/`): the URL album |
 
 - **Inside every module**: its definition (name, level, uses, owns: in a
   browser module the `defineModule({...})` its `index.js` exports, in a server
@@ -47,12 +48,15 @@ This file is the short reference that the structure tests enforce.
 
 Arrows are "uses": a module calls only the modules it points at, always on a
 lower level. News travels the other way, as events or extension points, so it
-needs no arrow. Every module exists (as of v0.1.47); legacy code still wires them together; the rest are still legacy
-code. Modules marked *both* have a browser half and a server half that share a
+needs no arrow. Every module exists (as of v0.1.47) and the URL album is an
+extension (v0.1.48); legacy code still wires the modules together. Modules marked *both* have a browser half and a server half that share a
 model and a contract.
 
 ```mermaid
 flowchart TB
+  subgraph L6["Level 6 · extensions"]
+    UrlAlbum["URL album (browser)"]
+  end
   subgraph L5["Level 5 · features"]
     Assistant["Assistant (both)"]
     Chats["Chats (both)"]
@@ -208,6 +212,24 @@ sequenceDiagram
 7. Each module owns its network messages and their version.
 8. Size budgets: the kernel about 300 lines and free of domain words; any file 800.
 
+## Extensions
+
+An extension is a folder under `extensions/` that adds a feature through the
+modules' public extension points only. The URL album (step 8) is the first:
+deleting `extensions/url-album/` and running `node tools/protocol-sync.mjs`
+leaves an app that works without it.
+
+- `extension.json`: `name`, `about`, `browser` (its browser module) and
+  `fileTypes` (entries in the shape of `protocol/file-types.json`). Both ends
+  merge these types after the built-in ones: the server's File types reads the
+  manifests, and `tools/protocol-sync.mjs` writes the browser's copy, the list
+  of modules `main.js` starts (`app/extensions.js`) and the files the service
+  worker caches (`extensions/offline.js`).
+- The browser module is a normal `defineModule` on level 6, above every core
+  module. It imports only `app/kernel/index.js` and modules' `index.js`.
+- The structure test fails if any code outside the extension's folder (the
+  generated copies aside) spells its name or its file types' ids or labels.
+
 ## Legacy code
 
 Code from before the restructure is not in a module yet. What it breaks today
@@ -238,7 +260,7 @@ refuses to record anything new.
 | 7f-2 | Chats in the browser (the chats view, this browser's own chat store, the server calls) and `protocol/chats.contract.json` with the chat events | done |
 | 7g-1 | Editor (browser): the source editor, split by job into parts that share one editor object (text and DOM, rendering, edits and undo, others' cursors, the toolbar, keys), highlighting, find and replace, autocomplete, links, the formatting toolbar and table picker, and the Markdown renderer as its model. The gutter popover for comments moved into Comments. The URL album entry editing is a port the app provides (it becomes an extension in step 8) | done |
 | 7g-2 | The tab strips and panes (and resuming the last view, through a port) and the preview pane with a `previews` extension point: images, Markdown and mind-map trees are built in; URL albums, diagrams and character sheets add theirs from `app/features/previews.js` | done |
-| 8 | The URL album as an extension | next |
+| 8 | The URL album as an extension (v0.1.48): `extensions/url-album/` with its file type, model, preview, highlighting, Entry button and entry dialog. The core gained extension points instead of album code: file parts in Workspace (a file's named parts listed, opened, renamed, moved, copied and dropped on their own), highlighters and toolbars in Editor, `shell.form` for dialogs with several fields, and the Create menu drawn from File types. Nothing in the core names the album | done |
 
 ### Notes for module authors
 
@@ -290,6 +312,21 @@ refuses to record anything new.
   `tools.markdownHtml(project, file, text)` renders Markdown with the
   project's links and images. A cacheable preview is a pure function of the
   file's text, the project's paths and the connection.
+- A file whose text holds named parts (each listed under the file in the
+  explorer, opened in the source editor on its own, renamed, deleted, copied,
+  dragged between files and dropped into Markdown):
+  `workspace.parts.add({ id: <file type id>, list, body, withBody, rename,
+  remove, take, insert, linkText?, add? })` (the shapes are in Workspace's
+  `index.js`). The explorer, tabs and file actions do the rest.
+- Highlighting and toolbar buttons for a format the Editor does not know:
+  `editor.highlighters.add({ id: format, line(rawLine, { escape, blank }) })`
+  and `editor.toolbars.add({ id: format, groups })` (groups as in
+  `TOOLBAR_SPECS`).
+- A dialog that asks for several values: `shell.form({ eyebrow, title,
+  message, fields: [{ name, label, value, type, multiline, placeholder }] })`
+  resolves to `{ name: value }` or null.
+- A new kind of file that can be created (New ... in the Create menu and the
+  explorer): give its File types entry a `create: { label, name, order }`.
 - A module's network messages: list each route in
   `protocol/<module>.contract.json`. The structure test checks that the
   server half serves exactly those and that nothing outside the module calls

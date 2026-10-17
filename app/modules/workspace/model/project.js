@@ -17,7 +17,6 @@ function createId(prefix) {
 const isAllowedFileName = (name) => builtinTypes.isKnown(name);
 const isTextFileName = (name) => builtinTypes.isText(name);
 const isBmapFileName = (name) => builtinTypes.is(name, "bmap");
-const isUrlDbFileName = (name) => builtinTypes.is(name, "urldb");
 const isMtreeFileName = (name) => builtinTypes.is(name, "mtree");
 const isImageFileName = (name) => builtinTypes.isImage(name);
 // Notes and character files edit and preview the same way.
@@ -351,7 +350,7 @@ function toggleFolder(project, nodeId) {
     return next;
   }
 
-  throw new Error("Only folders and expandable files (such as URL albums) can be expanded.");
+  throw new Error("Only folders and expandable files can be expanded.");
 }
 
 function setActiveFile(project, fileId) {
@@ -500,7 +499,6 @@ export {
   isPersonaFileName,
   isBmapFileName,
   isTextFileName,
-  isUrlDbFileName,
   listVisibleNodes,
   markFileSaved,
   markFilesSaved,

@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-17 · release `v0.1.47` (deployed; public verification passed)
+Last updated: 2026-10-17 · release `v0.1.48`
 
 ---
 
@@ -39,6 +39,28 @@ delete should remove them, keep them for a while, or offer them for restore.
 ---
 
 ## Fixed
+
+### v0.1.48: restructure step 8 (the URL album as an extension)
+
+The URL album lives in `extensions/url-album/` and reaches the app only
+through public extension points. For users, two things look different:
+the menu item is "Add Album Entry", and the entry dialog is Shell's new form
+dialog.
+
+- The core gained extension points instead of album code:
+  - file parts in Workspace: a file's named parts are listed under it, opened,
+    renamed, deleted, copied, dragged and dropped into Markdown;
+  - highlighters and toolbars in Editor;
+  - `shell.form`, a dialog with several fields;
+  - New ... entries drawn from File types.
+- The album's file type moved from `protocol/file-types.json` into its
+  `extension.json`, which both ends read.
+- A new structure rule fails if code outside the extension names it.
+  `url-album-browser.py` was written against the old code first, then kept
+  passing through the move. It also starts the app without the extension.
+- Two album words left the core: the "add it to a .urldb album" hint when a
+  remote image is blocked, and the lists of file kinds in the Add File and ZIP
+  messages, which now come from File types.
 
 ### v0.1.47: restructure step 7g-2 (panes and previews); step 7 complete
 

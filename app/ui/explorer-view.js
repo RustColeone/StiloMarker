@@ -1,4 +1,4 @@
-import { ROOT_ID, isUrlDbFileName, listVisibleNodes } from "../domain/project-model.js";
+import { ROOT_ID, listVisibleNodes } from "../domain/project-model.js";
 import { builtinTypes } from "../modules/file-types/index.js";
 
 function getFileIconClass(node) {
@@ -9,7 +9,9 @@ function getFileIconClass(node) {
   return builtinTypes.typeOf(node.name)?.icon ?? "is-file";
 }
 
-function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenUrlDbEntry, onToggleFolder, onSelectNode, onAction, canPasteTarget, canPreviewFile, canManagePreview, onDragNodeStart, onDragUrlDbEntryStart, getFilterMode, getAssetPreviewSrc, getUrlDbEntries, getSelectedTarget }) {
+const isExpandableFile = (node) => node.kind === "file" && builtinTypes.typeOf(node.name)?.expandable === true;
+
+function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenPart, onToggleFolder, onSelectNode, onAction, canPasteTarget, canPreviewFile, canManagePreview, onDragNodeStart, onDragPartStart, getFilterMode, getAssetPreviewSrc, listParts, getPartAdder, getSelectedTarget }) {
   let menuTarget = null;
   let currentProject = null;
   let activeMenuMode = null;
@@ -52,11 +54,11 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
 
   function getMenuEntries(node, mode = "default", target = null) {
     const pasteEnabled = canPasteTarget?.(target) === true;
-    if (target?.entryId) {
+    if (target?.partId) {
       const entries = [
         ["Copy", "copy"],
-        ["Rename", "rename-entry"],
-        ["Delete", "delete-entry"]
+        ["Rename", "rename-part"],
+        ["Delete", "delete-part"]
       ];
       if (pasteEnabled) {
         entries.splice(1, 0, ["Paste", "paste"]);
@@ -66,11 +68,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
 
     const createEntries = [
       ["New Folder", "new-folder"],
-      ["New Markdown", "new-md"],
-      ["New MTREE", "new-mtree"],
-      ["New URL Album", "new-urldb"],
-      ["New Diagram", "new-bmap"],
-      ["New Character", "new-persona"],
+      ...builtinTypes.creatable().map((type) => [type.create.label, `new-${type.id}`]),
       ["Add File", "add-file"]
     ];
 
@@ -107,8 +105,6 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
         typeEntries = [["Copy", "copy"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
       } else if (format === "mtree") {
         typeEntries = [["Copy", "copy"], ["Generate Module Map", "generate-module-map"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
-      } else if (format === "urldb") {
-        typeEntries = [["Copy", "copy"], ["Add Bookmark Entry", "add-bookmark-entry"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
       } else if (format === "image") {
         typeEntries = [["Copy", "copy"], ["Replace File", "replace-file"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
       } else if (format === "bmap") {
@@ -127,6 +123,10 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
         typeEntries = [["Copy", "copy"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
       }
 
+      const addPart = getPartAdder?.(node.id);
+      if (addPart) {
+        typeEntries.splice(1, 0, [addPart, "add-part"]);
+      }
       if (pasteEnabled) {
         typeEntries.splice(1, 0, ["Paste", "paste"]);
       }
@@ -266,8 +266,8 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       pressTimer = null;
       longPressFired = true;
       const target = row
-        ? { nodeId: row.dataset.nodeId, entryId: row.dataset.entryId || null }
-        : { nodeId: ROOT_ID, entryId: null };
+        ? { nodeId: row.dataset.nodeId, partId: row.dataset.partId || null }
+        : { nodeId: ROOT_ID, partId: null };
       onSelectNode?.(target);
       const mode = row?.dataset.projectRoot ? "project-root" : "default";
       showMenu(pressStart.x, pressStart.y, target, mode);
@@ -320,7 +320,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       event.preventDefault();
       const target = {
         nodeId: row.dataset.nodeId,
-        entryId: row.dataset.entryId || null
+        partId: row.dataset.partId || null
       };
       onSelectNode?.(target);
       showMenu(event.clientX, event.clientY, target, row.dataset.projectRoot ? "project-root" : "default");
@@ -332,7 +332,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
     }
 
     event.preventDefault();
-    const target = { nodeId: ROOT_ID, entryId: null };
+    const target = { nodeId: ROOT_ID, partId: null };
     onSelectNode?.(target);
     showMenu(event.clientX, event.clientY, target);
   });
@@ -341,7 +341,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
     if (event.target.closest(".tree-row")) {
       return;
     }
-    onSelectNode?.({ nodeId: ROOT_ID, entryId: null });
+    onSelectNode?.({ nodeId: ROOT_ID, partId: null });
   });
 
   function showAssetPreview(source, label, anchorElement) {
@@ -370,8 +370,8 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
   // whole project and, for server workspaces, opens the preview access editor.
   function createProjectRootRow(project) {
     const row = document.createElement("div");
-    const selectedTarget = getSelectedTarget?.() ?? { nodeId: ROOT_ID, entryId: null };
-    const isSelected = selectedTarget.nodeId === ROOT_ID && !selectedTarget.entryId;
+    const selectedTarget = getSelectedTarget?.() ?? { nodeId: ROOT_ID, partId: null };
+    const isSelected = selectedTarget.nodeId === ROOT_ID && !selectedTarget.partId;
     row.className = `tree-row is-project-root${isSelected ? " is-active" : ""}`;
     row.setAttribute("role", "treeitem");
     row.dataset.nodeId = ROOT_ID;
@@ -399,7 +399,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
     row.append(label);
 
     row.addEventListener("click", () => {
-      onSelectNode?.({ nodeId: ROOT_ID, entryId: null });
+      onSelectNode?.({ nodeId: ROOT_ID, partId: null });
     });
 
     return row;
@@ -414,8 +414,8 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
   let renderedSignature = null;
 
   function treeSignature(project, rows, pendingPaths, filterMode) {
-    const selected = getSelectedTarget?.() ?? { nodeId: ROOT_ID, entryId: null };
-    const parts = [project?.name ?? "", filterMode, selected.nodeId ?? "", selected.entryId ?? ""];
+    const selected = getSelectedTarget?.() ?? { nodeId: ROOT_ID, partId: null };
+    const parts = [project?.name ?? "", filterMode, selected.nodeId ?? "", selected.partId ?? ""];
     for (const { node, depth, path } of rows) {
       parts.push(node.id, node.kind, node.name, depth, path, node.expanded ? 1 : 0, pendingPaths.has(path) ? 1 : 0);
       if (builtinTypes.isImage(node.name)) {
@@ -423,9 +423,9 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
         const src = String(getAssetPreviewSrc?.(node.id) ?? "");
         parts.push(`${src.length}:${src.slice(0, 80)}:${src.slice(-40)}`);
       }
-      if (node.kind === "file" && isUrlDbFileName(node.name) && node.expanded) {
-        for (const entry of getUrlDbEntries?.(node.id) ?? []) {
-          parts.push(entry.id, entry.name, entry.url, entry.description ?? "");
+      if (isExpandableFile(node) && node.expanded) {
+        for (const part of listParts?.(node.id) ?? []) {
+          parts.push(part.id, part.name, part.title ?? "", part.image ?? "");
         }
       }
     }
@@ -455,8 +455,8 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
 
     rows.forEach(({ node, depth, path }) => {
       const row = document.createElement("div");
-      const selectedTarget = getSelectedTarget?.() ?? { nodeId: ROOT_ID, entryId: null };
-      const isSelectedNode = selectedTarget.nodeId === node.id && !selectedTarget.entryId;
+      const selectedTarget = getSelectedTarget?.() ?? { nodeId: ROOT_ID, partId: null };
+      const isSelectedNode = selectedTarget.nodeId === node.id && !selectedTarget.partId;
       const hasPendingEdit = pendingPaths.has(path);
       row.className = `tree-row${isSelectedNode ? " is-active" : ""}${hasPendingEdit ? " is-agent-pending" : ""}`;
       row.setAttribute("role", "treeitem");
@@ -478,12 +478,12 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       const toggle = document.createElement("button");
       toggle.type = "button";
       toggle.className = "icon-button";
-      toggle.textContent = node.kind === "folder" || (node.kind === "file" && isUrlDbFileName(node.name))
+      toggle.textContent = node.kind === "folder" || isExpandableFile(node)
         ? (node.expanded ? "▾" : "▸")
         : "·";
       toggle.addEventListener("click", (event) => {
         event.stopPropagation();
-        if (node.kind === "folder" || (node.kind === "file" && isUrlDbFileName(node.name))) {
+        if (node.kind === "folder" || isExpandableFile(node)) {
           onToggleFolder(node.id);
         }
       });
@@ -504,7 +504,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       }
 
       row.addEventListener("click", () => {
-        onSelectNode?.({ nodeId: node.id, entryId: null });
+        onSelectNode?.({ nodeId: node.id, partId: null });
         if (node.kind === "folder") {
           return;
         }
@@ -512,19 +512,18 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       });
       container.append(row);
 
-      if (node.kind === "file" && isUrlDbFileName(node.name) && node.expanded) {
-        const entries = getUrlDbEntries?.(node.id) ?? [];
-        entries.forEach((entry) => {
+      if (isExpandableFile(node) && node.expanded) {
+        (listParts?.(node.id) ?? []).forEach((part) => {
           const childRow = document.createElement("div");
-          const isSelectedEntry = selectedTarget?.nodeId === node.id && selectedTarget?.entryId === entry.id;
-          childRow.className = `tree-row tree-row-derived is-asset-row${isSelectedEntry ? " is-active" : ""}`;
+          const isSelectedPart = selectedTarget?.nodeId === node.id && selectedTarget?.partId === part.id;
+          childRow.className = `tree-row tree-row-derived is-asset-row${isSelectedPart ? " is-active" : ""}`;
           childRow.setAttribute("role", "treeitem");
           childRow.dataset.nodeId = node.id;
-          childRow.dataset.entryId = entry.id;
-          childRow.title = entry.description ? `${entry.name}\n${entry.url}\n${entry.description}` : `${entry.name}\n${entry.url}`;
+          childRow.dataset.partId = part.id;
+          childRow.title = part.title ?? part.name;
           childRow.draggable = true;
           childRow.addEventListener("dragstart", (event) => {
-            onDragUrlDbEntryStart?.(node.id, entry.id, event);
+            onDragPartStart?.(node.id, part.id, event);
           });
 
           const childIndent = document.createElement("span");
@@ -544,13 +543,13 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
 
           const childLabel = document.createElement("span");
           childLabel.className = "tree-label";
-          childLabel.textContent = entry.name;
+          childLabel.textContent = part.name;
           childRow.append(childLabel);
 
-          attachAssetPreview(childRow, entry.url, entry.name, "is-remote-asset-row");
+          if (part.image) attachAssetPreview(childRow, part.image, part.name, "is-remote-asset-row");
           childRow.addEventListener("click", () => {
-            onSelectNode?.({ nodeId: node.id, entryId: entry.id });
-            onOpenUrlDbEntry?.(node.id, entry.id);
+            onSelectNode?.({ nodeId: node.id, partId: part.id });
+            onOpenPart?.(node.id, part.id);
           });
 
           container.append(childRow);
@@ -562,7 +561,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
 
   function showQuickAddMenu(anchorElement, nodeId = ROOT_ID) {
     const rect = anchorElement.getBoundingClientRect();
-    showMenu(rect.left, rect.bottom + 4, { nodeId, entryId: null }, "quick-add");
+    showMenu(rect.left, rect.bottom + 4, { nodeId, partId: null }, "quick-add");
   }
 
   function toggleQuickAddMenu(anchorElement, nodeId = ROOT_ID) {
@@ -580,7 +579,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       return false;
     }
     const rect = anchorElement.getBoundingClientRect();
-    showMenu(rect.left, rect.bottom + 4, { nodeId, entryId: null }, "filter");
+    showMenu(rect.left, rect.bottom + 4, { nodeId, partId: null }, "filter");
     return true;
   }
 

@@ -1,5 +1,5 @@
 {
-  "about": "Every file type the app knows, in one place. Both ends load it: the server through server/stilo/modules/file_types, the browser through app/modules/file-types/model/builtin-types.js, which tools/protocol-sync.mjs writes from this file (never edit that copy). A name's type is the one whose extension is the longest match, so 'aria.persona.skill' is a character and 'notes.skill' a plain skill file. 'format' says how the file is edited, highlighted and previewed.",
+  "about": "Every file type the app knows, in one place. Both ends load it: the server through server/stilo/modules/file_types, the browser through app/modules/file-types/model/builtin-types.js, which tools/protocol-sync.mjs writes from this file (never edit that copy). A name's type is the one whose extension is the longest match, so 'aria.persona.skill' is a character and 'notes.skill' a plain skill file. 'format' says how the file is edited, highlighted and previewed. Extensions add their own types in extensions/<name>/extension.json ('fileTypes'); both ends merge them after these.",
   "version": 1,
   "types": [
     {
@@ -13,12 +13,6 @@
       "extensions": { ".mtree": "text/plain;charset=utf-8" },
       "icon": "is-mtree", "filters": ["mtree"],
       "create": { "label": "New MTREE", "name": "new mtree", "order": 2 }
-    },
-    {
-      "id": "urldb", "label": "URL Album", "kind": "text", "format": "urldb",
-      "extensions": { ".urldb": "text/plain;charset=utf-8" },
-      "icon": "is-urldb", "filters": ["images"], "expandable": true,
-      "create": { "label": "New URL Album", "name": "new url album", "order": 3 }
     },
     {
       "id": "bmap", "label": "Diagram", "kind": "text", "format": "bmap",

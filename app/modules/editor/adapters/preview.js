@@ -5,7 +5,8 @@
 //   previews.add({ id, matches(file) -> bool, render(target, project, file, tools) -> { shouldTypeset, content },
 //                  cacheable?: bool, printHtml?(project, file, tools) -> html })
 // tools.markdownHtml(project, file, text) renders Markdown with the project's
-// link and image resolution. A cacheable preview is a pure function of the
+// link and image resolution; tools.part is the id of the one part of the file
+// to show (a file with parts, Workspace's `parts`), or null for all of it. A cacheable preview is a pure function of the
 // file's text, the project's paths and the connection, so it is not rebuilt
 // while none of those changed.
 import { getNodeIdByPath, getPath, isImageFileName, isMarkdownFileName, isMtreeFileName } from "../../workspace/index.js";
@@ -113,7 +114,7 @@ export function createPreview(app, previews) {
     previewRenderKey = key;
     target.replaceChildren();
     if (!file) return { shouldTypeset: false, content: "" };
-    return preview.render(target, project, file, tools);
+    return preview.render(target, project, file, { ...tools, part: app.previewFileId === file.id ? app.previewPart ?? null : null });
   }
 
   function printPreviewAsPdf() {

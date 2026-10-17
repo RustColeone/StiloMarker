@@ -1,0 +1,86 @@
+/* The URL album's look: its icon in the explorer, its table preview and its
+   source highlighting. Loaded by the album's module when it starts. */
+.tree-icon.is-urldb {
+  border: 1px solid var(--accent);
+  background: rgba(14, 99, 156, 0.14);
+}
+
+.tree-icon.is-urldb::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 5px;
+  height: 5px;
+  background: var(--sidebar);
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+  border-left: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.tree-icon.is-urldb::after {
+  content: "URL";
+  position: absolute;
+  inset: 2px 1px 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-strong);
+  font-size: 6px;
+  font-weight: 700;
+}
+
+.urldb-preview {
+  height: 100%;
+  overflow: auto;
+  padding: 16px;
+}
+
+.urldb-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface-0);
+}
+
+.urldb-table th,
+.urldb-table td {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  font-size: 12px;
+}
+
+.urldb-table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-1);
+  z-index: 1;
+}
+
+.urldb-table img {
+  display: block;
+  width: 88px;
+  max-width: 88px;
+  height: 88px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+}
+
+.token-urldb-bracket,
+.token-urldb-separator {
+  color: var(--text-dim);
+}
+
+.token-urldb-key {
+  color: var(--accent-strong);
+}
+
+.token-urldb-name {
+  color: #c586c0;
+}
+
+.token-urldb-description {
+  color: #ce9178;
+}

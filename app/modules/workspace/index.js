@@ -21,6 +21,18 @@
 //   project()       -> that store
 //   attach(ports)   for code from before the restructure, which still edits and
 //                   syncs: { commit(path, previous, next, source), replace(operation, source) }
+//   parts.add(provider) -> remove()    an extension point: a kind of file that
+//       holds named parts, each listed under the file, opened, renamed, moved
+//       and copied on its own. `id` is the file type's id; the rest work on
+//       the file's text and return new text (they throw to refuse):
+//         list(text) -> [{ id, name, title?, image? }]   (image: a link for hover previews)
+//         body(text, id) -> what the source editor shows for one part
+//         withBody(text, id, body)   rename(text, id, name)   remove(text, id)
+//         take(text, id) -> the part as plain data, with its `name` (to copy or move)
+//         insert(text, part, index | null)   (refuses a name the file has)
+//         linkText?(part) -> what a part dropped into Markdown becomes
+//         add?: { label, run(file) -> Promise<part | null> }   (a menu item that asks for a new part)
+//   parts.of(name) -> the provider for a file name, or null
 // Static, for code from before the restructure: the pure project model
 // (applySyncOperation, getPath, isImageFileName…), seedDefaultProject, and
 // the text-patch rules.
@@ -28,6 +40,16 @@ import { defineModule } from "../../kernel/index.js";
 import { createWriter, StaleWriteError } from "./service/writer.js";
 import { createProjectController } from "./service/project-store.js";
 import { getNodeByPath } from "./model/project.js";
+
+const PART_FUNCTIONS = ["list", "body", "withBody", "rename", "remove", "take", "insert"];
+function checkParts(provider) {
+  for (const name of PART_FUNCTIONS) {
+    if (typeof provider[name] !== "function") throw new Error(`file parts for ${provider.id} need ${name}()`);
+  }
+  if (provider.add && (typeof provider.add.label !== "string" || typeof provider.add.run !== "function")) {
+    throw new Error(`file parts for ${provider.id}: add needs a label and run()`);
+  }
+}
 
 export * from "./model/project.js";
 export { seedDefaultProject } from "./service/project-store.js";
@@ -37,7 +59,7 @@ export default defineModule({
   name: "workspace",
   level: 2,
   uses: ["file-types"],
-  owns: { events: ["written"], names: ["operation update-file", "operation patch-file", "operation replace-project"] },
+  owns: { events: ["written"], registries: ["file parts"], names: ["operation update-file", "operation patch-file", "operation replace-project"] },
   start(ctx) {
     const events = ctx.emitter();
     let store = null;
@@ -45,7 +67,9 @@ export default defineModule({
       const node = store ? getNodeByPath(store.getProject(), path) : null;
       return node?.kind === "file" ? { content: node.content ?? "" } : null;
     };
-    const writer = createWriter({ types: ctx.use("file-types"), emit: events.emit, read });
+    const types = ctx.use("file-types");
+    const writer = createWriter({ types, emit: events.emit, read });
+    const parts = ctx.registry({ validate: checkParts });
     function openProject(project) {
       if (store) throw new Error("The workspace already has a project open; use project().replaceProject()");
       store = createProjectController(project);
@@ -60,7 +84,8 @@ export default defineModule({
       fits: writer.fits,
       attach: writer.attach,
       isStale: (error) => error instanceof StaleWriteError,
-      events: { on: events.on }
+      events: { on: events.on },
+      parts: { add: parts.add, of: (name) => parts.get(types.typeOf(name)?.id ?? "") ?? null }
     };
   }
 });

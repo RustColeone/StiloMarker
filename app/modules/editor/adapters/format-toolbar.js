@@ -53,10 +53,6 @@ const MTREE_NOTE_SNIPPET = `[Node Name]
 Note: Description
 `;
 
-const URLDB_ENTRY_SNIPPET = `[Entry Name]
-url = https://
-description = Description
-`;
 
 // Button groups per format. Groups are separated by a divider when rendered.
 const TOOLBAR_SPECS = {
@@ -96,11 +92,6 @@ const TOOLBAR_SPECS = {
       { id: "mtree-chain", html: "A&rarr;B", title: "Insert chain", action: { kind: "block", snippet: "Parent -> Child\n" } },
       { id: "mtree-note", html: "Note", title: "Insert note block", action: { kind: "block", snippet: MTREE_NOTE_SNIPPET } }
     ]
-  ],
-  urldb: [
-    [
-      { id: "urldb-entry", html: "Entry", title: "Insert entry", action: { kind: "block", snippet: URLDB_ENTRY_SNIPPET, caret: 1 } }
-    ]
   ]
 };
 
@@ -134,11 +125,13 @@ function buildTableSnippet({ rows, cols, kind = "markdown" }) {
 /**
  * Render a format's toolbar buttons into `container`. The caller owns the action
  * dispatch via `onAction(action, buttonEl)`. Returns the rendered format so the
- * caller can cache it and skip rebuilds when the format is unchanged.
+ * caller can cache it and skip rebuilds when the format is unchanged. A format
+ * that is not built in brings its buttons from the `toolbars` extension point
+ * ({ id: format, groups }, the same shape as TOOLBAR_SPECS), passed as `toolbars`.
  */
-function renderEditorFormatToolbar(container, format, { onAction } = {}) {
+function renderEditorFormatToolbar(container, format, { onAction, toolbars } = {}) {
   container.replaceChildren();
-  const groups = TOOLBAR_SPECS[format] ?? [];
+  const groups = TOOLBAR_SPECS[format] ?? toolbars?.get(format)?.groups ?? [];
 
   groups.forEach((group, groupIndex) => {
     if (groupIndex > 0) {

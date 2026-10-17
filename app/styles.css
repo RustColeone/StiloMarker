@@ -571,44 +571,6 @@ p {
   font-size: 13px;
 }
 
-.urldb-preview {
-  height: 100%;
-  overflow: auto;
-  padding: 16px;
-}
-
-.urldb-table {
-  width: 100%;
-  border-collapse: collapse;
-  background: var(--surface-0);
-}
-
-.urldb-table th,
-.urldb-table td {
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  text-align: left;
-  vertical-align: top;
-  font-size: 12px;
-}
-
-.urldb-table th {
-  position: sticky;
-  top: 0;
-  background: var(--surface-1);
-  z-index: 1;
-}
-
-.urldb-table img {
-  display: block;
-  width: 88px;
-  max-width: 88px;
-  height: 88px;
-  object-fit: cover;
-  border: 1px solid var(--border);
-  background: var(--surface-1);
-}
-
 .editor-readonly-note {
   color: var(--text-muted);
 }
@@ -819,7 +781,6 @@ p {
 .tree-icon.is-md,
 .tree-icon.is-persona,
 .tree-icon.is-mtree,
-.tree-icon.is-urldb,
 .tree-icon.is-remote-image,
 .tree-icon.is-bmap,
 .tree-icon.is-file {
@@ -837,7 +798,6 @@ p {
   background: rgba(197, 134, 192, 0.16);
 }
 
-.tree-icon.is-urldb,
 .tree-icon.is-remote-image {
   border-color: var(--accent);
   background: rgba(14, 99, 156, 0.14);
@@ -846,7 +806,6 @@ p {
 .tree-icon.is-md::before,
 .tree-icon.is-persona::before,
 .tree-icon.is-mtree::before,
-.tree-icon.is-urldb::before,
 .tree-icon.is-remote-image::before,
 .tree-icon.is-bmap::before,
 .tree-icon.is-file::before {
@@ -865,7 +824,6 @@ p {
 .tree-icon.is-md::after,
 .tree-icon.is-persona::after,
 .tree-icon.is-mtree::after,
-.tree-icon.is-urldb::after,
 .tree-icon.is-bmap::after,
 .tree-icon.is-remote-image::after {
   position: absolute;
@@ -885,12 +843,6 @@ p {
 .tree-icon.is-mtree::after {
   content: "MT";
   color: #8a5cff;
-}
-
-.tree-icon.is-urldb::after {
-  content: "URL";
-  color: var(--accent-strong);
-  font-size: 6px;
 }
 
 .tree-icon.is-remote-image::after {
@@ -3350,20 +3302,25 @@ menu {
   margin: 0;
 }
 
-.bookmark-entry-form input,
-.bookmark-entry-form textarea {
+.form-dialog-fields {
+  display: grid;
+  gap: 14px;
+}
+
+.form-dialog-form input,
+.form-dialog-form textarea {
   border: 1px solid var(--border-strong);
   background: var(--surface-0);
   color: var(--text);
   box-shadow: inset 0 0 0 1px transparent;
 }
 
-.bookmark-entry-form input:focus-visible,
-.bookmark-entry-form textarea:focus-visible {
+.form-dialog-form input:focus-visible,
+.form-dialog-form textarea:focus-visible {
   box-shadow: var(--focus-ring), inset 0 0 0 1px var(--accent);
 }
 
-.bookmark-entry-form textarea {
+.form-dialog-form textarea {
   width: 100%;
   resize: vertical;
   min-height: 88px;
@@ -3494,23 +3451,6 @@ menu {
 
 .editor-line.is-empty::before {
   content: "\00a0";
-}
-
-.token-urldb-bracket,
-.token-urldb-separator {
-  color: var(--text-dim);
-}
-
-.token-urldb-key {
-  color: var(--accent-strong);
-}
-
-.token-urldb-name {
-  color: #c586c0;
-}
-
-.token-urldb-description {
-  color: #ce9178;
 }
 
 ::-webkit-scrollbar {

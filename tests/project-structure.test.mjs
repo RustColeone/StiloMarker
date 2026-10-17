@@ -12,7 +12,6 @@ test("required workspace files exist", () => {
     "app/modules/sync/service/runtime.js",
     "app/services/file-content-service.js",
     "app/services/mtree-module-map-service.js",
-    "app/services/urldb-service.js",
     "app/domain/project-model.js",
     "app/services/zip-service.js",
     "app/services/offline-service.js",
@@ -54,7 +53,6 @@ test("index.html exposes required element ids", async () => {
     "notice-dialog",
     "confirm-dialog",
     "input-dialog",
-    "bookmark-entry-dialog",
     "mtree-tools-dialog",
     "mtree-target-file-select",
     "mtree-render-preview",
@@ -136,8 +134,8 @@ test("the offline app shell lists every app module", async () => {
   const { readdir } = await import("node:fs/promises");
   const walk = async (dir) => (await Promise.all((await readdir(resolveFromRoot(dir), { withFileTypes: true }))
     .map((entry) => entry.isDirectory() ? walk(`${dir}/${entry.name}`) : [`${dir}/${entry.name}`]))).flat();
-  const worker = await readFile(resolveFromRoot("service-worker.js"), "utf8");
-  const missing = (await walk("app")).filter((file) => file.endsWith(".js") && !worker.includes(`"./${file}"`));
+  const worker = await readFile(resolveFromRoot("service-worker.js"), "utf8") + await readFile(resolveFromRoot("extensions/offline.js"), "utf8");
+  const missing = [...await walk("app"), ...await walk("extensions")].filter((file) => /\.(js|css)$/.test(file) && !worker.includes(`"./${file}"`));
   assert.deepEqual(missing, []);
 });
 
@@ -203,7 +201,7 @@ test("the sync runtime wires transport and OT", async () => {
 test("service-worker.js caches the app shell", async () => {
   const serviceWorkerSource = await readFile(resolveFromRoot("service-worker.js"), "utf8");
   assert.match(serviceWorkerSource, /mdnotes-shell-v\d+/);
-  assert.match(serviceWorkerSource, /cache.addAll\(APP_SHELL\)/);
+  assert.match(serviceWorkerSource, /cache\.addAll\(\[\.\.\.APP_SHELL, \.\.\.self\.EXTENSION_FILES\]\)/);
 });
 
 test("backend exposes collaboration + OT endpoints", async () => {

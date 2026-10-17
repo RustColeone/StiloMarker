@@ -17,7 +17,7 @@ test("project model: folders, files, and path lookup", () => {
   assert.equal(projectModel.getPath(project, fileNode.id), "docs/readme.md");
 });
 
-test("project model: rejects unsupported binary, accepts images and urldb", () => {
+test("project model: rejects unsupported binary, accepts images and extension file types", () => {
   let project = projectModel.createProject("Test");
   project = projectModel.addFolder(project, projectModel.ROOT_ID, "docs");
   const docsFolder = Object.values(project.nodes).find((node) => node.kind === "folder" && node.name === "docs");
@@ -29,7 +29,7 @@ test("project model: rejects unsupported binary, accepts images and urldb", () =
 
   project = projectModel.addFile(project, docsFolder.id, "references.urldb", "[Cover]\nurl = https://example.com/cover.jpg");
   assert.ok(Object.values(project.nodes).find((node) => node.kind === "file" && node.name === "references.urldb"));
-  assert.equal(projectModel.isUrlDbFileName("references.urldb"), true);
+  assert.equal(projectModel.isUrlDbFileName, undefined, "the core knows no URL album: it is an extension");
 });
 
 test("project model: dirty tracking and save", () => {

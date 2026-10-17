@@ -8,6 +8,7 @@
 // Static, for code from before the restructure (each takes the app's shared
 // values, as before):
 //   createEditorCore(app)   createHighlighter(app)   createFindReplace(app)
+//     (app.toolbars and app.highlighters: this module's extension points)
 //   createAutocomplete(app)   createLinks(app)
 //   createPanes(app, previews)   the tab strips, panes and preview (previews: this module's extension point)
 //   renderMarkdown, extractMarkdownLinks, collectMarkdownReferences, parseMarkdownInlineElements
@@ -33,10 +34,15 @@ export default defineModule({
   level: 3,
   uses: ["shell", "file-types", "workspace"],
   owns: { elements: ["the source editor", "the formatting toolbar", "the find bar", "the tab strips", "the preview pane"],
-    registries: ["previews"], rules: ["Markdown rendering"] },
+    registries: ["previews", "highlighters", "toolbars"], rules: ["Markdown rendering"] },
   start(ctx) {
     // Previews of other kinds of file: { id, matches(file), render(target, project, file, tools), cacheable?, printHtml? }
     const previews = ctx.registry();
-    return { previews: { add: previews.add, all: previews.all } };
+    // Highlighting for a format that is not built in: { id: format, line(rawLine, { escape, blank }) -> html }
+    const highlighters = ctx.registry({ validate: (entry) => { if (typeof entry.line !== "function") throw new Error(`highlighter ${entry.id} needs line()`); } });
+    // Formatting-toolbar buttons for such a format: { id: format, groups: [[{ id, html, title, action }]] }
+    const toolbars = ctx.registry({ validate: (entry) => { if (!Array.isArray(entry.groups)) throw new Error(`toolbar ${entry.id} needs groups`); } });
+    const open = (registry) => ({ add: registry.add, get: registry.get, all: registry.all });
+    return { previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars) };
   }
 });

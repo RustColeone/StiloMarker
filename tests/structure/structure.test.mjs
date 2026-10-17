@@ -8,7 +8,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
-  ROOT, codeFiles, codeOf, read, lineCount, oversized, spellings, jsImports, pyImports,
+  ROOT, GENERATED, codeFiles, codeOf, read, lineCount, oversized, spellings, jsImports, pyImports,
   loadModules, moduleOf, KERNEL_MAX_LINES, DOMAIN_WORDS, MAX_LINES
 } from "./scan.mjs";
 
@@ -97,6 +97,31 @@ test("each owned name is spelled only by its owner, and the legacy spellings onl
   assert.deepEqual(problems, []);
 });
 
+test("the core never names an extension, and an extension reaches the app only through public APIs", () => {
+  const exts = all.filter((m) => m.extension);
+  const core = all.filter((m) => !m.extension && m.root === "app/modules");
+  const problems = [];
+  for (const m of exts) {
+    const home = `extensions/${m.extension}/`;
+    const manifest = json(`${home}extension.json`);
+    const handles = [manifest.name, ...(manifest.fileTypes ?? []).flatMap((type) => [type.id, type.label])];
+    const pattern = new RegExp(handles.map((h) => h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/[ -]/g, "[ _-]?")).join("|"), "i");
+    for (const file of files.filter((f) => !f.startsWith(home) && !GENERATED.has(f))) {
+      const hit = pattern.exec(codeOf(file));
+      if (hit) problems.push(`${file} names the ${m.extension} extension ("${hit[0]}"): offer an extension point it can register into instead`);
+    }
+    for (const file of files.filter((f) => f.startsWith(home) && f.endsWith(".js"))) {
+      for (const target of jsImports(file)) {
+        if (target.startsWith(home) || target === "app/kernel/index.js") continue;
+        if (!core.some((c) => target === `${c.dir}/index.js`)) problems.push(`${file} imports ${target}: an extension uses only the kernel and modules' index.js`);
+      }
+    }
+    const top = Math.max(...core.map((c) => c.level));
+    if (m.level <= top) problems.push(`${m.name} is on level ${m.level}: extensions sit above every module (level ${top + 1} or more)`);
+  }
+  assert.deepEqual(problems, []);
+});
+
 test("what each module owns does not overlap (rule 4)", () => {
   const seen = new Map();
   for (const m of all) {
@@ -178,7 +203,7 @@ test("the legacy contract matches the messages the code sends and handles (rule 
   // These are the browser's own words, not messages.
   const local = new Set(["node", "connector", "del", "add", "same", "image", "text", "link", "touchcancel"]);
   const checked = new Set();
-  for (const file of files.filter((f) => f.startsWith("app/"))) {
+  for (const file of files.filter((f) => f.startsWith("app/") || f.startsWith("extensions/"))) {
     for (const m of read(file).matchAll(/\.type === "([a-z-]+)"/g)) if (!local.has(m[1])) checked.add(m[1]);
   }
   const unknownChecked = [...checked].filter((t) => !ops.has(t) && !events.has(t)).sort();
@@ -253,7 +278,7 @@ test("the baseline lists nothing that has already been fixed", () => {
 
 // Which end a file belongs to, as a modules root.
 function endOf(file) {
-  return file.startsWith("server/") ? "server/stilo/modules" : "app/modules";
+  return file.startsWith("server/") ? "server/stilo/modules" : "app/modules"; // extensions are browser modules
 }
 
 // Test files of one kind under a folder (for rule 6).

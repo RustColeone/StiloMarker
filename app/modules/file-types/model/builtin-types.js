@@ -38,25 +38,6 @@ export default Object.freeze([
     }
   },
   {
-    "id": "urldb",
-    "label": "URL Album",
-    "kind": "text",
-    "format": "urldb",
-    "extensions": {
-      ".urldb": "text/plain;charset=utf-8"
-    },
-    "icon": "is-urldb",
-    "filters": [
-      "images"
-    ],
-    "expandable": true,
-    "create": {
-      "label": "New URL Album",
-      "name": "new url album",
-      "order": 3
-    }
-  },
-  {
     "id": "bmap",
     "label": "Diagram",
     "kind": "text",
@@ -121,5 +102,25 @@ export default Object.freeze([
     "filters": [
       "images"
     ]
+  },
+  {
+    "id": "urldb",
+    "label": "URL Album",
+    "kind": "text",
+    "format": "urldb",
+    "extensions": {
+      ".urldb": "text/plain;charset=utf-8"
+    },
+    "icon": "is-urldb",
+    "filters": [
+      "images"
+    ],
+    "expandable": true,
+    "create": {
+      "label": "New URL Album",
+      "name": "new url album",
+      "order": 3
+    },
+    "extension": "url-album"
   }
 ]);

@@ -108,12 +108,12 @@ async def main():
         checks.append('album text, table preview, Entry snippet')
 
         # Add an entry through the album's menu.
-        await menu(page.locator('.tree-row[title="refs.urldb"]'), 'Add Bookmark Entry')
-        await page.wait_for_selector('#bookmark-entry-dialog[open]')
-        await page.fill('#bookmark-entry-name-input', 'Tower')
-        await page.fill('#bookmark-entry-url-input', 'https://img.example/tower.jpg')
-        await page.fill('#bookmark-entry-description-input', 'Tall')
-        await page.click('#bookmark-entry-submit-button')
+        await menu(page.locator('.tree-row[title="refs.urldb"]'), 'Add Album Entry')
+        await page.wait_for_selector('#form-dialog[open]')
+        await page.fill('#form-dialog-field-name', 'Tower')
+        await page.fill('#form-dialog-field-url', 'https://img.example/tower.jpg')
+        await page.fill('#form-dialog-field-description', 'Tall')
+        await page.click('#form-dialog-submit-button')
         await page.wait_for_function('[...document.querySelectorAll(\'.tree-row-derived[data-node-id="r"] .tree-label\')].some((e) => e.textContent === "Tower")')
         assert await entry_names('r') == ['Castle', 'River', 'Tower']
         assert '[Tower]\nurl = https://img.example/tower.jpg\ndescription = Tall' in await saved('refs.urldb')
@@ -161,6 +161,28 @@ async def main():
         checks.append('entry dropped into Markdown as an image')
 
         assert not errors, errors
+
+        # Without the extension (its module not started) the app still runs:
+        # an album is an ordinary text file, with no entries and no album menu.
+        bare = await browser.new_context(viewport={'width': 1400, 'height': 900}, service_workers='block')
+        async def bare_route(rt):
+            if urlparse(rt.request.url).path == '/app/extensions.js':
+                await rt.fulfill(status=200, content_type='text/javascript', body='export default Object.freeze([]);'); return
+            await route(rt)
+        await bare.route('**/*', bare_route)
+        page2 = await bare.new_page(); bare_errors = []
+        page2.on('pageerror', lambda e: bare_errors.append(str(e)))
+        await page2.add_init_script('if (!sessionStorage.getItem("seeded")) { sessionStorage.setItem("seeded", "1");'
+                                    ' localStorage.setItem("mdnotes.project.v1", ' + json.dumps(json.dumps(project())) + ');'
+                                    ' localStorage.setItem("mdnotes.settings.v1", JSON.stringify({chatPanel: "hidden"})); }')
+        await page2.goto(BASE, wait_until='networkidle')
+        await page2.dblclick('.tree-row[title="refs.urldb"]')
+        await page2.wait_for_function('document.querySelector("#editor-content").innerText.includes("[River]")')
+        assert await page2.locator('.tree-row-derived').count() == 0
+        await page2.locator('.tree-row[title="refs.urldb"]').click(button='right')
+        assert await page2.locator('#explorer-context-menu').get_by_text('Add Album Entry').count() == 0
+        assert not bare_errors, bare_errors
+        checks.append('the app runs without the extension')
         await browser.close()
         print(json.dumps({'checks': checks, 'runtimeErrors': 0}))
 

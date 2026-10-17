@@ -8,7 +8,7 @@ import {
   getEditorToolbarFormat
 } from "../app/modules/editor/index.js";
 
-const { bmapService, mtreeService, urldbService, markdownService } = await loadModules();
+const { bmapService, mtreeService, markdownService } = await loadModules();
 
 test("toolbar: file extensions map to the correct format", () => {
   assert.equal(getEditorToolbarFormat("notes.md"), "markdown");
@@ -77,9 +77,3 @@ test("toolbar: mtree block snippets parse without throwing (in context)", () => 
   }
 });
 
-test("toolbar: urldb entry snippet parses into one named entry", () => {
-  const button = TOOLBAR_SPECS.urldb.flat()[0];
-  const entries = urldbService.parseUrlDb(button.action.snippet);
-  assert.equal(entries.length, 1);
-  assert.equal(entries[0].name, "Entry Name");
-});

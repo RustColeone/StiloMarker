@@ -4,11 +4,12 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, normalize, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { COPIES, extensions } from "../../tools/protocol-sync.mjs";
 
 export const ROOT = normalize(join(dirname(fileURLToPath(import.meta.url)), "../.."));
 
 // The shipped code. Tests, tools and docs may spell anything.
-const SCOPE = ["app", "server", "index.html", "service-worker.js"];
+const SCOPE = ["app", "extensions", "server", "index.html", "service-worker.js"];
 const SKIP = new Set(["node_modules", "__pycache__", "data", "vendor"]);
 const CODE = /\.(m?js|py|html|css)$/;
 
@@ -91,11 +92,16 @@ export function codeOf(file) {
   return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
 }
 
+// The browser's copies of protocol and extension data, which
+// tools/protocol-sync.mjs writes from their owners' files: what they spell,
+// the owner spelled.
+export const GENERATED = new Set(COPIES.map((copy) => copy.to));
+
 // For each owned name, the files whose code spells it.
 export function spellings(files = codeFiles()) {
   const out = {};
   for (const [name, pattern] of Object.entries(OWNED_NAMES)) {
-    out[name] = files.filter((file) => pattern.test(codeOf(file)));
+    out[name] = files.filter((file) => !GENERATED.has(file) && pattern.test(codeOf(file)));
   }
   return out;
 }
@@ -125,6 +131,8 @@ export function pyImports(file) {
 // manifest. A server module is a folder under server/stilo/modules with a
 // module.json, which its __init__.py also reads. Importing a browser
 // module's index.js must not touch the page, so this can run in Node.
+// An extension (extensions/<name>/extension.json) brings a browser module
+// too; it counts as one of the browser's, marked `extension`.
 export const MODULE_ROOTS = ["app/modules", "server/stilo/modules"];
 
 function moduleDirs(root) {
@@ -152,6 +160,11 @@ export async function loadModules() {
     if (!definition?.name) throw new Error(`${rel(dir)}/index.js must export defineModule({...}) as its default`);
     const { name, level, uses, owns } = definition;
     out.push({ root: "app/modules", dir: rel(dir), name, level, uses: [...uses], owns: owns ?? {} });
+  }
+  for (const extension of extensions().filter((e) => e.browser)) {
+    const file = join(ROOT, "extensions", extension.folder, extension.browser);
+    const { name, level, uses, owns } = (await import(pathToFileURL(file).href)).default;
+    out.push({ root: "app/modules", dir: rel(dirname(file)), name, level, uses: [...uses], owns: owns ?? {}, extension: extension.folder });
   }
   for (const dir of moduleDirs("server/stilo/modules")) {
     out.push({ root: "server/stilo/modules", dir: rel(dir), ...JSON.parse(readFileSync(join(dir, "module.json"), "utf8")) });

@@ -3,7 +3,7 @@
 // (the open tabs per workspace, kept on the server through app.saveUserState).
 // main.js creates this through createPanes and passes its shared values in `app`.
 import { normalizeServerUrl } from "../../shell/index.js";
-import { getPath, isBmapFileName, isUrlDbFileName } from "../../workspace/index.js";
+import { getPath, isBmapFileName } from "../../workspace/index.js";
 
 export function createTabs(app) {
 
@@ -74,7 +74,7 @@ export function createTabs(app) {
   function setActiveSourceFile(fileId) {
     app.captureViewState(); // resume-position: snapshot the outgoing document first
     app.selectionNodeId = fileId;
-    app.sourceUrlDbEntry = null;
+    app.sourcePart = null;
     openSourceTab(fileId);
     app.controller.setActiveFile(fileId);
     scheduleSaveUserState();
@@ -157,9 +157,9 @@ export function createTabs(app) {
     }
   }
 
-  function setActiveSourceUrlDbEntry(fileId, entryId) {
+  function setActiveSourcePart(fileId, partId) {
     app.selectionNodeId = fileId;
-    app.sourceUrlDbEntry = { fileId, entryId };
+    app.sourcePart = { fileId, partId };
     openSourceTab(fileId);
     app.controller.setActiveFile(fileId);
   }
@@ -180,7 +180,7 @@ export function createTabs(app) {
     app.captureViewState(); // resume-position: snapshot the outgoing preview first
     openPreviewTab(fileId);
     app.previewFileId = fileId;
-    app.previewUrlDbEntry = null;
+    app.previewPart = null;
     app.updateStatus(project);
   }
 
@@ -243,23 +243,23 @@ export function createTabs(app) {
     app.logDebug("action", "File dropped into source pane", getPath(app.controller.getProject(), fileId));
   }
 
-  function openUrlDbEntryInPane(fileId, entryId, pane) {
+  function openPartInPane(fileId, partId, pane) {
     const project = app.controller.getProject();
     const file = project.nodes[fileId];
-    if (!file || file.kind !== "file" || !isUrlDbFileName(file.name)) {
+    if (!file || file.kind !== "file" || !app.parts.of(file.name)) {
       return;
     }
 
     if (pane === "preview") {
       openPreviewTab(fileId);
       app.previewFileId = fileId;
-      app.previewUrlDbEntry = entryId;
+      app.previewPart = partId;
       app.updateStatus(project);
       return;
     }
 
-    setActiveSourceUrlDbEntry(fileId, entryId);
-    app.logDebug("action", "Bookmark entry dropped into source pane", `${getPath(project, fileId)} :: ${entryId}`);
+    setActiveSourcePart(fileId, partId);
+    app.logDebug("action", "Part dropped into source pane", `${getPath(project, fileId)} :: ${partId}`);
   }
 
   function bindPaneDropTarget(target, pane) {
@@ -267,7 +267,7 @@ export function createTabs(app) {
     target.addEventListener("dragover", (event) => {
       const types = event.dataTransfer?.types ?? [];
       const hasFile = types.includes("text/mdnotes-file-id");
-      const hasEntry = types.includes("text/mdnotes-urldb-entry");
+      const hasEntry = types.includes("text/stilo-file-part");
       if (!hasFile && !hasEntry) {
         setPaneDropActive(pane, false);
         return;
@@ -289,9 +289,9 @@ export function createTabs(app) {
     target.addEventListener("drop", (event) => {
       setPaneDropActive(pane, false);
       const fileId = event.dataTransfer?.getData("text/mdnotes-file-id");
-      const urlDbPayload = event.dataTransfer?.getData("text/mdnotes-urldb-entry");
-      app.logDebug("action", `Drop on ${pane} pane`, fileId ? `file=${fileId}` : `entry=${urlDbPayload}`);
-      if ((!fileId || !canOpenFileInPane(fileId, pane)) && !urlDbPayload) {
+      const partPayload = event.dataTransfer?.getData("text/stilo-file-part");
+      app.logDebug("action", `Drop on ${pane} pane`, fileId ? `file=${fileId}` : `part=${partPayload}`);
+      if ((!fileId || !canOpenFileInPane(fileId, pane)) && !partPayload) {
         app.logDebug("response", `Drop on ${pane} pane rejected`, fileId ? `canOpen=${canOpenFileInPane(fileId, pane)}` : "no payload");
         return;
       }
@@ -302,10 +302,10 @@ export function createTabs(app) {
       }
 
       try {
-        const parsed = JSON.parse(urlDbPayload);
-        openUrlDbEntryInPane(parsed.fileId, parsed.entryId, pane);
+        const parsed = JSON.parse(partPayload);
+        openPartInPane(parsed.fileId, parsed.partId, pane);
       } catch {
-        app.logDebug("response", `Drop on ${pane} pane: malformed urldb payload`);
+        app.logDebug("response", `Drop on ${pane} pane: malformed part payload`);
       }
     });
   }
@@ -663,5 +663,5 @@ export function createTabs(app) {
     });
   }
 
-  return { ensureOpenTabs, openSourceTab, openPreviewTab, setActiveSourceFile, currentWorkspaceView, cacheWorkspaceView, cachedWorkspaceView, showResumedFile, scheduleSaveUserState, restoreResumeState, setActiveSourceUrlDbEntry, setPreviewFile, openFileFromExplorer, canOpenFileInPane, setPaneDropActive, clearPaneDropState, openDroppedFileInPane, openUrlDbEntryInPane, bindPaneDropTarget, closeSourceTab, closePreviewTab, moveTabWithinList, reorderPaneTabs, tabOverflowButton, closeTabOverflowMenu, openTabOverflowMenu, renderTabStrip, renderTabs, bindTabStripReorderTarget };
+  return { ensureOpenTabs, openSourceTab, openPreviewTab, setActiveSourceFile, currentWorkspaceView, cacheWorkspaceView, cachedWorkspaceView, showResumedFile, scheduleSaveUserState, restoreResumeState, setActiveSourcePart, setPreviewFile, openFileFromExplorer, canOpenFileInPane, setPaneDropActive, clearPaneDropState, openDroppedFileInPane, openPartInPane, bindPaneDropTarget, closeSourceTab, closePreviewTab, moveTabWithinList, reorderPaneTabs, tabOverflowButton, closeTabOverflowMenu, openTabOverflowMenu, renderTabStrip, renderTabs, bindTabStripReorderTarget };
 }

@@ -2,10 +2,9 @@
 // the Add File dialog (and files dropped into the editor), create / rename /
 // delete / export, and the explorer's context-menu actions.
 // main.js creates this on first use and passes its shared values in `app`.
-import { ROOT_ID, describeFileTypes, fileBaseName, fileTypeExtension, findChildByName, getPath, isAllowedFileName, isBmapFileName, isImageFileName, isMarkdownFileName, isTextFileName, isUrlDbFileName } from "../domain/project-model.js";
+import { ROOT_ID, describeFileTypes, fileBaseName, fileTypeExtension, findChildByName, getPath, isAllowedFileName, isBmapFileName, isImageFileName, isMarkdownFileName, isTextFileName } from "../domain/project-model.js";
 import { normalizeBmapAst, parseBmap } from "../services/bmap-service.js";
 import { dataUrlToBlob, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent } from "../services/file-content-service.js";
-import { appendUrlDbEntry, moveUrlDbEntry, moveUrlDbEntryBetweenFiles, removeUrlDbEntry, serializeUrlDb, updateUrlDbEntry } from "../services/urldb-service.js";
 import { createZip, downloadBlob } from "../services/zip-service.js";
 
 export function createFileActions(app) {
@@ -35,19 +34,19 @@ export function createFileActions(app) {
     if (types.includes("text/mdnotes-file-id")) {
       return "file";
     }
-    if (types.includes("text/mdnotes-urldb-entry")) {
-      return "urldb-entry";
+    if (types.includes("text/stilo-file-part")) {
+      return "part";
     }
     return null;
   }
 
-  function getExplorerDropPlacement(row, node, entryId, payloadKind, event) {
-    if (payloadKind === "urldb-entry") {
-      if (entryId) {
+  function getExplorerDropPlacement(row, node, partId, payloadKind, event) {
+    if (payloadKind === "part") {
+      if (partId) {
         const rect = row.getBoundingClientRect();
         return event.clientY < rect.top + (rect.height / 2) ? "before" : "after";
       }
-      return node.kind === "file" && isUrlDbFileName(node.name) ? "into" : null;
+      return partsFile(app.controller.getProject(), node.id) ? "into" : null;
     }
 
     if (payloadKind !== "file" && payloadKind !== "node") {
@@ -133,7 +132,7 @@ export function createFileActions(app) {
     const parentPath = destination.parentId === ROOT_ID ? "" : getPath(project, destination.parentId);
     app.controller.move(nodeId, destination.parentId, destination.index);
     app.selectionNodeId = nodeId;
-    app.sourceUrlDbEntry = null;
+    app.sourcePart = null;
     // Tell the server. A move used to change only this browser's tree; the server
     // kept the old path, and the next reconnect's reconcile — which can only add
     // what the server lacks — uploaded the file again at its new path, leaving
@@ -147,73 +146,79 @@ export function createFileActions(app) {
     return true;
   }
 
-  function moveExplorerUrlDbEntry(sourceFileId, sourceEntryId, targetNodeId, targetEntryId, placement) {
+  // A file with parts (Workspace's `parts`) and its provider, or null.
+  function partsFile(project, fileId) {
+    const file = fileId ? project.nodes[fileId] : null;
+    const parts = file?.kind === "file" ? app.parts.of(file.name) : null;
+    return parts ? { file, parts } : null;
+  }
+
+  // Where `index` lands among the target's parts: next to `targetPartId`, or last.
+  function partIndex(parts, text, targetPartId, placement) {
+    const list = parts.list(text);
+    if (!targetPartId) return list.length;
+    const index = list.findIndex((part) => part.id === targetPartId);
+    return index < 0 ? null : placement === "after" ? index + 1 : index;
+  }
+
+  function showMovedPart(fileId, parts, text, name, previewToo) {
+    const part = parts.list(text).find((candidate) => candidate.name === name);
+    if (part) {
+      app.setActiveSourcePart(fileId, part.id);
+    } else {
+      app.selectionNodeId = fileId;
+      app.sourcePart = null;
+      app.controller.setActiveFile(fileId);
+    }
+    if (previewToo) {
+      app.previewFileId = fileId;
+      app.previewPart = part?.id ?? null;
+    }
+  }
+
+  function moveExplorerPart(sourceFileId, sourcePartId, targetNodeId, targetPartId, placement) {
     const project = app.controller.getProject();
-    const sourceFile = project.nodes[sourceFileId];
-    const targetFile = targetNodeId ? project.nodes[targetNodeId] : null;
-    if (!sourceFile || sourceFile.kind !== "file" || !isUrlDbFileName(sourceFile.name)) {
+    const source = partsFile(project, sourceFileId);
+    const target = partsFile(project, targetNodeId);
+    if (!source || !target || source.parts !== target.parts) {
       return false;
     }
-    if (!targetFile || targetFile.kind !== "file" || !isUrlDbFileName(targetFile.name)) {
+    const { parts } = source;
+    let moving;
+    try {
+      moving = parts.take(source.file.content, sourcePartId);
+    } catch {
       return false;
     }
-
-    const sourceEntry = app.getUrlDbEntryById(sourceFile.content, sourceEntryId);
-    if (!sourceEntry) {
-      return false;
-    }
-
-    const targetEntries = app.getUrlDbEntries(targetFile.content);
-    const targetIndex = targetEntryId
-      ? (() => {
-        const index = targetEntries.findIndex((entry) => entry.id === targetEntryId);
-        if (index < 0) {
-          return null;
-        }
-        return placement === "after" ? index + 1 : index;
-      })()
-      : targetEntries.length;
-
+    const targetIndex = partIndex(parts, target.file.content, targetPartId, placement);
     if (targetIndex === null) {
       return false;
     }
 
-    let nextTargetContent = targetFile.content;
-    if (sourceFileId === targetNodeId) {
-      const sourceEntries = app.getUrlDbEntries(sourceFile.content);
-      const sourceIndex = sourceEntries.findIndex((entry) => entry.id === sourceEntryId);
-      if (sourceIndex < 0) {
-        return false;
+    let nextTargetContent;
+    try {
+      if (sourceFileId === targetNodeId) {
+        const sourceIndex = parts.list(source.file.content).findIndex((part) => part.id === sourcePartId);
+        const normalizedIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
+        if (sourceIndex === normalizedIndex) {
+          return false;
+        }
+        nextTargetContent = parts.insert(parts.remove(source.file.content, sourcePartId), moving, normalizedIndex);
+        app.applyFileContentUpdates([{ fileId: sourceFileId, content: nextTargetContent }]);
+      } else {
+        nextTargetContent = parts.insert(target.file.content, moving, targetIndex);
+        app.applyFileContentUpdates([
+          { fileId: sourceFileId, content: parts.remove(source.file.content, sourcePartId) },
+          { fileId: targetNodeId, content: nextTargetContent }
+        ]);
       }
-      const normalizedIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
-      if (sourceIndex === normalizedIndex) {
-        return false;
-      }
-      nextTargetContent = moveUrlDbEntry(sourceFile.content, sourceEntryId, normalizedIndex);
-      app.applyFileContentUpdates([{ fileId: sourceFileId, content: nextTargetContent }]);
-    } else {
-      const moved = moveUrlDbEntryBetweenFiles(sourceFile.content, sourceEntryId, targetFile.content, targetIndex);
-      nextTargetContent = moved.targetContent;
-      app.applyFileContentUpdates([
-        { fileId: sourceFileId, content: moved.sourceContent },
-        { fileId: targetNodeId, content: moved.targetContent }
-      ]);
+    } catch (error) {
+      app.notify(error.message);
+      return false;
     }
 
-    const nextTargetEntries = app.getUrlDbEntries(nextTargetContent);
-    const movedEntry = nextTargetEntries.find((entry) => entry.name === sourceEntry.name);
-    if (movedEntry) {
-      app.setActiveSourceUrlDbEntry(targetNodeId, movedEntry.id);
-    } else {
-      app.selectionNodeId = targetNodeId;
-      app.sourceUrlDbEntry = null;
-      app.controller.setActiveFile(targetNodeId);
-    }
-    if (app.previewFileId === sourceFileId || app.previewFileId === targetNodeId) {
-      app.previewFileId = targetNodeId;
-      app.previewUrlDbEntry = movedEntry?.id ?? null;
-    }
-    app.logDebug("action", "Bookmark entry moved", `${getPath(app.controller.getProject(), targetNodeId)} :: ${sourceEntry.name}`);
+    showMovedPart(targetNodeId, parts, nextTargetContent, moving.name, app.previewFileId === sourceFileId || app.previewFileId === targetNodeId);
+    app.logDebug("action", "Part moved", `${getPath(app.controller.getProject(), targetNodeId)} :: ${moving.name}`);
     return true;
   }
 
@@ -221,22 +226,11 @@ export function createFileActions(app) {
     return project.nodes[app.selectionNodeId] ?? (project.activeFileId ? project.nodes[project.activeFileId] : project.nodes[project.rootId]);
   }
 
-  function getSelectedUrlDbEntry(project) {
-    if (!app.sourceUrlDbEntry) {
-      return null;
-    }
-
-    const file = project.nodes[app.sourceUrlDbEntry.fileId];
-    if (!file || file.kind !== "file" || !isUrlDbFileName(file.name)) {
-      return null;
-    }
-
-    const entry = app.getUrlDbEntryById(file.content, app.sourceUrlDbEntry.entryId);
-    if (!entry) {
-      return null;
-    }
-
-    return { file, entry };
+  // The part open in the source editor: { file, parts, part }, or null.
+  function getSelectedPart(project) {
+    const found = app.sourcePart ? partsFile(project, app.sourcePart.fileId) : null;
+    const part = found?.parts.list(found.file.content).find((candidate) => candidate.id === app.sourcePart.partId);
+    return part ? { ...found, part } : null;
   }
 
   function getSelectedParent(project) {
@@ -274,11 +268,11 @@ export function createFileActions(app) {
     }
 
     if (payload.kind === "node") {
-      return !target?.entryId && node.kind === "folder";
+      return !target?.partId && node.kind === "folder";
     }
 
-    if (payload.kind === "urldb-entry") {
-      return node.kind === "file" && isUrlDbFileName(node.name);
+    if (payload.kind === "part") {
+      return partsFile(project, node.id)?.parts === payload.parts;
     }
 
     return false;
@@ -286,19 +280,19 @@ export function createFileActions(app) {
 
   function copyExplorerTarget(target) {
     const project = app.controller.getProject();
-    if (target.entryId) {
-      const file = project.nodes[target.nodeId];
-      const entry = file?.kind === "file" ? app.getUrlDbEntryById(file.content, target.entryId) : null;
-      if (!entry) {
+    if (target.partId) {
+      const found = partsFile(project, target.nodeId);
+      let part;
+      try {
+        part = found?.parts.take(found.file.content, target.partId);
+      } catch {
         return false;
       }
-      app.explorerClipboard.payload = {
-        kind: "urldb-entry",
-        fileId: target.nodeId,
-        entryId: target.entryId,
-        entry: structuredClone(entry)
-      };
-      app.logDebug("action", "Explorer copied bookmark", `${getPath(project, target.nodeId)} :: ${entry.name}`);
+      if (!part) {
+        return false;
+      }
+      app.explorerClipboard.payload = { kind: "part", parts: found.parts, part };
+      app.logDebug("action", "Explorer copied part", `${getPath(project, target.nodeId)} :: ${part.name}`);
       return true;
     }
 
@@ -359,7 +353,7 @@ export function createFileActions(app) {
     }
 
     app.selectionNodeId = createdId;
-    app.sourceUrlDbEntry = null;
+    app.sourcePart = null;
     const createdNode = app.controller.getProject().nodes[createdId];
     if (createdNode?.kind === "file") {
       app.setActiveSourceFile(createdId);
@@ -372,40 +366,34 @@ export function createFileActions(app) {
     return true;
   }
 
-  function pasteUrlDbEntryClipboard(target) {
+  // A name like `name` that none of the file's parts has.
+  function uniquePartName(parts, text, name) {
+    const names = new Set(parts.list(text).map((part) => part.name.toLowerCase()));
+    let candidate = name;
+    for (let counter = 2; names.has(candidate.toLowerCase()); counter += 1) candidate = `${name}-${counter}`;
+    return candidate;
+  }
+
+  function pastePartClipboard(target) {
     const payload = app.explorerClipboard.payload;
-    if (!payload || payload.kind !== "urldb-entry") {
-      return false;
-    }
-
     const project = app.controller.getProject();
-    const targetFile = project.nodes[target.nodeId];
-    if (!targetFile || targetFile.kind !== "file" || !isUrlDbFileName(targetFile.name)) {
+    const found = payload?.kind === "part" ? partsFile(project, target.nodeId) : null;
+    if (!found || found.parts !== payload.parts) {
       return false;
     }
-
-    const entries = app.getUrlDbEntries(targetFile.content);
-    const insertionIndex = target.entryId
-      ? (() => {
-        const index = entries.findIndex((entry) => entry.id === target.entryId);
-        return index < 0 ? entries.length : index + 1;
-      })()
-      : entries.length;
-    const entryDraft = {
-      ...payload.entry,
-      name: app.suggestUniqueUrlDbEntryName(entries, payload.entry.name)
-    };
-    const nextEntries = [...entries];
-    nextEntries.splice(insertionIndex, 0, entryDraft);
-    const nextContent = serializeUrlDb(nextEntries);
-    void app.workspace.write(getPath(project, targetFile.id), nextContent, { source: "url album" }).catch((error) => app.notify(error.message));
-    const pastedEntry = app.getUrlDbEntries(nextContent).find((entry) => entry.name === entryDraft.name);
-    if (pastedEntry) {
-      app.setActiveSourceUrlDbEntry(targetFile.id, pastedEntry.id);
-      app.previewFileId = targetFile.id;
-      app.previewUrlDbEntry = pastedEntry.id;
+    const { file, parts } = found;
+    const index = target.partId ? partIndex(parts, file.content, target.partId, "after") ?? null : null;
+    const part = { ...payload.part, name: uniquePartName(parts, file.content, payload.part.name) };
+    let nextContent;
+    try {
+      nextContent = parts.insert(file.content, part, index);
+    } catch (error) {
+      app.notify(error.message);
+      return false;
     }
-    app.logDebug("action", "Explorer pasted bookmark", `${getPath(app.controller.getProject(), targetFile.id)} :: ${entryDraft.name}`);
+    void app.workspace.write(getPath(project, file.id), nextContent, { source: "file part" }).catch((error) => app.notify(error.message));
+    showMovedPart(file.id, parts, nextContent, part.name, true);
+    app.logDebug("action", "Explorer pasted part", `${getPath(app.controller.getProject(), file.id)} :: ${part.name}`);
     return true;
   }
 
@@ -418,8 +406,8 @@ export function createFileActions(app) {
       return pasteNodeClipboard(target);
     }
 
-    if (app.explorerClipboard.payload?.kind === "urldb-entry") {
-      return pasteUrlDbEntryClipboard(target);
+    if (app.explorerClipboard.payload?.kind === "part") {
+      return pastePartClipboard(target);
     }
 
     return false;
@@ -450,7 +438,7 @@ export function createFileActions(app) {
 
   async function stageAddFileFromLocalFile(file) {
     if (!isAllowedFileName(file.name)) {
-      throw new Error("Only markdown, mtree, urldb, and supported image files can be added.");
+      throw new Error(`Only these kinds of file can be added: ${describeFileTypes()}.`);
     }
 
     const content = await readFileAsProjectContent(file, file.name);
@@ -477,7 +465,7 @@ export function createFileActions(app) {
       response = await fetch(url);
     } catch {
       if (isImageFileName(suggestedName)) {
-        throw new Error(`Remote image download was blocked by the source host or browser policy. Add that URL to a ${fileTypeExtension("urldb")} album instead.`);
+        throw new Error("Remote image download was blocked by the source host or browser policy.");
       }
       throw new Error("Unable to fetch file from URL.");
     }
@@ -615,19 +603,19 @@ export function createFileActions(app) {
       return;
     }
 
-    const urlDbPayload = event.dataTransfer?.getData("text/mdnotes-urldb-entry");
-    if (urlDbPayload && isMarkdownFileName(activeFile.name)) {
+    const partPayload = event.dataTransfer?.getData("text/stilo-file-part");
+    if (partPayload && isMarkdownFileName(activeFile.name)) {
       try {
-        const parsed = JSON.parse(urlDbPayload);
-        const project = app.controller.getProject();
-        const sourceFile = project.nodes[parsed.fileId];
-        const entry = sourceFile?.kind === "file" ? app.getUrlDbEntryById(sourceFile.content, parsed.entryId) : null;
-        if (entry) {
-          insertEditorTextAtDrop(app.createMarkdownImageReference(entry.name, entry.url), event);
-          app.logDebug("action", "Bookmark image inserted", `${entry.name} :: ${entry.url}`);
+        const parsed = JSON.parse(partPayload);
+        const found = partsFile(app.controller.getProject(), parsed.fileId);
+        const part = found?.parts.take(found.file.content, parsed.partId);
+        const text = part ? found.parts.linkText?.(part) : null;
+        if (text) {
+          insertEditorTextAtDrop(text, event);
+          app.logDebug("action", "Part inserted", `${part.name} :: ${text}`);
         }
       } catch {
-        // Ignore malformed bookmark payloads.
+        // Ignore malformed part payloads.
       }
       return;
     }
@@ -670,51 +658,31 @@ export function createFileActions(app) {
     app.addFileState.parentId = parent.id;
     resetAddFileState();
     const targetPath = parent.id === project.rootId ? project.name : getPath(project, parent.id);
-    app.elements.addFileTargetText.textContent = `Add a markdown, mtree, urldb, or image file into ${targetPath}.`;
+    app.elements.addFileTargetText.textContent = `Add a file (${describeFileTypes()}) into ${targetPath}.`;
     app.elements.addFileDialog.showModal();
   }
 
-  async function promptAndAddUrlDbEntry(fileId) {
+  // A new part, from the provider's own `add` (it asks for one).
+  async function addPart(fileId) {
     const project = app.controller.getProject();
-    const file = project.nodes[fileId];
-    if (!file || file.kind !== "file" || !isUrlDbFileName(file.name)) {
-      app.notify(`Bookmark entries can only be added to ${fileTypeExtension("urldb")} files.`);
+    const found = partsFile(project, fileId);
+    if (!found?.parts.add) {
       return;
     }
-
-    const entryDraft = await app.showBookmarkEntryDialog({
-      name: app.getNextUrlDbEntryName(file.content),
-      url: "https://example.com/image.jpg",
-      description: ""
-    });
-
-    if (!entryDraft) {
+    const { file, parts } = found;
+    const part = await parts.add.run(file);
+    if (!part) {
       return;
     }
-
-    if (!entryDraft.name) {
-      app.notify("Bookmark entries require a name.");
-      return;
-    }
-
-    if (!entryDraft.url || !app.looksLikeUrl(entryDraft.url)) {
-      app.notify("Bookmark entries require a valid URL.");
-      return;
-    }
-
     try {
-      const nextContent = appendUrlDbEntry(file.content, entryDraft);
-      void app.workspace.write(getPath(project, file.id), nextContent, { source: "url album" }).catch((error) => app.notify(error.message));
-      const nextEntry = app.getUrlDbEntries(nextContent).find((entry) => entry.name === entryDraft.name);
-      if (nextEntry) {
-        app.setActiveSourceUrlDbEntry(file.id, nextEntry.id);
-      } else {
-        app.setActiveSourceFile(file.id);
-      }
+      const current = app.controller.getProject().nodes[file.id];
+      const nextContent = parts.insert(current.content, part, null);
+      void app.workspace.write(getPath(project, file.id), nextContent, { source: "file part" }).catch((error) => app.notify(error.message));
+      showMovedPart(file.id, parts, nextContent, part.name, false);
       app.openPreviewTab(file.id);
       app.previewFileId = file.id;
-      app.previewUrlDbEntry = null;
-      app.logDebug("action", "Bookmark added", `${getPath(project, file.id)} :: ${entryDraft.name}`);
+      app.previewPart = null;
+      app.logDebug("action", "Part added", `${getPath(project, file.id)} :: ${part.name}`);
     } catch (error) {
       app.notify(error.message);
     }
@@ -731,7 +699,7 @@ export function createFileActions(app) {
         throw new Error("Provide a file name before adding the file.");
       }
       if (!isAllowedFileName(fileName)) {
-        throw new Error("Only markdown, mtree, urldb, and supported image files can be added.");
+        throw new Error(`Only these kinds of file can be added: ${describeFileTypes()}.`);
       }
       if (typeof app.addFileState.content === "string" && app.addFileState.content.startsWith("data:image/") && !isImageFileName(fileName)) {
         throw new Error("Image assets must keep an image file extension.");
@@ -853,7 +821,7 @@ export function createFileActions(app) {
     const project = app.controller.getProject();
     const parent = project.nodes[parentId] ?? project.nodes[project.rootId];
     const parentPath = parent.id === project.rootId ? "" : getPath(project, parent.id);
-    const ext = app.fileExtensionForKind(kind);
+    const ext = fileTypeExtension(kind);
     let name = String(baseName || "").trim();
     if (!name) name = app.getNextDefaultFileName(project, parent.id, kind);
     else if (!name.toLowerCase().endsWith(ext)) name = `${name}${ext}`;
@@ -906,19 +874,20 @@ export function createFileActions(app) {
 
   async function renameSelected() {
     const project = app.controller.getProject();
-    const selectedEntry = getSelectedUrlDbEntry(project);
-    if (selectedEntry) {
-      const nextName = await app.promptForName("Rename bookmark", selectedEntry.entry.name);
+    const selected = getSelectedPart(project);
+    if (selected) {
+      const { file, parts, part } = selected;
+      const nextName = await app.promptForName(`Rename ${part.name}`, part.name);
       if (!nextName) {
         return;
       }
 
       try {
-        const nextContent = updateUrlDbEntry(selectedEntry.file.content, selectedEntry.entry.id, { name: nextName });
-        void app.workspace.write(getPath(project, selectedEntry.file.id), nextContent, { source: "url album" }).catch((error) => app.notify(error.message));
-        const nextEntry = app.getUrlDbEntries(nextContent).find((entry) => entry.name === nextName);
-        if (nextEntry) {
-          app.setActiveSourceUrlDbEntry(selectedEntry.file.id, nextEntry.id);
+        const nextContent = parts.rename(file.content, part.id, nextName);
+        void app.workspace.write(getPath(project, file.id), nextContent, { source: "file part" }).catch((error) => app.notify(error.message));
+        const renamed = parts.list(nextContent).find((candidate) => candidate.name === nextName.trim());
+        if (renamed) {
+          app.setActiveSourcePart(file.id, renamed.id);
         }
       } catch (error) {
         app.notify(error.message);
@@ -955,18 +924,19 @@ export function createFileActions(app) {
 
   async function deleteSelected() {
     const project = app.controller.getProject();
-    const selectedEntry = getSelectedUrlDbEntry(project);
-    if (selectedEntry) {
-      if (!await app.confirmAction(`Delete ${selectedEntry.entry.name}?`)) {
+    const selected = getSelectedPart(project);
+    if (selected) {
+      const { file, parts, part } = selected;
+      if (!await app.confirmAction(`Delete ${part.name}?`)) {
         return;
       }
 
       try {
-        const nextContent = removeUrlDbEntry(selectedEntry.file.content, selectedEntry.entry.id);
-        void app.workspace.write(getPath(project, selectedEntry.file.id), nextContent, { source: "url album" }).catch((error) => app.notify(error.message));
-        app.sourceUrlDbEntry = null;
-        app.previewUrlDbEntry = null;
-        app.setActiveSourceFile(selectedEntry.file.id);
+        const nextContent = parts.remove(file.content, part.id);
+        void app.workspace.write(getPath(project, file.id), nextContent, { source: "file part" }).catch((error) => app.notify(error.message));
+        app.sourcePart = null;
+        app.previewPart = null;
+        app.setActiveSourceFile(file.id);
       } catch (error) {
         app.notify(error.message);
       }
@@ -1110,7 +1080,7 @@ export function createFileActions(app) {
 
     const nodeId = target.nodeId;
     app.selectionNodeId = nodeId;
-    app.sourceUrlDbEntry = target.entryId ? { fileId: nodeId, entryId: target.entryId } : null;
+    app.sourcePart = target.partId ? { fileId: nodeId, partId: target.partId } : null;
     app.logDebug("action", "Explorer action", action);
     if (action === "open-source") {
       app.setActiveSourceFile(nodeId);
@@ -1143,39 +1113,23 @@ export function createFileActions(app) {
       createItem("folder");
       return;
     }
-    if (action === "new-md") {
-      createItem("md");
-      return;
-    }
-    if (action === "new-mtree") {
-      createItem("mtree");
-      return;
-    }
-    if (action === "new-urldb") {
-      createItem("urldb");
-      return;
-    }
-    if (action === "new-bmap") {
-      createItem("bmap");
-      return;
-    }
-    if (action === "new-persona") {
-      createItem("persona");
+    if (action.startsWith("new-")) {
+      createItem(action.slice("new-".length));
       return;
     }
     if (action === "add-file") {
       openAddFileDialog(nodeId);
       return;
     }
-    if (action === "add-bookmark-entry") {
-      await promptAndAddUrlDbEntry(nodeId);
+    if (action === "add-part") {
+      await addPart(nodeId);
       return;
     }
-    if (action === "rename-entry") {
+    if (action === "rename-part") {
       await renameSelected();
       return;
     }
-    if (action === "delete-entry") {
+    if (action === "delete-part") {
       await deleteSelected();
       return;
     }
@@ -1225,9 +1179,9 @@ export function createFileActions(app) {
   return {
     canPasteIntoExplorerTarget, clearExplorerDropState, createFileInFolder, createItem,
     deleteSelected, exportNode, getExplorerDropPayloadKind, getExplorerDropPlacement,
-    getSelectedNode, getSelectedParent, getSelectedUrlDbEntry, handleAddFileTransfer,
+    getSelectedNode, getSelectedParent, getSelectedPart, handleAddFileTransfer,
     handleEditorDrop, handleExplorerAction, handleNewFileSubmit, moveExplorerNode,
-    moveExplorerUrlDbEntry, openNewFileDialog, renameFileById, renameSelected, replaceImageFile,
+    moveExplorerPart, openNewFileDialog, renameFileById, renameSelected, replaceImageFile,
     resetAddFileState, setAddFileStatus, setExplorerDropState, stageAddFileFromLocalFile,
     submitAddFile
   };

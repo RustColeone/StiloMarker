@@ -11,6 +11,8 @@
 //   notify(message)               the same, titled "Message"
 //   confirm(message | {title, message, acceptLabel}) -> Promise<boolean>
 //   input({title, message, label, value, submitLabel, suffix}) -> Promise<string|null>
+//   form({eyebrow, title, message, fields: [{ name, label, value, type: text|url, multiline, placeholder }],
+//         submitLabel}) -> Promise<{ name: value } | null>
 //   toast(message, {duration})
 //   copyText(text)
 //   server.configure({ address: () => string })   where the server is (a setting)
@@ -33,7 +35,7 @@ export default defineModule({
   uses: [],
   owns: {
     registries: ["commands", "menus"],
-    elements: ["menu bar", "notice dialog", "confirm dialog", "input dialog", "toasts"],
+    elements: ["menu bar", "notice dialog", "confirm dialog", "input dialog", "form dialog", "toasts"],
     connection: ["the server address"]
   },
   start(ctx) {
@@ -64,6 +66,13 @@ export default defineModule({
       return value;
     }
 
+    async function form(options) {
+      ctx.log(`form requested: ${options.title ?? ""}`);
+      const values = await dialogs.showForm(options);
+      ctx.log(values ? `form sent: ${options.title ?? ""}` : "form cancelled");
+      return values;
+    }
+
     return {
       commands: { add: commands.add, get: commands.get, all: commands.all, onChange: commands.onChange },
       menus: { add: menus.add, all: menus.all },
@@ -73,6 +82,7 @@ export default defineModule({
       notify: (message) => notice(message),
       confirm,
       input,
+      form,
       toast: dialogs.showToast,
       copyText: dialogs.copyText,
       server: createServer()

@@ -219,7 +219,7 @@ async function importZipArchive(file) {
   const supportedEntries = zipEntries.filter((entry) => builtinTypes.isKnown(entry.path));
 
   if (supportedEntries.length === 0) {
-    throw new Error("ZIP archive does not contain any supported markdown, mtree, urldb, or image files.");
+    throw new Error(`ZIP archive does not contain any supported files (${builtinTypes.describe()}).`);
   }
 
   const projectName = file.name.replace(/\.zip$/i, "") || "Imported Zip";
