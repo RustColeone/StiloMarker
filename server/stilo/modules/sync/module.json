@@ -1,0 +1,9 @@
+{
+  "name": "sync",
+  "level": 3,
+  "uses": ["file_types", "workspace"],
+  "owns": {
+    "state": ["sessions", "presence", "leases", "event streams", "the rebase log"],
+    "rules": ["rebasing a text patch", "who may send which change", "stale writes refused"]
+  }
+}

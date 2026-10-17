@@ -30,12 +30,8 @@ test("backend: agentic tool loop + proposal symbols present", async () => {
   assert.match(backendSource, /batchId/);
   assert.match(backendSource, /max_tool_iterations/);
   assert.match(backendSource, /preImage/);
-  // Phase 2: sole-author revert
-  assert.match(backendSource, /revision_authors/);
-  assert.match(backendSource, /snapshot_history/);
-  assert.match(backendSource, /revert-to-revision/);
-  assert.match(backendSource, /_authorize_sole_author_revert/);
-  assert.match(backendSource, /SNAPSHOT_HISTORY_N/);
+  // Drop is the write path backwards (undo steps), not a server-side revert.
+  assert.doesNotMatch(backendSource, /revert-to-revision/);
 });
 
 test("client: agent decoration, checkpoint, and proposal symbols present", async () => {

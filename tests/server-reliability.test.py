@@ -67,8 +67,8 @@ class ReliabilityTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'conflict'):
                     self.op({'type': 'patch-file', 'path': path, 'start': 0, 'end': 0, 'text': 'BAD', 'baseRevision': base})
 
-    def test_revert_and_replace_project_are_rebase_barriers(self):
-        for kind in ('revert-to-revision', 'replace-project'):
+    def test_replace_project_is_a_rebase_barrier(self):
+        for kind in ('replace-project',):
             self.op({'type': 'patch-file', 'path': 'note.md', 'start': 0, 'end': 0,
                      'text': 'x', 'baseRevision': self.broker.revision})
             base = self.broker.revision
@@ -305,7 +305,7 @@ class ReliabilityTests(unittest.TestCase):
             self.broker.unsubscribe(token, expected_queue=events)  # the stream dropped; the token lives on
         with self.assertRaisesRegex(PermissionError, 'read-only'):
             self.broker.apply_operation(reader, {'type': 'create-folder', 'parentPath': '', 'name': 'x'})
-        self.assertIn(master, self.broker.master_tokens, 'the owner can still publish after a reconnect')
+        self.assertEqual(self.broker.sessions.role(master), 'master', 'the owner can still publish after a reconnect')
         self.broker.unsubscribe(reader, revoke=True)
         with self.assertRaises(PermissionError):
             self.broker.apply_operation(reader, {'type': 'create-folder', 'parentPath': '', 'name': 'x'})
@@ -347,7 +347,7 @@ class ReliabilityTests(unittest.TestCase):
     def test_concurrent_broadcasts_follow_committed_revision_order(self):
         events = self.broker.subscribe(self.token)
         events.get_nowait()
-        original = self.broker._broadcast
+        original = self.broker.sessions.broadcast
         entered = threading.Event()
         release = threading.Event()
         def pause_first(event, *args, **kwargs):
@@ -361,7 +361,7 @@ class ReliabilityTests(unittest.TestCase):
                 self.op({'type': 'create-file', 'name': name, 'parentPath': '', 'content': name})
             except Exception as error:
                 failures.append(error)
-        with patch.object(self.broker, '_broadcast', side_effect=pause_first):
+        with patch.object(self.broker.sessions, 'broadcast', side_effect=pause_first):
             first = threading.Thread(target=create, args=('first.md',))
             second = threading.Thread(target=create, args=('second.md',))
             first.start(); self.assertTrue(entered.wait(2)); second.start()

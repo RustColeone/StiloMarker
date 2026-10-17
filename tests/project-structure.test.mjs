@@ -205,7 +205,10 @@ test("service-worker.js caches the app shell", async () => {
 });
 
 test("backend exposes collaboration + OT endpoints", async () => {
-  const backendSource = await readFile(resolveFromRoot("server/mdnotes_server.py"), "utf8");
+  // Sharing a workspace live is the Sync module's (step 7c).
+  const backendSource = await readFile(resolveFromRoot("server/mdnotes_server.py"), "utf8")
+    + await readFile(resolveFromRoot("server/stilo/modules/sync/service/shared.py"), "utf8")
+    + await readFile(resolveFromRoot("server/stilo/modules/sync/model/rebase.py"), "utf8");
   const symbols = [
     /api\/events\/stream/,
     /api\/operations/,
@@ -213,13 +216,13 @@ test("backend exposes collaboration + OT endpoints", async () => {
     /patch-file/,
     /Persisting collaborative state/,
     /Backend self-test passed\./,
-    /operation_log/,
-    /_transform_range/,
-    /_rebase_patch/,
+    /class RebaseLog/,
+    /def transform_range\(/,
+    /def rebase\(/,
     /broadcast_cursor/,
     /api\/session\/presence/,
     /master_pin/,
-    /master_tokens/,
+    /role != "master"/,
     /master-pin/,
     /api\/generate/,
     /def _handle_generate\(/,

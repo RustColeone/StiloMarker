@@ -150,8 +150,12 @@ test("the legacy contract matches the messages the code sends and handles (rule 
   const handled = new Set();
   for (const file of server) {
     const text = read(file);
-    for (const m of text.matchAll(/(?:operation_type|op_type) == "([a-z-]+)"/g)) handled.add(m[1]);
-    for (const m of text.matchAll(/op_type in \(([^)]*)\)/g)) for (const t of m[1].matchAll(/"([a-z-]+)"/g)) handled.add(t[1]);
+    // In the modules that apply operations, the type is called `kind`.
+    const kind = /^server\/stilo\/modules\/(workspace|sync)\//.test(file) ? "|kind" : "";
+    for (const m of text.matchAll(new RegExp(`(?:operation_type|op_type${kind}) == "([a-z-]+)"`, "g"))) handled.add(m[1]);
+    for (const m of text.matchAll(new RegExp(`(?:op_type${kind}) in \\(([^)]*)\\)`, "g"))) for (const t of m[1].matchAll(/"([a-z-]+)"/g)) handled.add(t[1]);
+    // Names a module spells once as constants (Workspace's PATCH_FILE = "patch-file").
+    if (kind) for (const m of text.matchAll(/^[A-Z_, ]+ = ("[a-z-]+"(?:, "[a-z-]+")*)$/gm)) for (const t of m[1].matchAll(/"([a-z-]+)"/g)) handled.add(t[1]);
   }
   assert.deepEqual([...handled].sort(), [...ops].sort(), "operation types the server applies differ from protocol/legacy.contract.json");
 

@@ -3,7 +3,7 @@
   "version": 117,
   "operations": {
     "endpoint": "POST /api/operations",
-    "types": ["create-file", "create-folder", "delete-node", "move-node", "patch-file", "rename-node", "replace-project", "revert-to-revision", "update-file"]
+    "types": ["create-file", "create-folder", "delete-node", "move-node", "patch-file", "rename-node", "replace-project", "update-file"]
   },
   "workspaceEvents": {
     "endpoint": "GET /api/events/stream (server-sent events)",

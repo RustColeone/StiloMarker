@@ -34,14 +34,15 @@ from conversations import (SIDE_FILES as CHAT_DB_FILES, ProjectChats, ReplyQueue
                            persona_handle, persona_header, persona_summary, user_key)
 from stilo.kernel import start_modules
 from stilo.modules import (assistant as assistant_module, characters as characters_module, file_types as file_types_module,
-                           identity as identity_module, models as models_module, transport as transport_module, workspace as workspace_module)
+                           identity as identity_module, models as models_module, sync as sync_module, transport as transport_module, workspace as workspace_module)
 from stilo.modules.file_types import BUILTIN as FILE_TYPES
 from stilo.kernel.log import log as _log
 from stilo.modules.workspace import (append_node, atomic_write as _atomic_write, create_id, decode_data_url, default_project,
                                      find_child_by_name, fsync_directory as _fsync_directory, node_id_by_path, path_of,
                                      remove_node_recursive, subtree_paths, utf16_index as _utf16_index,
                                      utf16_length as _utf16_length)
-from stilo.modules.workspace import FolderStore
+from stilo.modules.workspace import FolderStore, LiveProject, StateFile, bump_edit_counters
+from stilo.modules.sync import PARTS as SYNC_PARTS, SharedWorkspace
 from stilo.modules.characters import character_instructions, characters_view, notes_mode, split_author_notes
 from stilo.modules.assistant import AGENT_TOOLS, propose_edit
 from stilo.modules.identity import ACCESS_FILE, ACCOUNT_FILE, AccountStore, open_identity
@@ -50,7 +51,7 @@ from stilo.modules.models import IMAGE_SIZES, GeneratedImages, MCPManager, MCPTu
 
 def start_server_modules():
     """The server's modules (docs/ARCHITECTURE.md); more join as the restructure moves code."""
-    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE, identity_module.MODULE, models_module.MODULE, characters_module.MODULE, assistant_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"))
+    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE, identity_module.MODULE, models_module.MODULE, sync_module.MODULE, characters_module.MODULE, assistant_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"))
 
 
 def _truthy(value: str | None) -> bool:
@@ -998,713 +999,79 @@ class ChatProxy:
         }
 
 
-class CollaborationBroker:
+class CollaborationBroker(SharedWorkspace):
+    """A shared workspace (Sync) over its storage (Workspace), plus the agent's
+    shared chat threads (chat.json), which move to Assistant later. The
+    underscored names are kept for code and tests from before the restructure."""
+
     def __init__(self, pin: str, state_file: Path | None, master_pin: str | None = None,
                  workspace_dir: Path | None = None):
-        self.pin = pin
-        # master_pin grants project-replace authority; defaults to same as pin so
-        # single-pin deployments are backward-compatible.
-        self.master_pin = master_pin or pin
+        # A folder of real files (team workspaces), one JSON file (the PIN
+        # session), or memory only (a guest-hosted session).
         self.state_file = state_file
-        # When set, the workspace persists as a real directory of files + a
-        # manifest.json (structure only), and image bytes live on disk and are
-        # served by URL rather than inlined as data: URLs. state_file is ignored.
         self.workspace_dir = workspace_dir
-        self.store = FolderStore(workspace_dir) if workspace_dir is not None else None  # Workspace module
-        self.lock = threading.RLock()
-        self.project = None
-        self._persisted_project = None
-        self._persist_failed = False
-        self.revision = 0
-        self.tokens = {}
-        self.subscribers = {}
-        self.presence = {}
-        self.leases = {}  # monotonic heartbeat time for clients using presence leases
-        self.master_tokens: set[str] = set()  # tokens that authenticated with master_pin
-        self.reader_tokens: set[str] = set()  # read-only sessions (access.readers)
-        # Ring buffer of applied operations for OT rebase, keyed by revision number.
-        # Stores (revision, path, start, end, inserted_length) tuples.
-        self.operation_log = []
-        # revision at which each file path last changed. A whole-file write that
-        # is based on an older revision than this would be overwriting someone
-        # else's newer content, so it is refused. Unknown paths fall back to
-        # _path_change_floor (the revision this broker was loaded at), so after a
-        # restart — when this map is empty — an out-of-date client still can't
-        # clobber: it is treated as behind and made to pull.
-        self.path_changed_at: dict[str, int] = {}
-        self.path_replaced_at: dict[str, int] = {}
-        self._path_change_floor = 0
-        self.operation_log_max = 2000
-        # Called just before a destructive change (see WorkspaceRegistry backups).
-        self.on_before_destructive = None
-        # Called with (broker, old_path, new_path) after a rename or move, so
-        # things that refer to files by path (chat characters) can follow.
-        self.on_paths_moved = None
-        # Per-revision author tracking for sole-author revert (Phase 2 / subtask 2.1).
-        self.revision_authors: dict[int, str] = {}
-        # Bounded snapshot history for revert-to-revision (Phase 2 / subtask 2.2).
-        # Stores (revision, deep_copy_of_project) tuples, newest last.
-        # Retention floor: max(SNAPSHOT_HISTORY_N, oldest unresolved agent batch base).
-        self.snapshot_history: list[tuple[int, dict]] = []
-        self.SNAPSHOT_HISTORY_N: int = 40  # N = 40 revisions (Decision Q4)
-        # Set of base revisions that must NOT be trimmed while a batch is pending.
-        # Client calls /api/operations with a revert-to-revision to resolve them.
-        self._pinned_base_revisions: set[int] = set()
-        # Chat workspace: shared thread list broadcast to all session members.
+        self.store = (FolderStore(workspace_dir) if workspace_dir is not None
+                      else StateFile(state_file) if state_file is not None else None)
+        super().__init__(LiveProject(self.store), pin, master_pin, **SYNC_PARTS, edit_gap=EDIT_SESSION_GAP_SECONDS)
         self.chat_workspace: dict = {"threads": [], "revision": 0}
-        self._load_state()
         self.chat_file = (self.workspace_dir / "chat.json" if self.workspace_dir is not None else
                           self.state_file.with_suffix(".chat.json") if self.state_file is not None else None)
         if self.chat_file is not None and self.chat_file.exists():
             self.chat_workspace = json.loads(self.chat_file.read_text(encoding="utf-8"))
 
-    def _default_project(self):
-        return default_project()
+    # Sessions, as code from before the restructure reads them.
+    subscribers = property(lambda self: self.sessions.subscribers)
+    presence = property(lambda self: self.sessions.presence)
+    leases = property(lambda self: self.sessions.leases)
+    tokens = property(lambda self: self.sessions.tokens)
+    _path_change_floor = property(lambda self: self.rebase.floor, lambda self, value: setattr(self.rebase, "floor", value))
 
-    # ---- directory-backed storage helpers (workspace_dir mode) -----------------
-    def _abs_path(self, node_id: str) -> Path:
-        return self.store.file_path(self.project, node_id)
+    def _admit(self, display_name, role, identity=None, device=None, leased=False):
+        return self.admit(display_name, role, identity, device, leased)
+
+    def _broadcast(self, event, exclude_token=None):
+        self.sessions.broadcast(event, exclude_token)
+
+    def _broadcast_to_users(self, usernames, event):
+        self.sessions.broadcast_to_users(usernames, event)
+
+    def _broadcast_presence(self, message):
+        self.sessions.broadcast_presence(message)
+
+    def _persist_state(self):
+        self.live.save()
+
+    def _ensure_persisted(self):
+        self.ensure_persisted()
 
     @staticmethod
-    def _decode_data_url(url: str) -> bytes | None:
+    def _default_project():
+        return default_project()
+
+    @staticmethod
+    def _decode_data_url(url):
         return decode_data_url(url)
 
-    def _write_node_file(self, node_id: str) -> None:
-        self.store.write_node_file(self.project, node_id)
+    def _get_node_id_by_path(self, path):
+        return node_id_by_path(self.project, path)
 
-    def _remove_path(self, path: Path) -> None:
-        FolderStore.remove(path)
-
-    def _externalize_images(self, project: dict) -> None:
-        self.store.externalize_images(project)
-
-    def _paths_moved(self, operation: dict):
-        op_type = operation.get("type")
-        if self.on_paths_moved is None or op_type not in ("rename-node", "move-node"):
-            return
-        old = str(operation.get("path", "")).strip("/")
-        base = old.rsplit("/", 1)[-1]
-        if op_type == "rename-node":
-            parent = old.rsplit("/", 1)[0] if "/" in old else ""
-            name = str(operation.get("name", ""))
-        else:
-            parent, name = str(operation.get("parentPath", "")).strip("/"), base
-        new = f"{parent}/{name}" if parent else name
-        if old and name and old != new:
-            try:
-                self.on_paths_moved(self, old, new)
-            except Exception as error:  # noqa: BLE001 — never fail the change itself
-                _log("CHATS", f"path-move hook failed: {error}")
-
-    def _before_destructive(self, reason: str):
-        hook = self.on_before_destructive
-        if hook is None:
-            return
-        try:
-            hook(self, reason)
-        except Exception as error:  # noqa: BLE001 — never block the change itself
-            _log("BACKUP", f"pre-change hook failed: {error}")
-
-    def _subtree_paths(self, node_id: str) -> list[str]:
-        return subtree_paths(self.project, node_id)
-
-    def _path_in(self, project: dict, node_id: str) -> str:
+    def _path_in(self, project, node_id):
         return path_of(project, node_id)
+
+    def _externalize_images(self, project):
+        self.store.externalize_images(project)
 
     def resolve_asset(self, rel_path: str) -> Path | None:
         """The on-disk file at a workspace-relative path (by path, so every peer
         agrees on the URL), or None; never outside the workspace folder."""
-        return self.store.resolve_asset(rel_path) if self.store is not None else None
-
-    def _asset_dest(self, rel_path: str) -> Path:
-        return self.store.asset_dest(rel_path)
+        return self.store.resolve_asset(rel_path) if self.workspace_dir is not None else None
 
     def write_asset_chunk(self, rel_path: str, offset: int, data: bytes) -> int:
         """Write one chunk of an image (large images upload in pieces, not through
         the operation stream); its node is created by a content-less create-file."""
-        if self.store is None:
+        if self.workspace_dir is None:
             raise PermissionError("This workspace does not store server assets")
         return self.store.write_asset_chunk(rel_path, offset, data)
-
-    def _load_state(self):
-        if self.workspace_dir is not None:
-            return self._load_state_dir()
-        # state_file None => ephemeral, in-memory only (guest-hosted local session).
-        if self.state_file is None or not self.state_file.exists():
-            self.project = self._default_project()
-            self.revision = 0
-            return
-        data = json.loads(self.state_file.read_text(encoding="utf-8"))
-        self.project = data.get("project") or self._default_project()
-        self.revision = int(data.get("revision", 0))
-        self._path_change_floor = self.revision  # in-memory map is empty after a load
-
-    def _load_state_dir(self):
-        loaded = self.store.load()
-        if loaded is None:
-            self.project = self._default_project()
-            self.revision = 0
-            return
-        self.project, self.revision = loaded
-        self._path_change_floor = self.revision  # in-memory map is empty after a load
-        self._persisted_project = copy.deepcopy(self.project)
-
-    def _ensure_persisted(self):
-        # A failed commit must be completed (or the last committed model reloaded)
-        # before serving or accepting more changes. Never acknowledge dirty RAM.
-        if self._persist_failed:
-            self._load_state()
-            self.operation_log.clear()
-            self.path_changed_at.clear()
-            self._path_change_floor = self.revision
-            self._persist_failed = False
-            self._broadcast({"type": "state", "revision": self.revision,
-                             "project": copy.deepcopy(self.project), "serverTime": time.time()})
-
-    def _persist_state(self):
-        try:
-            if self.workspace_dir is not None:
-                return self._persist_state_dir()
-            if self.state_file is None:
-                return
-            payload = {"project": self.project, "revision": self.revision}
-            _atomic_write(self.state_file, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
-        except OSError:
-            self._persist_failed = True
-            raise
-
-    def _persist_state_dir(self):
-        self.project = self.store.save(self.project, self.revision, self._persisted_project)
-        self._persisted_project = copy.deepcopy(self.project)
-
-    def _finish_directory_commit(self, payload, skip_unchanged=False):
-        self.store.finish_commit(payload, skip_unchanged)
-
-    def _broadcast(self, event, exclude_token: str | None = None):
-        subscribers = {}
-        with self.lock:
-            subscribers = dict(self.subscribers)
-        for token, subscriber in subscribers.items():
-            if token == exclude_token:
-                continue
-            subscriber.put(event)
-
-    def _broadcast_to_users(self, usernames, event):
-        """Send an event only to the sessions of these accounts (private chats)."""
-        wanted = set(usernames)
-        with self.lock:
-            targets = [subscriber for token, subscriber in self.subscribers.items()
-                       if self.presence.get(token, {}).get("user") in wanted]
-        for subscriber in targets:
-            subscriber.put(event)
-
-    def _broadcast_presence(self, message: str):
-        presence_snapshot = self.get_presence()
-        self._broadcast({
-            "type": "presence",
-            "presence": presence_snapshot,
-            "message": message,
-            "serverTime": time.time(),
-            "revision": self.revision,
-        })
-
-    def _find_child_by_name(self, parent_id: str, name: str):
-        return find_child_by_name(self.project, parent_id, name)
-
-    def _get_node_id_by_path(self, path: str):
-        return node_id_by_path(self.project, path)
-
-    def _get_path(self, node_id: str):
-        return path_of(self.project, node_id, strict=True)
-
-    def _create_id(self, prefix: str):
-        return create_id(prefix)
-
-    @staticmethod
-    def _transform_range(start, end, a_start, a_end, inserted):
-        """Rebase a later splice; ambiguous overlaps require draft recovery."""
-        delta = inserted - (a_end - a_start)
-        if start == end and a_start == a_end:
-            return (start + inserted, end + inserted) if a_start < start else (start, end)
-        if start == end:
-            if a_start < start < a_end:
-                raise ValueError("patch conflict: insertion inside concurrently removed text")
-            return (start + delta, end + delta) if start >= a_end else (start, end)
-        if a_start == a_end:
-            if start < a_start < end:
-                raise ValueError("patch conflict: concurrent insertion inside removed text")
-            return (start + inserted, end + inserted) if a_start <= start else (start, end)
-        if start < a_end and a_start < end:
-            raise ValueError("patch conflict: overlapping replacements")
-        return (start + delta, end + delta) if a_end <= start else (start, end)
-
-    def _path_revision(self, changes, path):
-        return max([self._path_change_floor] + [revision for changed, revision in changes.items()
-                   if path == changed or path.startswith(changed + "/")])
-
-    def _rebase_patch(self, path: str, start: int, end: int, base_revision: int) -> tuple[int, int]:
-        if base_revision < self._path_revision(self.path_replaced_at, path):
-            raise ValueError("patch conflict: file was replaced or its path changed — reload to continue")
-        for entry in self.operation_log:
-            if entry["revision"] <= base_revision or entry["path"] != path:
-                continue
-            start, end = self._transform_range(start, end, entry["start"], entry["end"], entry["insertedLength"])
-        return start, end
-
-    @staticmethod
-    def _bump_edit_counters(node, now=None):
-        """Advance a file's display counters (the E and N of its S.E.N label).
-
-        Purely cosmetic bookkeeping: nothing in the concurrency machinery reads
-        these. `revision` stays the one true ordering token, monotonic forever;
-        these are safe to reset precisely because no correctness property
-        depends on them.
-        """
-        stamp = time.time() if now is None else float(now)
-        if stamp - float(node.get("lastEditAt") or 0) > EDIT_SESSION_GAP_SECONDS:
-            node["editSessions"] = int(node.get("editSessions", 0) or 0) + 1
-            node["sessionEdits"] = 0
-        node["lastEditAt"] = stamp
-        node["sourceVersion"] = int(node.get("sourceVersion", 0) or 0) + 1
-        node["sessionEdits"] = int(node.get("sessionEdits", 0) or 0) + 1
-        return {
-            "editSessions": node["editSessions"],
-            "sessionEdits": node["sessionEdits"],
-            "sourceVersion": node["sourceVersion"],
-        }
-
-    def _note_path_changed(self, operation: dict):
-        """Record the revision at which a file path last changed (see path_changed_at)."""
-        op_type = operation.get("type")
-        if op_type in ("replace-project", "revert-to-revision"):
-            self.operation_log.clear()
-            self.path_changed_at.clear()
-            self.path_replaced_at.clear()
-            self._path_change_floor = self.revision
-        touched = []
-        if op_type in ("patch-file", "update-file", "delete-node"):
-            touched.append(str(operation.get("path", "")))
-        elif op_type in ("create-file", "create-folder"):
-            parent = str(operation.get("parentPath", ""))
-            name = str(operation.get("name", ""))
-            touched.append(f"{parent}/{name}" if parent else name)
-        elif op_type == "move-node":
-            # Every path under the moved node changed, old and new: a text patch
-            # queued against any of them must not rebase across the move.
-            touched.extend(getattr(self, "_moved_paths", []) or [])
-            self._moved_paths = []
-        elif op_type == "rename-node":
-            touched.append(str(operation.get("path", "")))
-            parent = str(operation.get("path", "")).rsplit("/", 1)[0] if "/" in str(operation.get("path", "")) else ""
-            new_name = str(operation.get("name", ""))
-            if new_name:
-                touched.append(f"{parent}/{new_name}" if parent else new_name)
-        for path in touched:
-            if path:
-                self.path_changed_at[path] = self.revision
-                if op_type != "patch-file":
-                    self.path_replaced_at[path] = self.revision
-
-    def _record_operation(self, path: str, start: int, end: int, inserted_length: int):
-        # revision is incremented in apply_operation after _apply_operation returns,
-        # so the entry for this op will carry revision + 1.
-        self.operation_log.append({
-            "revision": self.revision + 1,
-            "path": path,
-            "start": start,
-            "end": end,
-            "insertedLength": inserted_length,
-        })
-        if len(self.operation_log) > self.operation_log_max:
-            self.operation_log = self.operation_log[-self.operation_log_max:]
-
-    def _apply_text_patch(self, content: str, operation: dict, base_revision: int | None = None) -> tuple[str, int, int]:
-        """
-        Apply a text patch with optional OT rebase.
-        Returns (new_content, rebased_start, rebased_end).
-        If base_revision is provided and differs from the current revision, the
-        patch offsets are transformed through all intermediate operations first
-        so concurrent edits converge instead of conflicting.
-        """
-        start = int(operation.get("start", -1))
-        end = int(operation.get("end", -1))
-        insert_text = str(operation.get("text", ""))
-        removed_text = str(operation.get("removedText", ""))
-        insert_text.encode("utf-8")  # reject lone surrogates before mutating the model
-        path = str(operation.get("path", ""))
-
-        if start < 0 or end < start:
-            raise ValueError("Invalid text patch range")
-
-        # If the client sent a baseRevision that is behind the current revision,
-        # transform the offsets through the intervening operations.
-        if base_revision is not None and base_revision < self.revision:
-            orig_start, orig_end = start, end
-            start, end = self._rebase_patch(path, start, end, base_revision)
-            if start != orig_start or end != orig_end:
-                _log("OT", f"Rebased {path!r}  {orig_start}\u2013{orig_end} \u2192 {start}\u2013{end}",
-                     baseRev=base_revision, currentRev=self.revision)
-
-        py_start = _utf16_index(content, start)
-        py_end = _utf16_index(content, end)
-        current_slice = content[py_start:py_end]
-        if current_slice != removed_text:
-            raise ValueError("patch conflict: removed text no longer matches — reload to continue")
-
-        return f"{content[:py_start]}{insert_text}{content[py_end:]}", start, end
-
-    def _append_node(self, parent_id: str, node: dict):
-        append_node(self.project, parent_id, node)
-
-    def _remove_node_recursive(self, node_id: str):
-        remove_node_recursive(self.project, node_id)
-
-    def _wipe_workspace_dir(self):
-        """Empty the workspace folder, keeping the sidecars other parts keep beside
-        it, so a publish never resets who may open the project or its chats."""
-        if self.store is not None:
-            self.store.wipe((ACCESS_FILE, "user-state.json", "comments.json", "chat.json", *CHAT_DB_FILES))
-
-    def _apply_operation(self, operation):
-        operation_type = operation.get("type")
-        if operation_type == "replace-project":
-            # Wholesale tree replacement is the most destructive operation there
-            # is; it must be based on what the server currently has.
-            base_revision = operation.get("baseRevision")
-            if base_revision is None or int(base_revision) != int(self.revision):
-                raise ValueError(
-                    f"replace-project conflict: based on revision {base_revision} but the server is at "
-                    f"{self.revision} — reload before publishing over it"
-                )
-            self.project = operation["project"]
-            return
-
-        if operation_type == "create-folder":
-            parent_path = operation.get("parentPath", "")
-            parent_id = self._get_node_id_by_path(parent_path) if parent_path else self.project["rootId"]
-            if not parent_id:
-                raise ValueError(f"Parent path not found: {parent_path}")
-            if self._find_child_by_name(parent_id, operation["name"]):
-                raise ValueError("create conflict: a file or folder with that name already exists")
-            node = {
-                "id": self._create_id("folder"),
-                "kind": "folder",
-                "name": operation["name"],
-                "parentId": parent_id,
-                "children": [],
-                "expanded": True,
-            }
-            self._append_node(parent_id, node)
-            return
-
-        if operation_type == "create-file":
-            parent_path = operation.get("parentPath", "")
-            parent_id = self._get_node_id_by_path(parent_path) if parent_path else self.project["rootId"]
-            if not parent_id:
-                raise ValueError(f"Parent path not found: {parent_path}")
-            if self._find_child_by_name(parent_id, operation["name"]):
-                raise ValueError("create conflict: a file or folder with that name already exists")
-            if not FILE_TYPES.is_known(operation["name"]):  # as the browser refuses it: peers could not apply it
-                raise ValueError(f"Unsupported file type: {operation['name']}")
-            node = {
-                "id": self._create_id("file"),
-                "kind": "file",
-                "name": operation["name"],
-                "parentId": parent_id,
-                "content": operation.get("content", ""),
-                "dirty": False,
-                "sourceVersion": 0,
-                "editSessions": 0,
-                "sessionEdits": 0,
-                "lastEditAt": 0,
-            }
-            self._append_node(parent_id, node)
-            if self.workspace_dir is not None and FILE_TYPES.is_image(node["name"]):
-                operation["content"] = ""
-            return
-
-        if operation_type == "rename-node":
-            node_id = self._get_node_id_by_path(operation["path"])
-            if not node_id:
-                raise ValueError(f"Node path not found: {operation['path']}")
-            node = self.project["nodes"][node_id]
-            sibling = self._find_child_by_name(node["parentId"], operation["name"])
-            if sibling and sibling["id"] != node_id:
-                raise ValueError("rename conflict: a file or folder with that name already exists")
-            if node["kind"] == "file" and not FILE_TYPES.is_known(operation["name"]):
-                raise ValueError(f"Unsupported file type: {operation['name']}")
-            node["name"] = operation["name"]
-            return
-
-        if operation_type == "move-node":
-            # Re-parent (or reorder) a file or folder. There was no such operation:
-            # a drag in the explorer changed only the dragging browser's tree, the
-            # server kept the old path, and the next reconnect's reconcile — which
-            # can only ADD what the server lacks — uploaded the file again at its
-            # new path. Old and new then both existed: the "copies" a drag left.
-            #
-            # Validation and index arithmetic mirror moveNode() in
-            # app/domain/project-model.js exactly, because peers apply this same
-            # broadcast with that function; any difference would order the tree
-            # differently in different browsers. Persistence needs nothing extra:
-            # the directory commit derives every path from the tree and removes
-            # paths that no longer exist, under the redo journal.
-            node_id = self._get_node_id_by_path(operation["path"])
-            if not node_id:
-                raise ValueError(f"Node path not found: {operation['path']}")
-            root_id = self.project["rootId"]
-            if node_id == root_id:
-                raise ValueError("move conflict: the workspace root cannot be moved")
-            parent_path = str(operation.get("parentPath", "") or "")
-            target_id = self._get_node_id_by_path(parent_path) if parent_path else root_id
-            if not target_id:
-                raise ValueError(f"Parent path not found: {parent_path}")
-            nodes = self.project["nodes"]
-            target = nodes[target_id]
-            if target.get("kind") != "folder":
-                raise ValueError("Items can only be moved into folders")
-            ancestor = target_id
-            while ancestor:
-                if ancestor == node_id:
-                    raise ValueError("move conflict: cannot move an item into itself")
-                ancestor = nodes[ancestor].get("parentId")
-            node = nodes[node_id]
-            # Case-insensitive, like the browser's ensureUniqueName().
-            lowered = str(node["name"]).lower()
-            for child_id in target.get("children", []):
-                child = nodes.get(child_id)
-                if child and child_id != node_id and str(child.get("name", "")).lower() == lowered:
-                    raise ValueError("move conflict: a file or folder with that name already exists there")
-            old_paths = self._subtree_paths(node_id)
-            source = nodes[node["parentId"]]
-            source_children = list(source.get("children", []))
-            source_index = source_children.index(node_id) if node_id in source_children else -1
-            # index is a slot in the destination as it is BEFORE the move (see
-            # moveNode): clamp against that length, then account for the removal.
-            same_parent = source["id"] == target_id
-            slots = len(nodes[target_id].get("children", []))
-            raw_index = operation.get("index")
-            if raw_index is None:
-                clamped = slots
-            else:
-                try:
-                    clamped = max(0, min(int(raw_index), slots))
-                except (TypeError, ValueError):
-                    raise ValueError("move-node index must be an integer")
-            if same_parent and 0 <= source_index < clamped:
-                clamped -= 1
-            source["children"] = [child for child in source_children if child != node_id]
-            children = nodes[target_id].setdefault("children", [])
-            children.insert(clamped, node_id)
-            node["parentId"] = target_id
-            self._moved_paths = old_paths + self._subtree_paths(node_id)
-            return
-
-        if operation_type == "delete-node":
-            node_id = self._get_node_id_by_path(operation["path"])
-            if not node_id:
-                return
-            node = self.project["nodes"][node_id]
-            parent = self.project["nodes"][node["parentId"]]
-            parent["children"] = [child_id for child_id in parent.get("children", []) if child_id != node_id]
-            self._remove_node_recursive(node_id)
-            return
-
-        if operation_type == "update-file":
-            node_id = self._get_node_id_by_path(operation["path"])
-            if not node_id:
-                raise ValueError(f"File path not found: {operation['path']}")
-            node = self.project["nodes"][node_id]
-            # OPTIMISTIC CONCURRENCY. baseRevision was only ever used to REBASE
-            # typing offsets (patch-file); it gated nothing. So a whole-file write
-            # from a device stuck at an old revision was applied verbatim and
-            # silently replaced newer work — an old tab left open could overwrite
-            # documents nobody was even looking at.
-            # The precondition is the REVISION, not the file's sourceVersion: the
-            # client bumps sourceVersion on its own auto-save, so client and server
-            # counters drift apart and could never be compared.
-            base_revision = operation.get("baseRevision")
-            if base_revision is None:
-                raise ValueError(
-                    "update-file conflict: the client did not say which revision it is based on "
-                    "(reload to update this tab)"
-                )
-            changed_at = self._path_revision(self.path_changed_at, operation["path"])
-            if int(base_revision) < changed_at or int(base_revision) > self.revision:
-                raise ValueError(
-                    f"update-file conflict on {operation['path']!r}: this client is based on revision "
-                    f"{int(base_revision)} but that file changed at revision {changed_at} — "
-                    "reload to get the newer copy"
-                )
-            node["content"] = operation.get("content", "")
-            node["dirty"] = False
-            operation["counters"] = self._bump_edit_counters(node)
-            if self.workspace_dir is not None and FILE_TYPES.is_image(node["name"]):
-                operation["content"] = ""
-            return
-
-        if operation_type == "patch-file":
-            node_id = self._get_node_id_by_path(operation["path"])
-            if not node_id:
-                raise ValueError(f"File path not found: {operation['path']}")
-            node = self.project["nodes"][node_id]
-            if node["kind"] != "file":
-                raise ValueError("Only files can receive text patches")
-            base_revision = operation.get("baseRevision")
-            if base_revision is None or int(base_revision) < 0 or int(base_revision) > self.revision:
-                raise ValueError("patch conflict: invalid or missing base revision")
-            if base_revision is not None:
-                base_revision = int(base_revision)
-                # The rebase log is in-memory and capped, so it can no longer
-                # cover a very old base (a long-open tab, or any base at all after
-                # a server restart). Rebasing against a partial log silently lands
-                # the edit at the WRONG offsets and corrupts the file, so refuse
-                # and make the client reload instead.
-                if base_revision < self.revision:
-                    oldest = self.operation_log[0]["revision"] if self.operation_log else None
-                    if oldest is None or base_revision < oldest - 1:
-                        raise ValueError(
-                            f"patch conflict on {operation['path']!r}: base revision {base_revision} is too far "
-                            f"behind revision {self.revision} to rebase safely (the server restarted) — "
-                            "reload to continue"
-                        )
-            new_content, rebased_start, rebased_end = self._apply_text_patch(
-                node.get("content", ""), operation, base_revision
-            )
-            node["content"] = new_content
-            node["dirty"] = False
-            operation["counters"] = self._bump_edit_counters(node)
-            # Store rebased positions back into the operation dict so that
-            # when broadcast to peers they receive the positions actually applied,
-            # not the original (pre-OT) positions the sender submitted.
-            operation["start"] = rebased_start
-            operation["end"] = rebased_end
-            # Record the transformed op so later concurrent patches can be rebased.
-            inserted_length = _utf16_length(str(operation.get("text", "")))
-            self._record_operation(str(operation.get("path", "")), rebased_start, rebased_end, inserted_length)
-            return
-
-        raise ValueError(f"Unsupported operation type: {operation_type}")
-
-    # ------------------------------------------------------------------
-    # Sole-author revert infrastructure (Phase 2)
-    # ------------------------------------------------------------------
-
-    def _admit(self, display_name: str, role: str, identity: str | None = None, device: str | None = None, leased: bool = False):
-        """Mint a session token + presence for an already-authorized joiner.
-        Shared by PIN connect() and account/workspace opens (which have no PIN).
-        `identity` (an account username) + `device` dedupe sessions — see
-        evict_user(): the SAME account on the SAME device (a refresh/reconnect)
-        replaces its old session, but the same account on a DIFFERENT device is a
-        legitimate second presence (self-collaboration across devices)."""
-        token = secrets.token_urlsafe(24)
-        client_id = f"client-{uuid.uuid4().hex[:12]}"
-        cleaned_name = display_name.strip()[:40]
-        display_name = cleaned_name or f"Peer {client_id[-4:]}"
-        with self.lock:
-            self._ensure_persisted()
-            self.tokens[token] = client_id
-            self.presence[token] = {"clientId": client_id, "displayName": display_name, "connectedAt": time.time(), "user": identity, "device": device}
-            if leased:
-                self.leases[token] = time.monotonic()
-            if role == "master":
-                self.master_tokens.add(token)
-            elif role == "reader":
-                self.reader_tokens.add(token)
-        _log("CONNECT", f"{display_name} joined as {role}", clientId=client_id, revision=self.revision)
-        self._broadcast_presence(f"{display_name} joined the session.")
-        return {"token": token, "clientId": client_id, "displayName": display_name, "revision": self.revision, "sessionId": "default", "role": role}
-
-    def evict_user(self, identity: str, device: str | None = None) -> None:
-        """Drop prior sessions for the same account so a refresh/reconnect doesn't
-        pile up duplicate 'ghost' presences. When `device` is given, only evict
-        the SAME account on the SAME device — a different device stays connected so
-        the user can genuinely collaborate with themselves across devices (and two
-        windows never evict each other into a reconnect war). The old SSE loops are
-        orphaned (tokens invalidated) and expire on their next write."""
-        if not identity:
-            return
-        with self.lock:
-            stale = [
-                tok for tok, entry in self.presence.items()
-                if entry.get("user") == identity and (device is None or entry.get("device") == device)
-            ]
-            for tok in stale:
-                self.presence.pop(tok, None)
-                self.leases.pop(tok, None)
-                self.tokens.pop(tok, None)
-                self.master_tokens.discard(tok)
-                self.reader_tokens.discard(tok)
-                self.subscribers.pop(tok, None)
-        if stale:
-            self._broadcast_presence("Replaced a duplicate session.")
-
-    def connect(self, pin: str, display_name: str = "", leased: bool = False):
-        if pin == self.master_pin:
-            role = "master"
-        elif pin == self.pin:
-            role = "client"
-        else:
-            _log("AUTH", "Rejected connect — wrong PIN")
-            raise PermissionError("Invalid PIN")
-        return self._admit(display_name, role, leased=leased)
-
-    def authorize(self, token: str):
-        with self.lock:
-          client_id = self.tokens.get(token)
-        if not client_id:
-            raise PermissionError("Invalid or expired session token")
-        return client_id
-
-    def get_state(self, token: str):
-        self.authorize(token)
-        with self.lock:
-            self._ensure_persisted()
-            return {"project": copy.deepcopy(self.project), "revision": self.revision, "presence": self.get_presence(), "sessionId": "default"}
-
-    def get_presence(self):
-        with self.lock:
-            return list(self.presence.values())
-
-    def set_state(self, token: str, project, base_revision=None):
-        client_id = self.authorize(token)
-        with self.lock:
-            if token not in self.master_tokens:
-                raise PermissionError("Only the session master can replace the project state")
-        event = None
-        with self.lock:
-            self._ensure_persisted()
-            # This is the most destructive path in the server: it WIPES the
-            # workspace directory and swaps the whole tree. It had no revision
-            # check at all, and every logged-in account is admitted as master, so
-            # any tab — including one left open for days on a stale copy — could
-            # replace everything. The check lives inside the mutation lock so it
-            # cannot race. Checked here rather than in _apply_operation because
-            # this path bypasses it entirely.
-            if base_revision is None or int(base_revision) != int(self.revision):
-                raise ValueError(
-                    f"replace conflict: this client is based on revision {base_revision} but the server is at "
-                    f"{self.revision} — reload to get the newer copy before replacing it"
-                )
-            self._before_destructive("replacing the whole project")
-            self.project = project
-            self.revision += 1
-            # The whole tree just changed: every path is "changed as of now", so
-            # anything based on an older revision must pull before writing.
-            self.path_changed_at.clear()
-            self._path_change_floor = self.revision
-            self.operation_log.clear()
-            self._persist_state()
-            event = {
-                "type": "state",
-                "clientId": client_id,
-                "revision": self.revision,
-                "project": copy.deepcopy(self.project),
-                "serverTime": time.time()
-            }
-            self._broadcast(event)
-
-        return event
 
     def get_chat_workspace(self, token: str) -> dict:
         self.authorize(token)
@@ -1712,7 +1079,7 @@ class CollaborationBroker:
             return copy.deepcopy(self.chat_workspace)
 
     def set_chat_workspace(self, token: str, workspace: dict) -> dict:
-        client_id = self.authorize(token)
+        client_id = self.sessions.authorize(token)
         threads = workspace.get("threads")
         if not isinstance(threads, list):
             raise ValueError("threads must be a list")
@@ -1738,232 +1105,9 @@ class CollaborationBroker:
             if self.chat_file is not None:
                 _atomic_write(self.chat_file, json.dumps(snapshot, ensure_ascii=False).encode("utf-8"))
             self.chat_workspace = snapshot
-            self._broadcast({"type": "chat-workspace-update", "workspace": copy.deepcopy(snapshot),
+            self.sessions.broadcast({"type": "chat-workspace-update", "workspace": copy.deepcopy(snapshot),
                              "clientId": client_id, "serverTime": time.time()}, exclude_token=token)
             return copy.deepcopy(snapshot)
-
-    # ------------------------------------------------------------------
-    # Sole-author revert infrastructure (Phase 2)
-    # ------------------------------------------------------------------
-
-    def _trim_snapshot_history(self):
-        """Discard old snapshots while honoring the retention floor (Decision Q4)."""
-        floor = max(0, self.revision - self.SNAPSHOT_HISTORY_N)
-        # Never trim a snapshot that a pending agent batch's baseRevision points to.
-        if self._pinned_base_revisions:
-            floor = min(floor, min(self._pinned_base_revisions))
-        self.snapshot_history = [
-            entry for entry in self.snapshot_history if entry[0] >= floor
-        ]
-
-    def pin_base_revision(self, base_revision: int):
-        """Record that a client batch was accepted at base_revision (keep snapshot)."""
-        with self.lock:
-            self._pinned_base_revisions.add(base_revision)
-
-    def unpin_base_revision(self, base_revision: int):
-        """Remove a pending-batch pin once kept or dropped."""
-        with self.lock:
-            self._pinned_base_revisions.discard(base_revision)
-
-    def _authorize_sole_author_revert(self, token: str, target_revision: int):
-        """
-        Raise PermissionError unless every revision in (target_revision, self.revision]
-        was authored by the client identified by token.
-        Also validates target_revision is within snapshot_history.
-        """
-        client_id = self.tokens.get(token)
-        if not client_id:
-            raise PermissionError("Invalid or expired session token")
-        known_revisions = {rev for rev, _ in self.snapshot_history}
-        if target_revision not in known_revisions:
-            raise PermissionError(
-                f"Target revision {target_revision} is outside the snapshot history window. "
-                "The batch is too old to drop \u2014 it has already been incorporated by other edits."
-            )
-        for rev in range(target_revision + 1, self.revision + 1):
-            author = self.revision_authors.get(rev)
-            if author != client_id:
-                raise PermissionError(
-                    f"Revision {rev} was authored by a different collaborator. "
-                    "Drop is only allowed when you are the sole author of all edits since the target."
-                )
-
-    def apply_operation(self, token: str, operation):
-        client_id = self.authorize(token)
-        with self.lock:
-            self._ensure_persisted()
-            op_type = operation.get("type")
-            op_path = operation.get("path", "")
-            if "expectedRevision" in operation and operation["expectedRevision"] != self.revision:
-                raise ValueError("Edit conflict: the workspace changed since this change was prepared")
-
-            if token in self.reader_tokens:
-                raise PermissionError("You have read-only access to this project")
-            if op_type == "replace-project" and token not in self.master_tokens:
-                raise PermissionError("Only the session master can replace the project")
-
-            # --- sole-author revert (Phase 2 / subtask 2.4) ---
-            if op_type == "revert-to-revision":
-                target = int(operation.get("targetRevision", -1))
-                if target < 0:
-                    raise ValueError("revert-to-revision requires a non-negative targetRevision")
-                if token not in self.master_tokens:
-                    self._authorize_sole_author_revert(token, target)
-                # Reconstruct project from snapshot — NEVER from request body (forgery guard R3).
-                self._before_destructive(f"reverting to revision {target}")
-                snapshot_map = dict(self.snapshot_history)
-                if target not in snapshot_map:
-                    raise ValueError(f"Snapshot for revision {target} not found.")
-                self.project = copy.deepcopy(snapshot_map[target])
-                self.revision += 1
-                self._note_path_changed(operation)
-                self._persist_state()
-                self.revision_authors[self.revision] = client_id
-                self.snapshot_history.append((self.revision, copy.deepcopy(self.project)))
-                self._trim_snapshot_history()
-                sender_name = self.presence.get(token, {}).get("displayName", client_id[-8:])
-                _log("REVERT", f"revert-to-revision target={target}", from_=sender_name, new_rev=self.revision)
-                event = {
-                    "type": "state",
-                    "clientId": client_id,
-                    "revision": self.revision,
-                    "project": copy.deepcopy(self.project),
-                    "serverTime": time.time(),
-                }
-                recipient_names = [
-                    self.presence.get(t, {}).get("displayName", f"\u2026{t[-4:]}")
-                    for t in self.subscribers if t != token
-                ]
-                if recipient_names:
-                    _log("BROADCAST", f"revert-to-revision  rev={self.revision}  to=[{', '.join(recipient_names)}]")
-                self._broadcast(event)
-                return event
-
-            # --- normal operations ---
-            if op_type in ("delete-node", "replace-project"):
-                self._before_destructive("deleting " + str(op_path) if op_type == "delete-node" else "replacing the project")
-            # Capture original positions before _apply_operation may rebase them.
-            orig_start = operation.get("start")
-            orig_end = operation.get("end")
-            self._apply_operation(operation)
-            self.revision += 1
-            # Remember when this file last changed, so a later whole-file write
-            # based on an older revision can be refused instead of overwriting it.
-            self._note_path_changed(operation)
-            self._paths_moved(operation)
-            self._persist_state()
-            self.revision_authors[self.revision] = client_id  # subtask 2.1
-            # Snapshot after apply (subtask 2.2); trim per retention rule (Decision Q4).
-            self.snapshot_history.append((self.revision, copy.deepcopy(self.project)))
-            self._trim_snapshot_history()
-            event = {
-                "type": "operation",
-                "clientId": client_id,
-                "revision": self.revision,
-                "operation": operation,
-                "serverTime": time.time(),
-            }
-            # Collect sender name and recipient names while still holding the lock.
-            sender_name = self.presence.get(token, {}).get("displayName", client_id[-8:])
-            recipient_names = [
-                self.presence.get(t, {}).get("displayName", f"\u2026{t[-4:]}")
-                for t in self.subscribers if t != token
-            ]
-            self._broadcast(copy.deepcopy(event))
-        if op_type == "patch-file":
-            insert_text = str(operation.get("text", ""))
-            text_preview = repr(insert_text[:30])
-            applied_start = operation.get("start")
-            applied_end = operation.get("end")
-            ot_detail = (
-                f"  [OT: {orig_start}\u2013{orig_end} \u2192 {applied_start}\u2013{applied_end}]"
-                if (applied_start != orig_start or applied_end != orig_end) else ""
-            )
-            _log("PATCH", f"{op_path!r}  {applied_start}\u2013{applied_end}{ot_detail}  text={text_preview}",
-                 from_=sender_name,
-                 baseRev=operation.get("baseRevision"),
-                 revision=self.revision)
-            to_str = ", ".join(recipient_names) if recipient_names else "(no other peers)"
-            _log("BROADCAST", f"patch-file  rev={self.revision}  start={applied_start}  end={applied_end}  to=[{to_str}]")
-        else:
-            _log("OP", op_type, from_=sender_name, path=op_path or None, revision=self.revision)
-            if recipient_names:
-                to_str = ", ".join(recipient_names)
-                _log("BROADCAST", f"{op_type}  rev={self.revision}  to=[{to_str}]")
-        return event
-
-    def broadcast_cursor(self, token: str, file_id: str, sel_start: int, sel_end: int):
-        """Broadcast selection/cursor position to all other subscribers."""
-        client_id = self.authorize(token)
-        with self.lock:
-            display_name = self.presence.get(token, {}).get("displayName", "")
-            recipient_count = sum(1 for t in self.subscribers if t != token)
-        event = {
-            "type": "cursor",
-            "clientId": client_id,
-            "displayName": display_name,
-            "fileId": file_id,
-            "selStart": int(sel_start),
-            "selEnd": int(sel_end),
-            "serverTime": time.time(),
-        }
-        self._broadcast(event, exclude_token=token)
-        _log("CURSOR", f"from={display_name!r}  fileId={file_id!r}  sel={sel_start}\u2013{sel_end}  to={recipient_count} peer(s)")
-
-    def subscribe(self, token: str, leased: bool = False):
-        client_id = self.authorize(token)
-        event_queue = queue.Queue()
-        with self.lock:
-            self._ensure_persisted()
-            # Enqueue ready and register atomically with respect to mutations.
-            # The client compares this revision to its fetched snapshot, then
-            # fetches again while buffering the now-subscribed stream if needed.
-            event_queue.put({
-                "type": "ready", "clientId": client_id,
-                "revision": self.revision, "serverTime": time.time()
-            })
-            self.subscribers[token] = event_queue
-            if leased:
-                self.leases[token] = time.monotonic()
-        return event_queue
-
-    def renew_lease(self, token: str) -> None:
-        with self.lock:
-            self.authorize(token)
-            if token in self.leases:
-                self.leases[token] = time.monotonic()
-
-    def session_should_close(self, token: str) -> bool:
-        with self.lock:
-            return token not in self.tokens or (token in self.leases and time.monotonic() - self.leases[token] > 75)
-
-    def unsubscribe(self, token: str, expected_queue=None, expired_only=False, revoke=False):
-        client_id = None
-        had_token = False
-        display_name = None
-        with self.lock:
-            if expected_queue is not None and self.subscribers.get(token) is not expected_queue:
-                return False
-            if expired_only and not (token in self.leases and time.monotonic() - self.leases[token] > 75):
-                return False
-            had_token = token in self.tokens
-            self.subscribers.pop(token, None)
-            if revoke:
-                # A role lasts as long as its token: a stream that drops and
-                # comes back must not turn a reader into an editor.
-                self.leases.pop(token, None)
-                self.tokens.pop(token, None)
-                self.master_tokens.discard(token)
-                self.reader_tokens.discard(token)
-            presence = self.presence.pop(token, None)
-            if presence:
-                client_id = presence["clientId"]
-                display_name = presence["displayName"]
-        if client_id:
-            _log("DISCONNECT", f"{display_name} left", clientId=client_id)
-            self._broadcast_presence(f"{display_name} left the session.")
-        return had_token
 
 
 # Special team that holds today's single PIN session and any ephemeral
@@ -5229,12 +4373,12 @@ def run_broker_selftest(state_file):
     # Editing a DIFFERENT file doesn't make this one stale (per-path, not global).
     _sb.apply_operation(_stok, {"type": "create-file", "parentPath": "", "name": "other.md", "content": "o"})
     _sb.apply_operation(_stok, {"type": "update-file", "path": "race.md",
-                                "content": "v3", "baseRevision": _sb.path_changed_at["race.md"]})
+                                "content": "v3", "baseRevision": _sb.rebase.changed_at["race.md"]})
     assert _sb.project["nodes"][_nid]["content"] == "v3", "unrelated edits must not block a write"
 
     # A patch whose base predates what we can rebase from is refused rather
     # than silently landing at the wrong offsets (corrupting the file).
-    _sb.operation_log = []  # e.g. after a server restart, or trimmed away
+    _sb.rebase.entries = []  # e.g. after a server restart, or trimmed away
     try:
         _sb.apply_operation(_stok, {"type": "patch-file", "path": "race.md", "start": 0, "end": 0,
                                     "removedText": "", "text": "X", "baseRevision": max(0, _sb.revision - 5)})
@@ -5369,18 +4513,18 @@ def run_broker_selftest(state_file):
     # nothing orders on them, which is why they may reset.
     _node = {"sourceVersion": 0, "editSessions": 0, "sessionEdits": 0, "lastEditAt": 0}
     _t0 = 1_000_000.0
-    CollaborationBroker._bump_edit_counters(_node, _t0)
+    bump_edit_counters(_node, _t0, gap=EDIT_SESSION_GAP_SECONDS)
     assert (_node["editSessions"], _node["sessionEdits"]) == (1, 1), _node
     # Two more edits moments later stay in the same sitting.
-    CollaborationBroker._bump_edit_counters(_node, _t0 + 5)
-    CollaborationBroker._bump_edit_counters(_node, _t0 + 30)
+    bump_edit_counters(_node, _t0 + 5, gap=EDIT_SESSION_GAP_SECONDS)
+    bump_edit_counters(_node, _t0 + 30, gap=EDIT_SESSION_GAP_SECONDS)
     assert (_node["editSessions"], _node["sessionEdits"]) == (1, 3), _node
     # A gap longer than the threshold opens a new sitting and resets N.
-    CollaborationBroker._bump_edit_counters(_node, _t0 + 30 + EDIT_SESSION_GAP_SECONDS + 1)
+    bump_edit_counters(_node, _t0 + 30 + EDIT_SESSION_GAP_SECONDS + 1, gap=EDIT_SESSION_GAP_SECONDS)
     assert (_node["editSessions"], _node["sessionEdits"]) == (2, 1), _node
     # A gap of exactly the threshold is still the same sitting (strict >):
     # the previous edit landed at _t0+631, so this one is 600s later.
-    CollaborationBroker._bump_edit_counters(_node, _t0 + 30 + 2 * EDIT_SESSION_GAP_SECONDS + 1)
+    bump_edit_counters(_node, _t0 + 30 + 2 * EDIT_SESSION_GAP_SECONDS + 1, gap=EDIT_SESSION_GAP_SECONDS)
     assert (_node["editSessions"], _node["sessionEdits"]) == (2, 2), _node
     # The lifetime counter never resets, and nothing here touched revision.
     assert _node["sourceVersion"] == 5, _node
@@ -5411,12 +4555,12 @@ def run_broker_selftest(state_file):
     _snap_node = _wb.project["nodes"][_wb._get_node_id_by_path("sen.md")]
     assert (_snap_node["editSessions"], _snap_node["sessionEdits"]) == (1, 4), _snap_node
     _rev_at_snapshot = _wb.revision
-    _changed_at = dict(_wb.path_changed_at)
+    _changed_at = dict(_wb.rebase.changed_at)
     _made = _reg.create_snapshot(_alice, "qa", _RP, "sen.md", "xxxx", "first cut")
     assert _made["created"], "snapshot should be created"
     assert _made["version"]["editSessions"] == 1 and _made["version"]["sessionEdits"] == 4, _made["version"]
     assert _wb.revision == _rev_at_snapshot, "a snapshot must not bump the revision"
-    assert _wb.path_changed_at == _changed_at, "a snapshot must not mark the path changed"
+    assert _wb.rebase.changed_at == _changed_at, "a snapshot must not mark the path changed"
     # ...so the very next write from a client based on the pre-snapshot
     # revision still applies rather than 409ing.
     _wb.apply_operation(_ws["token"], {"type": "update-file", "path": "sen.md",

@@ -16,13 +16,13 @@
     {
       "name": "operations (create, rename, move, delete, update, patch) and applying a text patch",
       "js": "app/modules/workspace/model/project.js: applySyncOperation; model/text-patch.js: applyTextPatch",
-      "py": "server/mdnotes_server.py: CollaborationBroker._apply_operation, _apply_text_patch",
+      "py": "server/stilo/modules/workspace/model/operations.py: apply_operation, patch_text",
       "cases": "spec/workspace/operations.cases.json"
     },
     {
       "name": "move-node order",
       "js": "app/modules/workspace/model/project.js: moveNode",
-      "py": "server/mdnotes_server.py: CollaborationBroker._apply_operation (move-node)",
+      "py": "server/stilo/modules/workspace/model/operations.py: apply_operation (move-node)",
       "cases": "spec/workspace/move-node.cases.json"
     },
     {
@@ -30,13 +30,13 @@
       "js": "app/modules/characters/model/persona.js: parsePersona, personaSummary, splitAuthorNotes, notesMode, withoutAuthorNotes, hiddenFromCharacters",
       "py": "server/stilo/modules/characters/model.py: persona_header, persona_summary, split_author_notes, notes_mode, without_author_notes, hidden_from_characters",
       "cases": "spec/characters/sheets.cases.json"
-    }
-  ],
-  "uncovered": [
+    },
     {
       "name": "rebasing a text patch over another",
-      "js": "app/services/text-patch-service.js: transformTextPatch",
-      "py": "server/mdnotes_server.py: CollaborationBroker._transform_range, _rebase_patch"
+      "js": "app/modules/workspace/model/text-patch.js: transformTextPatch (insertAfter false)",
+      "py": "server/stilo/modules/sync/model/rebase.py: transform_range",
+      "cases": "spec/sync/rebase.cases.json"
     }
-  ]
+  ],
+  "uncovered": []
 }
