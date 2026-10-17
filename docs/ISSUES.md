@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-17 · release `v0.1.44` (deployed; public verification passed)
+Last updated: 2026-10-17 · release `v0.1.45`
 
 ---
 
@@ -39,6 +39,16 @@ delete should remove them, keep them for a while, or offer them for restore.
 ---
 
 ## Fixed
+
+### v0.1.45: restructure step 7f-2 (Chats in the browser)
+
+Chats' browser side is the Chats module. Nothing changes for users.
+
+- The Chats view, the cloud store (the server calls) and this browser's own
+  store for a browser-only workspace are the Chats module; the chat panel
+  asks it for them, and the view still loads only when the tab first opens.
+- `protocol/chats.contract.json` lists Chats' routes and its three live
+  events; the legacy contract keeps only the agent's events now.
 
 ### v0.1.44: restructure step 7f-1 (Chats on the server)
 

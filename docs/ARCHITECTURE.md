@@ -47,7 +47,7 @@ This file is the short reference that the structure tests enforce.
 
 Arrows are "uses": a module calls only the modules it points at, always on a
 lower level. News travels the other way, as events or extension points, so it
-needs no arrow. Green modules exist (as of v0.1.44; Chats' browser half is still legacy); the rest are still legacy
+needs no arrow. Green modules exist (as of v0.1.45); the rest are still legacy
 code. Modules marked *both* have a browser half and a server half that share a
 model and a contract.
 
@@ -235,8 +235,8 @@ refuses to record anything new.
 | 7d | History on both ends: snapshots and backups in one content-addressed store each, their retention rules, the routes and `protocol/history.contract.json`; in the browser this browser's own snapshot store, History's server calls and the line diff (the dialogs stay in `app/features` and call it) | done |
 | 7e | Comments on both ends: the rules for a line comment, the comments file it owns, its routes, contract and `comments` event; in the browser keeping a comment on its line (the gutter popover stays in `app/editor`) | done |
 | 7f-1 | Chats on the server: the chat store (SQLite per project), who answers, the reply queue, claims for replies written in a member's own browser, its routes; a character's name comes from Characters' header rules (a fourth copy of them went) | done |
-| 7f-2 | Chats in the browser (the chats view, this browser's own chat store, the server calls) and `protocol/chats.contract.json` with the chat events | next |
-| 7g | Editor (browser): the source editor, preview, tabs within panes, find and replace | |
+| 7f-2 | Chats in the browser (the chats view, this browser's own chat store, the server calls) and `protocol/chats.contract.json` with the chat events | done |
+| 7g | Editor (browser): the source editor, preview, tabs within panes, find and replace | next |
 | 8 | The URL album as an extension | |
 
 ### Notes for module authors

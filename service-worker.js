@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v0.1.44";
+const CACHE_NAME = "mdnotes-shell-v0.1.45";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -62,9 +62,11 @@ const APP_SHELL = [
   "./app/modules/identity/model/credentials.js",
   "./app/modules/identity/service/account.js",
   "./app/modules/identity/adapters/api.js",
-  "./app/ui/chats-view.js",
-  "./app/services/chats-api-service.js",
-  "./app/services/local-chats-service.js",
+  "./app/modules/chats/index.js",
+  "./app/modules/chats/adapters/api.js",
+  "./app/modules/chats/adapters/local-records.js",
+  "./app/modules/chats/adapters/view.js",
+  "./app/modules/chats/service/local-chats.js",
   "./app/modules/comments/index.js",
   "./app/modules/comments/model/anchors.js",
   "./app/modules/comments/adapters/api.js",

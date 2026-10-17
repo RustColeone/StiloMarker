@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createLocalChats } from '../app/services/local-chats-service.js';
+import { createLocalChats } from '../app/modules/chats/index.js';
 
 // Chats in a browser-only workspace: characters only, kept in this browser,
 // replies run here. Same behaviour as the server where they overlap.
