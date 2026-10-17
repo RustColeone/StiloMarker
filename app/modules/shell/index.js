@@ -13,11 +13,19 @@
 //   input({title, message, label, value, submitLabel, suffix}) -> Promise<string|null>
 //   toast(message, {duration})
 //   copyText(text)
+//   server.configure({ address: () => string })   where the server is (a setting)
+//   server.url()                                   its normalized address
+//   server.request(path, { method, query, body, failure, timeout })
+// Static, for code from before the restructure: normalizeServerUrl,
+// parseResponse, throwForResponse.
 import { defineModule } from "../../kernel/index.js";
 import { createCommands } from "./service/commands.js";
 import { createDialogs } from "./adapters/dialogs.js";
 import { createKeyboard } from "./adapters/keyboard.js";
 import { createMenuBar } from "./adapters/menu-bar.js";
+import { createServer } from "./adapters/server.js";
+
+export { normalizeServerUrl, parseResponse, throwForResponse } from "./adapters/server.js";
 
 export default defineModule({
   name: "shell",
@@ -25,7 +33,8 @@ export default defineModule({
   uses: [],
   owns: {
     registries: ["commands", "menus"],
-    elements: ["menu bar", "notice dialog", "confirm dialog", "input dialog", "toasts"]
+    elements: ["menu bar", "notice dialog", "confirm dialog", "input dialog", "toasts"],
+    connection: ["the server address"]
   },
   start(ctx) {
     const { commands, menus, run } = createCommands(ctx);
@@ -65,7 +74,8 @@ export default defineModule({
       confirm,
       input,
       toast: dialogs.showToast,
-      copyText: dialogs.copyText
+      copyText: dialogs.copyText,
+      server: createServer()
     };
   }
 });

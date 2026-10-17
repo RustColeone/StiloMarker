@@ -46,13 +46,15 @@ async def main():
                     chat_requests.append(route.request.post_data_json)
                     payload = {'message':'Test response','proposedOperations':[]}
                 elif path == '/api/ping': payload = {'appVersion':'0.1.17','minSyncVersion':114}
+                elif path == '/api/auth/login':
+                    payload = {'token':'test-account','username':route.request.post_data_json['username'],'teams':['friends']}
                 else: payload = {}
                 await route.fulfill(status=200, content_type='application/json', body=json.dumps(payload)); return
             file = ROOT / (path.lstrip('/') or 'index.html')
             if file.is_file():
                 body = inject_chat_internals(path, file.read_bytes())
                 if path == '/app/main.js':
-                    body += b'\nwindow.__mcpTest = {syncState, settings, openSettingsDialog, renderChatPanel, controller, ' + CHAT_HOOK.encode() + b'};\n'
+                    body += b'\nwindow.__mcpTest = {syncState, identity, settings, openSettingsDialog, renderChatPanel, controller, ' + CHAT_HOOK.encode() + b'};\n'
                 await route.fulfill(status=200, content_type=mimetypes.guess_type(str(file))[0] or 'application/octet-stream', body=body)
             else:
                 await route.continue_()
@@ -61,9 +63,9 @@ async def main():
         await page.wait_for_function('Boolean(window.__mcpTest)')
         assert not errors, errors
         assert not mcp_requests, 'MCP must not run during project load'
-        await page.evaluate('''() => {
+        await page.evaluate('''async () => {
           const t=window.__mcpTest;
-          t.syncState.account={token:'test-account',username:'tester',teams:['friends']};
+          await t.identity.signIn('tester','pw');
           t.openSettingsDialog('agent');
         }''')
         await page.wait_for_function(WAIT_LOADED)  # Settings loads the chat panel (MCP controls)
@@ -89,9 +91,9 @@ async def main():
         assert chat_requests[0]['mcpServers'] == ['library','archive']
         assert chat_requests[0]['accountToken'] == 'test-account'
         # Changing account scope drops opt-in without making a network request.
-        await page.evaluate('''() => {
+        await page.evaluate('''async () => {
           const t=window.__mcpTest;
-          t.syncState.account={token:'test-account',username:'other',teams:['friends']};
+          await t.identity.signIn('other','pw');
           t.renderChatPanel(t.controller.getProject());
         }''')
         assert await page.locator('#chat-mcp-summary').is_hidden()

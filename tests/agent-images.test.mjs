@@ -25,7 +25,7 @@ function harness({ synced = false, directory = false, account = { token: 'acct' 
   const project = { nodes: { root: { id: 'root', kind: 'folder', name: 'W', children: [] } } };
   const fetches = [], applied = [], published = [], uploads = [], toasts = [];
   const deps = {
-    syncState: { account },
+    identity: { account: () => account, token: () => account?.token ?? null },
     settings: { serverUrl: 'https://notes.example/' },
     normalizeServerUrl: (url) => url.replace(/\/+$/, ''),
     fetch: async (url) => {

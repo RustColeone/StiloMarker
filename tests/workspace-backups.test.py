@@ -25,7 +25,7 @@ class WorkspaceBackupTests(unittest.TestCase):
         accounts.users = {'alice': {'password': 'pw', 'teams': ['qa']}, 'bob': {'password': 'pw', 'teams': ['qa']},
                           'carol': {'password': 'pw', 'teams': ['other']}}
         self.reg = server.WorkspaceRegistry('2468', Path(self.tmp.name) / 'state.json', accounts=accounts, data_dir=data)
-        self.alice = self.reg.login('alice', 'pw')['token']
+        self.alice = self.reg.identity.login('alice', 'pw')['token']
         self.reg.create_workspace(self.alice, 'qa', 'Novel')
         self.path = 'workspaces/Novel'
         self.session = self.reg.open_workspace(self.alice, 'qa', self.path)['token']
@@ -126,11 +126,11 @@ class WorkspaceBackupTests(unittest.TestCase):
     def test_permissions(self):
         self.op({'type': 'create-file', 'parentPath': '', 'name': 'a.md', 'content': 'x'})
         self.reg.set_access(self.alice, 'qa', self.path, [], [], ['bob'])  # bob becomes a reader
-        bob = self.reg.login('bob', 'pw')['token']
+        bob = self.reg.identity.login('bob', 'pw')['token']
         self.reg.list_backups(bob, 'qa', self.path)  # readers may look
         with self.assertRaises(PermissionError):
             self.reg.create_backup(bob, 'qa', self.path)
-        carol = self.reg.login('carol', 'pw')['token']
+        carol = self.reg.identity.login('carol', 'pw')['token']
         with self.assertRaises((PermissionError, ValueError)):
             self.reg.list_backups(carol, 'qa', self.path)
         self.assertTrue(self.reg.create_backup(self.alice, 'qa', self.path, 'by hand')['created'])

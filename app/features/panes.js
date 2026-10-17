@@ -166,7 +166,7 @@ export function createPanes(app) {
   let saveUserStateTimer = null;
   function scheduleSaveUserState() {
     cacheWorkspaceView();
-    if (app.workspaceMode !== "synced" || !app.syncState.account) return;
+    if (app.workspaceMode !== "synced" || !app.identity.account()) return;
     const ws = app.settings.lastWorkspace;
     if (!ws?.team || ws.path == null) return;
     if (saveUserStateTimer) clearTimeout(saveUserStateTimer);
@@ -180,7 +180,7 @@ export function createPanes(app) {
       const activeFile = activeId && project.nodes[activeId]?.kind === "file"
         ? getPath(project, activeId)
         : null;
-      saveUserState(app.settings.serverUrl, app.syncState.account.token, ws.team, ws.path, openFiles, activeFile)
+      saveUserState(app.settings.serverUrl, app.identity.token(), ws.team, ws.path, openFiles, activeFile)
         .catch((error) => app.logDebug("response", "Save resume state failed", error.message));
     }, 1200);
   }

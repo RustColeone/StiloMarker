@@ -294,9 +294,9 @@ class StoreTests(unittest.TestCase):
 class GateTests(unittest.TestCase):
     def handler(self, payload, accounts=True, store=None):
         handler = object.__new__(server.MDNotesRequestHandler)
-        handler.registry = SimpleNamespace(accounts=SimpleNamespace(enabled=accounts),
-                                           account_for_token=lambda token: USER if token == 'acct' else None,
-                                           _require_account=lambda token: USER if token == 'acct' else (_ for _ in ()).throw(PermissionError()))
+        handler.registry = SimpleNamespace(identity=SimpleNamespace(
+            enabled=accounts, who=lambda token: USER if token == 'acct' else None,
+            require=lambda token: USER if token == 'acct' else (_ for _ in ()).throw(PermissionError())))
         calls = []
         handler.chat_proxy = SimpleNamespace(authorize_client=lambda ip: None, generated=store,
                                              chat=lambda *a, **k: calls.append(k) or {'message': 'ok', 'contextPaths': [], 'proposedOperations': []},

@@ -150,3 +150,16 @@ function applyEditorFont(settings) {
 }
 
 export { applyEditorFont, applyTheme, clampSourceFontSize, cssFontFamily, loadSettings, patchStoredSettings, saveSettings };
+
+// Where Identity keeps the account's stored sign-in: in these settings.
+export function signInSettings(settings) {
+  return {
+    read: () => ({ username: settings.accountUsername, password: settings.accountPassword, proven: settings.accountSuccess }),
+    write(stored) {
+      if ("username" in stored) settings.accountUsername = stored.username;
+      if ("password" in stored) settings.accountPassword = stored.password;
+      if ("proven" in stored) settings.accountSuccess = stored.proven;
+      saveSettings(settings);
+    }
+  };
+}

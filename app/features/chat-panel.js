@@ -32,7 +32,7 @@ export function createChatPanel(deps) {
     createFileInFolder, elements, escapeHtmlAttribute, getSelectedParent, isMobileLayout,
     jumpToAgentChange, logDebug, notify, openFileFromExplorer, openSettingsDialog,
     personaAvatarSrc, promptForName, registerAgentDecorations, settings, workspace,
-    showConfirmDialog, showToast, storedProject, syncState, updateEditorAgentBar
+    showConfirmDialog, showToast, storedProject, updateEditorAgentBar, identity
   } = deps;
 
   let mcpControls = null;
@@ -712,7 +712,7 @@ export function createChatPanel(deps) {
     const examples = [
       "Summarize the open file and suggest a better title",
       "Make a character file for the main character of my current chapter",
-      ...(chatState.imageGeneration && syncState.account ? ["Draw the opening scene of my current chapter"] : []),
+      ...(chatState.imageGeneration && identity.account() ? ["Draw the opening scene of my current chapter"] : []),
       "Find every note that mentions this file and link them together"
     ];
     return `<div class="chat-empty-state chat-empty-agent">
@@ -884,7 +884,7 @@ export function createChatPanel(deps) {
       model: chatState.selectedModel ?? undefined,
       contextFiles: resolveChatContextFiles(project, { contextPaths: trigger?.contextPaths ?? [] }),
       project: buildAgentProjectSnapshot(project),
-      accountToken: syncState.account?.token,
+      accountToken: identity.token(),
       ...agentRequestOverride(),
       mode: "persona",
       persona: { path: character.path, name: character.name, content: character.content, temperature: character.temperature },
@@ -1017,9 +1017,9 @@ export function createChatPanel(deps) {
 
   mcpControls = createMcpControls({
     list: query("#mcp-connections"), status: query("#mcp-status"), loadButton: query("#mcp-load-button"), summary: query("#chat-mcp-summary"),
-    getIdentity: () => syncState.account ? {
-      serverUrl: settings.serverUrl, token: syncState.account.token,
-      scope: JSON.stringify([normalizeServerUrl(settings.serverUrl), syncState.account.username, chatWorkspaceKey()])
+    getIdentity: () => identity.account() ? {
+      serverUrl: settings.serverUrl, token: identity.token(),
+      scope: JSON.stringify([normalizeServerUrl(settings.serverUrl), identity.account().username, chatWorkspaceKey()])
     } : null
   });
 
@@ -1092,7 +1092,7 @@ export function createChatPanel(deps) {
         chatState.detail = "Using your own API key.";
       } else {
         // A server with accounts only lets signed-in users spend its keys.
-        const needsSignIn = Boolean(status.requiresAccount) && !syncState.account;
+        const needsSignIn = Boolean(status.requiresAccount) && !identity.account();
         chatState.configured = Boolean(status.configured) && !needsSignIn;
         chatState.provider = status.provider ?? null;
         chatState.model = status.model ?? null;
@@ -1238,7 +1238,7 @@ export function createChatPanel(deps) {
         contextFiles,
         project: buildAgentProjectSnapshot(project),
         ...mcpControls.getRequest(),
-        accountToken: syncState.account?.token,
+        accountToken: identity.token(),
         // Own-key mode: pass the user's key/url/model so the proxy uses them.
         ...agentRequestOverride()
       }, (event) => {
@@ -1380,7 +1380,7 @@ export function createChatPanel(deps) {
 
   /** URL of an image the agent generated (kept on the server for 14 days). */
   function generatedImageUrl(image) {
-    const token = syncState.account?.token;
+    const token = identity.token();
     if (!token || !image?.id) return "";
     return `${normalizeServerUrl(settings.serverUrl)}/api/generated?token=${encodeURIComponent(token)}&id=${encodeURIComponent(image.id)}`;
   }

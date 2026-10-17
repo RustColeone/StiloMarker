@@ -4,7 +4,7 @@
 import { seedDefaultProject } from "../modules/workspace/index.js";
 import { openProjectOpfs, supportsOpfs } from "../services/opfs-service.js";
 import { saveSettings } from "../services/settings-service.js";
-import { createProjectServer, getAccess, loginToServer, normalizeServerUrl, pingServer, setAccess } from "../services/sync-service.js";
+import { createProjectServer, pingServer } from "../services/sync-service.js";
 
 export function createCloudBrowser(app) {
   async function pingCurrentServer({ silent = false } = {}) {
@@ -47,7 +47,7 @@ export function createCloudBrowser(app) {
   function renderAccountControls() {
     const row = app.elements.accountLoginRow;
     if (!row) return;
-    const loggedIn = Boolean(app.syncState.account);
+    const loggedIn = Boolean(app.identity.account());
     // The block is only relevant once a pinged server advertises accounts, or
     // while a session is already active.
     row.hidden = !(app.syncState.accountsAvailable || loggedIn);
@@ -60,10 +60,10 @@ export function createCloudBrowser(app) {
     }
     app.elements.accountLogoutButton.hidden = !loggedIn;
     if (loggedIn) {
-      const teams = app.syncState.account.teams ?? [];
+      const teams = app.identity.account().teams ?? [];
       app.elements.accountStatusText.textContent = teams.length
-        ? `Logged in as ${app.syncState.account.username} · teams: ${teams.join(", ")}`
-        : `Logged in as ${app.syncState.account.username}`;
+        ? `Logged in as ${app.identity.account().username} · teams: ${teams.join(", ")}`
+        : `Logged in as ${app.identity.account().username}`;
     } else {
       app.elements.accountStatusText.textContent = "";
     }
@@ -84,7 +84,7 @@ export function createCloudBrowser(app) {
     }
     const previous = app.elements.hostTeamSelect.value;
     const options = [["", "No team (temporary)"]];
-    for (const team of (app.syncState.account?.teams ?? [])) {
+    for (const team of (app.identity.account()?.teams ?? [])) {
       options.push([team, `Team: ${team}`]);
     }
     app.elements.hostTeamSelect.replaceChildren(...options.map(([value, label]) => {
@@ -98,7 +98,7 @@ export function createCloudBrowser(app) {
 
   async function handleHost() {
     const team = app.elements.hostTeamSelect?.value ?? "";
-    const displayName = app.settings.displayName || app.syncState.account?.username || "";
+    const displayName = app.settings.displayName || app.identity.account()?.username || "";
     try {
       if (app.workspaceMode === "private") {
         app.privateProjectSnapshot = app.controller.getProject();
@@ -112,7 +112,7 @@ export function createCloudBrowser(app) {
         app.logDebug("action", "Hosting ephemeral session", `pin=${guestPin}`);
       } else {
         // Publish the current local project into a new persistent team workspace.
-        if (!app.syncState.account) {
+        if (!app.identity.account()) {
           app.notify("Log in to publish to a team.");
           return;
         }
@@ -121,9 +121,9 @@ export function createCloudBrowser(app) {
         const localProject = app.controller.getProject();
         // Publish into a new project directory under the team's workspaces/ folder,
         // then open and push into it — same path the file browser's Publish uses.
-        const created = await createProjectServer(app.settings.serverUrl, app.syncState.account.token, team, "workspaces", name);
+        const created = await createProjectServer(app.settings.serverUrl, app.identity.token(), team, "workspaces", name);
         app.workspaceMode = "synced";
-        await app.collaboration.openWorkspace(app.settings.serverUrl, app.syncState.account.token, team, created.path, { reason: "create-project" });
+        await app.collaboration.openWorkspace(app.settings.serverUrl, app.identity.token(), team, created.path, { reason: "create-project" });
         // The freshly-opened workspace is empty; push our local project into it.
         app.controller.replaceProject(localProject);
         await app.collaboration.publishSnapshot(localProject);
@@ -176,7 +176,7 @@ export function createCloudBrowser(app) {
   function openFileBrowser({ side, intent = "open", mode = "open" } = {}) {
     if (!app.elements.openServerDialog) return;
     const opfsOk = supportsOpfs();
-    const serverOk = Boolean(app.syncState.account);
+    const serverOk = Boolean(app.identity.account());
     // Honour the requested side but fall back when it isn't available.
     let chosen = side;
     if (chosen === "server" && !serverOk) chosen = opfsOk ? "local" : "server";
@@ -213,7 +213,7 @@ export function createCloudBrowser(app) {
 
   function switchBrowserSide(side) {
     if (side === app.browserState.provider?.id) return;
-    if (side === "server" && !app.syncState.account) {
+    if (side === "server" && !app.identity.account()) {
       // Not signed in: close and route to the account login, pinging the server.
       if (app.elements.openServerDialog?.open) app.elements.openServerDialog.close();
       app.openSettingsDialog("collaboration");
@@ -287,7 +287,7 @@ export function createCloudBrowser(app) {
 
   function renderBrowserSideToggle() {
     const opfsOk = supportsOpfs();
-    const serverOk = Boolean(app.syncState.account);
+    const serverOk = Boolean(app.identity.account());
     const current = app.browserState.provider?.id;
     // The side switch stays available while picking a destination, so a Copy/Move
     // can land on the other side (device ↔ team) than it started from.
@@ -709,7 +709,7 @@ export function createCloudBrowser(app) {
   // then open it — the same flow as Collaboration → Share to team, unified here.
   async function handlePublishHere() {
     const { team, rel } = splitServerPath(app.browserState.path);
-    if (!app.syncState.account || !team) return;
+    if (!app.identity.account() || !team) return;
     const name = await app.promptForName("Publish current workspace as", "");
     if (!name) return;
     const path = rel;
@@ -718,9 +718,9 @@ export function createCloudBrowser(app) {
         app.privateProjectSnapshot = app.controller.getProject();
       }
       const localProject = app.controller.getProject();
-      const created = await createProjectServer(app.settings.serverUrl, app.syncState.account.token, team, path, name);
+      const created = await createProjectServer(app.settings.serverUrl, app.identity.token(), team, path, name);
       app.workspaceMode = "synced";
-      await app.collaboration.openWorkspace(app.settings.serverUrl, app.syncState.account.token, team, created.path, { reason: "create-project" });
+      await app.collaboration.openWorkspace(app.settings.serverUrl, app.identity.token(), team, created.path, { reason: "create-project" });
       app.controller.replaceProject(localProject);
       await app.collaboration.publishSnapshot(localProject);
       app.settings.wasConnected = false;
@@ -750,14 +750,14 @@ export function createCloudBrowser(app) {
   }
 
   async function openAccessEditor(team, path, name) {
-    if (!app.syncState.account) return;
+    if (!app.identity.account()) return;
     accessEditorTarget = { team, path };
     if (app.elements.accessDialogTitle) app.elements.accessDialogTitle.textContent = `Access — ${name}`;
     if (app.elements.accessWhitelist) app.elements.accessWhitelist.value = "";
     if (app.elements.accessBlacklist) app.elements.accessBlacklist.value = "";
     setAccessStatus("");
     try {
-      const data = await getAccess(app.settings.serverUrl, app.syncState.account.token, team, path);
+      const data = await app.identity.getAccess(team, path);
       if (app.elements.accessWhitelist) app.elements.accessWhitelist.value = (data.whitelist ?? []).join("\n");
       if (app.elements.accessBlacklist) app.elements.accessBlacklist.value = (data.blacklist ?? []).join("\n");
     } catch (error) {
@@ -767,12 +767,10 @@ export function createCloudBrowser(app) {
   }
 
   async function saveAccessEditor() {
-    if (!accessEditorTarget || !app.syncState.account) return;
+    if (!accessEditorTarget || !app.identity.account()) return;
     const parseList = (value) => String(value ?? "").split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
     try {
-      await setAccess(
-        app.settings.serverUrl,
-        app.syncState.account.token,
+      await app.identity.setAccess(
         accessEditorTarget.team,
         accessEditorTarget.path,
         parseList(app.elements.accessWhitelist?.value),
@@ -814,7 +812,7 @@ export function createCloudBrowser(app) {
   let openWorkspaceInFlight = null;
 
   async function handleOpenWorkspace(team, path, options = {}) {
-    if (!app.syncState.account) throw new Error("Sign in to resume this workspace.");
+    if (!app.identity.account()) throw new Error("Sign in to resume this workspace.");
     const workspaceId = `${team}/${path}`;
     const reason = options.reason || "unspecified";
     // Already connected to exactly this workspace? Re-opening buys nothing and
@@ -871,7 +869,7 @@ export function createCloudBrowser(app) {
       }
       if (options.isCurrent && !options.isCurrent()) throw Object.assign(new Error("Session restoration cancelled."), { status: 499 });
       const session = await app.collaboration.openWorkspace(
-        app.settings.serverUrl, app.syncState.account.token, team, path,
+        app.settings.serverUrl, app.identity.token(), team, path,
         {
           reconcileLocal,
           reason,
@@ -924,19 +922,13 @@ export function createCloudBrowser(app) {
   }
 
   async function performLogin(username, password, { silent = false, isCurrent = () => true } = {}) {
-    const result = await loginToServer(app.settings.serverUrl, username, password);
-    if (!isCurrent()) throw Object.assign(new Error("Session restoration cancelled."), { status: 499 });
-    app.syncState.account = { token: result.token, username: result.username, teams: result.teams ?? [] };
-    // Remember creds + mark this (server, username) as a proven login so boot can
-    // auto-restore it. Also default the collaborator display name to the username.
-    app.settings.accountUsername = result.username;
-    app.settings.accountPassword = password;
-    app.settings.accountSuccess = { ...app.settings.accountSuccess, [normalizeServerUrl(app.settings.serverUrl)]: result.username };
+    const result = await app.identity.signIn(username, password, { isCurrent });
     // Cross-device resume: if THIS browser has no remembered workspace but the
     // account opened one elsewhere, adopt it so boot / the welcome page can resume.
     if (!app.settings.lastWorkspace?.team && result.lastWorkspace?.team) {
       app.settings.lastWorkspace = { team: result.lastWorkspace.team, path: result.lastWorkspace.path };
     }
+    // The collaborator display name defaults to the username.
     if (!app.settings.displayName) {
       app.settings.displayName = result.username;
       if (app.elements.displayNameInput) app.elements.displayNameInput.value = result.username;
@@ -961,7 +953,7 @@ export function createCloudBrowser(app) {
       await performLogin(username, password);
       app.elements.accountPasswordInput.value = "";
     } catch (error) {
-      app.syncState.account = null;
+      app.identity.drop();
       app.logDebug("response", "Account login failed", error.message);
       app.flashStatusPanel("error", app.elements.accountSection);
       // Render first (it resets the status line), then surface the failure so the
@@ -978,12 +970,9 @@ export function createCloudBrowser(app) {
     app.collaboration.disconnect("Logged out.");
     // Leaving the account also leaves any cloud workspace it opened.
     if (app.workspaceMode === "synced") app.switchWorkspaceMode?.("private");
-    app.syncState.account = null;
-    // Explicit logout clears the proven-login record + stored password for this
-    // server so it won't silently auto-login again (username stays for autofill).
-    const { [normalizeServerUrl(app.settings.serverUrl)]: _dropped, ...rest } = app.settings.accountSuccess ?? {};
-    app.settings.accountSuccess = rest;
-    app.settings.accountPassword = "";
+    // Identity forgets the stored password and that this server knew the
+    // account, so it is not signed in again by itself (the username stays).
+    app.identity.signOut();
     app.settings.lastWorkspace = null;
     app.settings.syncedProjectId = null;
     saveSettings(app.settings);

@@ -100,7 +100,7 @@ class MCPTests(unittest.TestCase):
  def test_authenticated_metadata_hides_urls_and_credentials(self):
   proxy=SimpleNamespace(mcp=mcp.MCPManager());proxy.mcp.configs={'library':CONFIG}
   handler=object.__new__(server.MDNotesRequestHandler);handler.headers={'Authorization':'Bearer account-test'}
-  handler.registry=SimpleNamespace(_require_account=lambda token:{'teams':['friends']} if token=='account-test' else (_ for _ in ()).throw(PermissionError()))
+  handler.registry=SimpleNamespace(identity=SimpleNamespace(require=lambda token:{'teams':['friends']} if token=='account-test' else (_ for _ in ()).throw(PermissionError())))
   handler.chat_proxy=proxy;handler._read_json=lambda:{'action':'list'};results=[];handler._write_json=lambda status,body:results.append((status,body))
   handler._handle_mcp();self.assertEqual(results[-1][1]['servers'],[{'id':'library','label':'Reference library'}])
   self.assertNotIn('url',json.dumps(results));self.assertNotIn('secret',json.dumps(results))

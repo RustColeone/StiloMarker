@@ -1,6 +1,7 @@
 import { dataUrlToBytes } from "./file-content-service.js";
 
 import { SYNC_PROTOCOL_VERSION } from "../version.js";
+import { normalizeServerUrl, parseResponse, throwForResponse } from "../modules/shell/index.js";
 
 // The numeric wire gate deliberately stays separate from the app release label.
 // Identifies THIS page load. Sent with every workspace open so the server log can
@@ -9,41 +10,6 @@ import { SYNC_PROTOCOL_VERSION } from "../version.js";
 // over means a single tab is reconnecting (a network / stream problem).
 const PAGE_ID = `pg-${Math.random().toString(36).slice(2, 10)}`;
 const PAGE_LOADED_AT = Date.now();
-
-function normalizeServerUrl(serverUrl) {
-  const value = (serverUrl ?? "").trim();
-  // Empty string means "same origin + current app base path" so the app
-  // works when mounted under a subpath (for example "/stilomarker/")
-  // behind a reverse proxy without manual URL configuration.
-  if (!value) {
-    if (typeof window === "undefined") {
-      return "";
-    }
-    const pathname = window.location.pathname || "/";
-    const basePath = pathname.endsWith("/")
-      ? pathname.slice(0, -1)
-      : pathname.replace(/\/[^/]*$/, "");
-    return `${window.location.origin}${basePath}`;
-  }
-  return value.replace(/\/+$/, "");
-}
-
-async function parseResponse(response) {
-  const contentType = response.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
-    return response.json();
-  }
-  return response.text();
-}
-
-async function throwForResponse(prefix, response) {
-  const payload = await parseResponse(response);
-  const message = typeof payload === "string" ? payload : payload?.message;
-  const error = new Error(message ? `${prefix} ${message}` : `${prefix} Status ${response.status}.`);
-  error.status = response.status;
-  error.payload = payload;
-  throw error;
-}
 
 async function pingServer(serverUrl) {
   const baseUrl = normalizeServerUrl(serverUrl);
@@ -80,29 +46,6 @@ async function connectToServer(serverUrl, pin, displayName = "") {
 
   if (!response.ok) {
     await throwForResponse("Connect failed.", response);
-  }
-
-  return parseResponse(response);
-}
-
-async function loginToServer(serverUrl, username, password) {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const trimmedName = String(username ?? "").trim();
-  if (!trimmedName) {
-    throw new Error("Username is required.");
-  }
-  const response = await fetch(`${baseUrl}/api/auth/login`, {
-    signal: AbortSignal.timeout(15000),
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      accept: "application/json, text/plain;q=0.9"
-    },
-    body: JSON.stringify({ username: trimmedName, password: String(password ?? "") })
-  });
-
-  if (!response.ok) {
-    await throwForResponse("Login failed.", response);
   }
 
   return parseResponse(response);
@@ -225,32 +168,6 @@ async function createProjectServer(serverUrl, accountToken, team, path, name) {
   });
   if (!response.ok) {
     await throwForResponse("Could not create project.", response);
-  }
-  return parseResponse(response);
-}
-
-async function getAccess(serverUrl, accountToken, team, path) {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const params = new URLSearchParams({ token: accountToken, team, path });
-  const response = await fetch(`${baseUrl}/api/workspaces/access?${params.toString()}`, {
-    method: "GET",
-    headers: { accept: "application/json" }
-  });
-  if (!response.ok) {
-    await throwForResponse("Could not read access list.", response);
-  }
-  return parseResponse(response);
-}
-
-async function setAccess(serverUrl, accountToken, team, path, whitelist, blacklist) {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const response = await fetch(`${baseUrl}/api/workspaces/access?token=${encodeURIComponent(accountToken)}`, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({ team, path, whitelist, blacklist })
-  });
-  if (!response.ok) {
-    await throwForResponse("Could not update access list.", response);
   }
   return parseResponse(response);
 }
@@ -557,7 +474,6 @@ export {
   deleteServerSnapshot,
   exportProjectServer,
   fetchSessionState,
-  getAccess,
   getServerSnapshotContent,
   hostSession,
   importProjectServer,
@@ -565,7 +481,6 @@ export {
   listServerSnapshotPaths,
   listServerSnapshotVersions,
   listWorkspaces,
-  loginToServer,
   mkdirServer,
   normalizeServerUrl,
   openEventStream,
@@ -580,6 +495,5 @@ export {
   saveComment,
   sanitizeProjectForSync,
   saveUserState,
-  setAccess,
   uploadAsset
 };

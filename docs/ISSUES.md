@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-17 · release `v0.1.37` (deployed; public verification passed)
+Last updated: 2026-10-17 · release `v0.1.38`
 
 ---
 
@@ -30,6 +30,35 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.38: restructure step 7a (Identity and access)
+
+Accounts, sign-in and who may open a project now live in one module on each
+end, instead of being spread over the server's workspace registry, its request
+handler, and the browser's main script, cloud browser, chat panel and panes.
+Nothing changes for users.
+
+- Server: the account file, sign-in tokens, teams, the access record of each
+  project (whitelist, blacklist, readers, owner), roles and what each role may
+  do (`can(role, "open" | "edit" | "replace")`), and the per-account
+  preferences (the last workspace, for resuming on another device). The rule
+  "only the owner manages a project; with no owner, anyone who may open it"
+  was written twice (changing access, deleting a project); it is now one rule.
+  Identity serves its own routes (sign-in, access).
+- Browser: the signed-in account and its stored sign-in, signing in and out,
+  and signing in again by itself (only where that account signed in before,
+  with a stored password). Forty-odd places that read `syncState.account`
+  now ask `identity.account()` or `identity.token()`.
+- The browser's server address and request helpers moved into Shell, so every
+  module calls the server the same way.
+- Identity and Models moved from level 1 to level 2, beside Workspace: they need
+  Transport and Shell below them.
+- Identity's routes are the first module contract
+  (`protocol/identity.contract.json`, version 1); a structure test checks that
+  the server serves exactly those routes and that nothing outside Identity
+  calls them.
+- The access file, the account file and the preferences file each have one
+  owner; the structure test fails if any other code spells their names.
 
 ### v0.1.37: restructure step 6 (Assistant): the agent edits passages, not whole files
 

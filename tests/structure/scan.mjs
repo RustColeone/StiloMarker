@@ -29,6 +29,9 @@ export const OWNED_NAMES = {
   "operation patch-file": /["']patch-file["']/,
   "operation replace-project": /["']replace-project["']/,
   "sync protocol number": /SYNC_PROTOCOL_VERSION|MIN_CLIENT_VERSION|minSyncVersion/,
+  "account file": /whitelist\.json/,
+  "access file": /access\.json/,
+  "account prefs file": /user-prefs\.json/,
 };
 
 // Words the kernel may never contain: it knows no domain (Module design, rule 8).

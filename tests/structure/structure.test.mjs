@@ -183,6 +183,35 @@ test("the legacy contract matches the messages the code sends and handles (rule 
   assert.equal(Number(floor), contract.version, "the server's MIN_CLIENT_VERSION and the contract disagree on the version");
 });
 
+test("each module's contract lists exactly the routes it serves, and only that module calls them (rule 7)", () => {
+  const contracts = readdirSync(join(ROOT, "protocol")).filter((f) => f.endsWith(".contract.json") && f !== "legacy.contract.json");
+  const problems = [];
+  for (const name of contracts) {
+    const contract = json(`protocol/${name}`);
+    const where = `protocol/${name}`;
+    if (!Number.isInteger(contract.version) || contract.version < 1) problems.push(`${where}: version must be a whole number from 1`);
+    const serverDir = `server/stilo/modules/${contract.module.replaceAll("-", "_")}`;
+    const browserDir = `app/modules/${contract.module.replaceAll("_", "-")}`;
+    const listed = new Set(contract.routes.map((r) => `${r.method} ${r.path}`));
+    const served = new Set();
+    for (const file of files.filter((f) => f.startsWith(`${serverDir}/`))) {
+      for (const m of codeOf(file).matchAll(/add_route\(\s*"(GET|POST)",\s*"([^"]+)"/g)) served.add(`${m[1]} ${m[2]}`);
+    }
+    const missing = [...listed].filter((r) => !served.has(r)), extra = [...served].filter((r) => !listed.has(r));
+    if (missing.length || extra.length) problems.push(`${serverDir} serves ${[...served].join(", ") || "nothing"} but ${where} lists ${[...listed].join(", ")}`);
+    for (const path of new Set(contract.routes.map((r) => r.path))) {
+      const quoted = new RegExp(`["'\`]${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'\`?]`);
+      const spelled = files.filter((f) => quoted.test(codeOf(f)));
+      const outside = spelled.filter((f) => !f.startsWith(`${serverDir}/`) && !f.startsWith(`${browserDir}/`));
+      if (outside.length) problems.push(`${outside.join(", ")} call ${path}, which belongs to ${contract.module}: use its API`);
+      if (existsSync(join(ROOT, browserDir)) && !spelled.some((f) => f.startsWith(`${browserDir}/`))) {
+        problems.push(`${path} is in ${where} but ${browserDir} never calls it`);
+      }
+    }
+  }
+  assert.deepEqual(problems, []);
+});
+
 test("the browser's copies of protocol data are up to date", async () => {
   const { COPIES, render } = await import("../../tools/protocol-sync.mjs");
   for (const copy of COPIES) {
