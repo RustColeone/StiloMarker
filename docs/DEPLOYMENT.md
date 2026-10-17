@@ -763,3 +763,27 @@ per-key churn budget still holds).
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T124522Z-v0.1.46`.
 Nine project manifests valid, 171/171 files.
+
+## Verified release: v0.1.47
+
+Deployed on 2026-10-17 at 13:09 UTC. Module restructure step 7g-2: the tab
+strips, panes and preview pane in the Editor, with a previews extension
+point (URL albums, diagrams and character sheets register theirs). This
+completes step 7. App version `0.1.47`; sync compatibility unchanged at `117`.
+
+The deployment backup counted 10 projects: one was a throwaway project of
+mine (`EditorCheck…`) left by an earlier verification run that crashed
+before cleaning up. It was deleted through the app as its owner; later
+probes clean up in a `finally`.
+
+Public checks: ping (`0.1.47`), no errors in the journal. Live, in a headless
+browser signed in as `test`, in a throwaway project in team red (deleted
+afterwards) holding a character file, a Markdown note and a URL album: each
+previewed through its registered or built-in preview (the card "Mara Quill",
+the heading "Heading Here", the album row "Gull"); no page errors.
+Validation: 225 Node tests, all Python suites, the backend self-test,
+seventeen browser suites (`session-recovery-browser.py` caught a left-behind
+import in the split before release).
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T130909Z-v0.1.47`.
+Ten project manifests valid (one of them the leftover above), 177/177 files.
