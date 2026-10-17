@@ -1,0 +1,247 @@
+{
+  "about": "Chats' network messages (rule 7): conversations between a project's people and characters, and characters' replies (on the server, or written by a member's own browser). The server half serves exactly these routes (server/stilo/modules/chats/adapters/routes.py); only the browser half (app/modules/chats/adapters/api.js) calls them. A value may come in the body or the query; the token is always in the query. Live events go only to a conversation's members, on Sync's stream.",
+  "module": "chats",
+  "version": 1,
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/chats",
+      "query": [
+        "token",
+        "team",
+        "path"
+      ],
+      "reply": [
+        "me",
+        "conversations",
+        "people",
+        "characters",
+        "notes"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/chats/messages",
+      "query": [
+        "token",
+        "team",
+        "path",
+        "id",
+        "before",
+        "after"
+      ],
+      "reply": [
+        "conversation",
+        "messages"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/chats/search",
+      "query": [
+        "token",
+        "team",
+        "path",
+        "id",
+        "q"
+      ],
+      "reply": [
+        "results"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/chats/note",
+      "query": [
+        "token",
+        "team",
+        "path",
+        "contact"
+      ],
+      "reply": [
+        "alias",
+        "note"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/note",
+      "body": [
+        "team",
+        "path",
+        "contact",
+        "alias",
+        "note"
+      ],
+      "reply": [
+        "alias",
+        "note"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/start",
+      "body": [
+        "team",
+        "path",
+        "members"
+      ],
+      "reply": [
+        "conversation",
+        "created"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/send",
+      "body": [
+        "team",
+        "path",
+        "id",
+        "content",
+        "contextPaths",
+        "model",
+        "runner"
+      ],
+      "reply": [
+        "message",
+        "conversation",
+        "replies",
+        "claims"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/invite",
+      "body": [
+        "team",
+        "path",
+        "id",
+        "members"
+      ],
+      "reply": [
+        "conversation",
+        "created"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/leave",
+      "body": [
+        "team",
+        "path",
+        "id"
+      ],
+      "reply": [
+        "left"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/rename",
+      "body": [
+        "team",
+        "path",
+        "id",
+        "title"
+      ],
+      "reply": [
+        "conversation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/read",
+      "body": [
+        "team",
+        "path",
+        "id",
+        "messageId"
+      ],
+      "reply": [
+        "conversation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/stop",
+      "body": [
+        "team",
+        "path",
+        "id"
+      ],
+      "reply": [
+        "stopped"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/import",
+      "body": [
+        "team",
+        "path",
+        "title",
+        "characters",
+        "messages"
+      ],
+      "reply": [
+        "conversation"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/prompt",
+      "body": [
+        "team",
+        "path",
+        "id",
+        "character",
+        "trigger"
+      ],
+      "reply": [
+        "payload",
+        "name"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/typing",
+      "body": [
+        "team",
+        "path",
+        "id",
+        "character",
+        "trigger",
+        "text",
+        "state"
+      ],
+      "reply": [
+        "ok"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/chats/reply",
+      "body": [
+        "team",
+        "path",
+        "id",
+        "character",
+        "trigger",
+        "content",
+        "state"
+      ],
+      "reply": [
+        "message"
+      ]
+    }
+  ],
+  "events": {
+    "endpoint": "Sync's event stream, to a conversation's members only",
+    "types": [
+      "chat-message",
+      "chat-typing",
+      "chat-update"
+    ]
+  }
+}

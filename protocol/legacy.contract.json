@@ -3,9 +3,6 @@
   "workspaceEvents": {
     "endpoint": "Sync's event stream (protocol/sync.contract.json), for modules that have not taken their events yet",
     "types": [
-      "chat-message",
-      "chat-typing",
-      "chat-update",
       "chat-workspace-update"
     ]
   },

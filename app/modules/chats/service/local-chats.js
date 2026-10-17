@@ -1,59 +1,14 @@
 // Chats in a browser-only workspace: conversations with the project's
-// characters, kept in this browser (IndexedDB). Same methods as the cloud
-// store (chats-api-service.js), so the Chats view does not care which it has.
-// There are no other people here; characters' replies run in this browser
-// through `runReply`, and their progress is reported through `onEvent` exactly
-// like the server's live events.
+// characters. Same methods as the cloud store (adapters/api.js), so the Chats
+// view does not care which it has. There are no other people here;
+// characters' replies run in this browser through `runReply`, and their
+// progress is reported through `onEvent` exactly like the server's live events.
+// `records` keeps the data (adapters/local-records.js).
+import { findMentions } from "../../characters/index.js";
 
-import { findMentions } from "./persona-service.js";
-
-const DB_NAME = "stilomarker-chats";
-const STORE = "workspaces";
 const MAX_MESSAGE = 16000;
 
-function openDatabase() {
-  return new Promise((resolve, reject) => {
-    if (!globalThis.indexedDB) { reject(new Error("IndexedDB unavailable")); return; }
-    const request = globalThis.indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(STORE, { keyPath: "key" });
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-/** Load / save one workspace's chats as a single record (they are small). */
-export function createIdbRecordStore() {
-  let db = null;
-  const memory = new Map(); // when IndexedDB is unavailable (private mode, tests)
-  async function database() {
-    if (db === false) return null;
-    try { db ??= await openDatabase(); } catch { db = false; return null; }
-    return db;
-  }
-  return {
-    async load(key) {
-      const handle = await database();
-      if (!handle) return memory.get(key) ?? null;
-      return new Promise((resolve) => {
-        const request = handle.transaction(STORE).objectStore(STORE).get(key);
-        request.onsuccess = () => resolve(request.result ?? null);
-        request.onerror = () => resolve(null);
-      });
-    },
-    async save(record) {
-      const handle = await database();
-      if (!handle) { memory.set(record.key, structuredClone(record)); return; }
-      await new Promise((resolve, reject) => {
-        const tx = handle.transaction(STORE, "readwrite");
-        tx.objectStore(STORE).put(record);
-        tx.oncomplete = resolve;
-        tx.onerror = () => reject(tx.error);
-      });
-    }
-  };
-}
-
-export function createLocalChats({ workspaceKey, listCharacters, runReply, onEvent, records = createIdbRecordStore(),
+export function createLocalChats({ workspaceKey, listCharacters, runReply, onEvent, records,
   me = "user:you", meName = "You", now = () => Date.now() }) {
   let state = null;
   const running = new Map(); // conversation id -> AbortController of its reply queue

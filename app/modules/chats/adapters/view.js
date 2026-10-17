@@ -8,13 +8,13 @@
 //                 chat, invite (a pair → a new group), rename / leave a group
 //   picker        choose people and characters for a new chat or an invite
 //
-// Data comes from a store with one interface (chats-api-service.js in a cloud
-// workspace, local-chats-service.js in a browser-only one); live updates
+// Data comes from a store with one interface (adapters/api.js in a cloud
+// workspace, service/local-chats.js in a browser-only one); live updates
 // arrive through receive(event). Everything the view needs from the app comes
 // in through `deps`. Loaded the first time the tab opens.
 
-import { fileTypeExtension } from "../domain/project-model.js";
-import { colorFor, findMentions, initialsFor, parsePersona, personaAvatarHtml } from "../services/persona-service.js";
+import { fileTypeExtension } from "../../workspace/index.js";
+import { colorFor, findMentions, initialsFor, parsePersona, personaAvatarHtml } from "../../characters/index.js";
 
 const MENTION_BEFORE_CARET = /(^|[^\p{L}\p{N}_@.])@([\p{L}\p{N}_-]*)$/u;
 const GROUP_GAP = 5 * 60; // seconds: closer messages from one author share a header

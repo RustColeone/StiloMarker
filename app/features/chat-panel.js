@@ -13,8 +13,7 @@ import { isChatNearBottom, shouldSubmitChat } from "../services/chat-ui-service.
 import { renderMarkdown } from "../services/markdown-service.js";
 import { createMcpControls } from "../services/mcp-ui-service.js";
 import { charactersView, parsePersona, personaSummary } from "../modules/characters/index.js";
-import { createCloudChats } from "../services/chats-api-service.js";
-import { createLocalChats } from "../services/local-chats-service.js";
+import { createCloudChats, createLocalChats, loadChatsView } from "../modules/chats/index.js";
 import { chosenModel, groupByProvider, runDirectReply } from "../modules/models/index.js";
 import { saveSettings } from "../services/settings-service.js";
 import { normalizeServerUrl } from "../services/sync-service.js";
@@ -930,7 +929,7 @@ export function createChatPanel(deps) {
 
   function ensureChats(project) {
     if (!chats) {
-      chatsLoading ??= import("../ui/chats-view.js").then(({ createChatsView }) => {
+      chatsLoading ??= loadChatsView().then(({ createChatsView }) => {
         chats = createChatsView({
           elements: { chatPanel: elements.chatPanel, chatCastBar: elements.chatCastBar, chatMessageList: elements.chatMessageList, chatInput: elements.chatInput },
           escapeHtml: escapeHtmlAttribute,
