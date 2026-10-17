@@ -297,6 +297,19 @@ class ReliabilityTests(unittest.TestCase):
         self.broker.unsubscribe(self.token, revoke=True)
         self.assertTrue(self.broker.session_should_close(self.token))
 
+    def test_a_role_outlives_a_dropped_stream(self):
+        reader = self.broker._admit('Rita', 'reader', identity='rita')['token']
+        master = self.broker._admit('Olga', 'master', identity='olga')['token']
+        for token in (reader, master):
+            events = self.broker.subscribe(token)
+            self.broker.unsubscribe(token, expected_queue=events)  # the stream dropped; the token lives on
+        with self.assertRaisesRegex(PermissionError, 'read-only'):
+            self.broker.apply_operation(reader, {'type': 'create-folder', 'parentPath': '', 'name': 'x'})
+        self.assertIn(master, self.broker.master_tokens, 'the owner can still publish after a reconnect')
+        self.broker.unsubscribe(reader, revoke=True)
+        with self.assertRaises(PermissionError):
+            self.broker.apply_operation(reader, {'type': 'create-folder', 'parentPath': '', 'name': 'x'})
+
     def test_lease_sweep_removes_a_session_even_without_a_stream(self):
         registry = server.WorkspaceRegistry('2468', Path(self.tmp.name) / 'default.json')
         session = registry.connect(None, '2468', 'Phone', leased=True)

@@ -1,0 +1,10 @@
+{
+  "name": "models",
+  "level": 2,
+  "uses": [],
+  "owns": {
+    "state": ["model providers", "the OpenAI model catalog", "generated images awaiting Keep"],
+    "rules": ["which models are offered", "request options per model", "chat-completions and responses streams"],
+    "connections": ["MCP servers"]
+  }
+}

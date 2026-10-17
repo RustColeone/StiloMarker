@@ -34,10 +34,10 @@ class PersonaTurnTests(unittest.TestCase):
         seen = []
         queue = list(responses)
 
-        def completion(payload, headers, emit):
+        def completion(payload, emit):
             seen.append(copy.deepcopy(payload))
             return queue.pop(0)
-        proxy._stream_completion = completion
+        proxy._complete = completion
         messages = messages if messages is not None else [{'name': 'Leo', 'content': 'Aria, the hold is flooding.', 'self': False}]
         with patch.object(server, '_log'):
             result = proxy.chat(messages, context or [], 'Novel', project, override=OVERRIDE,

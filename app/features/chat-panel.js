@@ -15,7 +15,7 @@ import { createMcpControls } from "../services/mcp-ui-service.js";
 import { charactersView, parsePersona, personaSummary } from "../modules/characters/index.js";
 import { createCloudChats } from "../services/chats-api-service.js";
 import { createLocalChats } from "../services/local-chats-service.js";
-import { runDirectReply } from "../services/direct-model-service.js";
+import { chosenModel, groupByProvider, runDirectReply } from "../modules/models/index.js";
 import { saveSettings } from "../services/settings-service.js";
 import { normalizeServerUrl } from "../services/sync-service.js";
 import { query } from "../ui/dom.js";
@@ -518,14 +518,10 @@ export function createChatPanel(deps) {
       if (showPicker) {
         const desired = chatState.selectedModel ?? chatState.models[0];
         const option = (name) => `<option value="${escapeHtmlAttribute(name)}"${name === desired ? " selected" : ""}>${escapeHtmlAttribute(name)}</option>`;
-        // Group by provider when the server offers more than one (DeepSeek, OpenAI).
-        const groups = new Map();
-        for (const name of chatState.models) {
-          const group = chatState.modelProviders?.get(name) ?? "";
-          groups.set(group, [...(groups.get(group) ?? []), name]);
-        }
-        const optionsHtml = groups.size > 1
-          ? [...groups].map(([group, names]) => `<optgroup label="${escapeHtmlAttribute(group || "Other")}">${names.map(option).join("")}</optgroup>`).join("")
+        // Grouped by provider when the server offers more than one (DeepSeek, OpenAI).
+        const groups = groupByProvider(chatState.models, (name) => chatState.modelProviders?.get(name));
+        const optionsHtml = groups.length > 1
+          ? groups.map(([group, names]) => `<optgroup label="${escapeHtmlAttribute(group || "Other")}">${names.map(option).join("")}</optgroup>`).join("")
           : chatState.models.map(option).join("");
         if (elements.chatModelSelect.innerHTML !== optionsHtml) {
           elements.chatModelSelect.innerHTML = optionsHtml;
@@ -822,7 +818,8 @@ export function createChatPanel(deps) {
 
   function runDirect(payload, signal, onText, onTool) {
     return runDirectReply({ payload, apiUrl: settings.agentApiUrl.trim(), apiKey: (settings.agentApiKey || "").trim(),
-      model: (settings.agentModel || "").trim(), signal, onText, onTool, tools: directTools() });
+      model: (settings.agentModel || "").trim(), signal, onText, onTool, tools: directTools(),
+      refusal: "Characters can read workspace files but cannot change them." });
   }
 
   // Replies this browser claimed in a cloud chat: write each, streaming progress
@@ -1103,9 +1100,7 @@ export function createChatPanel(deps) {
           .map((row) => [row.id, row.provider]));
         chatState.imageGeneration = Boolean(status.imageGeneration);
         // Keep the user's saved choice if the server still offers it, else default.
-        chatState.selectedModel = chatState.models.includes(settings.chatModel)
-          ? settings.chatModel
-          : (status.model ?? chatState.models[0] ?? null);
+        chatState.selectedModel = chosenModel(chatState.models, settings.chatModel, status.model);
         chatState.status = chatState.configured ? "ready" : (needsSignIn && status.configured ? "signin" : "unconfigured");
         chatState.detail = chatState.configured
           ? "Ready"

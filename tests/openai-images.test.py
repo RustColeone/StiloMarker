@@ -7,7 +7,8 @@ from urllib.error import HTTPError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'server'))
 import mdnotes_server as server
-import openai_support as oa
+from stilo.modules import models as oa
+from stilo.modules.models.adapters import openai as oa_adapter
 
 CATALOG = ['gpt-4o', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'gpt-5.1',
            'gpt-5.1-mini', 'gpt-5-2025-08-07', 'gpt-4o-audio-preview', 'gpt-realtime', 'gpt-5.1-codex',
@@ -41,8 +42,9 @@ class FakeOpenAI:
 
 def proxy_with_openai(opener=None, env=None, store_dir=None):
     proxy = server.ChatProxy()
-    proxy.api_key, proxy.api_url = 'deepseek-key', 'https://deepseek.example.invalid/chat'
-    proxy.openai = oa.OpenAIProvider({'OPENAI_API_KEY': 'openai-key', **(env or {})}, opener=opener or FakeOpenAI())
+    openai = oa.OpenAIProvider({'OPENAI_API_KEY': 'openai-key', **(env or {})}, opener=opener or FakeOpenAI())
+    proxy.providers = oa.open_providers({'MDNOTES_CHAT_API_KEY': 'deepseek-key',
+                                         'MDNOTES_CHAT_API_URL': 'https://deepseek.example.invalid/chat'}, openai=openai)
     proxy.openai.apply_catalog(CATALOG)
     if store_dir:
         proxy.generated = oa.GeneratedImages(Path(store_dir))
@@ -121,7 +123,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(provider.models, ['gpt-5.1', 'gpt-5.1-mini'])
         failing = oa.OpenAIProvider({'OPENAI_API_KEY': 'k'}, opener=FakeOpenAI(fail='Incorrect API key'))
         logs = []
-        with patch.object(oa.time, 'sleep', side_effect=SystemExit):
+        with patch.object(oa_adapter.time, 'sleep', side_effect=SystemExit):
             try:
                 failing.start(lambda *a, **k: logs.append((a, k)), retry_seconds=0)
                 time.sleep(0.2)
@@ -133,7 +135,7 @@ class CatalogTests(unittest.TestCase):
 
     def test_no_key_means_nothing_offered(self):
         proxy = server.ChatProxy()
-        proxy.openai = oa.OpenAIProvider({})
+        proxy.providers = oa.open_providers({}, openai=oa.OpenAIProvider({}))
         proxy.openai.apply_catalog(CATALOG)
         self.assertNotIn('gpt-5.1', proxy.all_models())
         self.assertFalse(proxy.public_status()['imageGeneration'])
@@ -143,17 +145,20 @@ class RoutingTests(unittest.TestCase):
     def run_chat(self, proxy, model, **kwargs):
         seen = []
 
-        def completion(payload, headers, emit):
-            seen.append({'payload': copy.deepcopy(payload), 'url': proxy._eff_url(), 'auth': headers['Authorization']})
-            return reply('Done.')
-        proxy._stream_completion = completion
+        class FakeHTTP:
+            """The provider's endpoint, at the edge of Models: what was sent where."""
+            @staticmethod
+            def stream_events(url, payload, headers, timeout):
+                seen.append({'payload': copy.deepcopy(payload), 'url': url, 'auth': headers['Authorization']})
+                yield {'choices': [{'delta': {'content': 'Done.'}, 'finish_reason': 'stop'}]}
+        proxy.providers.http = FakeHTTP
         with patch.object(server, '_log'):
             result = proxy.chat([{'role': 'user', 'content': 'hi'}], [], 'Novel', PROJECT, model=model, **kwargs)
         return result, seen[0]
 
     def test_gpt_models_go_to_openai_without_unsupported_options(self):
         proxy = proxy_with_openai()
-        proxy.enable_thinking = True
+        proxy.providers.thinking = True
         result, call = self.run_chat(proxy, 'gpt-5.1')
         self.assertEqual(call['url'], 'https://api.openai.com/v1/chat/completions')
         self.assertEqual(call['auth'], 'Bearer openai-key')
@@ -164,10 +169,10 @@ class RoutingTests(unittest.TestCase):
 
     def test_deepseek_stays_the_default_and_keeps_its_options(self):
         proxy = proxy_with_openai()
-        proxy.enable_thinking = True
+        proxy.providers.thinking = True
         result, call = self.run_chat(proxy, None)
         self.assertEqual(call['auth'], 'Bearer deepseek-key')
-        self.assertEqual(call['payload']['model'], proxy.model)
+        self.assertEqual(call['payload']['model'], proxy.providers.default_model)
         self.assertEqual(call['payload']['thinking'], {'type': 'enabled'})
         self.assertEqual(call['payload']['temperature'], 0.2)
         self.assertEqual(result['provider'], 'DeepSeek')
@@ -184,11 +189,13 @@ class RoutingTests(unittest.TestCase):
     def test_route_state_does_not_leak_between_requests(self):
         proxy = proxy_with_openai()
         self.run_chat(proxy, 'gpt-5.1')
-        self.assertEqual(proxy._eff_key(), 'deepseek-key')
+        self.assertIsNone(proxy._req.route)
+        _, call = self.run_chat(proxy, None)
+        self.assertEqual(call['auth'], 'Bearer deepseek-key')
 
     def test_status_lists_both_providers(self):
         status = proxy_with_openai().public_status()
-        self.assertEqual(status['models'][:1], [server.ChatProxy().model])
+        self.assertEqual(status['models'][:1], [server.ChatProxy().providers.default_model])
         self.assertIn('gpt-5.1', status['models'])
         info = {row['id']: row['provider'] for row in status['modelInfo']}
         self.assertEqual(info['gpt-5.1'], 'OpenAI')
@@ -206,10 +213,10 @@ class ImageToolTests(unittest.TestCase):
     def turn(self, responses, identity=USER):
         seen, queue = [], list(responses)
 
-        def completion(payload, headers, emit):
+        def completion(payload, emit):
             seen.append(copy.deepcopy(payload))
             return queue.pop(0)
-        self.proxy._stream_completion = completion
+        self.proxy._complete = completion
         with patch.object(server, '_log'):
             result = self.proxy.chat([{'role': 'user', 'content': 'Draw the lighthouse'}], [], 'Novel', PROJECT, identity=identity)
         return result, seen
@@ -261,7 +268,7 @@ class ImageToolTests(unittest.TestCase):
 
     def test_persona_turns_never_get_the_image_tool(self):
         seen = []
-        self.proxy._stream_completion = lambda p, h, e: seen.append(p) or reply('Aye.')
+        self.proxy._complete = lambda p, e: seen.append(p) or reply('Aye.')
         with patch.object(server, '_log'):
             self.proxy.chat([{'name': 'Leo', 'content': 'hi', 'self': False}], [], 'Novel', PROJECT, identity=USER,
                             persona={'name': 'Mara', 'content': 'sheet'}, cast=[])
