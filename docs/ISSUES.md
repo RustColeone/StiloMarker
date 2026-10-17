@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-17 · release `v0.1.39` (deployed; public verification passed)
+Last updated: 2026-10-17 · release `v0.1.40`
 
 ---
 
@@ -30,6 +30,27 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.40: restructure step 7c-1 (Sync on the server)
+
+The server's 1,000-line session broker is split by job. Nothing changes for
+users.
+
+- Workspace: applying an operation to a tree is one pure function, the same
+  rules the browser's `applySyncOperation` follows (both still run the shared
+  operation cases); the open project and its storage (a folder, one JSON file,
+  or memory) are one object.
+- Sync: sessions and their roles, presence, leases and event streams; the
+  rebase log (text patches moved over the ones since; stale whole-file writes,
+  renames, moves and replaces as barriers); one path for every change, which
+  checks the sender's role and revision, applies, commits and broadcasts.
+- Rebasing a text patch now has a shared case table (17 cases) that the
+  browser and the server both run; it was the last rule written in both
+  languages without one.
+- Removed: "revert to revision", unused since the agent's Drop became the
+  write path backwards (v0.1.33). It kept 40 full copies of every open project
+  in memory. Also an unused folder wipe.
+- `mdnotes_server.py` is 856 lines shorter.
 
 ### v0.1.39: restructure step 7b (Models)
 

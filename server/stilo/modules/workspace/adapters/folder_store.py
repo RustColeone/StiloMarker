@@ -188,12 +188,3 @@ class FolderStore:
         if journal.exists():
             journal.unlink()
             fsync_directory(self.folder)
-
-    def wipe(self, keep: tuple[str, ...]) -> None:
-        """Remove everything in the folder except the named files (sidecars other
-        modules keep beside the project, such as who may open it)."""
-        if not self.folder.exists():
-            return
-        for child in self.folder.iterdir():
-            if child.name not in keep:
-                self.remove(child)

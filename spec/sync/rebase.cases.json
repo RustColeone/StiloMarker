@@ -1,0 +1,22 @@
+{
+  "about": "Rebasing a text patch over one applied before it (rule 6): the server's transform_range (server/stilo/modules/sync/model/rebase.py) and the browser's transformTextPatch (app/modules/workspace/model/text-patch.js, moving to app/modules/sync in step 7c-2) both run these. A patch is [start, end) in UTF-16 units; applied is the earlier patch, which replaced [start, end) with `inserted` units. `expect` is the later patch moved over it, or \"conflict\" when it cannot be placed safely. Ties at the same point keep the later patch before the earlier one's text (the browser's insertAfter=false).",
+  "cases": [
+    { "name": "insert after an earlier insert moves right", "patch": [10, 10], "applied": [4, 4], "inserted": 3, "expect": [13, 13] },
+    { "name": "insert before an earlier insert stays", "patch": [2, 2], "applied": [4, 4], "inserted": 3, "expect": [2, 2] },
+    { "name": "two inserts at the same point: the later stays before", "patch": [4, 4], "applied": [4, 4], "inserted": 3, "expect": [4, 4] },
+    { "name": "insert after a replacement shifts by the change in length", "patch": [20, 20], "applied": [5, 10], "inserted": 2, "expect": [17, 17] },
+    { "name": "insert before a replacement stays", "patch": [3, 3], "applied": [5, 10], "inserted": 2, "expect": [3, 3] },
+    { "name": "insert at the end of removed text shifts", "patch": [10, 10], "applied": [5, 10], "inserted": 0, "expect": [5, 5] },
+    { "name": "insert at the start of removed text stays", "patch": [5, 5], "applied": [5, 10], "inserted": 1, "expect": [5, 5] },
+    { "name": "insert inside removed text is a conflict", "patch": [7, 7], "applied": [5, 10], "inserted": 0, "expect": "conflict" },
+    { "name": "replacement after an insert moves right", "patch": [8, 12], "applied": [3, 3], "inserted": 4, "expect": [12, 16] },
+    { "name": "replacement starting at an insert point moves right", "patch": [3, 6], "applied": [3, 3], "inserted": 2, "expect": [5, 8] },
+    { "name": "replacement before an insert stays", "patch": [1, 2], "applied": [3, 3], "inserted": 2, "expect": [1, 2] },
+    { "name": "an insert inside a later replacement is a conflict", "patch": [2, 8], "applied": [5, 5], "inserted": 2, "expect": "conflict" },
+    { "name": "replacement after a replacement shifts", "patch": [30, 35], "applied": [10, 20], "inserted": 4, "expect": [24, 29] },
+    { "name": "replacement touching the end of an earlier one shifts", "patch": [20, 22], "applied": [10, 20], "inserted": 15, "expect": [25, 27] },
+    { "name": "replacement before an earlier one stays", "patch": [1, 5], "applied": [10, 20], "inserted": 0, "expect": [1, 5] },
+    { "name": "overlapping replacements are a conflict", "patch": [15, 25], "applied": [10, 20], "inserted": 3, "expect": "conflict" },
+    { "name": "a replacement containing an earlier one is a conflict", "patch": [5, 30], "applied": [10, 20], "inserted": 3, "expect": "conflict" }
+  ]
+}

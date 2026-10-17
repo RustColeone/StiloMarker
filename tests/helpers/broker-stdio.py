@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+# Answers go to stdout; everything the server logs goes to stderr.
+ANSWERS, sys.stdout = sys.stdout, sys.stderr
 spec = importlib.util.spec_from_file_location('server', Path(__file__).resolve().parents[2] / 'server/mdnotes_server.py')
 server = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(server)
@@ -22,6 +24,6 @@ with tempfile.TemporaryDirectory() as directory:
                 result = broker.get_state(tokens[name])
             else:
                 result = broker.apply_operation(tokens[name], request['operation'])
-            print(json.dumps({'result': result}), flush=True)
+            print(json.dumps({'result': result}), file=ANSWERS, flush=True)
         except Exception as error:
-            print(json.dumps({'error': str(error)}), flush=True)
+            print(json.dumps({'error': str(error)}), file=ANSWERS, flush=True)
