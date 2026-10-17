@@ -19,7 +19,7 @@ import { clearOfflineShellData, registerOfflineShell } from "./services/offline-
 import { applyEditorFont, applyTheme, clampSourceFontSize, loadSettings, patchStoredSettings, saveSettings, signInSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
 import { clearViewStates, loadViewStates, saveViewStates } from "./services/view-state-service.js";
-import { browseServer, createProjectServer, deleteServer, exportProjectServer, importProjectServer, mkdirServer, normalizeServerUrl, uploadAsset } from "./services/sync-service.js";
+import { browseServer, createProjectServer, deleteServer, exportProjectServer, importProjectServer, mkdirServer, normalizeServerUrl, saveUserState, uploadAsset } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { formatUrlDbEntryBody, parseUrlDb, parseUrlDbEntryBody, updateUrlDbEntry } from "./services/urldb-service.js";
 import { query } from "./ui/dom.js";
@@ -27,9 +27,9 @@ import { createExplorerView } from "./ui/explorer-view.js";
 import { createDefaultBmap } from "./services/bmap-service.js";
 import { createCloudBrowser } from "./features/cloud-browser.js";
 import { createFileActions } from "./features/file-actions.js";
-import { createPanes } from "./features/panes.js";
+import { registerPreviews } from "./features/previews.js";
 import { createLayout } from "./ui/layout.js";
-import { createAutocomplete, createEditorCore, createFindReplace, createHighlighter, createLinks, renderMarkdown } from "./modules/editor/index.js";
+import editorModule, { createAutocomplete, createEditorCore, createFindReplace, createHighlighter, createLinks, createPanes, renderMarkdown } from "./modules/editor/index.js";
 import { createDialogs } from "./ui/dialogs.js";
 import { createLineComments } from "./modules/comments/index.js";
 import { createSnapshots } from "./features/snapshots.js";
@@ -277,7 +277,7 @@ const elements = {
 // ---- Modules (docs/ARCHITECTURE.md) ----
 // The app is moving into modules one step at a time. Code still in this file
 // reaches a module only through the public API the kernel hands back.
-const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, historyModule], {
+const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, historyModule], {
   log: (owner, ...args) => { try { logDebug("action", `${owner}: ${args.join(" ")}`); } catch { /* log not ready yet */ } }
 });
 const { shell, workspace, identity } = modules;
@@ -1883,8 +1883,9 @@ const backlinksListEl = document.getElementById("backlinks-list");
 // context, so it always sees their current values. `var`: a forwarding
 // function can run during startup, before this line is reached.
 var panesInstance;
-function panes() {
-  return (panesInstance ??= createPanes({
+function panes() { // the Editor's panes; URL albums, diagrams and character sheets add their previews
+  return (panesInstance ??= createPanes(registerPreviews(modules.editor.previews, {
+    saveUserState: (ws, openFiles, activeFile) => saveUserState(settings.serverUrl, identity.token(), ws.team, ws.path, openFiles, activeFile),
     get DIFF_TAB_ID() { return DIFF_TAB_ID; },
     get agentPendingDecorations() { return agentPendingDecorations; },
     get bmapViewModule() { return bmapViewModule; },
@@ -1932,13 +1933,12 @@ function panes() {
     set sourceOpenTabIds(value) { sourceOpenTabIds = value; },
     get sourceUrlDbEntry() { return sourceUrlDbEntry; },
     set sourceUrlDbEntry(value) { sourceUrlDbEntry = value; },
-    get syncState() { return syncState; },
     get identity() { return identity; },
     get togglePreview() { return togglePreview; },
     get updateFileContentFromPreview() { return updateFileContentFromPreview; },
     get updateStatus() { return updateStatus; },
     get workspaceMode() { return workspaceMode; }
-  }));
+  }), modules.editor.previews));
 }
 function bindPaneDropTarget(...args) { return panes().bindPaneDropTarget(...args); }
 function bindTabStripReorderTarget(...args) { return panes().bindTabStripReorderTarget(...args); }
