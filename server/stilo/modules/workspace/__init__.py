@@ -16,7 +16,7 @@ from .adapters.state_file import StateFile  # noqa: F401
 from .model.operations import (EDIT_SESSION_GAP_SECONDS, PATCH_FILE, REPLACE_PROJECT, UPDATE_FILE, apply_operation,  # noqa: F401
                                bump_edit_counters, patch_text, touched_paths)
 from .model.text import utf16_index, utf16_length  # noqa: F401
-from .model.tree import (append_node, create_id, default_project, find_child_by_name,  # noqa: F401
+from .model.tree import (append_node, create_id, default_project, file_key, find_child_by_name,  # noqa: F401
                          node_id_by_path, path_of, remove_node_recursive, subtree_paths, update_file_operation)
 from .service.live import LiveProject  # noqa: F401
 

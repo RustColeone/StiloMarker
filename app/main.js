@@ -3,6 +3,7 @@ import shellModule from "./modules/shell/index.js";
 import fileTypesModule from "./modules/file-types/index.js";
 import workspaceModule from "./modules/workspace/index.js";
 import identityModule from "./modules/identity/index.js";
+import historyModule from "./modules/history/index.js";
 import { createWorkspacePorts } from "./features/workspace-ports.js";
 import { rememberedWorkspace, createSessionRecovery } from "./services/session-recovery-service.js";
 import { installMobileViewport } from "./services/chat-ui-service.js";
@@ -281,7 +282,7 @@ const elements = {
 // ---- Modules (docs/ARCHITECTURE.md) ----
 // The app is moving into modules one step at a time. Code still in this file
 // reaches a module only through the public API the kernel hands back.
-const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule], {
+const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, historyModule], {
   log: (owner, ...args) => { try { logDebug("action", `${owner}: ${args.join(" ")}`); } catch { /* log not ready yet */ } }
 });
 const { shell, workspace, identity } = modules;
@@ -727,8 +728,6 @@ function jumpToAgentChange(batchId) {
   }
 }
 
-
-
 /** Build a simple unified diff hunks array from two text strings. */
 function buildTextDiffHunks(oldText, newText) {
   const oldLines = oldText.split("\n");
@@ -1027,7 +1026,6 @@ function showNoticeDialog(message, title) { return shell.notice(message, title);
 function showToast(message, options) { return shell.toast(message, options); }
 function traceEditorEvent(...args) { return dialogs().traceEditorEvent(...args); }
 
-
 function resolveProjectAssetUrl(project, sourceFileId, url) {
   const trimmed = String(url ?? "").trim();
   if (!trimmed || /^(https?:\/\/|data:|blob:|#|\/)/i.test(trimmed)) {
@@ -1182,9 +1180,8 @@ function replaceAllMatches(...args) { return findReplace().replaceAllMatches(...
 function replaceCurrent(...args) { return findReplace().replaceCurrent(...args); }
 function toggleFindOption(...args) { return findReplace().toggleFindOption(...args); }
 
-
 // ============================ Snapshots + Diff ==============================
-// Per-file, content-addressed history (see snapshot-service). Diff state caches
+// Per-file, content-addressed history (the History module). Diff state caches
 // the fetched old-version text so renderDiff() can run synchronously (in the
 // diff overlay). `path` is the file whose version being compared.
 // The diff lives in the preview pane's tab strip as a single special (non-file)
@@ -1244,7 +1241,6 @@ async function removeLineComment(...args) { return lineCommentsUi().removeLineCo
 function renderEditorFromModel(...args) { return lineCommentsUi().renderEditorFromModel(...args); }
 function scheduleCommentReanchor(...args) { return lineCommentsUi().scheduleCommentReanchor(...args); }
 async function submitLineComment(...args) { return lineCommentsUi().submitLineComment(...args); }
-
 
 // ---- Where snapshots live ----------------------------------------------------
 // A cloud workspace keeps snapshots ON THE SERVER, so they follow you to any
@@ -1307,7 +1303,6 @@ async function showFileDiff(...args) { return snapshots().showFileDiff(...args);
 async function snapshotDirtyFiles(...args) { return snapshots().snapshotDirtyFiles(...args); }
 function snapshotStore(...args) { return snapshots().snapshotStore(...args); }
 function writeAtPathOperations(...args) { return snapshots().writeAtPathOperations(...args); }
-
 
 let workspaceHistory = null;
 let workspaceHistoryLoading = null;
@@ -1877,7 +1872,6 @@ function hideLinkTooltip(...args) { return links().hideLinkTooltip(...args); }
 function openLinkFromEditor(...args) { return links().openLinkFromEditor(...args); }
 function renderLinksPanel(...args) { return links().renderLinksPanel(...args); }
 
-
 editorLinkTooltip.el.addEventListener("mouseleave", () => hideLinkTooltip(true));
 
 // ── Links panel (outgoing + backlinks) ───────────────────────────────────────
@@ -2067,7 +2061,6 @@ function setAddFileStatus(...args) { return fileActions().setAddFileStatus(...ar
 function setExplorerDropState(...args) { return fileActions().setExplorerDropState(...args); }
 async function stageAddFileFromLocalFile(...args) { return fileActions().stageAddFileFromLocalFile(...args); }
 async function submitAddFile(...args) { return fileActions().submitAddFile(...args); }
-
 
 function applyFileContentUpdates(updates) {
   const nextProject = structuredClone(controller.getProject());
@@ -3757,7 +3750,6 @@ function toggleMobileMenu(...args) { return layout().toggleMobileMenu(...args); 
 function togglePreview(...args) { return layout().togglePreview(...args); }
 function toggleSource(...args) { return layout().toggleSource(...args); }
 
-
 // ── Touch gestures: explorer drawer + pane carousel ─────────────────────────
 // One dispatcher owns every horizontal drag so the two gestures can never fight
 // over the same finger. At gesture start it decides who gets it:
@@ -4404,7 +4396,6 @@ async function saveAccessEditor(...args) { return cloudBrowser().saveAccessEdito
 function splitServerPath(...args) { return cloudBrowser().splitServerPath(...args); }
 function switchBrowserSide(...args) { return cloudBrowser().switchBrowserSide(...args); }
 function toggleMultiSelect(...args) { return cloudBrowser().toggleMultiSelect(...args); }
-
 
 elements.pingServerButton.addEventListener("click", () => { void pingCurrentServer(); });
 

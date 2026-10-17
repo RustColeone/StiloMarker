@@ -2,7 +2,7 @@
 // compare one with the workspace as it is now, restore one file or everything.
 // Loaded the first time the dialog opens; the app passes in what it needs.
 
-import { createWorkspaceBackup, getWorkspaceBackupContent, listWorkspaceBackupFiles, listWorkspaceBackups } from "../services/sync-service.js";
+import { createWorkspaceBackup, getWorkspaceBackupContent, listWorkspaceBackupFiles, listWorkspaceBackups } from "../modules/history/index.js";
 import { query } from "../ui/dom.js";
 
 export function createWorkspaceHistory(deps) {

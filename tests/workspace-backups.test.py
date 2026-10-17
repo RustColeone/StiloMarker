@@ -36,10 +36,10 @@ class WorkspaceBackupTests(unittest.TestCase):
         return self.broker.apply_operation(self.session, operation)
 
     def backups(self):
-        return self.reg.list_backups(self.alice, 'qa', self.path)['backups']
+        return self.reg.history.list_backups(self.alice, 'qa', self.path)['backups']
 
     def content(self, backup_id, file):
-        return self.reg.get_backup_content(self.alice, 'qa', self.path, backup_id, file)['content']
+        return self.reg.history.get_backup_content(self.alice, 'qa', self.path, backup_id, file)['content']
 
     def test_backups_only_on_days_with_changes(self):
         self.op({'type': 'create-file', 'parentPath': '', 'name': '第一回.md', 'content': 'v1'})
@@ -66,10 +66,10 @@ class WorkspaceBackupTests(unittest.TestCase):
         safety = [b for b in self.backups() if b['kind'] == 'safety']
         self.assertEqual(len(safety), 1, 'a burst of deletes shares the copy taken before it began')
         before_first = safety[0]
-        files = {f['path'] for f in self.reg.list_backup_files(self.alice, 'qa', self.path, before_first['id'])['files']}
+        files = {f['path'] for f in self.reg.history.list_backup_files(self.alice, 'qa', self.path, before_first['id'])['files']}
         self.assertEqual(files, {'第一卷/第七回.md', '大纲.md'})
         self.assertEqual(self.content(before_first['id'], '第一卷/第七回.md'), '正文😀')
-        self.assertIn('第一卷', self.reg.list_backup_files(self.alice, 'qa', self.path, before_first['id'])['folders'])
+        self.assertIn('第一卷', self.reg.history.list_backup_files(self.alice, 'qa', self.path, before_first['id'])['folders'])
         self.assertEqual([n for n in self.broker.project['nodes'].values() if n['kind'] == 'file'], [], 'workspace is empty now')
 
     def test_a_later_destructive_change_gets_its_own_copy(self):
@@ -81,7 +81,7 @@ class WorkspaceBackupTests(unittest.TestCase):
             self.op({'type': 'delete-node', 'path': 'b.md'})
         safety = sorted((b for b in self.backups() if b['kind'] == 'safety'), key=lambda b: b['createdAt'])
         self.assertEqual(len(safety), 2)
-        later = {f['path'] for f in self.reg.list_backup_files(self.alice, 'qa', self.path, safety[1]['id'])['files']}
+        later = {f['path'] for f in self.reg.history.list_backup_files(self.alice, 'qa', self.path, safety[1]['id'])['files']}
         self.assertEqual(later, {'b.md'}, 'the second copy holds the state just before the second delete')
 
     def test_replacing_the_whole_project_takes_a_safety_copy(self):
@@ -110,7 +110,7 @@ class WorkspaceBackupTests(unittest.TestCase):
         self.assertLessEqual(len(days), 14 + 8 + 6)
         self.assertGreaterEqual(len(days), 14, 'every one of the last 14 active days')
         self.assertEqual(days[-1], time.strftime('%Y-%m-%d', time.gmtime(self.t0 + 119 * DAY)))
-        index = self.reg._backup_load(self.reg._backup_dir('qa', self.path))
+        index = self.reg.history.backups.store('qa', self.path).load()
         referenced = {e['blob'] for b in index['backups'] for e in b['files']}
         stored = {p.name[:-3] for p in (Path(self.tmp.name) / 'data/_backups/qa/workspaces/Novel/blobs').iterdir()}
         self.assertEqual(stored, referenced, 'pruned backups release their blobs; nothing orphaned or missing')
@@ -127,13 +127,13 @@ class WorkspaceBackupTests(unittest.TestCase):
         self.op({'type': 'create-file', 'parentPath': '', 'name': 'a.md', 'content': 'x'})
         self.reg.set_access(self.alice, 'qa', self.path, [], [], ['bob'])  # bob becomes a reader
         bob = self.reg.identity.login('bob', 'pw')['token']
-        self.reg.list_backups(bob, 'qa', self.path)  # readers may look
+        self.reg.history.list_backups(bob, 'qa', self.path)  # readers may look
         with self.assertRaises(PermissionError):
-            self.reg.create_backup(bob, 'qa', self.path)
+            self.reg.history.create_backup(bob, 'qa', self.path)
         carol = self.reg.identity.login('carol', 'pw')['token']
         with self.assertRaises((PermissionError, ValueError)):
-            self.reg.list_backups(carol, 'qa', self.path)
-        self.assertTrue(self.reg.create_backup(self.alice, 'qa', self.path, 'by hand')['created'])
+            self.reg.history.list_backups(carol, 'qa', self.path)
+        self.assertTrue(self.reg.history.create_backup(self.alice, 'qa', self.path, 'by hand')['created'])
 
     def test_backups_live_outside_the_project_folder(self):
         self.op({'type': 'create-file', 'parentPath': '', 'name': 'a.md', 'content': 'x'})
@@ -149,8 +149,8 @@ class WorkspaceBackupTests(unittest.TestCase):
         reg.data_dir = self.reg.data_dir
         self.op({'type': 'create-file', 'parentPath': '', 'name': 'late.md', 'content': 'written just before a restart'})
         httpd.server_close()
-        names = {f['path'] for b in self.reg.list_backups(self.alice, 'qa', self.path)['backups']
-                 for f in self.reg.list_backup_files(self.alice, 'qa', self.path, b['id'])['files']}
+        names = {f['path'] for b in self.reg.history.list_backups(self.alice, 'qa', self.path)['backups']
+                 for f in self.reg.history.list_backup_files(self.alice, 'qa', self.path, b['id'])['files']}
         self.assertIn('late.md', names)
 
 

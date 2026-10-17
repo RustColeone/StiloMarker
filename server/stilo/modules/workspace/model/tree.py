@@ -81,3 +81,14 @@ def update_file_operation(path: str, content: str, base: str | None = None, **ex
     if base is not None:
         operation["preImage"] = base
     return {**operation, **extra}
+
+
+def file_key(file_path) -> str:
+    """A file path used as a key (in History's indexes, in comments), never a path
+    on disk, so it may hold any name (第一卷/第一回试写.md). Normalized and
+    bounded all the same."""
+    raw = str(file_path or "").replace("\\", "/").strip().strip("/")
+    key = "/".join(seg for seg in raw.split("/") if seg and seg not in (".", ".."))
+    if not key or len(key) > 512 or "\x00" in key:
+        raise ValueError("A valid file path is required")
+    return key

@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-17 · release `v0.1.41` (deployed; public verification passed)
+Last updated: 2026-10-17 · release `v0.1.42`
 
 ---
 
@@ -30,6 +30,22 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.42: restructure step 7d (History)
+
+Snapshots and backups are the History module on each end. Nothing changes
+for users.
+
+- Server: snapshots and backups each keep a content-addressed, refcounted
+  store beside the project data; the two stores had two copies of the same
+  blob code, now one. The retention rules (which snapshots go when over
+  budget, when a backup is skipped, which backups a policy keeps) are pure
+  functions. History serves its own routes (`protocol/history.contract.json`)
+  and is told about destructive changes and the daily sweep through hooks.
+- The rule for a file path used as a key (in History's indexes and in
+  comments) is Workspace's.
+- Browser: this browser's own snapshot store, History's server calls and the
+  line diff; the dialogs still live in `app/features` and call History.
 
 ### v0.1.41: restructure step 7c-2 (Sync in the browser, Sync's routes and contract)
 

@@ -3,8 +3,8 @@
 // comparing the open file with a snapshot.
 // main.js creates this on first use and passes its shared values in `app`.
 import { getPath, isTextFileName } from "../domain/project-model.js";
-import { createFileSnapshot, deleteVersion, diffLines, getVersionContent, listFileVersions, listSnapshotPaths } from "../services/snapshot-service.js";
-import { createServerSnapshot, deleteServerSnapshot, getServerSnapshotContent, listServerSnapshotPaths, listServerSnapshotVersions } from "../services/sync-service.js";
+import { createFileSnapshot, createServerSnapshot, deleteServerSnapshot, deleteVersion, diffLines, getServerSnapshotContent, getVersionContent,
+  listFileVersions, listServerSnapshotPaths, listServerSnapshotVersions, listSnapshotPaths } from "../modules/history/index.js";
 
 export function createSnapshots(app) {
   // ---- Version label (S.E.N) --------------------------------------------------
