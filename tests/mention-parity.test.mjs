@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { findMentions, personaHandle } from '../app/services/persona-service.js';
 
-// The server decides which characters reply (server/conversations.py) and the
+// The server decides which characters reply (server/stilo/modules/chats, asking Characters) and the
 // browser highlights mentions; both read this table so they agree.
 const table = JSON.parse(await readFile(new URL('../spec/characters/mentions.cases.json', import.meta.url), 'utf8'));
 

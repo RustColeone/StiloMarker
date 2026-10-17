@@ -1,13 +1,11 @@
 """The server's half of the shared mention table (spec/characters/mentions.cases.json).
 The browser's half is mention-parity.test.mjs; both must pass the same cases."""
-import importlib.util, json, sys, unittest
+import json, sys, unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
-spec = importlib.util.spec_from_file_location("conversations", ROOT / "server/conversations.py")
-conversations = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(conversations)
+import stilo.modules.characters as conversations  # noqa: E402  (Chats asks Characters who was mentioned)
 TABLE = json.loads((ROOT / "spec/characters/mentions.cases.json").read_text(encoding="utf-8"))
 
 

@@ -127,7 +127,9 @@ class TransportTests(unittest.TestCase):
         spec.loader.exec_module(server)
         keys = [(m, p, prefix) for m, p, prefix, _ in server.LEGACY_ROUTES]
         self.assertEqual(len(keys), len(set(keys)))
-        self.assertIn(("POST", "/api/chats", True), keys)
+        self.assertIn(("POST", "/api/chat", False), keys)
+        self.assertFalse([p for _, p, _ in keys if p.startswith(("/api/chats", "/api/session", "/api/comments"))],
+                         "routes that moved into modules are no longer legacy")
         self.assertNotIn("/api/ping", [p for _, p, _ in keys], "ping is a data route")
 
 

@@ -1,0 +1,11 @@
+{
+  "name": "chats",
+  "level": 5,
+  "uses": ["transport", "file_types", "workspace", "characters"],
+  "owns": {
+    "names": ["chat database"],
+    "events": ["chat-message", "chat-typing", "chat-update"],
+    "routes": ["/api/chats*"],
+    "rules": ["who answers in a chat", "reply claims"]
+  }
+}

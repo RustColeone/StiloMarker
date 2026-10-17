@@ -24,11 +24,10 @@ import sys
 _mcp_module_dir = str(Path(__file__).resolve().parent)
 if _mcp_module_dir not in sys.path:
     sys.path.insert(0, _mcp_module_dir)
-from conversations import (SIDE_FILES as CHAT_DB_FILES, ProjectChats, ReplyQueue, char_key, find_mentions,
-                           persona_handle, persona_header, persona_summary, user_key)
+from stilo.modules.chats import DB_FILES as CHAT_DB_FILES, open_chats
 from stilo.kernel import start_modules
 from stilo.modules import (assistant as assistant_module, characters as characters_module, file_types as file_types_module,
-                           identity as identity_module, models as models_module, sync as sync_module, history as history_module, comments as comments_module, transport as transport_module, workspace as workspace_module)
+                           identity as identity_module, models as models_module, sync as sync_module, history as history_module, comments as comments_module, chats as chats_module, transport as transport_module, workspace as workspace_module)
 from stilo.modules.file_types import BUILTIN as FILE_TYPES
 from stilo.kernel.log import log as _log
 from stilo.modules.workspace import (append_node, atomic_write as _atomic_write, create_id, decode_data_url, default_project,
@@ -37,7 +36,8 @@ from stilo.modules.workspace import (append_node, atomic_write as _atomic_write,
                                      utf16_length as _utf16_length)
 from stilo.modules.workspace import FolderStore, LiveProject, StateFile, bump_edit_counters
 from stilo.modules.sync import PARTS as SYNC_PARTS, VERSION as SYNC_LEVEL, SharedWorkspace, announce as sync_announce
-from stilo.modules.characters import character_instructions, characters_view, notes_mode, split_author_notes
+from stilo.modules.characters import (character_instructions, characters_view, notes_mode, persona_header, persona_summary,
+                                     split_author_notes)
 from stilo.modules.assistant import AGENT_TOOLS, propose_edit
 from stilo.modules.comments import COMMENTS_FILE, open_comments
 from stilo.modules.history import open_history
@@ -47,7 +47,7 @@ from stilo.modules.models import IMAGE_SIZES, GeneratedImages, MCPManager, MCPTu
 
 def start_server_modules():
     """The server's modules (docs/ARCHITECTURE.md); more join as the restructure moves code."""
-    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE, identity_module.MODULE, models_module.MODULE, sync_module.MODULE, characters_module.MODULE, history_module.MODULE, comments_module.MODULE, assistant_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"))
+    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE, identity_module.MODULE, models_module.MODULE, sync_module.MODULE, characters_module.MODULE, history_module.MODULE, comments_module.MODULE, chats_module.MODULE, assistant_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"))
 
 
 def _truthy(value: str | None) -> bool:
@@ -1113,18 +1113,12 @@ class WorkspaceRegistry:
     def __init__(self, pin: str, legacy_state_file: Path, master_pin: str | None = None,
                  accounts: "AccountStore | None" = None, data_dir: Path | None = None):
         self.lock = threading.RLock()
-        self._chat_stores: dict[str, ProjectChats] = {}  # workspace id -> its chats database
-        self._chat_stores_lock = threading.Lock()
-        self.on_chat_message = None  # (registry, team, relpath, conversation, message, identity, options) -> list
-        self.chat_proxy = None       # set by build_server; characters' replies use it
-        self.chat_replies = ReplyQueue(self._run_chat_reply)
-        self._chat_claims: dict = {}  # (workspace, conversation, trigger, character) -> claim
-        self._chat_claims_lock = threading.Lock()
         self.pin = pin
         self.master_pin = master_pin or pin
         self.identity = open_identity(accounts, data_dir)
         self.history = open_history(data_dir, self)
         self.comments = open_comments(self)
+        self.chats = open_chats(self)  # its runner (the agent) is set by build_server
         self.data_dir = data_dir
         self.brokers: dict[str, CollaborationBroker] = {}
         self.token_workspace: dict[str, str] = {}
@@ -1200,7 +1194,7 @@ class WorkspaceRegistry:
             except (OSError, ValueError, json.JSONDecodeError) as error:
                 _log("WORKSPACE", f"Migration failed for {team}/{name}: {error}")
         broker.on_before_destructive = self.backup_before_destructive  # safety backups
-        broker.on_paths_moved = self._chat_paths_moved
+        broker.on_paths_moved = self.chats.paths_moved
         return broker
 
     def list_workspaces(self, token: str) -> list[dict]:
@@ -1327,30 +1321,8 @@ class WorkspaceRegistry:
     def backup_sweep(self, now=None):
         """Daily backups for every live workspace that changed since its last one."""
         made = self.history.sweep(now)
-        self._backup_chats(now)
+        self.chats.backup(lambda team, relpath: self.history.backups.store(team, relpath).folder / "chats", now)
         return made
-
-    CHAT_BACKUP_DAYS = 14
-
-    def _backup_chats(self, now=None):
-        """A daily copy of each open project's chats, on days they changed."""
-        if self.data_dir is None:
-            return
-        day = time.strftime("%Y-%m-%d", time.gmtime(time.time() if now is None else now))
-        with self._chat_stores_lock:
-            stores = list(self._chat_stores.items())
-        for workspace_id, store in stores:
-            if getattr(store, "backed_up_version", None) == store.version:
-                continue
-            team, relpath = workspace_id.split("/", 1)
-            try:
-                folder = self.data_dir / "_backups" / team / relpath / "chats"
-                store.backup_to(folder / f"{day}.sqlite")
-                store.backed_up_version = store.version
-                for old in sorted(folder.glob("*.sqlite"))[:-self.CHAT_BACKUP_DAYS]:
-                    old.unlink(missing_ok=True)
-            except Exception as error:  # noqa: BLE001
-                _log("BACKUP", f"chat backup failed for {workspace_id}: {error}")
 
     # ---- Per-user resume state (which files a user had open) -------------------
     def read_user_state(self, team: str, relpath: str, username: str) -> dict:
@@ -1549,49 +1521,14 @@ class WorkspaceRegistry:
             # session can't recreate files after the tree is gone.
             for wid in [w for w in self.brokers if w == workspace_id or w.startswith(workspace_id + "/")]:
                 self.brokers.pop(wid, None)
-            self._close_chat_stores(workspace_id)
+            self.chats.close(workspace_id)
             shutil.rmtree(target)
         _log("WORKSPACE", f"{identity['username']} deleted {workspace_id}")
         return {"team": team, "path": relpath, "deleted": True}
 
-    # ---- Chats: conversations between a project's people and characters --------
-    # One SQLite database per project (server/conversations.py). Everything needs
-    # a signed-in account with access to the project; a conversation's contents
-    # only ever go to its members.
-
-    def chat_store(self, team: str, relpath: str) -> ProjectChats:
-        workspace_id = f"{team}/{relpath}"
-        with self._chat_stores_lock:
-            store = self._chat_stores.get(workspace_id)
-            if store is None:
-                store = ProjectChats(self._abs_under_team(team, relpath) / CHAT_DB_FILES[0])
-                self._chat_stores[workspace_id] = store
-            return store
-
-    def _close_chat_stores(self, workspace_id: str = None) -> None:
-        with self._chat_stores_lock:
-            for wid in [w for w in self._chat_stores if workspace_id is None or w == workspace_id or w.startswith(workspace_id + "/")]:
-                try:
-                    self._chat_stores.pop(wid).close()
-                except Exception:  # noqa: BLE001
-                    pass
-
-    def _chat_paths_moved(self, broker, old_path: str, new_path: str) -> None:
-        workspace_id = self._workspace_id_of(broker)
-        if not workspace_id or "/" not in workspace_id:
-            return
-        team, relpath = workspace_id.split("/", 1)
-        db_path = self._abs_under_team(team, relpath) / CHAT_DB_FILES[0]
-        if not db_path.exists() and workspace_id not in self._chat_stores:
-            return  # no chats yet: nothing to follow
-        if self.chat_store(team, relpath).rename_character_paths(old_path, new_path):
-            broker._broadcast({"type": "chat-update", "reason": "characters-moved", "serverTime": time.time()})
-
-    def _chat_context(self, token: str, team: str, path: str):
-        identity, team, relpath = self.authorize_project(token, team, path)
-        return identity, team, relpath, self.chat_store(team, relpath), user_key(identity["username"])
-
-    def _project_snapshot(self, team: str, relpath: str) -> dict:
+    # ---- Chats' port (server/stilo/modules/chats/service/desk.py) -----------------
+    def project_copy(self, team: str, relpath: str) -> dict:
+        """A copy of the project: the live one, or read from its folder."""
         broker = self.get_broker(f"{team}/{relpath}")
         if broker is None:
             broker = CollaborationBroker(self.pin, None, master_pin=self.master_pin,
@@ -1599,367 +1536,10 @@ class WorkspaceRegistry:
         with broker.lock:
             return copy.deepcopy(broker.project)
 
-    @staticmethod
-    def _persona_name(content: str, path: str) -> str:
-        match = re.match(r"\ufeff?---[ \t]*\r?\n([\s\S]*?)\r?\n---", str(content or ""))
-        if match:
-            for line in match.group(1).splitlines():
-                key, _, value = line.partition(":")
-                if key.strip().lower() == "name":
-                    value = re.sub(r"\s+#.*$", "", value.strip()).strip().strip('"\'')
-                    if value:
-                        return value[:80]
-        base = path.rsplit("/", 1)[-1]
-        return FILE_TYPES.base_name(base) if FILE_TYPES.is_type(base, "persona") else base
-
-    def chat_characters(self, team: str, relpath: str, project: dict | None = None) -> list[dict]:
-        project = project or self._project_snapshot(team, relpath)
-        out = []
-        for node_id, node in project.get("nodes", {}).items():
-            name = node.get("name", "")
-            if node.get("kind") != "file" or not FILE_TYPES.is_type(name, "persona"):
-                continue
-            path = self._node_path(project, node_id)
-            out.append({"key": char_key(path), "path": path, "name": self._persona_name(node.get("content", ""), path),
-                        "handle": persona_handle(path), "content": node.get("content", "")})
-        return sorted(out, key=lambda c: c["name"].lower())
-
-    @staticmethod
-    def _node_path(project: dict, node_id: str) -> str:
-        nodes, parts = project.get("nodes", {}), []
-        while node_id and node_id in nodes and nodes[node_id].get("parentId") is not None:
-            parts.append(nodes[node_id]["name"])
-            node_id = nodes[node_id].get("parentId")
-        return "/".join(reversed(parts))
-
-    def chat_people(self, team: str, relpath: str) -> list[dict]:
-        broker = self.get_broker(f"{team}/{relpath}")
-        online = set()
-        if broker is not None:
-            with broker.lock:
-                online = {entry.get("user") for entry in broker.presence.values() if entry.get("user")}
-        people = []
-        for username in sorted(self.identity.team_members(team), key=str.lower):
-            identity = self.identity.member(username)
-            if self.can_access(identity, team, relpath):
-                people.append({"key": user_key(username), "username": username, "name": username,
-                               "online": username in online})
-        return people
-
-    def chats_overview(self, token: str, team: str, path: str) -> dict:
-        identity, team, relpath, store, me = self._chat_context(token, team, path)
-        characters = [{k: v for k, v in c.items() if k != "content"} for c in self.chat_characters(team, relpath)]
-        return {"me": me, "conversations": store.list_for(me), "people": self.chat_people(team, relpath),
-                "characters": characters, "notes": store.notes_for(me)}
-
-    def chats_messages(self, token, team, path, conversation_id, before=None, after=None) -> dict:
-        _, team, relpath, store, me = self._chat_context(token, team, path)
-        return {"conversation": store.get(me, conversation_id),
-                "messages": store.messages(me, conversation_id, before=before, after=after)}
-
-    def _validate_chat_members(self, team: str, relpath: str, keys) -> list[str]:
-        """Only people with access and characters that exist may join a chat."""
-        people = {p["key"] for p in self.chat_people(team, relpath)}
-        characters = {c["key"] for c in self.chat_characters(team, relpath)}
-        out = []
-        for key in keys or []:
-            key = str(key)
-            if key not in people and key not in characters:
-                raise ValueError("Someone you picked isn't in this project")
-            out.append(key)
-        return out
-
-    def _chat_notify(self, team: str, relpath: str, store: ProjectChats, conversation_id, event: dict) -> None:
-        broker = self.get_broker(f"{team}/{relpath}")
-        if broker is None:
-            return
-        users = [key[5:] for key in store.members(conversation_id) if key.startswith("user:")]
-        try:
-            broker._broadcast_to_users(users, {**event, "conversationId": int(conversation_id), "serverTime": time.time()})
-        except Exception:  # noqa: BLE001 — a broadcast never fails the write that caused it
-            pass
-
-    def chats_start(self, token, team, path, members) -> dict:
-        _, team, relpath, store, me = self._chat_context(token, team, path)
-        conversation, created = store.start(me, self._validate_chat_members(team, relpath, members))
-        if created:
-            self._chat_notify(team, relpath, store, conversation["id"], {"type": "chat-update", "reason": "created"})
-        return {"conversation": conversation, "created": created}
-
-    def chats_send(self, token, team, path, conversation_id, content, context_paths=None, options=None) -> dict:
-        identity, team, relpath, store, me = self._chat_context(token, team, path)
-        message = store.send(me, conversation_id, content, identity["username"], context_paths)
-        self._chat_notify(team, relpath, store, conversation_id, {"type": "chat-message", "message": message})
-        conversation = store.get(me, conversation_id)
-        hook = self.on_chat_message or self._queue_chat_replies
-        options = dict(options or {})
-        replies = hook(self, team, relpath, conversation, message, identity, options) or []
-        return {"message": message, "conversation": conversation, "replies": replies, "claims": options.get("claims", [])}
-
-    # ---- characters' replies -----------------------------------------------------
-    # In a private chat with a character, it answers every message; in a group,
-    # the characters @mentioned answer (@all = every character), one after
-    # another. Replies run on the server (default) and stream to every member.
-
-    def chat_responders(self, conversation: dict, message: dict, characters: list[dict]) -> list[str]:
-        members = conversation["members"]
-        cast = [c for c in characters if c["key"] in members]
-        if conversation["kind"] == "pair":
-            return [c["key"] for c in cast]
-        handles = find_mentions(message["content"], [c["handle"] for c in cast])
-        by_handle = {c["handle"]: c["key"] for c in cast}
-        return [by_handle[h] for h in handles if h in by_handle]
-
-    @staticmethod
-    def _queue_chat_replies(registry, team, relpath, conversation, message, identity, options):
-        if not message["author"].startswith("user:"):
-            return []
-        characters = registry.chat_characters(team, relpath)
-        responders = registry.chat_responders(conversation, message, characters)
-        if not responders:
-            return []
-        if options.get("runner") == "client":
-            return registry._claim_chat_replies(team, relpath, conversation, message, identity, characters, responders, options)
-        if registry.chat_proxy is None:
-            return []
-        jobs = [{"team": team, "relpath": relpath, "conversation": conversation["id"], "character": key,
-                 "trigger": message["id"], "model": options.get("model"), "identity": identity}
-                for key in responders]
-        accepted = registry.chat_replies.submit(f"{team}/{relpath}#{conversation['id']}", jobs)
-        store = registry.chat_store(team, relpath)
-        for job in accepted:  # everyone sees who is about to answer
-            name = next((c["name"] for c in characters if c["key"] == job["character"]), "")
-            registry._chat_notify(team, relpath, store, conversation["id"],
-                                  {"type": "chat-typing", "character": job["character"], "name": name, "state": "queued", "text": ""})
-        return [job["character"] for job in accepted]
-
-    TYPING_INTERVAL = 0.25  # seconds between live updates of a reply being written
-    CLAIM_SECONDS = 60      # a browser writing a reply must report progress at least this often
-
-    # ---- replies written by a member's own browser (their key / a local model) ----
-    # The server doesn't call a model: it records that this person's browser will
-    # write these replies ("claims"), hands it the prompt, relays its progress to
-    # the other members, and stores the result. A claim that goes quiet expires.
-
-    def _claim_chat_replies(self, team, relpath, conversation, message, identity, characters, responders, options):
-        store = self.chat_store(team, relpath)
-        claims = []
-        with self._chat_claims_lock:
-            for key in responders:
-                claim_key = (f"{team}/{relpath}", conversation["id"], message["id"], key)
-                if claim_key in self._chat_claims:
-                    continue
-                name = next((c["name"] for c in characters if c["key"] == key), "")
-                self._chat_claims[claim_key] = {"user": identity["username"], "touched": time.monotonic(), "text": "", "name": name}
-                claims.append({"character": key, "trigger": message["id"], "name": name})
-        for claim in claims:
-            self._chat_notify(team, relpath, store, conversation["id"], {"type": "chat-typing", "character": claim["character"],
-                                                                         "name": claim["name"], "state": "queued", "text": ""})
-        options["claims"] = claims
-        return [claim["character"] for claim in claims]
-
-    def _my_claim(self, team, relpath, cid, trigger, char, username) -> dict:
-        claim = self._chat_claims.get((f"{team}/{relpath}", int(cid), int(trigger), str(char)))
-        if claim is None or claim["user"] != username:
-            raise LookupError("That reply isn't yours to write (or it timed out)")
-        return claim
-
-    def chats_prompt(self, token, team, path, conversation_id, character, trigger) -> dict:
-        identity, team, relpath, store, me = self._chat_context(token, team, path)
-        store.get(me, conversation_id)  # members only
-        with self._chat_claims_lock:
-            claim = self._my_claim(team, relpath, conversation_id, trigger, character, identity["username"])
-            claim["touched"] = time.monotonic()
-        context = self._reply_context(team, relpath, int(conversation_id), str(character), int(trigger))
-        if context is None or self.chat_proxy is None:
-            raise LookupError("That character is no longer in this chat")
-        payload, _ = self.chat_proxy.build_persona_payload(
-            context["transcript"], context["context_files"], relpath.rsplit("/", 1)[-1], context["project"],
-            context["persona"], context["cast"], "")
-        for key in ("model", "thinking", "reasoning_effort"):
-            payload.pop(key, None)
-        return {"payload": payload, "name": context["character"]["name"]}
-
-    def chats_typing(self, token, team, path, conversation_id, character, trigger, text, state="writing") -> dict:
-        identity, team, relpath, store, me = self._chat_context(token, team, path)
-        with self._chat_claims_lock:
-            claim = self._my_claim(team, relpath, conversation_id, trigger, character, identity["username"])
-            claim.update(touched=time.monotonic(), text=str(text or "")[:16000])
-        self._chat_notify(team, relpath, store, conversation_id, {"type": "chat-typing", "character": str(character),
-                                                                  "name": claim["name"], "state": "reading" if state == "reading" else "writing",
-                                                                  "text": claim["text"]})
-        return {"ok": True}
-
-    def chats_reply(self, token, team, path, conversation_id, character, trigger, content, state="done") -> dict:
-        identity, team, relpath, store, me = self._chat_context(token, team, path)
-        with self._chat_claims_lock:
-            claim = self._my_claim(team, relpath, conversation_id, trigger, character, identity["username"])
-            self._chat_claims.pop((f"{team}/{relpath}", int(conversation_id), int(trigger), str(character)), None)
-        state = state if state in ("done", "interrupted", "error") else "done"
-        text = str(content or "").strip() or ("(stopped before replying)" if state != "done" else "")
-        if not text:
-            raise ValueError("The reply is empty")
-        message = store.post_as(int(conversation_id), str(character), claim["name"], text, state)
-        self._chat_notify(team, relpath, store, conversation_id, {"type": "chat-typing", "character": str(character), "state": "end", "text": ""})
-        self._chat_notify(team, relpath, store, conversation_id, {"type": "chat-message", "message": message})
-        return {"message": message}
-
-    def expire_chat_claims(self, now=None) -> int:
-        """Replies whose browser went away: keep what was written, marked stopped."""
-        now = time.monotonic() if now is None else now
-        with self._chat_claims_lock:
-            stale = [(key, claim) for key, claim in self._chat_claims.items() if now - claim["touched"] > self.CLAIM_SECONDS]
-            for key, _ in stale:
-                self._chat_claims.pop(key, None)
-        for (workspace_id, cid, _, char), claim in stale:
-            team, relpath = workspace_id.split("/", 1)
-            try:
-                store = self.chat_store(team, relpath)
-                message = store.post_as(cid, char, claim["name"], claim["text"].strip() or "(the reply was interrupted)", "interrupted")
-                self._chat_notify(team, relpath, store, cid, {"type": "chat-typing", "character": char, "state": "end", "text": ""})
-                self._chat_notify(team, relpath, store, cid, {"type": "chat-message", "message": message})
-            except Exception as error:  # noqa: BLE001
-                _log("CHATS", f"could not close an expired reply: {error}")
-        return len(stale)
-
-    def _reply_context(self, team, relpath, cid, char, trigger_id) -> dict | None:
-        """What a character's reply is built from: their sheet, the others in
-        the chat, this conversation as the transcript, the files attached to the
-        message that asked, and the project. None if the character is gone."""
-        store = self.chat_store(team, relpath)
-        project = self._project_snapshot(team, relpath)
-        characters = self.chat_characters(team, relpath, project)
-        character = next((c for c in characters if c["key"] == char), None)
-        members = store.members(cid)
-        if character is None or char not in members:
-            return None
-        names = {c["key"]: c["name"] for c in characters}
-        transcript = [{"name": names.get(m["author"], m["authorName"] or m["author"].split(":", 1)[-1]),
-                       "content": m["content"], "self": m["author"] == char}
-                      for m in store.history(cid) if m["state"] == "done"]
-        cast = [{"name": c["name"], "summary": persona_summary(split_author_notes(persona_header(c["content"])["body"])["sheet"])}
-                for c in characters if c["key"] in members]
-        trigger = store.message(trigger_id) or {}
-        context_files = []
-        for path in trigger.get("contextPaths", []):
-            node_id = ChatProxy._get_node_id_by_path_in(project, path)
-            node = project.get("nodes", {}).get(node_id) if node_id else None
-            if node and node.get("kind") == "file":
-                context_files.append({"path": path, "kind": "image" if FILE_TYPES.is_image(node.get("name", "")) else "text",
-                                      "content": "" if FILE_TYPES.is_image(node.get("name", "")) else node.get("content", "")})
-        header = persona_header(character["content"])["header"]
-        return {"store": store, "project": project, "character": character, "transcript": transcript, "cast": cast,
-                "context_files": context_files,
-                "persona": {"path": character["path"], "name": character["name"], "content": character["content"],
-                            "temperature": header.get("temperature")}}
-
-    def _run_chat_reply(self, job: dict, cancelled) -> None:
-        team, relpath, cid, char = job["team"], job["relpath"], job["conversation"], job["character"]
-        context = self._reply_context(team, relpath, cid, char, job["trigger"])
-        store = self.chat_store(team, relpath)
-        if context is None:
-            self._chat_notify(team, relpath, store, cid, {"type": "chat-typing", "character": char, "state": "end", "text": ""})
-            return
-        project, character = context["project"], context["character"]
-        transcript, cast, context_files = context["transcript"], context["cast"], context["context_files"]
-        state = {"text": "", "last": 0.0}
-
-        def typing(text_state="writing"):
-            self._chat_notify(team, relpath, store, cid, {"type": "chat-typing", "character": char, "name": character["name"],
-                                                          "state": text_state, "text": state["text"]})
-
-        def progress(event):
-            if event.get("type") == "status":
-                state["text"] = ""
-            elif event.get("type") == "delta":
-                state["text"] += event.get("text", "")
-            elif event.get("type") != "tool":
-                return
-            now = time.monotonic()
-            if now - state["last"] >= self.TYPING_INTERVAL:
-                state["last"] = now
-                typing("reading" if event.get("type") == "tool" else "writing")
-
-        typing("writing")
-        try:
-            if self.chat_proxy is None:
-                raise RuntimeError("Replies are not available on this server.")
-            result = self.chat_proxy.chat(
-                transcript, context_files, relpath.rsplit("/", 1)[-1], project, progress=progress,
-                model=job.get("model"), cancelled=cancelled, identity=job.get("identity"),
-                persona=context["persona"], cast=cast)
-            message = store.post_as(cid, char, character["name"], result["message"])
-        except Exception as error:  # noqa: BLE001 — the failure becomes a visible message
-            partial = state["text"].strip()
-            if cancelled():
-                content, outcome = (partial or "(stopped before replying)"), "interrupted"
-            else:
-                content, outcome = f"{character['name']} could not reply: {error}", "error"
-            message = store.post_as(cid, char, character["name"], content, outcome)
-        typing("end")
-        self._chat_notify(team, relpath, store, cid, {"type": "chat-message", "message": message})
-
-    def chats_import(self, token, team, path, title, characters, messages) -> dict:
-        """One old Roleplay group chat (from the agent's thread list) becomes a
-        group conversation of the importer and its characters."""
-        identity, team, relpath, store, me = self._chat_context(token, team, path)
-        existing = {c["path"] for c in self.chat_characters(team, relpath)}
-        members = [char_key(p) for p in dict.fromkeys(str(p) for p in (characters or [])) if p in existing]
-        rows = []
-        for message in (messages or [])[:5000]:
-            if not isinstance(message, dict):
-                continue
-            role, speaker = message.get("role"), str(message.get("speaker") or "")
-            if role == "user":
-                author, name = me, str(message.get("authorName") or identity["username"])
-            elif role == "assistant" and char_key(speaker) in members:
-                author, name = char_key(speaker), str(message.get("speakerName") or "")
-            else:
-                continue
-            created = message.get("createdAt")
-            rows.append({"author": author, "author_name": name, "content": str(message.get("content", "")),
-                         "created_at": (float(created) / 1000 if isinstance(created, (int, float)) and created > 1e11 else created),
-                         "state": "interrupted" if message.get("interrupted") else "done"})
-        conversation = store.import_group(me, str(title or "")[:120], members, rows)
-        return {"conversation": conversation}
-
-    def chats_stop(self, token, team, path, conversation_id) -> dict:
-        _, team, relpath, store, me = self._chat_context(token, team, path)
-        store.get(me, conversation_id)  # members only
-        return {"stopped": self.chat_replies.cancel(f"{team}/{relpath}#{int(conversation_id)}")}
-
-    def chats_invite(self, token, team, path, conversation_id, members) -> dict:
-        _, team, relpath, store, me = self._chat_context(token, team, path)
-        conversation, created = store.invite(me, conversation_id, self._validate_chat_members(team, relpath, members))
-        self._chat_notify(team, relpath, store, conversation["id"], {"type": "chat-update", "reason": "members"})
-        return {"conversation": conversation, "created": created}
-
-    def chats_leave(self, token, team, path, conversation_id) -> dict:
-        _, team, relpath, store, me = self._chat_context(token, team, path)
-        store.leave(me, conversation_id)
-        self._chat_notify(team, relpath, store, conversation_id, {"type": "chat-update", "reason": "members"})
-        return {"left": True}
-
-    def chats_rename(self, token, team, path, conversation_id, title) -> dict:
-        _, team, relpath, store, me = self._chat_context(token, team, path)
-        conversation = store.rename(me, conversation_id, title)
-        self._chat_notify(team, relpath, store, conversation_id, {"type": "chat-update", "reason": "title"})
-        return {"conversation": conversation}
-
-    def chats_read(self, token, team, path, conversation_id, message_id) -> dict:
-        _, team, relpath, store, me = self._chat_context(token, team, path)
-        store.mark_read(me, conversation_id, message_id)
-        return {"conversation": store.get(me, conversation_id)}
-
-    def chats_search(self, token, team, path, conversation_id, query) -> dict:
-        _, team, relpath, store, me = self._chat_context(token, team, path)
-        return {"results": store.search(me, conversation_id, query)}
-
-    def chats_note(self, token, team, path, contact, alias=None, note=None) -> dict:
-        _, team, relpath, store, me = self._chat_context(token, team, path)
-        if alias is None and note is None:
-            return store.notes_for(me).get(str(contact), {"alias": "", "note": ""})
-        return store.set_note(me, contact, alias or "", note or "")
+    def people(self, team: str, relpath: str) -> list[str]:
+        """Everyone in the team who may open this project (Chats' contacts)."""
+        return [name for name in self.identity.team_members(team)
+                if self.can_access(self.identity.member(name), team, relpath)]
 
     def export_project(self, token: str, team: str, path: str) -> dict:
         """Return a portable copy of a project as ``{name, project}`` where
@@ -2062,7 +1642,7 @@ class WorkspaceRegistry:
             self.pin, None, master_pin=self.master_pin, workspace_dir=workspace_dir
         )
         broker.on_before_destructive = self.backup_before_destructive  # safety backups
-        broker.on_paths_moved = self._chat_paths_moved
+        broker.on_paths_moved = self.chats.paths_moved
         return broker
 
     def create_workspace(self, token: str, team: str, name: str, share_team: bool = False) -> dict:
@@ -2492,73 +2072,6 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             self._log_request(400, str(error))
 
     # GET /api/chats[/messages|/search|/note]   POST /api/chats/<action>
-    _CHAT_ACTIONS = {
-        ("GET", "/api/chats"): "overview", ("GET", "/api/chats/messages"): "messages",
-        ("GET", "/api/chats/search"): "search", ("GET", "/api/chats/note"): "note-get",
-        ("POST", "/api/chats/start"): "start", ("POST", "/api/chats/send"): "send",
-        ("POST", "/api/chats/invite"): "invite", ("POST", "/api/chats/leave"): "leave",
-        ("POST", "/api/chats/rename"): "rename", ("POST", "/api/chats/read"): "read",
-        ("POST", "/api/chats/note"): "note-set", ("POST", "/api/chats/stop"): "stop",
-        ("POST", "/api/chats/import"): "import", ("POST", "/api/chats/prompt"): "prompt",
-        ("POST", "/api/chats/typing"): "typing", ("POST", "/api/chats/reply"): "reply",
-    }
-
-    def _handle_chats(self, parsed):
-        action = self._CHAT_ACTIONS.get((self.command, parsed.path.rstrip("/")))
-        if action is None:
-            return self._write_json(HTTPStatus.NOT_FOUND, {"message": "Unknown chats request"})
-        try:
-            token = self._extract_token(parsed)
-            query = {k: v[0] for k, v in parse_qs(parsed.query).items()}
-            body = self._read_json() if self.command == "POST" else {}
-            if not isinstance(body, dict):
-                raise ValueError("Expected a JSON object")
-            arg = lambda key, default=None: body.get(key, query.get(key, default))
-            team, path, cid = str(arg("team", "")), str(arg("path", "")), arg("id")
-            r = self.registry
-            if action == "overview":
-                result = r.chats_overview(token, team, path)
-            elif action == "messages":
-                result = r.chats_messages(token, team, path, cid, before=arg("before"), after=arg("after"))
-            elif action == "search":
-                result = r.chats_search(token, team, path, cid, str(arg("q", "")))
-            elif action == "note-get":
-                result = r.chats_note(token, team, path, str(arg("contact", "")))
-            elif action == "note-set":
-                result = r.chats_note(token, team, path, str(arg("contact", "")), str(arg("alias", "")), str(arg("note", "")))
-            elif action == "start":
-                result = r.chats_start(token, team, path, arg("members") or [])
-            elif action == "send":
-                result = r.chats_send(token, team, path, cid, str(arg("content", "")), arg("contextPaths") or [],
-                                      {"model": arg("model"), "runner": arg("runner"), "accountToken": token})
-            elif action == "invite":
-                result = r.chats_invite(token, team, path, cid, arg("members") or [])
-            elif action == "leave":
-                result = r.chats_leave(token, team, path, cid)
-            elif action == "rename":
-                result = r.chats_rename(token, team, path, cid, str(arg("title", "")))
-            elif action == "stop":
-                result = r.chats_stop(token, team, path, cid)
-            elif action == "prompt":
-                result = r.chats_prompt(token, team, path, cid, str(arg("character", "")), int(arg("trigger", 0) or 0))
-            elif action == "typing":
-                result = r.chats_typing(token, team, path, cid, str(arg("character", "")), int(arg("trigger", 0) or 0),
-                                        str(arg("text", "")), str(arg("state", "writing")))
-            elif action == "reply":
-                result = r.chats_reply(token, team, path, cid, str(arg("character", "")), int(arg("trigger", 0) or 0),
-                                       str(arg("content", "")), str(arg("state", "done")))
-            elif action == "import":
-                result = r.chats_import(token, team, path, arg("title", ""), arg("characters") or [], arg("messages") or [])
-            else:  # read
-                result = r.chats_read(token, team, path, cid, int(arg("messageId", 0) or 0))
-            self._write_json(HTTPStatus.OK, result)
-        except PermissionError as error:
-            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error) or "Sign in to use Chats"})
-        except LookupError as error:
-            self._write_json(HTTPStatus.NOT_FOUND, {"message": str(error.args[0]) if error.args else "Not found"})
-        except (ValueError, TypeError) as error:
-            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
-
     def _handle_set_user_state(self, parsed):
         try:
             token = self._extract_token(parsed)
@@ -2931,8 +2444,6 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
 # Each writes its own response; Transport only finds it. Modules take theirs
 # over as they move, and this list shrinks (docs/ARCHITECTURE.md).
 LEGACY_ROUTES = [
-    ("GET", "/api/chats", True, lambda h, parsed: h._handle_chats(parsed)),
-    ("POST", "/api/chats", True, lambda h, parsed: h._handle_chats(parsed)),
     ("GET", "/api/chat/status", False, lambda h, parsed: h._handle_chat_status()),
     ("GET", "/api/chat/workspace", False, lambda h, parsed: h._handle_get_chat_workspace(parsed)),
     ("GET", "/api/workspaces", False, lambda h, parsed: h._handle_list_workspaces(parsed)),
@@ -2962,7 +2473,7 @@ def build_server(host: str, port: int, pin: str, static_root: Path, state_file: 
     # Chat context falls back to the default workspace's project when the client
     # doesn't supply one — same behaviour as the pre-registry single broker.
     chat_proxy.broker = registry.default_broker
-    registry.chat_proxy = chat_proxy
+    registry.chats.runner = chat_proxy
     if data_dir is not None and chat_proxy.generated is None:
         chat_proxy.generated = GeneratedImages(Path(data_dir) / "_generated")
     modules = start_server_modules()
@@ -2971,6 +2482,7 @@ def build_server(host: str, port: int, pin: str, static_root: Path, state_file: 
     modules["sync"].serve(registry)
     modules["history"].serve(registry.history)
     modules["comments"].serve(registry.comments)
+    modules["chats"].serve(registry.chats)
     transport.add_route("GET", "/api/ping", lambda request: {
             "message": "pong",
             "server": "mdnotes",
@@ -3002,8 +2514,7 @@ def build_server(host: str, port: int, pin: str, static_root: Path, state_file: 
                 registry.backup_sweep()
             except Exception as error:  # noqa: BLE001
                 _log("BACKUP", f"shutdown backup sweep failed: {error}")
-            registry.chat_replies.shutdown()
-            registry._close_chat_stores()
+            registry.chats.shutdown()
             super().server_close()
 
     server = ServerWithPresenceSweep((host, port), handler)
@@ -3011,7 +2522,7 @@ def build_server(host: str, port: int, pin: str, static_root: Path, state_file: 
     def sweep_presence():
         while not server.presence_stop.wait(15):
             registry.expire_leases()
-            registry.expire_chat_claims()
+            registry.chats.expire_claims()
     threading.Thread(target=sweep_presence, daemon=True, name="presence-lease-sweep").start()
     def sweep_backups():
         while not server.presence_stop.wait(BACKUP_SWEEP_SECONDS):

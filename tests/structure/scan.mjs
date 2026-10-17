@@ -33,6 +33,7 @@ export const OWNED_NAMES = {
   "access file": /access\.json/,
   "account prefs file": /user-prefs\.json/,
   "comments file": /comments\.json/,
+  "chat database": /conversations\.sqlite/,
 };
 
 // Words the kernel may never contain: it knows no domain (Module design, rule 8).
