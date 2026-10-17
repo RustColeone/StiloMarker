@@ -4,6 +4,7 @@
 // app passes in what it needs through deps.
 
 import { undoSteps } from "./agent-undo.js";
+import { editsHtml, editsLabel } from "../modules/assistant/index.js";
 import { getNodeIdByPath, getPath, isImageFileName, isPersonaFileName } from "../domain/project-model.js";
 import { fetchChatStatus, fetchServerChatWorkspace, pushServerChatWorkspace, sendChatRequest } from "../services/chat-api-service.js";
 import { createChatMessage, createChatThread, deriveChatTitle, loadChatWorkspace, saveChatWorkspace } from "../services/chat-storage-service.js";
@@ -151,11 +152,10 @@ export function createChatPanel(deps) {
       const opPath = escapeHtmlAttribute(op.path ?? op.name ?? "");
       const icon = OP_ICONS[opType] ?? "?";
       const opState = op.proposalState ?? state;
-      const diffHtml = renderProposalDiff(op);
-      // A generated picture is shown outright; text changes stay folded away.
-      const diffSection = !diffHtml ? ""
-        : op.generatedImage ? diffHtml
-        : `<details class="proposal-op-diff"><summary>diff</summary><div class="proposal-op-diff-body">${diffHtml}</div></details>`;
+      // An edit_file proposal shows each edit; a generated picture is shown outright; other changes fold away.
+      const diffHtml = op.edits?.length ? editsHtml(op.edits) : renderProposalDiff(op);
+      const diffSection = !diffHtml ? "" : op.generatedImage ? diffHtml
+        : `<details class="proposal-op-diff"><summary>${op.edits?.length ? editsLabel(op.edits) : "diff"}</summary><div class="proposal-op-diff-body">${diffHtml}</div></details>`;
 
       if (opState === "stale") {
         return `<div class="proposal-op is-stale" data-proposal-id="${opId}">

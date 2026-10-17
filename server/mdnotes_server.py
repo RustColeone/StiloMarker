@@ -35,7 +35,7 @@ from conversations import (SIDE_FILES as CHAT_DB_FILES, ProjectChats, ReplyQueue
                            persona_handle, persona_header, persona_summary, user_key)
 from openai_support import IMAGE_FORMATS, IMAGE_SIZES, GeneratedImages, OpenAIProvider, is_openai_model, uses_fixed_temperature, uses_responses_api, to_responses_request, ResponsesStream
 from stilo.kernel import start_modules
-from stilo.modules import characters as characters_module, file_types as file_types_module, transport as transport_module, workspace as workspace_module
+from stilo.modules import assistant as assistant_module, characters as characters_module, file_types as file_types_module, transport as transport_module, workspace as workspace_module
 from stilo.modules.file_types import BUILTIN as FILE_TYPES
 from stilo.kernel.log import log as _log
 from stilo.modules.workspace import (append_node, atomic_write as _atomic_write, create_id, decode_data_url, default_project,
@@ -44,11 +44,12 @@ from stilo.modules.workspace import (append_node, atomic_write as _atomic_write,
                                      utf16_length as _utf16_length)
 from stilo.modules.workspace import FolderStore
 from stilo.modules.characters import character_instructions, characters_view, notes_mode, split_author_notes
+from stilo.modules.assistant import AGENT_TOOLS, propose_edit
 
 
 def start_server_modules():
     """The server's modules (docs/ARCHITECTURE.md); more join as the restructure moves code."""
-    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE, characters_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"))
+    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE, characters_module.MODULE, assistant_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"))
 
 
 
@@ -284,122 +285,8 @@ class ChatProxy:
 
     @staticmethod
     def _get_tool_schemas() -> list:
-        """OpenAI function-calling tool definitions for the agent."""
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": "list_files",
-                    "description": "List all files and folders in the workspace with their paths and types.",
-                    "parameters": {"type": "object", "properties": {}, "required": []},
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "read_file",
-                    "description": "Read the full content of a file at the given path.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string", "description": "Path to the file, e.g. 'folder/notes.md'"},
-                        },
-                        "required": ["path"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "create_file",
-                    "description": "Propose creating a new file with the given content.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "parentPath": {"type": "string", "description": "Parent folder path; empty string for root."},
-                            "name": {"type": "string", "description": "File name including extension."},
-                            "content": {"type": "string", "description": "Initial file content."},
-                        },
-                        "required": ["name", "content"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "update_file",
-                    "description": "Propose replacing the entire content of an existing file.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string", "description": "Path to the file."},
-                            "content": {"type": "string", "description": "New full content for the file."},
-                        },
-                        "required": ["path", "content"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "rename_node",
-                    "description": "Propose renaming a file or folder.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string", "description": "Current path of the file or folder."},
-                            "name": {"type": "string", "description": "New name."},
-                        },
-                        "required": ["path", "name"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "delete_node",
-                    "description": "Propose deleting a file or folder (recursive for folders).",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string", "description": "Path of the file or folder to delete."},
-                        },
-                        "required": ["path"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "create_folder",
-                    "description": "Propose creating a new folder.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "parentPath": {"type": "string", "description": "Parent folder path; empty string for root."},
-                            "name": {"type": "string", "description": "Folder name."},
-                        },
-                        "required": ["name"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "move_node",
-                    "description": "Propose moving a file or folder to a different parent.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "path": {"type": "string", "description": "Current path of the item."},
-                            "parentPath": {"type": "string", "description": "Destination parent folder path; empty for root."},
-                            "index": {"type": "integer", "description": "Optional insertion index within the new parent."},
-                        },
-                        "required": ["path", "parentPath"],
-                    },
-                },
-            },
-        ]
+        """The agent's tools (Assistant module)."""
+        return copy.deepcopy(AGENT_TOOLS)
 
     @staticmethod
     def _walk_project_tree(project: dict) -> list:
@@ -703,6 +590,9 @@ class ChatProxy:
             })
             return {"status": "proposed", "proposalId": proposal_id}
 
+        if name == "edit_file":
+            return propose_edit(project_snapshot, proposed_operations, args.get("path"), args.get("edits"), proposal_id)
+
         if name == "update_file":
             path = str(args.get("path", "")).strip()
             node_id = self._get_node_id_by_path_in(project_snapshot, path)
@@ -888,10 +778,11 @@ class ChatProxy:
             "1. Before editing a file, call read_file to load its current content; "
             "call list_files when you are unsure which files exist. Never invent file "
             "paths — only reference files shown in the workspace file tree.\n"
-            "2. To change a file, call update_file with the COMPLETE new content "
-            "(whole-file replace). Preserve the parts the user did not ask you to "
-            "change — keep their headings, ordering, and prose intact and only edit "
-            "what the request calls for. Use create_file for genuinely new files.\n"
+            "2. To change part of a file, call edit_file with the exact passages to "
+            "change (copied from read_file) and what they become; everything else stays "
+            "as the author wrote it. Use update_file only to restructure most of a file, "
+            "and create_file for genuinely new files. Character files are always edited "
+            "with edit_file.\n"
             "3. Write clean GitHub-flavored Markdown: a single top-level '# Title', "
             "properly nested '##'/'###' headings, fenced code blocks with a language "
             "tag, '-' bullet lists, '1.' ordered lists, '- [ ]' task lists, and "

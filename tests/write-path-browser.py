@@ -103,10 +103,12 @@ async def converge(pages, want, timeout=15):
     raise AssertionError(f"files {files}; did not converge on {want!r}: browsers {got!r}, disk {DISK.read_text(encoding='utf-8') if DISK.exists() else None!r}")
 
 
-async def agent_edit(page, base, content, batch):
-    """Anna asks her agent; it proposes `content` for notes.md, computed from `base`."""
-    AGENT["next"] = {"message": "Edited.", "batchId": batch, "contextPaths": [], "proposedOperations": [
-        {"proposalId": f"{batch}-op", "type": "update-file", "path": "notes.md", "content": content, "preImage": base}]}
+async def agent_edit(page, base, content, batch, edits=None):
+    """Anna asks her agent; it proposes `content` for notes.md, computed from `base`
+    (with `edits`, as edit_file proposes it: the full text plus each change)."""
+    op = {"proposalId": f"{batch}-op", "type": "update-file", "path": "notes.md", "content": content, "preImage": base}
+    if edits: op["edits"] = edits
+    AGENT["next"] = {"message": "Edited.", "batchId": batch, "contextPaths": [], "proposedOperations": [op]}
     await page.locator("#chat-input").fill("Edit notes")
     await page.locator("#chat-input").press("Enter")
     await page.wait_for_function(f'window.__chatInternals?.chatState.threads.some((t) => t.messages.some((m) => m.batchId === "{batch}" && m.proposalState))', timeout=15000)
@@ -156,6 +158,17 @@ async def main():
         state = await a.evaluate('window.__chatInternals.chatState.threads.flatMap((t) => t.messages).find((m) => m.batchId === "b2").proposedOperations[0].proposalState')
         assert state == "stale", state
         ok("an agent edit to a line Bob changed is refused instead of overwriting him")
+
+        # edit_file: the card shows the edit, and it merges like any other.
+        await bb.evaluate('window.__w.workspace.write("notes.md", window.__w.controller.getActiveFile().content.replace("one", "one (bob)"))')
+        await converge([a, bb], bobs.replace("one", "one (bob)"))
+        await agent_edit(a, bobs, bobs.replace("four", "FOUR (edited)"), "b3", edits=[{"find": "four", "replace": "FOUR (edited)"}])
+        await converge([a, bb], bobs.replace("one", "one (bob)").replace("four", "FOUR (edited)"))
+        summary = await a.locator('.proposal-op-diff summary').last.inner_text()
+        found = await a.locator('.proposal-edit del').last.text_content() if await a.locator('.proposal-edit del').count() else None
+        replaced = await a.locator('.proposal-edit ins').last.text_content() if await a.locator('.proposal-edit ins').count() else None
+        assert (summary, found, replaced) == ("1 edit", "four", "FOUR (edited)"), (summary, found, replaced)
+        ok("an edit_file proposal shows each edit in its card and merges with Bob's typing")
 
         # A Snapshots-style restore (a whole text) goes out as a patch too.
         await a.evaluate(f'window.__w.workspace.write("notes.md", {json.dumps(ORIGINAL)}, {{ source: "snapshot restore" }})')

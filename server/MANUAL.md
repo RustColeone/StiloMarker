@@ -598,7 +598,7 @@ When a user asks you (the agent) to make a character file from their writing:
 When a user asks you to update a character file after new writing:
 
 1. Read the character file and the new writing first.
-2. Change only what the new writing changes. Keep the author's wording everywhere else, including the example lines. (Until there is a tool for editing part of a file, send the complete file with `update_file`, unchanged except for those parts.)
+2. Change only what the new writing changes, with `edit_file`: each edit names an exact passage (copied from the file) and what it becomes. Keep the author's wording everywhere else, including the example lines.
 3. Never change `## Author's notes`, except to remove a plan once the writing has made it happen; then add the event to the sheet in the past tense, with the chapter it happened in.
 4. Write new facts with where they come from, e.g. "(chapter 4)", so a later update can tell writing from inference.
 5. When the writing contradicts the sheet, do not choose: leave that point unchanged and ask the author which is true.
