@@ -589,3 +589,25 @@ browser suites (new: `identity-browser.py`).
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T040757Z-v0.1.38`.
 Nine project manifests valid, 170/170 files.
+
+## Verified release: v0.1.39
+
+Deployed on 2026-10-17 at 06:02 UTC. Module restructure step 7b: Models on
+both ends (providers, routes per request, both streams, generated images,
+MCP; in the browser the direct runner and the picker), and a fix: a
+session keeps its role when its event stream drops and comes back. App
+version `0.1.39`; sync compatibility unchanged at `117`.
+
+Public checks: ping (`0.1.39`), the journal shows the kernel starting
+models and the OpenAI catalog ready (gpt-6.1-sol, gpt-6-luna, gpt-image-2),
+no errors. The status lists DeepSeek and OpenAI models with images on. Live
+with the real models, signed in as `test`: the agent on deepseek-flash and on
+gpt-6.1-sol (through the Responses API) each streamed and proposed one
+`edit_file` edit, with the right provider in the reply; a character turn on
+each answered in character; Quick Generate (no streaming) returned a
+document from deepseek-flash. Validation: 219 Node tests (new: Models in the
+browser), all Python suites (new: `models`; a regression test for the role
+fix), the backend self-test, sixteen browser suites.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T060232Z-v0.1.39`.
+Nine project manifests valid, 170/170 files.
