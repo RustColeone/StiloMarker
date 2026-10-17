@@ -725,3 +725,21 @@ backend self-test, seventeen browser suites.
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T085158Z-v0.1.44`.
 Nine project manifests valid, 171/171 files.
+
+## Verified release: v0.1.45
+
+Deployed on 2026-10-17 at 12:24 UTC. Module restructure step 7f-2: Chats in
+the browser (the view, the cloud store, this browser's own store) and
+`protocol/chats.contract.json`. App version `0.1.45`; sync compatibility
+unchanged at `117`.
+
+Public checks: ping (`0.1.45`), no errors in the journal. Live, in a headless
+browser signed in as `test`, in a throwaway project in team red holding one
+character file (deleted afterwards): the Chats tab listed the team's people
+and "Mara Quill"; a private chat with her opened, and a question got an
+in-character answer from deepseek-flash, shown in the view; no page errors.
+Validation: 225 Node tests (the release now stops unless they all pass), all
+Python suites, the backend self-test, seventeen browser suites.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T122456Z-v0.1.45`.
+Nine project manifests valid, 171/171 files.
