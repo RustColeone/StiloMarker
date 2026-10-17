@@ -1,7 +1,7 @@
 // Source-pane autocomplete: file paths and images in Markdown links, words
 // from the document, and .bmap block properties, shown at the caret.
 // main.js creates this on first use and passes its shared values in `app`.
-import { getPath, isBmapFileName, isImageFileName, isMarkdownFileName, isTextFileName } from "../domain/project-model.js";
+import { getPath, isBmapFileName, isImageFileName, isMarkdownFileName, isTextFileName } from "../../workspace/index.js";
 
 export function createAutocomplete(app) {
   function buildProjectFileSuggestions(project, activeFileId, kind = "path") {

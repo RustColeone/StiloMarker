@@ -14,7 +14,7 @@ import {
   parseBmap,
   serializeBmap,
 } from "../services/bmap-service.js";
-import { renderMarkdown } from "../services/markdown-service.js";
+import { renderMarkdown } from "../modules/editor/index.js";
 import { builtinTypes } from "../modules/file-types/index.js";
 
 const GRID_BASE = 5;

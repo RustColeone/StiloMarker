@@ -10,7 +10,7 @@ import { fetchChatStatus, fetchServerChatWorkspace, pushServerChatWorkspace, sen
 import { createChatMessage, createChatThread, deriveChatTitle, loadChatWorkspace, saveChatWorkspace } from "../services/chat-storage-service.js";
 import { createChatSynchronizer } from "../services/chat-sync-service.js";
 import { isChatNearBottom, shouldSubmitChat } from "../services/chat-ui-service.js";
-import { renderMarkdown } from "../services/markdown-service.js";
+import { renderMarkdown } from "../modules/editor/index.js";
 import { createMcpControls } from "../services/mcp-ui-service.js";
 import { charactersView, parsePersona, personaSummary } from "../modules/characters/index.js";
 import { createCloudChats, createLocalChats, loadChatsView } from "../modules/chats/index.js";

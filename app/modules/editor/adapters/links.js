@@ -2,9 +2,9 @@
 // Ctrl+Click to follow it, and the sidebar's Linked Notes panel (outgoing
 // links and backlinks). main.js creates this on first use and passes its
 // shared values in `app`.
-import { getNodeIdByPath, getPath, isImageFileName, isMarkdownFileName } from "../domain/project-model.js";
-import { extractMarkdownLinks, renderMarkdown } from "../services/markdown-service.js";
-import { builtinTypes } from "../modules/file-types/index.js";
+import { getNodeIdByPath, getPath, isImageFileName, isMarkdownFileName } from "../../workspace/index.js";
+import { extractMarkdownLinks, renderMarkdown } from "../model/markdown.js";
+import { builtinTypes } from "../../file-types/index.js";
 
 export function createLinks(app) {
   let _linkTooltipTimer = null;

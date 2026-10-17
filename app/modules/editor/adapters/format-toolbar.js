@@ -13,7 +13,7 @@
 //   { kind: "block",  snippet, caret }             multi-line block insert
 //   { kind: "table" }                              opens the table grid-picker
 
-import { builtinTypes } from "../modules/file-types/index.js";
+import { builtinTypes } from "../../file-types/index.js";
 
 /** Map a file name to its toolbar format, or null when no toolbar applies. */
 function getEditorToolbarFormat(fileName) {
