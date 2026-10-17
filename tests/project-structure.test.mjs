@@ -73,11 +73,11 @@ test("index.html exposes required element ids", async () => {
 });
 
 test("main.js wires core feature symbols", async () => {
-  // Code split out of main.js lives in app/features/, app/editor/ and app/ui/;
+  // Code split out of main.js lives in app/features/, app/ui/ and the modules it moved into;
   // the wiring may be in any of them.
   const { readdir } = await import("node:fs/promises");
   const split = [];
-  for (const dir of ["app/features", "app/editor", "app/ui"]) {
+  for (const dir of ["app/features", "app/ui", "app/modules/editor/adapters", "app/modules/comments/adapters"]) {
     for (const name of (await readdir(resolveFromRoot(dir))).filter((n) => n.endsWith(".js"))) split.push(`${dir}/${name}`);
   }
   const mainSource = [await readFile(resolveFromRoot("app/main.js"), "utf8"),

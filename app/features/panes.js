@@ -3,7 +3,7 @@
 // the preview itself (Markdown, images, URL albums, diagrams, PDF printing).
 // main.js creates this on first use and passes its shared values in `app`.
 import { getNodeIdByPath, getPath, isBmapFileName, isImageFileName, isMarkdownFileName, isMtreeFileName, isPersonaFileName, isUrlDbFileName } from "../domain/project-model.js";
-import { renderMarkdown } from "../services/markdown-service.js";
+import { renderMarkdown } from "../modules/editor/index.js";
 import { authorNotesHtml, parsePersona, personaAvatarHtml } from "../modules/characters/index.js";
 import { normalizeServerUrl, saveUserState } from "../services/sync-service.js";
 

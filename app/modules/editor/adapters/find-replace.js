@@ -1,7 +1,7 @@
 // Find and replace in the open file: the find bar, match highlighting,
 // stepping through matches, and replacing one or all.
 // main.js creates this on first use and passes its shared values in `app`.
-import { isTextFileName } from "../domain/project-model.js";
+import { isTextFileName } from "../../workspace/index.js";
 
 export function createFindReplace(app) {
   // Build the RegExp for the current query + toggles, or null on empty/invalid.

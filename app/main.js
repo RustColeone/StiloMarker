@@ -14,7 +14,6 @@ import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandl
 import { supportsOpfs, listOpfsDir, mkdirOpfs, createProjectOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs, deleteOpfsEntry, exportProjectModelOpfs, importProjectModelOpfs } from "./services/opfs-service.js";
 import { createCollaborationRuntime } from "./modules/sync/index.js";
 import { sendGenerationRequest } from "./services/chat-api-service.js";
-import { renderMarkdown } from "./services/markdown-service.js";
 import { PERSONA_SUFFIX, parsePersona, personaTemplate } from "./services/persona-service.js";
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
 import { applyEditorFont, applyTheme, clampSourceFontSize, loadSettings, patchStoredSettings, saveSettings, signInSettings } from "./services/settings-service.js";
@@ -22,7 +21,7 @@ import { loadProject, saveProject } from "./services/storage-service.js";
 import { clearViewStates, loadViewStates, saveViewStates } from "./services/view-state-service.js";
 import { browseServer, createProjectServer, deleteServer, exportProjectServer, importProjectServer, mkdirServer, normalizeServerUrl, uploadAsset } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
-import { formatUrlDbEntryBody, parseUrlDb } from "./services/urldb-service.js";
+import { formatUrlDbEntryBody, parseUrlDb, parseUrlDbEntryBody, updateUrlDbEntry } from "./services/urldb-service.js";
 import { query } from "./ui/dom.js";
 import { createExplorerView } from "./ui/explorer-view.js";
 import { createDefaultBmap } from "./services/bmap-service.js";
@@ -30,13 +29,9 @@ import { createCloudBrowser } from "./features/cloud-browser.js";
 import { createFileActions } from "./features/file-actions.js";
 import { createPanes } from "./features/panes.js";
 import { createLayout } from "./ui/layout.js";
-import { createHighlighter } from "./editor/highlight.js";
-import { createFindReplace } from "./editor/find-replace.js";
-import { createAutocomplete } from "./editor/autocomplete.js";
-import { createLinks } from "./editor/links.js";
-import { createEditorCore } from "./editor/editor-core.js";
+import { createAutocomplete, createEditorCore, createFindReplace, createHighlighter, createLinks, renderMarkdown } from "./modules/editor/index.js";
 import { createDialogs } from "./ui/dialogs.js";
-import { createLineComments } from "./editor/comments.js";
+import { createLineComments } from "./modules/comments/index.js";
 import { createSnapshots } from "./features/snapshots.js";
 
 document.querySelectorAll("[data-app-version]").forEach((label) => { label.textContent = `v${APP_VERSION}`; });
@@ -311,7 +306,7 @@ const RECOVERY_SAVE_MAX_MS = 3000;
 let recoverySaveTimer = null;
 let recoverySaveDeadline = 0;
 let recoverySavePending = null;
-// ---- Editor core (./editor/editor-core.js) ----
+// ---- Editor core (the Editor module) ----
 // Created on first use. The module reads main's shared values through this
 // context, so it always sees their current values. `var`: a forwarding
 // function can run during startup, before this line is reached.
@@ -336,6 +331,10 @@ function editorCore() {
     get escapeHtmlAttribute() { return escapeHtmlAttribute; },
     get formatEditorDebugValue() { return formatEditorDebugValue; },
     get getSelectedUrlDbEntry() { return getSelectedUrlDbEntry; },
+    fileContentFromEditor(file, text) { // a URL album entry: the edited entry goes back into the whole file
+      const entry = getSelectedUrlDbEntry(controller.getProject());
+      return entry ? updateUrlDbEntry(file.content, entry.entry.id, parseUrlDbEntryBody(text)) : text;
+    },
     get hideEditorAutocomplete() { return hideEditorAutocomplete; },
     get highlightEditorLinesMemo() { return highlightEditorLinesMemo; },
     get logDebug() { return logDebug; },
@@ -1115,7 +1114,7 @@ function getRelativePath(fromPath, toPath) {
   const relative = [...upSegments, ...downSegments].join("/");
   return relative || "./";
 }
-// ---- Source autocomplete (./editor/autocomplete.js) ----
+// ---- Source autocomplete (the Editor module) ----
 // Created on first use. The module reads main's shared values through this
 // context, so it always sees their current values. `var`: a forwarding
 // function can run during startup, before this line is reached.
@@ -1148,7 +1147,7 @@ const searchState = {
   matches: [],      // [{ start, end }] plain-text offsets into the active file
   currentIndex: -1,
 };
-// ---- Find and replace (./editor/find-replace.js) ----
+// ---- Find and replace (the Editor module) ----
 // Created on first use. The module reads main's shared values through this
 // context, so it always sees their current values. `var`: a forwarding
 // function can run during startup, before this line is reached.
@@ -1210,7 +1209,7 @@ function snapshotProjectKey() {
 // the line's own content, so after edits shift it we re-find it rather than
 // leaving the note stranded on a line number that now means something else.
 const lineComments = { byFile: new Map(), loadedFor: null };
-// ---- Line comments (./editor/comments.js) ----
+// ---- Line comments (the Comments module) ----
 // Created on first use. The module reads main's shared values through this
 // context, so it always sees their current values. `var`: a forwarding
 // function can run during startup, before this line is reached.
@@ -1797,7 +1796,7 @@ async function openMtreeToolsDialog(fileId) {
     notify(`Module map tools could not load: ${error.message}`);
   }
 }
-// ---- Source highlighting (./editor/highlight.js) ----
+// ---- Source highlighting (the Editor module) ----
 // Created on first use. The module reads main's shared values through this
 // context, so it always sees their current values. `var`: a forwarding
 // function can run during startup, before this line is reached.
@@ -1845,7 +1844,7 @@ const editorLinkTooltip = (() => {
   document.body.append(el);
   return { el, nameEl, hintEl, previewEl };
 })();
-// ---- Links: editor tooltip and Linked Notes (./editor/links.js) ----
+// ---- Links: editor tooltip and Linked Notes (the Editor module) ----
 // Created on first use. The module reads main's shared values through this
 // context, so it always sees their current values. `var`: a forwarding
 // function can run during startup, before this line is reached.

@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-17 · release `v0.1.45` (deployed; public verification passed)
+Last updated: 2026-10-17 · release `v0.1.46`
 
 ---
 
@@ -39,6 +39,21 @@ delete should remove them, keep them for a while, or offer them for restore.
 ---
 
 ## Fixed
+
+### v0.1.46: restructure step 7g-1 (the Editor)
+
+The source editor is the Editor module. Nothing changes for users.
+
+- `editor-core.js` (1,655 lines, one closure) is six files that share one
+  editor object: the text and the DOM (caret, selection), rendering, edits
+  and undo, other people's cursors and the overview ruler, the formatting
+  toolbar's edits, and keys. Each is under 400 lines; the typing hot path is
+  unchanged (the browser test's per-key churn budget still holds).
+- Highlighting, find and replace, autocomplete, links, the formatting
+  toolbar, the table picker and the Markdown renderer moved into the Editor
+  module; the comments popover moved into Comments. `app/editor/` is gone.
+- The editor no longer knows the URL album: when it shows one album entry,
+  the app maps the edited text back into the whole file.
 
 ### v0.1.45: restructure step 7f-2 (Chats in the browser)
 

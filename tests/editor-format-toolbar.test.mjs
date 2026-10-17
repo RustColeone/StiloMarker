@@ -6,7 +6,7 @@ import {
   TOOLBAR_SPECS,
   buildTableSnippet,
   getEditorToolbarFormat
-} from "../app/ui/editor-format-toolbar.js";
+} from "../app/modules/editor/index.js";
 
 const { bmapService, mtreeService, urldbService, markdownService } = await loadModules();
 

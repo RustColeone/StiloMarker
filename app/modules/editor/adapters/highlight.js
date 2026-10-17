@@ -1,7 +1,7 @@
 // Source-pane syntax highlighting for Markdown, .mtree, .urldb and .bmap
 // files, with a per-line memo so typing re-highlights only changed lines.
 // main.js creates this on first use and passes its shared values in `app`.
-import { builtinTypes } from "../modules/file-types/index.js";
+import { builtinTypes } from "../../file-types/index.js";
 
 export function createHighlighter(app) {
   function escapeEditorHtml(value) {

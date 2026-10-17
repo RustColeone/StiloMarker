@@ -31,7 +31,7 @@ export async function loadModules() {
   ] = await Promise.all([
     load("app/domain/project-model.js"),
     load("app/services/zip-service.js"),
-    load("app/services/markdown-service.js"),
+    load("app/modules/editor/model/markdown.js"),
     load("app/services/bmap-service.js"),
     load("app/services/mtree-module-map-service.js"),
     load("app/services/urldb-service.js"),
