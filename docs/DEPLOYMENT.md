@@ -567,3 +567,25 @@ browser suites (`write-path-browser.py` gained the `edit_file` card and merge).
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T023104Z-v0.1.37`.
 Nine project manifests valid, 170/170 files.
+
+## Verified release: v0.1.38
+
+Deployed on 2026-10-17 at 04:08 UTC. Module restructure step 7a: Identity
+and access on both ends (accounts, sign-in tokens, project access and roles,
+per-account preferences; in the browser the signed-in account and its
+stored sign-in), Shell's server connection, and Identity's contract. App
+version `0.1.38`; sync compatibility unchanged at `117`.
+
+Public checks: ping (`0.1.38`, accounts on), the journal shows the kernel
+starting identity, no errors. Over HTTP as `test`: a wrong password is
+refused (403), signing in returns the teams (red, blue) and the remembered
+workspace, the team browses, a project's access record reads, and a request
+without a token is refused. In a headless browser on the public site:
+signing in through Settings shows "Logged in as test · teams: red, blue", a
+reload signs in again by itself, and signing out shows the sign-in fields.
+Validation: 215 Node tests (new: Identity in the browser, the module contract
+check), all Python suites (new: `identity`), the backend self-test, sixteen
+browser suites (new: `identity-browser.py`).
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T040757Z-v0.1.38`.
+Nine project manifests valid, 170/170 files.
