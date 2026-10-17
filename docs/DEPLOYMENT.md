@@ -678,3 +678,22 @@ self-test, sixteen browser suites.
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T081005Z-v0.1.42`.
 Nine project manifests valid, 171/171 files.
+
+## Verified release: v0.1.43
+
+Deployed on 2026-10-17 at 08:33 UTC. Module restructure step 7e: Comments on
+both ends (the rules, the comments file, routes, contract and event; in the
+browser keeping a comment on its line). App version `0.1.43`; sync
+compatibility unchanged at `117`.
+
+Public checks: ping (`0.1.43`), the journal shows the kernel starting
+comments, no errors. Live in a throwaway project in team red (deleted
+afterwards): `test` saved a comment on `第一卷/a.md`, `test1` listed it,
+`test` moved it and deleted it, and `test1`'s event stream received the
+three `comments` events (one comment, one comment, none); a request without
+a valid token was refused (403). Validation: 225 Node tests (new: Comments in
+the browser), all Python suites (new: `comments`), the backend self-test,
+seventeen browser suites (new: `comments-browser.py`).
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T083347Z-v0.1.43`.
+Nine project manifests valid, 174/174 files.
