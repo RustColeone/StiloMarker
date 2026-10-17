@@ -1205,7 +1205,7 @@ function snapshotProjectKey() {
 
 // ---- Line comments -----------------------------------------------------------
 // A note attached to a LINE, like a breakpoint: it lives in metadata beside the
-// project on the server (comments.json), never in the document text. Shared with
+// project on the server (the Comments module), never in the document text. Shared with
 // everyone who can open the workspace. Comments follow the text: each one stores
 // the line's own content, so after edits shift it we re-find it rather than
 // leaving the note stranded on a line number that now means something else.

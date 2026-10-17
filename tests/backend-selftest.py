@@ -329,47 +329,47 @@ def run_broker_selftest(state_file):
     # --- Line comments (metadata about a line, never in the document) --------
     _CP = "workspaces/Alpha"
     _cf = "第一卷/第一回试写.md"  # CJK path must work here too
-    _c1 = _reg.save_comment(_alice, "qa", _CP, {"file": _cf, "line": 41,
+    _c1 = _reg.comments.save(_alice, "qa", _CP, {"file": _cf, "line": 41,
                                                 "anchorText": "原文这一行", "text": "check this pacing"})["comment"]
     assert _c1["author"] == "alice" and _c1["line"] == 41
-    _all = _reg.list_comments(_alice, "qa", _CP)["files"]
+    _all = _reg.comments.list(_alice, "qa", _CP)["files"]
     assert [c["text"] for c in _all[_cf]] == ["check this pacing"]
     # comments.json lives beside the project but is never a browseable file.
     assert (_alpha_dir / "comments.json").is_file(), "sidecar not written"
     assert "comments.json" not in {e["name"] for e in _reg.browse(_alice, "qa", "workspaces")["entries"]}
 
     # Editing by id updates in place rather than adding a duplicate.
-    _reg.save_comment(_alice, "qa", _CP, {"file": _cf, "id": _c1["id"], "text": "revised note"})
-    assert len(_reg.list_comments(_alice, "qa", _CP)["files"][_cf]) == 1
-    assert _reg.list_comments(_alice, "qa", _CP)["files"][_cf][0]["text"] == "revised note"
+    _reg.comments.save(_alice, "qa", _CP, {"file": _cf, "id": _c1["id"], "text": "revised note"})
+    assert len(_reg.comments.list(_alice, "qa", _CP)["files"][_cf]) == 1
+    assert _reg.comments.list(_alice, "qa", _CP)["files"][_cf][0]["text"] == "revised note"
 
     # Re-anchoring moves a comment when edits above shift its line.
-    _reg.reanchor_comments(_alice, "qa", _CP, _cf, [{"id": _c1["id"], "line": 57, "anchorText": "原文这一行"}])
-    assert _reg.list_comments(_alice, "qa", _CP)["files"][_cf][0]["line"] == 57, "re-anchor did not move the comment"
+    _reg.comments.reanchor(_alice, "qa", _CP, _cf, [{"id": _c1["id"], "line": 57, "anchorText": "原文这一行"}])
+    assert _reg.comments.list(_alice, "qa", _CP)["files"][_cf][0]["line"] == 57, "re-anchor did not move the comment"
 
     # Comments survive a publish (replace-project wipes the project dir).
     _alpha_broker._apply_operation({"type": "replace-project", "baseRevision": _alpha_broker.revision,
                                     "project": _alpha_broker._default_project()})
     _alpha_broker._persist_state()
     assert (_alpha_dir / "comments.json").is_file(), "comments.json must survive replace-project"
-    assert _reg.list_comments(_alice, "qa", _CP)["files"][_cf][0]["text"] == "revised note", "comments lost on publish"
+    assert _reg.comments.list(_alice, "qa", _CP)["files"][_cf][0]["text"] == "revised note", "comments lost on publish"
 
     # Empty text is rejected; access follows the project (bob is blacklisted/off-list).
     try:
-        _reg.save_comment(_alice, "qa", _CP, {"file": _cf, "text": "   "})
+        _reg.comments.save(_alice, "qa", _CP, {"file": _cf, "text": "   "})
         assert False, "empty comment should be rejected"
     except ValueError:
         pass
-    for _call in (lambda: _reg.list_comments(_bob, "qa", _CP),
-                  lambda: _reg.save_comment(_bob, "qa", _CP, {"file": _cf, "text": "nope"})):
+    for _call in (lambda: _reg.comments.list(_bob, "qa", _CP),
+                  lambda: _reg.comments.save(_bob, "qa", _CP, {"file": _cf, "text": "nope"})):
         try:
             _call()
             assert False, "non-whitelisted user must not reach comments"
         except PermissionError:
             pass
 
-    assert _reg.delete_comment(_alice, "qa", _CP, _c1["id"])["deleted"], "delete failed"
-    assert _reg.list_comments(_alice, "qa", _CP)["files"] == {}, "comment not removed"
+    assert _reg.comments.delete(_alice, "qa", _CP, _c1["id"])["deleted"], "delete failed"
+    assert _reg.comments.list(_alice, "qa", _CP)["files"] == {}, "comment not removed"
 
     # --- Stale-write protection (an old tab must not overwrite newer work) ---
     _ss = _reg.open_workspace(_alice, "qa", "workspaces/Alpha")

@@ -28,17 +28,18 @@ from conversations import (SIDE_FILES as CHAT_DB_FILES, ProjectChats, ReplyQueue
                            persona_handle, persona_header, persona_summary, user_key)
 from stilo.kernel import start_modules
 from stilo.modules import (assistant as assistant_module, characters as characters_module, file_types as file_types_module,
-                           identity as identity_module, models as models_module, sync as sync_module, history as history_module, transport as transport_module, workspace as workspace_module)
+                           identity as identity_module, models as models_module, sync as sync_module, history as history_module, comments as comments_module, transport as transport_module, workspace as workspace_module)
 from stilo.modules.file_types import BUILTIN as FILE_TYPES
 from stilo.kernel.log import log as _log
 from stilo.modules.workspace import (append_node, atomic_write as _atomic_write, create_id, decode_data_url, default_project,
                                      find_child_by_name, fsync_directory as _fsync_directory, node_id_by_path, path_of,
                                      remove_node_recursive, subtree_paths, utf16_index as _utf16_index,
                                      utf16_length as _utf16_length)
-from stilo.modules.workspace import FolderStore, LiveProject, StateFile, bump_edit_counters, file_key as key_of_file
+from stilo.modules.workspace import FolderStore, LiveProject, StateFile, bump_edit_counters
 from stilo.modules.sync import PARTS as SYNC_PARTS, VERSION as SYNC_LEVEL, SharedWorkspace, announce as sync_announce
 from stilo.modules.characters import character_instructions, characters_view, notes_mode, split_author_notes
 from stilo.modules.assistant import AGENT_TOOLS, propose_edit
+from stilo.modules.comments import COMMENTS_FILE, open_comments
 from stilo.modules.history import open_history
 from stilo.modules.identity import ACCESS_FILE, ACCOUNT_FILE, AccountStore, open_identity
 from stilo.modules.models import IMAGE_SIZES, GeneratedImages, MCPManager, MCPTurn, open_providers
@@ -46,7 +47,7 @@ from stilo.modules.models import IMAGE_SIZES, GeneratedImages, MCPManager, MCPTu
 
 def start_server_modules():
     """The server's modules (docs/ARCHITECTURE.md); more join as the restructure moves code."""
-    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE, identity_module.MODULE, models_module.MODULE, sync_module.MODULE, characters_module.MODULE, history_module.MODULE, assistant_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"))
+    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE, identity_module.MODULE, models_module.MODULE, sync_module.MODULE, characters_module.MODULE, history_module.MODULE, comments_module.MODULE, assistant_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"))
 
 
 def _truthy(value: str | None) -> bool:
@@ -1112,7 +1113,6 @@ class WorkspaceRegistry:
     def __init__(self, pin: str, legacy_state_file: Path, master_pin: str | None = None,
                  accounts: "AccountStore | None" = None, data_dir: Path | None = None):
         self.lock = threading.RLock()
-        self._snapshot_lock = threading.Lock()  # guards data/_snapshots index writes
         self._chat_stores: dict[str, ProjectChats] = {}  # workspace id -> its chats database
         self._chat_stores_lock = threading.Lock()
         self.on_chat_message = None  # (registry, team, relpath, conversation, message, identity, options) -> list
@@ -1124,6 +1124,7 @@ class WorkspaceRegistry:
         self.master_pin = master_pin or pin
         self.identity = open_identity(accounts, data_dir)
         self.history = open_history(data_dir, self)
+        self.comments = open_comments(self)
         self.data_dir = data_dir
         self.brokers: dict[str, CollaborationBroker] = {}
         self.token_workspace: dict[str, str] = {}
@@ -1225,7 +1226,7 @@ class WorkspaceRegistry:
 
     # ---- File-browser navigation (nested folders + per-project access) ---------
     # Files that are storage bookkeeping, never shown as browseable entries.
-    _RESERVED_NAMES = {"index.json", ACCESS_FILE, "manifest.json", "user-state.json", "comments.json", "chat.json", *CHAT_DB_FILES}
+    _RESERVED_NAMES = {"index.json", ACCESS_FILE, "manifest.json", "user-state.json", COMMENTS_FILE, "chat.json", *CHAT_DB_FILES}
 
     def _safe_relpath(self, path: str) -> str:
         """Sanitize a '/'-separated path relative to a team dir. Each segment is
@@ -1281,145 +1282,9 @@ class WorkspaceRegistry:
     def can_access(self, identity: dict, team: str, relpath: str) -> bool:
         return self.identity.may_open(identity, team, self.read_access(team, relpath))
 
-    # ---- Line comments (breakpoint-style notes anchored to a line) -------------
-    # Kept in a comments.json sidecar INSIDE the project (like access.json), so
-    # they travel with the project and are shared by everyone who can open it.
-    # Preserved across a publish and hidden from the file browser (see
-    # _wipe_workspace_dir / _RESERVED_NAMES). The comment text never touches the
-    # document itself — this is metadata about a line, not content in it.
-    COMMENT_MAX_LEN = 4000
-    COMMENT_MAX_PER_FILE = 500
-
-    def _comments_path(self, team: str, relpath: str) -> Path:
-        return self._abs_under_team(team, relpath) / "comments.json"
-
-    def _read_comments(self, team: str, relpath: str) -> dict:
-        path = self._comments_path(team, relpath)
-        if path.exists():
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-                if isinstance(data, dict) and isinstance(data.get("files"), dict):
-                    return data
-            except (OSError, json.JSONDecodeError):
-                pass
-        return {"files": {}}
-
-    def _write_comments(self, team: str, relpath: str, data: dict):
-        path = self._comments_path(team, relpath)
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, path)
-
-    def _broadcast_comments(self, team: str, relpath: str, data: dict):
-        """Push the project's comment list to everyone connected to it, so a
-        teammate's note appears immediately instead of only after a reopen."""
-        broker = self.brokers.get(f"{team}/{relpath}")
-        if broker is None:
-            return
-        try:
-            broker._broadcast({
-                "type": "comments",
-                "files": data.get("files", {}),
-                "serverTime": time.time(),
-            })
-        except Exception:  # a broadcast must never fail the write that caused it
-            pass
-
-    def list_comments(self, token: str, team: str, path: str) -> dict:
-        _, team, relpath = self.authorize_project(token, team, path)
-        return self._read_comments(team, relpath)
-
-    def save_comment(self, token: str, team: str, path: str, payload: dict) -> dict:
-        identity, team, relpath = self.authorize_project(token, team, path)
-        file_key = key_of_file(payload.get("file"))  # same rules: a key, not a filesystem path
-        text = str(payload.get("text", "")).strip()
-        if not text:
-            raise ValueError("A comment needs some text")
-        if len(text) > self.COMMENT_MAX_LEN:
-            raise ValueError("That comment is too long")
-        with self._snapshot_lock:  # reuse the sidecar write lock
-            data = self._read_comments(team, relpath)
-            entries = data["files"].setdefault(file_key, [])
-            comment_id = str(payload.get("id") or "")
-            now = int(time.time() * 1000)
-            existing = next((c for c in entries if c.get("id") == comment_id), None) if comment_id else None
-            if existing is not None:
-                existing["text"] = text
-                existing["updatedAt"] = now
-                # Re-anchoring may also move it.
-                if payload.get("line") is not None:
-                    existing["line"] = max(0, int(payload.get("line", 0)))
-                if payload.get("anchorText") is not None:
-                    existing["anchorText"] = str(payload.get("anchorText", ""))[:400]
-                result = existing
-            else:
-                if len(entries) >= self.COMMENT_MAX_PER_FILE:
-                    raise ValueError("Too many comments on that file")
-                result = {
-                    "id": f"{now}-{secrets.token_hex(4)}",
-                    "line": max(0, int(payload.get("line", 0))),
-                    # The line's own text, so the comment can be re-anchored after
-                    # edits shift it up or down (and across sessions/devices).
-                    "anchorText": str(payload.get("anchorText", ""))[:400],
-                    "text": text,
-                    "author": identity["username"],
-                    "createdAt": now,
-                    "updatedAt": now,
-                }
-                entries.append(result)
-            entries.sort(key=lambda c: int(c.get("line", 0)))
-            self._write_comments(team, relpath, data)
-        self._broadcast_comments(team, relpath, data)
-        return {"comment": result}
-
-    def delete_comment(self, token: str, team: str, path: str, comment_id: str) -> dict:
-        _, team, relpath = self.authorize_project(token, team, path)
-        with self._snapshot_lock:
-            data = self._read_comments(team, relpath)
-            removed = False
-            for key, entries in list(data["files"].items()):
-                kept = [c for c in entries if c.get("id") != comment_id]
-                if len(kept) != len(entries):
-                    removed = True
-                if kept:
-                    data["files"][key] = kept
-                else:
-                    data["files"].pop(key, None)
-            if removed:
-                self._write_comments(team, relpath, data)
-        if removed:
-            self._broadcast_comments(team, relpath, data)
-        return {"deleted": removed}
-
-    # Re-anchoring lives on the CLIENT (it has the live text); the server only
-    # stores the line + anchorText the client last resolved.
-    def reanchor_comments(self, token: str, team: str, path: str, file_key: str, moves: list) -> dict:
-        _, team, relpath = self.authorize_project(token, team, path)
-        key = key_of_file(file_key)
-        with self._snapshot_lock:
-            data = self._read_comments(team, relpath)
-            entries = data["files"].get(key, [])
-            by_id = {c.get("id"): c for c in entries}
-            changed = False
-            for move in moves or []:
-                target = by_id.get(str(move.get("id", "")))
-                if target is None:
-                    continue
-                line = max(0, int(move.get("line", target.get("line", 0))))
-                if target.get("line") != line:
-                    target["line"] = line
-                    changed = True
-                if move.get("anchorText") is not None:
-                    anchor = str(move.get("anchorText", ""))[:400]
-                    if target.get("anchorText") != anchor:
-                        target["anchorText"] = anchor
-                        changed = True
-            if changed:
-                entries.sort(key=lambda c: int(c.get("line", 0)))
-                self._write_comments(team, relpath, data)
-        if changed:
-            self._broadcast_comments(team, relpath, data)
-        return {"updated": changed}
+    # ---- The port of Comments and History: where a project is, who may see it --
+    def project_dir(self, team, relpath):
+        return self._abs_under_team(team, relpath)
 
     def authorize_project(self, token, team, path):
         identity = self.identity.require(token)
@@ -2694,40 +2559,6 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         except (ValueError, TypeError) as error:
             self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
 
-    def _handle_comments_get(self, parsed):
-        try:
-            token = self._extract_token(parsed)
-            query = parse_qs(parsed.query)
-            result = self.registry.list_comments(token, query.get("team", [""])[0], query.get("path", [""])[0])
-            self._write_json(HTTPStatus.OK, result)
-        except PermissionError as error:
-            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
-        except ValueError as error:
-            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
-
-    def _handle_comments_post(self, parsed, kind):
-        try:
-            token = self._extract_token(parsed)
-            payload = self._read_json()
-            team = str(payload.get("team", ""))
-            path = str(payload.get("path", ""))
-            if kind == "save":
-                result = self.registry.save_comment(token, team, path, payload)
-                self._log_request(200, "comment saved")
-            elif kind == "delete":
-                result = self.registry.delete_comment(token, team, path, str(payload.get("id", "")))
-                self._log_request(200, "comment deleted")
-            else:
-                result = self.registry.reanchor_comments(
-                    token, team, path, str(payload.get("file", "")), payload.get("moves") or [])
-            self._write_json(HTTPStatus.OK, result)
-        except PermissionError as error:
-            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
-            self._log_request(403, str(error))
-        except ValueError as error:
-            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
-            self._log_request(400, str(error))
-
     def _handle_set_user_state(self, parsed):
         try:
             token = self._extract_token(parsed)
@@ -3106,7 +2937,6 @@ LEGACY_ROUTES = [
     ("GET", "/api/chat/workspace", False, lambda h, parsed: h._handle_get_chat_workspace(parsed)),
     ("GET", "/api/workspaces", False, lambda h, parsed: h._handle_list_workspaces(parsed)),
     ("GET", "/api/workspaces/browse", False, lambda h, parsed: h._handle_browse(parsed)),
-    ("GET", "/api/comments", False, lambda h, parsed: h._handle_comments_get(parsed)),
     ("GET", "/api/workspaces/export", False, lambda h, parsed: h._handle_export_project(parsed)),
     ("GET", "/api/workspaces/asset", False, lambda h, parsed: h._handle_asset(parsed)),
     ("GET", "/api/generated", False, lambda h, parsed: h._handle_generated(parsed)),
@@ -3120,9 +2950,6 @@ LEGACY_ROUTES = [
     ("POST", "/api/workspaces/create", False, lambda h, parsed: h._handle_create_project(parsed)),
     ("POST", "/api/workspaces/delete", False, lambda h, parsed: h._handle_delete(parsed)),
     ("POST", "/api/workspaces/import", False, lambda h, parsed: h._handle_import_project(parsed)),
-    ("POST", "/api/comments", False, lambda h, parsed: h._handle_comments_post(parsed, "save")),
-    ("POST", "/api/comments/delete", False, lambda h, parsed: h._handle_comments_post(parsed, "delete")),
-    ("POST", "/api/comments/reanchor", False, lambda h, parsed: h._handle_comments_post(parsed, "reanchor")),
     ("POST", "/api/workspaces/user-state", False, lambda h, parsed: h._handle_set_user_state(parsed)),
     ("POST", "/api/workspaces/asset", False, lambda h, parsed: h._handle_asset_upload(parsed)),
 ]
@@ -3143,6 +2970,7 @@ def build_server(host: str, port: int, pin: str, static_root: Path, state_file: 
     modules["identity"].serve(registry.identity, registry)
     modules["sync"].serve(registry)
     modules["history"].serve(registry.history)
+    modules["comments"].serve(registry.comments)
     transport.add_route("GET", "/api/ping", lambda request: {
             "message": "pong",
             "server": "mdnotes",

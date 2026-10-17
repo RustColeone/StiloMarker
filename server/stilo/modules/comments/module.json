@@ -1,0 +1,11 @@
+{
+  "name": "comments",
+  "level": 4,
+  "uses": ["transport", "workspace"],
+  "owns": {
+    "names": ["comments file"],
+    "events": ["comments"],
+    "routes": ["/api/comments*"],
+    "rules": ["line comments"]
+  }
+}

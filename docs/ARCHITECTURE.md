@@ -47,7 +47,7 @@ This file is the short reference that the structure tests enforce.
 
 Arrows are "uses": a module calls only the modules it points at, always on a
 lower level. News travels the other way, as events or extension points, so it
-needs no arrow. Green modules exist (as of v0.1.42); the rest are still legacy
+needs no arrow. Green modules exist (as of v0.1.43); the rest are still legacy
 code. Modules marked *both* have a browser half and a server half that share a
 model and a contract.
 
@@ -92,7 +92,7 @@ flowchart TB
   L5 ~~~ L4 ~~~ L3 ~~~ L2 ~~~ L1
 
   classDef built fill:#d8f5dd,stroke:#2e8b47,color:#123;
-  class Shell,Transport,FileTypes,Workspace,Identity,Models,Sync,Characters,History,Assistant,Kernel built;
+  class Shell,Transport,FileTypes,Workspace,Identity,Models,Sync,Characters,History,Comments,Assistant,Kernel built;
 ```
 
 ### Inside a module
@@ -233,8 +233,8 @@ refuses to record anything new.
 | 7c-1 | Sync on the server: sessions and roles, presence, leases, event streams, the rebase log; every change checked against its revision before Workspace applies it. Workspace gains the pure `apply_operation`, the open project (`LiveProject`) and the one-file store. The last uncovered twin (rebasing a text patch) gets its case table. Dead code removed: revert-to-revision with its 40 project copies per workspace, the folder wipe | done |
 | 7c-2 | Sync in the browser (the collaboration runtime, split into the runtime, the patch queue and pure rules; its server calls), Sync's routes on the server (Transport gained stream routes and refusals with a status), and `protocol/sync.contract.json` with the sync version both ends read. The backend self-test moved out of `mdnotes_server.py` into `tests/backend-selftest.py` | done |
 | 7d | History on both ends: snapshots and backups in one content-addressed store each, their retention rules, the routes and `protocol/history.contract.json`; in the browser this browser's own snapshot store, History's server calls and the line diff (the dialogs stay in `app/features` and call it) | done |
-| 7e | Comments: line comments and their anchors | next |
-| 7f | Chats: conversations, members, notes, search, the reply queue | |
+| 7e | Comments on both ends: the rules for a line comment, the comments file it owns, its routes, contract and `comments` event; in the browser keeping a comment on its line (the gutter popover stays in `app/editor`) | done |
+| 7f | Chats: conversations, members, notes, search, the reply queue | next |
 | 7g | Editor (browser): the source editor, preview, tabs within panes, find and replace | |
 | 8 | The URL album as an extension | |
 

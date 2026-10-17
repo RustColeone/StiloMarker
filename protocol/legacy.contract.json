@@ -6,8 +6,7 @@
       "chat-message",
       "chat-typing",
       "chat-update",
-      "chat-workspace-update",
-      "comments"
+      "chat-workspace-update"
     ]
   },
   "agentTurnEvents": {
