@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.error import HTTPError
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'server'))
-import mcp_client as mcp
+from stilo.modules.models.adapters import mcp
 import mdnotes_server as server
 
 CONFIG={'id':'library','label':'Reference library','url':'https://tools.example.invalid/mcp','allowedTools':['search'],'teams':['friends'],'tokenEnv':'TEST_MCP_KEY'}
@@ -107,20 +107,20 @@ class MCPTests(unittest.TestCase):
   handler.headers={};handler._handle_mcp();self.assertEqual(results[-1][0],403)
  def test_chat_tool_loop_uses_mcp_and_retains_workspace_tools(self):
   proxy=server.ChatProxy();seen=[];opener=Opener();provider_headers=[]
-  def completion(payload,headers,emit):
-   provider_headers.append(headers);seen.append(copy.deepcopy(payload))
+  def completion(payload,emit):
+   provider_headers.append(proxy._req.route.key);seen.append(copy.deepcopy(payload))
    if len(seen)==1:
     alias=next(t['function']['name'] for t in payload['tools'] if t['function']['name'].startswith('mcp_'))
     return {'choices':[{'message':{'tool_calls':[{'id':'call-1','type':'function','function':{'name':alias,'arguments':'{"query":"dragon"}'}}]}}]}
    self.assertIn('Reference: https://example.invalid/source',payload['messages'][-1]['content'])
    return {'choices':[{'message':{'content':'Answer from the reference library.'}}]}
-  proxy._stream_completion=completion
+  proxy._complete=completion
   factory=lambda configs,**kw:mcp.MCPTurn(configs,**kw,factory=lambda c,**args:self.client(opener))
   with patch.object(server,'MCPTurn',factory),patch.object(server,'_log'):
    result=proxy.chat([{'role':'user','content':'Find a dragon reference'}],[],'Test',{'rootId':'root','nodes':{'root':{'kind':'folder','children':[]}}},override={'apiKey':'model-test-key','apiUrl':'https://model.example.invalid'},mcp_configs=[CONFIG])
   self.assertEqual(result['message'],'Answer from the reference library.');self.assertEqual(result['proposedOperations'],[])
   self.assertTrue(any(t['function']['name']=='read_file' for t in seen[0]['tools']))
-  self.assertTrue(all(h['Authorization']=='Bearer model-test-key' for h in provider_headers))
+  self.assertTrue(all(key=='model-test-key' for key in provider_headers))
   self.assertTrue(all(r.get_header('Authorization')=='Bearer mcp-test-secret' for r in opener.requests))
   self.assertIsNone(proxy._req.mcp_turn);self.assertEqual(opener.deleted,1)
 if __name__=='__main__':unittest.main()

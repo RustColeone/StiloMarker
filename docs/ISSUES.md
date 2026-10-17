@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-17 · release `v0.1.38` (deployed; public verification passed)
+Last updated: 2026-10-17 · release `v0.1.39`
 
 ---
 
@@ -30,6 +30,28 @@ one. Affects only pre-existing local history.
 ---
 
 ## Fixed
+
+### v0.1.39: restructure step 7b (Models)
+
+The model providers moved out of the agent into a Models module on each end.
+Nothing changes for users.
+
+- Server: DeepSeek (or another OpenAI-compatible endpoint), OpenAI's chat and
+  image models and a user's own key; which models are offered; what each
+  request must carry for its model (thinking, temperature); both streams
+  (chat completions and the Responses API); generated images; MCP
+  connections. `openai_support.py` and `mcp_client.py` are gone.
+- A request now gets an explicit route (model, URL, key, provider) that is
+  passed along, instead of the provider fields the agent used to set on
+  shared per-thread state and clear afterwards. The one-shot generator
+  (Quick Generate) uses the same provider code as chat.
+- Browser: a model called straight from the browser (own key or a local
+  model) and the picker's grouping and choice.
+- Fixed (found while splitting the server's session code for the next step):
+  when a session's event stream dropped and came back with the same token,
+  the server forgot the session's role. A read-only member could then write,
+  and a project's owner could no longer publish. A role now lasts as long as
+  its token; a regression test covers both.
 
 ### v0.1.38: restructure step 7a (Identity and access)
 

@@ -45,7 +45,7 @@ This file is the short reference that the structure tests enforce.
 
 Arrows are "uses": a module calls only the modules it points at, always on a
 lower level. News travels the other way, as events or extension points, so it
-needs no arrow. Green modules exist (as of v0.1.38); the rest are still legacy
+needs no arrow. Green modules exist (as of v0.1.39); the rest are still legacy
 code. Modules marked *both* have a browser half and a server half that share a
 model and a contract.
 
@@ -90,7 +90,7 @@ flowchart TB
   L5 ~~~ L4 ~~~ L3 ~~~ L2 ~~~ L1
 
   classDef built fill:#d8f5dd,stroke:#2e8b47,color:#123;
-  class Shell,Transport,FileTypes,Workspace,Identity,Characters,Assistant,Kernel built;
+  class Shell,Transport,FileTypes,Workspace,Identity,Models,Characters,Assistant,Kernel built;
 ```
 
 ### Inside a module
@@ -227,8 +227,8 @@ refuses to record anything new.
 | 5 | Characters on both ends: author's notes (hidden unless `notes: hints`), files characters cannot read (`Plans/`, `*.plan.md`), the agent's update rules and length guidance; every rule in one shared case table | done |
 | 6 | Assistant on both ends: `edit_file` (exact passages, one match each, refused precisely so the model retries; proposals travel as an update-file with their edits and merge through the write path), the agent's tool definitions, the edit review card | done |
 | 7a | Identity and access on both ends: accounts and the account file, sign-in tokens, who may open a project and in what role (`can(role, action)`), per-account preferences; in the browser the signed-in account and its stored sign-in. Shell gains the server connection. Identity's routes get the first module contract | done |
-| 7b | Models: providers (DeepSeek, OpenAI, own key, local), streaming, MCP | next |
-| 7c | Sync: sessions, presence, leases, the event stream, reconnect; the server's operations (`_apply_operation`, from 4c); a sync contract and version in place of 117 | |
+| 7b | Models: the providers (DeepSeek or another OpenAI-compatible endpoint, OpenAI, a user's own key), which models are offered and what each request carries, both streams (chat completions and the Responses API), image generation and generated images, MCP connections; in the browser a model called straight from the browser and the picker's grouping. A request gets an explicit route instead of provider fields on shared state | done |
+| 7c | Sync: sessions, presence, leases, the event stream, reconnect; the server's operations (`_apply_operation`, from 4c); a sync contract and version in place of 117 | next |
 | 7d | History: snapshots, backups, restore (through `write`) | |
 | 7e | Comments: line comments and their anchors | |
 | 7f | Chats: conversations, members, notes, search, the reply queue | |
@@ -261,6 +261,12 @@ refuses to record anything new.
   Never read the stored password or the sign-in settings: Identity keeps them.
   On the server, `identity.require(token)`, `require_team`, `may_open`,
   `role` and `can(identity, action, team, access)`.
+- Calling a model (server): `route = providers.route(model, own_key,
+  own_url, own_model)`, then `providers.stream(route, payload, emit)` (or
+  `complete`). Build the payload in chat-completions form; Models adds what
+  the model needs and translates it for the Responses API. In the agent the
+  seam is `ChatProxy._complete(payload, emit)`, which tests fake. From the
+  browser to a user's own endpoint: `runDirectReply` (Models).
 - A module's network messages: list each route in
   `protocol/<module>.contract.json`. The structure test checks that the
   server half serves exactly those and that nothing outside the module calls

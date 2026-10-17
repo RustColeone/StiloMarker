@@ -30,13 +30,11 @@ import sys
 _mcp_module_dir = str(Path(__file__).resolve().parent)
 if _mcp_module_dir not in sys.path:
     sys.path.insert(0, _mcp_module_dir)
-from mcp_client import MCPManager, MCPTurn
 from conversations import (SIDE_FILES as CHAT_DB_FILES, ProjectChats, ReplyQueue, char_key, find_mentions,
                            persona_handle, persona_header, persona_summary, user_key)
-from openai_support import IMAGE_FORMATS, IMAGE_SIZES, GeneratedImages, OpenAIProvider, is_openai_model, uses_fixed_temperature, uses_responses_api, to_responses_request, ResponsesStream
 from stilo.kernel import start_modules
 from stilo.modules import (assistant as assistant_module, characters as characters_module, file_types as file_types_module,
-                           identity as identity_module, transport as transport_module, workspace as workspace_module)
+                           identity as identity_module, models as models_module, transport as transport_module, workspace as workspace_module)
 from stilo.modules.file_types import BUILTIN as FILE_TYPES
 from stilo.kernel.log import log as _log
 from stilo.modules.workspace import (append_node, atomic_write as _atomic_write, create_id, decode_data_url, default_project,
@@ -47,13 +45,12 @@ from stilo.modules.workspace import FolderStore
 from stilo.modules.characters import character_instructions, characters_view, notes_mode, split_author_notes
 from stilo.modules.assistant import AGENT_TOOLS, propose_edit
 from stilo.modules.identity import ACCESS_FILE, ACCOUNT_FILE, AccountStore, open_identity
+from stilo.modules.models import IMAGE_SIZES, GeneratedImages, MCPManager, MCPTurn, open_providers
 
 
 def start_server_modules():
     """The server's modules (docs/ARCHITECTURE.md); more join as the restructure moves code."""
-    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE, identity_module.MODULE, characters_module.MODULE, assistant_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"))
-
-
+    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE, identity_module.MODULE, models_module.MODULE, characters_module.MODULE, assistant_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"))
 
 
 def _truthy(value: str | None) -> bool:
@@ -97,12 +94,10 @@ MIN_CLIENT_VERSION = _read_int_env("MDNOTES_MIN_CLIENT_VERSION", 117, 0, 1_000_0
 EDIT_SESSION_GAP_SECONDS = _read_int_env("MDNOTES_EDIT_SESSION_GAP", 600, 30, 86_400)
 
 
-
-
-
-
-
-
+# The image files the agent's generate_image can write: extension -> (the
+# provider's output format, MIME type).
+IMAGE_FORMATS = {".png": ("png", "image/png"), ".jpg": ("jpeg", "image/jpeg"),
+                 ".jpeg": ("jpeg", "image/jpeg"), ".webp": ("webp", "image/webp")}
 
 
 class ChatProxy:
@@ -117,48 +112,11 @@ class ChatProxy:
     PERSONA_MAX_TEMPERATURE = 1.5
 
     def __init__(self):
-        self.api_key = (
-            os.environ.get("MDNOTES_CHAT_API_KEY", "").strip()
-            or os.environ.get("DEEPSEEK_API_KEY", "").strip()
-        )
-        self.api_url = (
-            os.environ.get("MDNOTES_CHAT_API_URL", "").strip()
-            or os.environ.get("DEEPSEEK_API_URL", "").strip()
-            or "https://api.deepseek.com/chat/completions"
-        )
-        self.model = (
-            os.environ.get("MDNOTES_CHAT_MODEL", "").strip()
-            or os.environ.get("DEEPSEEK_MODEL", "").strip()
-            or "deepseek-flash"
-        )
-        # Optional list of models the client may pick from (comma-separated).
-        # Defaults to just the configured model. The default model is always
-        # offered and listed first; client-supplied overrides are validated
-        # against this allowlist so an arbitrary model name can't be injected.
-        extra_models = [
-            name.strip()
-            for name in os.environ.get("MDNOTES_CHAT_MODELS", "").split(",")
-            if name.strip()
-        ]
-        # The provider's currently-supported model ids, so the UI can switch
-        # without a server change. Verified against the API: it rejects anything
-        # else (e.g. the old "deepseek-v4-flash", which was silently failing).
-        fallback_models = ["deepseek-flash", "deepseek-v4-pro"]
-        ordered = [self.model] + extra_models + fallback_models
-        seen = set()
-        self.models = [m for m in ordered if m and not (m in seen or seen.add(m))]
-        self.organization = os.environ.get("MDNOTES_CHAT_ORGANIZATION", "").strip()
-        self.provider_label = os.environ.get("MDNOTES_CHAT_PROVIDER", "DeepSeek").strip() or "DeepSeek"
+        self.providers = open_providers()
         self.allow_remote = _truthy(os.environ.get("MDNOTES_CHAT_ALLOW_REMOTE"))
         self.max_context_chars = _read_int_env("MDNOTES_CHAT_MAX_CONTEXT_CHARS", 60000, 4000, 250000)
         self.max_messages = _read_int_env("MDNOTES_CHAT_MAX_MESSAGES", 24, 2, 100)
-        self.timeout_seconds = _read_int_env("MDNOTES_CHAT_TIMEOUT", 60, 5, 180)
-        self.reasoning_effort = os.environ.get("DEEPSEEK_REASONING_EFFORT", "high").strip().lower() or "high"
-        self.enable_thinking = _truthy(os.environ.get("DEEPSEEK_ENABLE_THINKING"))
         self.mcp = MCPManager(static_root=Path(__file__).resolve().parents[1])
-        # A second provider: GPT chat models (picked from the account's model
-        # catalog, see start_providers) and image generation for the agent.
-        self.openai = OpenAIProvider()
         self.generated = None  # GeneratedImages, wired in build_server when there is a data dir
         self.broker = None  # wired in build_server after construction
         # Per-request key/URL override (a client bringing its own key). Stored on a
@@ -175,48 +133,31 @@ class ChatProxy:
             self.manual_content = ""
 
     def is_configured(self) -> bool:
-        return bool(self.api_key and self.model and self.api_url) or bool(self.openai.configured and self.openai.models)
+        return self.providers.configured()
 
     def start_providers(self) -> None:
         """Begin reading the OpenAI model catalog (no-op without a key)."""
-        self.openai.start(_log)
-
-    # Effective key/URL for the request in flight: a client-supplied key (own-key
-    # mode) takes precedence, then the provider of the selected model.
-    def _eff_key(self) -> str:
-        return getattr(self._req, "api_key", "") or getattr(self._req, "route_key", "") or self.api_key
-
-    def _eff_url(self) -> str:
-        return getattr(self._req, "api_url", "") or getattr(self._req, "route_url", "") or self.api_url
+        self.providers.start(_log)
 
     def all_models(self) -> list[str]:
-        """DeepSeek models first (the default), then GPT models when configured."""
-        extra = self.openai.models if self.openai.configured else []
-        return list(dict.fromkeys([*self.models, *extra]))
+        return self.providers.all_models()
 
-    def _route(self, model, own_key: bool, own_model: str) -> str:
-        """Pick the model for this request and point the request at its provider."""
-        self._req.route_key = ""
-        self._req.route_url = ""
-        self._req.provider_label = self.provider_label
-        if own_key:
-            return own_model or model or self.model
-        if model and self.openai.configured and model in self.openai.models:
-            self._req.route_key = self.openai.api_key
-            self._req.route_url = self.openai.chat_url
-            self._req.provider_label = self.openai.label
-            return model
-        return model if (model and model in self.models) else self.model
+    @property
+    def openai(self):
+        return self.providers.openai
 
-    def _model_options(self, payload: dict) -> dict:
-        """Provider-specific request options for the chosen model."""
-        model = payload.get("model", "")
-        if self.enable_thinking and not is_openai_model(model):
-            payload["thinking"] = {"type": "enabled"}
-            payload["reasoning_effort"] = self.reasoning_effort
-        if uses_fixed_temperature(model):
-            payload.pop("temperature", None)
-        return payload
+    def _ready_route(self, model, own_key: bool, own_model: str):
+        """The route of this request (Models); refused when it has no key."""
+        route = self.providers.route(model, getattr(self._req, "api_key", "") if own_key else "",
+                                     getattr(self._req, "api_url", ""), own_model)
+        if not route.ready:
+            raise ValueError("Chat is not configured. Add your API key in Settings → Agent, or set DEEPSEEK_API_KEY on the server.")
+        self._req.route = route
+        return route
+
+    def _complete(self, payload: dict, emit) -> dict:
+        """One model call along this request's route, streamed (Models)."""
+        return self.providers.stream(self._req.route, payload, emit)
 
     def images_available(self) -> bool:
         """Image generation is offered only to a signed-in request (it always
@@ -234,11 +175,10 @@ class ChatProxy:
         models = self.all_models()
         return {
             "configured": self.is_configured(),
-            "provider": self.provider_label,
-            "model": self.model or (models[0] if models else None),
+            "provider": self.providers.label,
+            "model": self.providers.default_model or (models[0] if models else None),
             "models": models,
-            "modelInfo": [{"id": m, "provider": self.openai.label if m in self.openai.models and m not in self.models
-                           else self.provider_label} for m in models],
+            "modelInfo": [{"id": m, "provider": self.providers.provider_of(m)} for m in models],
             "imageGeneration": self.openai.images_ready,
             "localOnly": not self.allow_remote,
             "message": message,
@@ -337,124 +277,6 @@ class ChatProxy:
         if not isinstance(tool_calls, list) or not tool_calls:
             return []
         return tool_calls
-
-    def _stream_completion(self, base_payload: dict, headers: dict, emit) -> dict:
-        """Call the chat completion endpoint in streaming mode, surfacing live
-        progress via `emit`, and return a reconstructed non-streaming response
-        payload (same shape `_extract_tool_calls` / `_extract_message_text` expect).
-
-        The slow part of an agent turn is the model generating a long file body,
-        which arrives as tool-call *argument* fragments — so without streaming
-        the user just sees a spinner. Streaming surfaces the assistant's text
-        token-by-token and a live byte count while a file is being written, and
-        keeps bytes flowing so the connection never idles into a timeout.
-        """
-        payload = dict(base_payload)
-        payload["stream"] = True
-        responses = None
-        url = self._eff_url()
-        if url == self.openai.chat_url and uses_responses_api(payload.get("model", "")):
-            responses, url, payload = ResponsesStream(), self.openai.responses_url, to_responses_request(payload)
-        request = Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers=headers,
-            method="POST",
-        )
-        content_parts: list[str] = []
-        tool_acc: dict[int, dict] = {}
-        finish_reason = None
-        last_emit = 0.0
-
-        try:
-            response = urlopen(request, timeout=self.timeout_seconds)
-        except HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")
-            try:
-                error_payload = json.loads(detail)
-            except json.JSONDecodeError:
-                error_payload = None
-            err_msg = error_payload.get("error", {}).get("message") if isinstance(error_payload, dict) else None
-            raise RuntimeError(err_msg or detail or f"Chat provider returned HTTP {error.code}.") from error
-        except URLError as error:
-            raise RuntimeError(f"Chat provider is unreachable: {error.reason}.") from error
-
-        with response:
-            for raw_line in response:
-                line = raw_line.decode("utf-8", errors="replace").strip()
-                if not line or not line.startswith("data:"):
-                    continue
-                data = line[5:].strip()
-                if data == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(data)
-                except json.JSONDecodeError:
-                    continue
-                if responses is not None:
-                    shown = responses.feed(chunk)
-                    if shown and shown.get("text"):
-                        emit({"type": "delta", "text": shown["text"]})
-                    elif shown and shown.get("reasoning"):
-                        emit({"type": "reasoning", "text": shown["reasoning"]})
-                    now = time.time()
-                    if responses.tools and now - last_emit > 0.4:
-                        last_emit = now
-                        for slot in responses.tools.values():
-                            if slot["function"]["name"]:
-                                emit({"type": "writing", "name": slot["function"]["name"],
-                                      "chars": len(slot["function"]["arguments"])})
-                    continue
-                choices = chunk.get("choices") or []
-                if not choices:
-                    continue
-                choice = choices[0]
-                delta = choice.get("delta") or {}
-                if choice.get("finish_reason"):
-                    finish_reason = choice.get("finish_reason")
-
-                text = delta.get("content")
-                if isinstance(text, str) and text:
-                    content_parts.append(text)
-                    emit({"type": "delta", "text": text})
-
-                # Reasoning-model chain-of-thought arrives as a separate field
-                # (reasoning_content). Surface it live so the UI can show what the
-                # agent is thinking, without mixing it into the committed answer.
-                reasoning = delta.get("reasoning_content")
-                if isinstance(reasoning, str) and reasoning:
-                    emit({"type": "reasoning", "text": reasoning})
-
-                for tc in (delta.get("tool_calls") or []):
-                    idx = tc.get("index", 0)
-                    slot = tool_acc.setdefault(idx, {
-                        "id": "", "type": "function",
-                        "function": {"name": "", "arguments": ""},
-                    })
-                    if tc.get("id"):
-                        slot["id"] = tc["id"]
-                    fn = tc.get("function") or {}
-                    if fn.get("name"):
-                        slot["function"]["name"] = fn["name"]
-                    if fn.get("arguments"):
-                        slot["function"]["arguments"] += fn["arguments"]
-
-                # Throttled progress while a long tool argument streams in.
-                now = time.time()
-                if tool_acc and now - last_emit > 0.4:
-                    last_emit = now
-                    for slot in tool_acc.values():
-                        name = slot["function"]["name"]
-                        if name:
-                            emit({"type": "writing", "name": name,
-                                  "chars": len(slot["function"]["arguments"])})
-
-        if responses is not None:
-            return responses.result()
-        message: dict = {"role": "assistant", "content": "".join(content_parts)}
-        if tool_acc:
-            message["tool_calls"] = [tool_acc[i] for i in sorted(tool_acc)]
-        return {"choices": [{"message": message, "finish_reason": finish_reason}]}
 
     def _describe_tool_call(self, tc: dict) -> dict:
         """Build a small, UI-friendly summary of a tool call for progress streaming."""
@@ -716,17 +538,15 @@ class ChatProxy:
             self._req.cancelled = lambda: False
             self._req.api_key = ""
             self._req.api_url = ""
-            self._req.route_key = ""
-            self._req.route_url = ""
+            self._req.route = None
             self._req.identity = None
 
     def _chat_inner(self, messages, context_files, project_name, client_project,
                     progress, model, own_key: bool, own_model: str) -> dict:
         # Own-key mode trusts the client's model choice; server mode validates
         # against the server's allowlist and routes to that model's provider.
-        active_model = self._route(model, own_key, own_model)
-        if not (self._eff_key() and self._eff_url()):
-            raise ValueError("Chat is not configured. Add your API key in Settings → Agent, or set DEEPSEEK_API_KEY on the server.")
+        route = self._ready_route(model, own_key, own_model)
+        active_model = route.model
 
         # Resolve the project the agent reasons about.
         # Prefer the client-supplied project (the workspace the user is actually
@@ -811,14 +631,14 @@ class ChatProxy:
         if context_text:
             system_sections.append("Workspace context:\n" + context_text)
 
-        base_payload: dict = self._model_options({
+        base_payload: dict = {
             "model": active_model,
             "temperature": 0.2,
             "messages": [
                 {"role": "system", "content": "\n\n".join(system_sections)},
                 *safe_messages,
             ],
-        })
+        }
 
         # Attach tool schemas when the broker is available (subtask 1.3).
         tools = self._get_tool_schemas() if project_snapshot is not None else []
@@ -847,13 +667,6 @@ class ChatProxy:
             base_payload["tools"] = tools
             base_payload["tool_choice"] = "auto"
 
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self._eff_key()}",
-        }
-        if self.organization:
-            headers["OpenAI-Organization"] = self.organization
-
         # Agentic tool loop (subtask 1.4 / 1.8).
         proposed_operations: list[dict] = []
         batch_id = f"batch-{uuid.uuid4().hex[:8]}"
@@ -872,7 +685,7 @@ class ChatProxy:
             if getattr(self._req, "cancelled", lambda: False)():
                 raise RuntimeError("Chat stopped.")
             emit({"type": "status", "stage": "thinking", "iteration": iteration})
-            response_payload = self._stream_completion(base_payload, headers, emit)
+            response_payload = self._complete(base_payload, emit)
 
             tool_calls = self._extract_tool_calls(response_payload)
 
@@ -935,7 +748,7 @@ class ChatProxy:
         return {
             "message": reply,
             "model": active_model,
-            "provider": getattr(self._req, "provider_label", self.provider_label),
+            "provider": route.label,
             "contextPaths": used_paths,
             "proposedOperations": proposed_operations,
             "batchId": batch_id if proposed_operations else None,
@@ -1038,7 +851,7 @@ class ChatProxy:
         if context_text:
             system_sections.append("Files the author attached to this message:\n" + context_text)
 
-        payload: dict = self._model_options({
+        payload: dict = self.providers.options({
             "model": active_model,
             "temperature": self._persona_temperature(persona.get("temperature")),
             "messages": [{"role": "system", "content": "\n\n".join(system_sections)}, *turns],
@@ -1058,9 +871,8 @@ class ChatProxy:
         path = self._clean_text(persona.get("path"), 512)
         if not name:
             raise ValueError("The character needs a name.")
-        active_model = self._route(model, own_key, own_model)
-        if not (self._eff_key() and self._eff_url()):
-            raise ValueError("Chat is not configured. Add your API key in Settings → Agent, or set DEEPSEEK_API_KEY on the server.")
+        route = self._ready_route(model, own_key, own_model)
+        active_model = route.model
 
         project_snapshot = None
         if isinstance(client_project, dict) and client_project.get("nodes"):
@@ -1073,13 +885,6 @@ class ChatProxy:
 
         payload, used_paths = self.build_persona_payload(messages, context_files, project_name, project_snapshot,
                                                          persona, cast, active_model)
-
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self._eff_key()}",
-        }
-        if self.organization:
-            headers["OpenAI-Organization"] = self.organization
 
         def emit(event: dict) -> None:
             if progress is None:
@@ -1096,7 +901,7 @@ class ChatProxy:
             if iteration == self.max_tool_iterations and "tools" in payload:
                 payload["tool_choice"] = "none"  # last step: answer with what was read
             emit({"type": "status", "stage": "thinking", "iteration": iteration})
-            response_payload = self._stream_completion(payload, headers, emit)
+            response_payload = self._complete(payload, emit)
             tool_calls = self._extract_tool_calls(response_payload) if "tools" in payload else []
             if not tool_calls or iteration >= self.max_tool_iterations:
                 reply = self._extract_message_text(response_payload)
@@ -1124,7 +929,7 @@ class ChatProxy:
         return {
             "message": reply,
             "model": active_model,
-            "provider": getattr(self._req, "provider_label", self.provider_label),
+            "provider": route.label,
             "contextPaths": used_paths,
             "proposedOperations": [],
             "batchId": None,
@@ -1171,46 +976,15 @@ class ChatProxy:
             user_parts.append(f"Additional instructions:\n{instructions}")
         user_content = "\n\n".join(user_parts)[:16000]
 
-        payload: dict = {
-            "model": self.model,
+        route = self.providers.route()
+        response_payload = self.providers.complete(route, {
+            "model": route.model,
             "temperature": 0.4,
             "messages": [
                 {"role": "system", "content": "\n\n".join(system_sections)},
                 {"role": "user", "content": user_content},
             ],
-        }
-        if self.enable_thinking:
-            payload["thinking"] = {"type": "enabled"}
-            payload["reasoning_effort"] = self.reasoning_effort
-
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self._eff_key()}",
-        }
-        if self.organization:
-            headers["OpenAI-Organization"] = self.organization
-
-        request = Request(
-            self._eff_url(),
-            data=json.dumps(payload).encode("utf-8"),
-            headers=headers,
-            method="POST",
-        )
-        try:
-            raw_response = urlopen(request, timeout=self.timeout_seconds).read().decode("utf-8")
-            response_payload = json.loads(raw_response)
-        except HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")
-            try:
-                error_payload = json.loads(detail)
-            except json.JSONDecodeError:
-                error_payload = None
-            err_msg = error_payload.get("error", {}).get("message") if isinstance(error_payload, dict) else None
-            raise RuntimeError(err_msg or detail or f"Chat provider returned HTTP {error.code}.") from error
-        except URLError as error:
-            raise RuntimeError(f"Chat provider is unreachable: {error.reason}.") from error
-        except json.JSONDecodeError as error:
-            raise RuntimeError("Chat provider returned invalid JSON.") from error
+        })
 
         content = self._extract_message_text(response_payload)
         if not content:
@@ -1218,8 +992,8 @@ class ChatProxy:
 
         return {
             "content": content,
-            "model": self.model,
-            "provider": self.provider_label,
+            "model": route.model,
+            "provider": route.label,
             "contextPaths": used_paths,
         }
 
@@ -2176,10 +1950,12 @@ class CollaborationBroker:
             had_token = token in self.tokens
             self.subscribers.pop(token, None)
             if revoke:
+                # A role lasts as long as its token: a stream that drops and
+                # comes back must not turn a reader into an editor.
                 self.leases.pop(token, None)
                 self.tokens.pop(token, None)
-            self.master_tokens.discard(token)
-            self.reader_tokens.discard(token)
+                self.master_tokens.discard(token)
+                self.reader_tokens.discard(token)
             presence = self.presence.pop(token, None)
             if presence:
                 client_id = presence["clientId"]
@@ -5707,7 +5483,6 @@ def run_broker_selftest(state_file):
     _sh.rmtree(_data, ignore_errors=True)
 
 
-
 def main():
     parser = argparse.ArgumentParser(description="MDNotes collaboration server")
     parser.add_argument("--host", default=os.environ.get("MDNOTES_HOST", "0.0.0.0"))
@@ -5743,7 +5518,7 @@ def main():
     print(f"Master PIN configured: {'yes (separate)' if args.master_pin and args.master_pin != args.pin else 'same as session PIN'}")
     print(f"Chat proxy configured: {'yes' if chat_proxy.is_configured() else 'no'}")
     if chat_proxy.is_configured():
-        print(f"Chat provider: {chat_proxy.provider_label} ({chat_proxy.model})")
+        print(f"Chat provider: {chat_proxy.providers.label} ({chat_proxy.providers.default_model})")
         print(f"Chat access: {'local browser only' if not chat_proxy.allow_remote else 'remote clients allowed'}")
     else:
         print("Set DEEPSEEK_API_KEY or MDNOTES_CHAT_API_KEY in the server environment to enable chat.")
