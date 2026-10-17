@@ -787,3 +787,39 @@ import in the split before release).
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T130909Z-v0.1.47`.
 Ten project manifests valid (one of them the leftover above), 177/177 files.
+
+## Verified release: v0.1.48
+
+Deployed on 2026-10-17 at 20:39 UTC. Module restructure step 8: the URL album
+as an extension (`extensions/url-album/`), reaching the app only through
+public extension points. App version `0.1.48`; sync compatibility unchanged
+at `117`.
+
+Public checks: ping (`0.1.48`), no errors in the journal. The live check, as
+`test` in a throwaway project in team red (deleted afterwards), listed the
+entries under their albums, opened an entry in the source and the preview,
+and saved an edit and a new entry (through the new form dialog) to the
+server. A drag of an entry into the other album did not reach the server.
+That bug is older than this release; v0.1.49 fixes it. Validation: 225 Node
+tests, all Python suites, the backend self-test, eighteen browser suites
+(`url-album-browser.py` new, written against the old code first).
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T203904Z-v0.1.48`.
+173/173 data files, every JSON file valid.
+
+## Verified release: v0.1.49
+
+Deployed on 2026-10-17 at 21:17 UTC. Dragging a file part (an album entry)
+between files, or within one, now goes through the write path; before, it
+changed only the dragging browser. App version `0.1.49`; sync compatibility
+unchanged at `117`.
+
+Public checks: ping (`0.1.49`), no errors in the journal. The same live
+check, rerun, passed: the edit, the new entry and the dragged entry were all
+in the server's copies of both albums. Throwaway project deleted. Validation:
+225 Node tests, all Python suites, the backend self-test, eighteen browser
+suites (`write-path-browser.py` now drags an entry between albums with two
+browsers; it passed three runs in a row after a wait in the test was fixed).
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T211653Z-v0.1.49`.
+173/173 data files, every JSON file valid.
