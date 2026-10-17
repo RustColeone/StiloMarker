@@ -1,7 +1,8 @@
 """History as callers ask for it: every request names the account (its
 token) and the project, and is answered only if that account may open it.
-Also the two hooks the server calls: a safety backup before a destructive
-change, and the daily sweep.
+Also the hooks the server calls: a safety backup before a destructive
+change, a deleted project put in the trash, and the daily sweep (backups,
+then the trash). `trash` is service/trash.py.
 
 places (today the server's WorkspaceRegistry):
     authorize_project(token, team, path) -> (identity, team, relpath)
@@ -13,8 +14,8 @@ places (today the server's WorkspaceRegistry):
 
 
 class HistoryDesk:
-    def __init__(self, snapshots, backups, places):
-        self.snapshots, self.backups, self._places = snapshots, backups, places
+    def __init__(self, snapshots, backups, places, trash=None):
+        self.snapshots, self.backups, self._places, self.trash = snapshots, backups, places, trash
 
     def _project(self, token, team, path):
         return self._places.authorize_project(token, team, path)
@@ -79,4 +80,7 @@ class HistoryDesk:
             self.backups.before_destructive(workspace, *place, reason)
 
     def sweep(self, now=None) -> int:
-        return self.backups.sweep(self._places.live_workspaces(), now)
+        made = self.backups.sweep(self._places.live_workspaces(), now)
+        if self.trash is not None:
+            self.trash.sweep(now)
+        return made

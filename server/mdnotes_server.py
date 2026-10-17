@@ -8,7 +8,6 @@ import os
 import posixpath
 import re
 import secrets
-import shutil
 import threading
 import time
 import uuid
@@ -1111,12 +1110,12 @@ class WorkspaceRegistry:
     """
 
     def __init__(self, pin: str, legacy_state_file: Path, master_pin: str | None = None,
-                 accounts: "AccountStore | None" = None, data_dir: Path | None = None):
+                 accounts: "AccountStore | None" = None, data_dir: Path | None = None, trash_days: int = 30):
         self.lock = threading.RLock()
         self.pin = pin
         self.master_pin = master_pin or pin
         self.identity = open_identity(accounts, data_dir)
-        self.history = open_history(data_dir, self)
+        self.history = open_history(data_dir, self, self.identity, trash_days)
         self.comments = open_comments(self)
         self.chats = open_chats(self)  # its runner (the agent) is set by build_server
         self.data_dir = data_dir
@@ -1506,15 +1505,7 @@ class WorkspaceRegistry:
             raise ValueError("No such folder or project")
         if target.name in self._RESERVED_NAMES:
             raise ValueError("Cannot delete a reserved entry")
-        if self.is_project_dir(target):
-            self.identity.require_owner(identity, team, self.read_access(team, relpath),
-                                        "Only the project owner can delete this project")
-        else:
-            base = self._abs_under_team(team, "")
-            for manifest in target.rglob("manifest.json"):
-                proj_rel = manifest.parent.relative_to(base).as_posix()
-                if self.identity.owned_by_other(identity, self.read_access(team, proj_rel)):
-                    raise PermissionError("This folder contains projects owned by others")
+        self.identity.may_delete(identity, team, target, lambda: self._legacy_meta(team, relpath))
         workspace_id = f"{team}/{relpath}"
         with self.lock:
             # Drop any live broker (and nested project brokers) so an open
@@ -1522,9 +1513,13 @@ class WorkspaceRegistry:
             for wid in [w for w in self.brokers if w == workspace_id or w.startswith(workspace_id + "/")]:
                 self.brokers.pop(wid, None)
             self.chats.close(workspace_id)
-            shutil.rmtree(target)
-        _log("WORKSPACE", f"{identity['username']} deleted {workspace_id}")
-        return {"team": team, "path": relpath, "deleted": True}
+            kind = "project" if self.is_project_dir(target) else "folder"
+            self.history.trash.put(identity["username"], team, relpath, target, kind)
+        _log("WORKSPACE", f"{identity['username']} deleted {workspace_id} (kept in the trash)")
+        return {"team": team, "path": relpath, "deleted": True, "trashDays": self.history.trash.days}
+
+    def folder(self, team: str, relpath: str) -> Path:  # History's trash port
+        return self._abs_under_team(self.safe_component(team), self._safe_relpath(relpath))
 
     # ---- Chats' port (server/stilo/modules/chats/service/desk.py) -----------------
     def project_copy(self, team: str, relpath: str) -> dict:
@@ -2466,9 +2461,9 @@ LEGACY_ROUTES = [
 ]
 
 
-def build_server(host: str, port: int, pin: str, static_root: Path, state_file: Path, master_pin: str | None = None, chat_proxy: ChatProxy | None = None, whitelist_file: Path | None = None, data_dir: Path | None = None):
+def build_server(host: str, port: int, pin: str, static_root: Path, state_file: Path, master_pin: str | None = None, chat_proxy: ChatProxy | None = None, whitelist_file: Path | None = None, data_dir: Path | None = None, trash_days: int = 30):
     accounts = AccountStore(whitelist_file)
-    registry = WorkspaceRegistry(pin, state_file, master_pin=master_pin, accounts=accounts, data_dir=data_dir)
+    registry = WorkspaceRegistry(pin, state_file, master_pin=master_pin, accounts=accounts, data_dir=data_dir, trash_days=trash_days)
     chat_proxy = chat_proxy or ChatProxy()
     # Chat context falls back to the default workspace's project when the client
     # doesn't supply one — same behaviour as the pre-registry single broker.
@@ -2547,6 +2542,8 @@ def main():
                         help="Account whitelist JSON (accounts mode). Kept out of the web-served set. Absent ⇒ accounts disabled.")
     parser.add_argument("--data-dir", default=os.environ.get("MDNOTES_DATA_DIR", str(Path(__file__).resolve().parent / "data")),
                         help="Directory for persistent per-team cloud workspaces. Kept out of the web-served set.")
+    parser.add_argument("--trash-days", type=int, default=int(os.environ.get("MDNOTES_TRASH_DAYS", "30")),
+                        help="Days a deleted project stays in its team's trash before it is removed for good (1 to 30).")
     args = parser.parse_args()
 
     static_root = Path(args.static_dir).resolve()
@@ -2554,7 +2551,7 @@ def main():
     whitelist_file = Path(args.whitelist).resolve() if args.whitelist else None
     data_dir = Path(args.data_dir).resolve() if args.data_dir else None
     chat_proxy = ChatProxy()
-    server = build_server(args.host, args.port, args.pin, static_root, state_file, master_pin=args.master_pin, chat_proxy=chat_proxy, whitelist_file=whitelist_file, data_dir=data_dir)
+    server = build_server(args.host, args.port, args.pin, static_root, state_file, master_pin=args.master_pin, chat_proxy=chat_proxy, whitelist_file=whitelist_file, data_dir=data_dir, trash_days=args.trash_days)
     accounts_enabled = whitelist_file is not None and whitelist_file.exists()
     print(f"MDNotes collaboration server running at http://{args.host}:{args.port}")
     print(f"Serving static files from {static_root}")

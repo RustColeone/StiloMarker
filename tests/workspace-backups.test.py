@@ -154,5 +154,36 @@ class WorkspaceBackupTests(unittest.TestCase):
         self.assertIn('late.md', names)
 
 
+    def test_a_deleted_project_waits_in_the_trash_with_its_history(self):
+        """Deleting a project puts it, with its history, in its team's trash for
+        30 days; its owner restores it as it was; then the sweep removes it."""
+        self.op({'type': 'create-file', 'parentPath': '', 'name': 'a.md', 'content': 'kept text'})
+        self.reg.backup_sweep(now=self.t0)
+        self.assertEqual(self.reg.delete_entry(self.alice, 'qa', self.path)['trashDays'], 30)
+        data = Path(self.tmp.name) / 'data'
+        self.assertFalse((data / 'team_qa' / self.path).exists())
+        self.assertFalse((data / '_backups' / 'qa' / self.path).exists())
+        bob = self.reg.identity.login('bob', 'pw')['token']
+        carol = self.reg.identity.login('carol', 'pw')['token']
+        [entry] = self.reg.history.trash.list(self.alice, 'qa')['entries']
+        self.assertEqual((entry['name'], entry['kind'], entry['deletedBy'], entry['restorable']), ('Novel', 'project', 'alice', True))
+        self.assertFalse(self.reg.history.trash.list(bob, 'qa')['entries'][0]['restorable'], 'only the owner restores')
+        with self.assertRaises(PermissionError):
+            self.reg.history.trash.list(carol, 'qa')
+        with self.assertRaises(PermissionError):
+            self.reg.history.trash.delete(bob, 'qa', entry['id'])
+        restored = self.reg.history.trash.restore(self.alice, 'qa', entry['id'])
+        self.assertEqual(restored['path'], self.path)
+        session = self.reg.open_workspace(self.alice, 'qa', self.path)['token']
+        broker = self.reg.brokers[f'qa/{self.path}']
+        self.assertIn('kept text', [n.get('content') for n in broker.project['nodes'].values()])
+        self.assertTrue(self.backups(), 'its backups came back with it')
+        self.reg.close_session(session)
+        self.reg.delete_entry(self.alice, 'qa', self.path)
+        self.reg.backup_sweep(now=time.time() + 31 * DAY)
+        self.assertEqual(self.reg.history.trash.list(self.alice, 'qa')['entries'], [])
+        self.assertEqual(list((data / '_trash' / 'qa').iterdir()), [])
+
+
 if __name__ == '__main__':
     unittest.main()

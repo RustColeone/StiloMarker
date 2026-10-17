@@ -23,7 +23,7 @@ from .adapters.routes import add_routes
 from .model.access import ROLES, can  # noqa: F401
 from .service.identity import Identity
 
-_ACCESS_STORE = SimpleNamespace(read=access_file.read_access, write=access_file.write_access)
+_ACCESS_STORE = SimpleNamespace(read=access_file.read_access, write=access_file.write_access, projects_in=access_file.projects_in)
 
 
 def open_identity(accounts: AccountStore | None = None, data_dir=None) -> Identity:

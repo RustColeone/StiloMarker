@@ -169,6 +169,7 @@ const elements = {
   browserStatus: query("#browser-status"),
   browserNewFolder: query("#browser-new-folder"),
   browserNewProject: query("#browser-new-project"),
+  browserTrash: query("#browser-trash"),
   browserPublishHere: query("#browser-publish-here"),
   browserOpenBtn: query("#browser-open-btn"),
   browserAccessBtn: query("#browser-access-btn"),
@@ -1631,9 +1632,7 @@ const explorer = createExplorerView({
   onOpenPart(fileId, partId) {
     const project = controller.getProject();
     const file = project.nodes[fileId];
-    if (!file || file.kind !== "file" || !modules.workspace.parts.of(file.name)) {
-      return;
-    }
+    if (!file || file.kind !== "file" || !modules.workspace.parts.of(file.name)) return;
     setActiveSourcePart(fileId, partId);
     openPreviewTab(fileId);
     previewFileId = fileId;
@@ -1689,9 +1688,7 @@ const explorer = createExplorerView({
     const file = project.nodes[fileId];
     const parts = file?.kind === "file" ? modules.workspace.parts.of(file.name) : null;
     const part = parts?.list(file.content).find((candidate) => candidate.id === partId);
-    if (!part) {
-      return;
-    }
+    if (!part) return;
     event.dataTransfer?.setData("text/stilo-file-part", JSON.stringify({ fileId, partId }));
     event.dataTransfer?.setData("text/plain", part.image || part.name);
     if (event.dataTransfer) {
@@ -4272,6 +4269,7 @@ var cloudBrowserInstance;
 function cloudBrowser() {
   return (cloudBrowserInstance ??= createCloudBrowser({
     get browserState() { return browserState; },
+    get history() { return modules.history; },
     get cachedWorkspaceView() { return cachedWorkspaceView; },
     get collaboration() { return collaboration; },
     get controller() { return controller; },
@@ -4431,6 +4429,7 @@ elements.accountLoginButton?.addEventListener("click", () => { void handleAccoun
 elements.accountLogoutButton?.addEventListener("click", handleAccountLogout);
 elements.browserNewFolder?.addEventListener("click", () => { void handleNewFolder(); });
 elements.browserNewProject?.addEventListener("click", () => { void handleNewProject(); });
+elements.browserTrash?.addEventListener("click", () => { void cloudBrowser().handleOpenTrash(); });
 elements.browserPublishHere?.addEventListener("click", () => { void handlePublishHere(); });
 elements.browserSideLocal?.addEventListener("click", () => switchBrowserSide("local"));
 elements.browserSideServer?.addEventListener("click", () => switchBrowserSide("server"));

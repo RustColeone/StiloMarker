@@ -5,7 +5,9 @@ content-addressed store beside the project data. The browser's half is
 app/modules/history.
 
 Static, for code from before the restructure:
-    open_history(data_dir, places) -> HistoryDesk (see service/desk.py for `places`)
+    open_history(data_dir, places, identity, trash_days=30) -> HistoryDesk (see
+        service/desk.py and service/trash.py for `places`; identity: Identity's API); a deleted project waits in its trash
+        (data/_trash) for trash_days, at most TRASH_DAYS
     POLICY, MAX_PER_FILE (snapshot retention)
 
 API (started by the kernel):
@@ -20,10 +22,13 @@ from stilo.modules.workspace import node_id_by_path, path_of
 from .adapters.blob_store import BlobStore
 from .adapters.images import image_bytes
 from .adapters.routes import add_routes
+from .adapters.trash_store import TrashStore
 from .model.retention import POLICY  # noqa: F401
+from .model.trash import TRASH_DAYS, keep_days  # noqa: F401
 from .service.backups import Backups
 from .service.desk import HistoryDesk
 from .service.snapshots import MAX_PER_FILE, Snapshots  # noqa: F401
+from .service.trash import Trash
 
 
 def _folder(root: Path, team: str, relpath: str) -> Path:
@@ -55,7 +60,7 @@ def _counters(places):
     return read
 
 
-def open_history(data_dir, places) -> HistoryDesk:
+def open_history(data_dir, places, identity=None, trash_days=TRASH_DAYS) -> HistoryDesk:
     data_dir = Path(data_dir) if data_dir is not None else None
 
     def store(root_name, empty):
@@ -67,7 +72,11 @@ def open_history(data_dir, places) -> HistoryDesk:
 
     snapshots = Snapshots(store("_snapshots", {"files": {}}), _counters(places))
     backups = Backups(store("_backups", {"backups": []}), FILE_TYPES, _node_paths, image_bytes)
-    return HistoryDesk(snapshots, backups, places)
+    trash = None
+    if data_dir is not None:
+        roots = {name: data_dir / name for name in ("_snapshots", "_backups")}
+        trash = Trash(TrashStore(data_dir / "_trash", roots), identity, places, keep_days(trash_days), backups.lock)
+    return HistoryDesk(snapshots, backups, places, trash)
 
 
 def start(ctx):

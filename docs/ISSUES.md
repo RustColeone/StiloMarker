@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-17 · release `v0.1.49` (deployed; public verification passed)
+Last updated: 2026-10-17 · release `v0.1.50`
 
 ---
 
@@ -27,18 +27,32 @@ Migration only adopts files whose paths exist in the workspace being opened, so 
 two workspaces contain a **same-named file**, a snapshot could migrate to the wrong
 one. Affects only pre-existing local history.
 
-### 3. Deleting a project keeps its history
-**Confidence:** confirmed, intended so far · **Severity:** low (a decision)
-
-Snapshots and backups live outside the project folder (so publishing over a
-project never erases them), and deleting a project leaves them in
-`data/_snapshots` and `data/_backups`. That keeps a way back after deleting
-the wrong project, but nothing lists or removes them later. Decide whether a
-delete should remove them, keep them for a while, or offer them for restore.
-
 ---
 
 ## Fixed
+
+### v0.1.50: deleted cloud projects go to the team's Trash for 30 days
+
+Item 3 ("Deleting a project keeps its history") is decided: the history
+becomes a trash.
+
+- **Delete:** a deleted cloud project or folder is moved into its team's
+  Trash (`data/_trash`), with its snapshots, backups, comments and chats,
+  instead of being removed.
+- **Restore:** the file manager's new Trash button lists what is there and
+  how many days each item has left. Its owner can restore it where it was
+  (or as "Name (restored)" if that name was taken meanwhile), or delete it
+  for good.
+- **Expiry:** after 30 days the regular backup sweep removes it. A server can
+  keep items for less with `--trash-days` (1 to 30).
+- **Earlier deletes:** history left by projects deleted before this release
+  is picked up by the sweep and expires the same way. It can only be
+  removed, since the project itself is gone.
+- **Wording:** the delete confirmation for a cloud project now says it goes
+  to the Trash. Deleting on this device is still permanent.
+- **Server change:** who may delete or restore (a project's owner; a folder
+  unless it holds someone else's projects) is now one rule in Identity, used
+  by both.
 
 ### v0.1.49: dragging an album entry between albums now syncs
 

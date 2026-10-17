@@ -30,6 +30,15 @@ def read_access(project_dir: Path, legacy=lambda: None) -> dict:
     return data
 
 
+def projects_in(folder: Path) -> tuple:
+    """(whether `folder` is itself a project, the project folders it holds).
+    A project is a folder with a manifest.json."""
+    folder = Path(folder)
+    if (folder / "manifest.json").is_file():
+        return True, [folder]
+    return False, [manifest.parent for manifest in folder.rglob("manifest.json")]
+
+
 def write_access(project_dir: Path, data: dict) -> None:
     project_dir = Path(project_dir)
     project_dir.mkdir(parents=True, exist_ok=True)

@@ -275,6 +275,7 @@ export function createCloudBrowser(app) {
     const picking = app.browserState.mode === "pick";
     if (app.elements.browserNewFolder) app.elements.browserNewFolder.hidden = !canCreate;
     if (app.elements.browserNewProject) app.elements.browserNewProject.hidden = !canCreate || picking;
+    if (app.elements.browserTrash) app.elements.browserTrash.hidden = picking || provider?.id !== "server" || !app.browserState.path;
     if (app.elements.browserPublishHere) app.elements.browserPublishHere.hidden = picking || !(canCreate && provider?.supportsPublish);
     if (app.elements.browserSelectToggle) {
       const manage = app.browserState.mode === "manage";
@@ -463,13 +464,8 @@ export function createCloudBrowser(app) {
     // Multi-select management bar: a count + Move/Copy/Delete, with the single-
     // selection Open/Access controls hidden.
     const canTransfer = manageMulti && count > 0;
-    if (app.elements.browserMoveBtn) {
-      app.elements.browserMoveBtn.hidden = !manageMulti;
-      app.elements.browserMoveBtn.disabled = !canTransfer;
-    }
-    if (app.elements.browserCopyBtn) {
-      app.elements.browserCopyBtn.hidden = !manageMulti;
-      app.elements.browserCopyBtn.disabled = !canTransfer;
+    for (const button of [app.elements.browserMoveBtn, app.elements.browserCopyBtn]) {
+      if (button) Object.assign(button, { hidden: !manageMulti, disabled: !canTransfer });
     }
     if (app.elements.browserDeleteBtn) {
       app.elements.browserDeleteBtn.hidden = !manageMulti;
@@ -483,9 +479,7 @@ export function createCloudBrowser(app) {
       app.elements.browserPickBtn.hidden = !picking;
       app.elements.browserPickBtn.disabled = !canDrop;
     }
-    if (app.elements.browserPickCancel) {
-      app.elements.browserPickCancel.hidden = !picking;
-    }
+    if (app.elements.browserPickCancel) app.elements.browserPickCancel.hidden = !picking;
     if (app.elements.browserSelectionLabel) {
       if (picking) {
         const op = app.browserState.pendingTransfer?.op === "move" ? "Move" : "Copy";
@@ -604,11 +598,10 @@ export function createCloudBrowser(app) {
     const targets = app.browserState.entries.filter((entry) => app.browserState.checked.has(entry.path));
     if (targets.length === 0) return;
     const label = targets.length === 1 ? `"${targets[0].name}"` : `${targets.length} items`;
-    const confirmed = await app.showConfirmDialog({
-      title: "Delete",
-      message: `Delete ${label}? This permanently removes ${targets.length === 1 ? "it" : "them"} and cannot be undone.`,
-      acceptLabel: "Delete"
-    });
+    const it = targets.length === 1 ? "it" : "them";
+    const confirmed = await app.showConfirmDialog({ title: "Delete", acceptLabel: "Delete", message: provider.id === "server"
+      ? `Delete ${label}? The team's Trash keeps ${it} for 30 days, where the owner can restore ${it}.`
+      : `Delete ${label}? This permanently removes ${it} and cannot be undone.` });
     if (!confirmed) return;
     let openWasDeleted = false;
     const failures = [];
@@ -627,6 +620,9 @@ export function createCloudBrowser(app) {
     await browseTo(app.browserState.path);
     if (failures.length) setBrowserStatus(`Could not delete — ${failures.join("; ")}`);
   }
+
+  // The team's trash (History): deleted projects, restorable for a while.
+  const handleOpenTrash = () => app.history.trash.open(app.browserState.path.split("/")[0], { onChange: () => void browseTo(app.browserState.path) });
 
   // Restore the File Manager title/subtitle after a destination-pick detour.
   function setManageChrome() {
@@ -985,7 +981,7 @@ export function createCloudBrowser(app) {
 
   return {
     activateBrowserEntry, beginTransfer, cancelPick, handleAccountLogin, handleAccountLogout,
-    handleDeleteSelected, handleHost, handleNewFolder, handleNewProject, handleOpenWorkspace,
+    handleDeleteSelected, handleHost, handleNewFolder, handleNewProject, handleOpenTrash, handleOpenWorkspace,
     handlePublishHere, handleSelectDestination, openAccessEditor, openFileBrowser,
     openLocalProjectFromBrowser, performLogin, pingCurrentServer, renderHostTargets,
     saveAccessEditor, splitServerPath, switchBrowserSide, toggleMultiSelect

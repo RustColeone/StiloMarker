@@ -7317,3 +7317,13 @@ pre.proposal-diff-block {
   font-size: 0.85em;
   opacity: 0.7;
 }
+
+/* The team's trash (History): deleted cloud projects, restorable for a while. */
+#trash-dialog { width: min(560px, calc(100vw - 32px)); }
+.trash-list { display: grid; gap: 8px; max-height: min(60vh, 480px); overflow: auto; }
+.trash-row { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid var(--border); background: var(--surface-0); }
+.trash-text { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.trash-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trash-actions { display: flex; gap: 6px; flex: none; }
+.browser-tool-btn.is-danger { color: var(--danger, #c0392b); }
+@media (max-width: 560px) { .trash-row { flex-direction: column; align-items: stretch; } }

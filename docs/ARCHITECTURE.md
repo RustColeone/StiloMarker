@@ -327,6 +327,12 @@ refuses to record anything new.
   resolves to `{ name: value }` or null.
 - A new kind of file that can be created (New ... in the Create menu and the
   explorer): give its File types entry a `create: { label, name, order }`.
+- Deleting a cloud project or folder: `registry.delete_entry` moves it, with
+  its history, into History's trash (`history.trash.put`). The trash keeps it
+  for `--trash-days` (at most 30) and the backup sweep removes it after
+  that. Who may delete or restore is `identity.may_delete(identity, team,
+  folder)`. In the browser, `modules.history.trash.open(team, { onChange })`
+  shows it.
 - A module's network messages: list each route in
   `protocol/<module>.contract.json`. The structure test checks that the
   server half serves exactly those and that nothing outside the module calls

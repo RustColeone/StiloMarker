@@ -12,7 +12,7 @@ class Identity:
     def __init__(self, accounts, prefs, access_store):
         self.accounts = accounts          # the account file (adapters/account_file.py)
         self.prefs = prefs                # adapters/prefs_file.py
-        self._access = access_store       # read(project_dir, legacy), write(project_dir, data)
+        self._access = access_store       # read(project_dir, legacy), write(project_dir, data), projects_in(folder)
         self._tokens: dict[str, str] = {}  # account token -> username
         self._lock = threading.Lock()
 
@@ -94,6 +94,21 @@ class Identity:
 
     def require_owner(self, identity: dict, team: str, access: dict, refusal: str) -> None:
         require_owner(access, identity["username"], self.may_open(identity, team, access), refusal)
+
+    def in_team(self, token: str, team: str) -> tuple:
+        """(identity, team) for an account token in that team; raises otherwise."""
+        identity = self.require(token)
+        return identity, self.require_team(identity, team)
+
+    def may_delete(self, identity: dict, team: str, folder, legacy=lambda: None) -> None:
+        """A project: only its owner. Another folder: anyone in the team, unless
+        it holds projects someone else owns. Reads the access files where the
+        folder is now (in the team, or in the trash). Raises PermissionError."""
+        is_project, projects = self._access.projects_in(folder)
+        if is_project:
+            self.require_owner(identity, team, self.access(folder, legacy), "Only the project owner can delete this project")
+        elif any(self.owned_by_other(identity, self.access(project)) for project in projects):
+            raise PermissionError("This folder contains projects owned by others")
 
     def claim(self, identity: dict, project_dir) -> None:
         """Record `identity` as the owner of a project they just made or imported."""

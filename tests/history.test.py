@@ -12,6 +12,9 @@ from stilo.modules.history.adapters.blob_store import BlobStore  # noqa: E402
 from stilo.modules.history.model.retention import POLICY, backups_to_drop, over_budget, skip_backup  # noqa: E402
 from stilo.modules.history.service.backups import Backups  # noqa: E402
 from stilo.modules.history.service.snapshots import Snapshots  # noqa: E402
+from stilo.modules.history.adapters.trash_store import TrashStore  # noqa: E402
+from stilo.modules.history.model.trash import free_name, keep_days  # noqa: E402
+from stilo.modules.history.service.trash import Trash  # noqa: E402
 from stilo.modules.workspace import file_key  # noqa: E402
 
 DAY = 86400 * 1000
@@ -121,6 +124,83 @@ class Services(unittest.TestCase):
         workspace.revision = 5
         self.assertEqual(backups.sweep([("red", "Novel", workspace)], now=1_800_000_900), 1)
         self.assertEqual(len(backups.list("red", "Novel")["backups"]), 1, "one daily per day, refreshed")
+
+
+class TrashBin(unittest.TestCase):
+    """A deleted project waits in the trash with its history; its owner can
+    restore it (under a new name if its place was taken) or remove it; the
+    sweep removes what has expired and adopts history whose project is gone."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.data = Path(self.tmp.name)
+        roots = {name: self.data / name for name in ("_snapshots", "_backups")}
+        data = self.data
+        class Identity:
+            def in_team(self, token, team):
+                if token not in ("amy", "bo"):
+                    raise PermissionError("no")
+                return {"username": token}, team
+            def may_delete(self, identity, team, folder):
+                owner = (folder / "owner").read_text() if (folder / "owner").exists() else ""
+                if owner and owner != identity["username"]:
+                    raise PermissionError("Only the project owner can delete this project")
+        class Places:
+            def folder(self, team, relpath):
+                return data / f"team_{team}" / relpath
+        self.trash = Trash(TrashStore(data / "_trash", roots), Identity(), Places(), 30, threading.RLock())
+
+    def project(self, relpath, owner="amy"):
+        folder = self.data / "team_red" / relpath
+        folder.mkdir(parents=True)
+        (folder / "manifest.json").write_text("{}")
+        (folder / "owner").write_text(owner)
+        (folder / "chapter.md").write_text("text")
+        for root in ("_snapshots", "_backups"):
+            (self.data / root / "red" / relpath).mkdir(parents=True)
+            (self.data / root / "red" / relpath / "index.json").write_text("{}")
+        return folder
+
+    def test_rules(self):
+        self.assertEqual((keep_days(90), keep_days(0), keep_days("x"), keep_days(7)), (30, 1, 30, 7))
+        taken = {"Novel", "Novel (restored)"}
+        self.assertEqual(free_name("Novel", taken.__contains__), "Novel (restored 2)")
+        self.assertEqual(free_name("Poems", taken.__contains__), "Poems")
+
+    def test_delete_restore_and_remove(self):
+        folder = self.project("Novel")
+        entry = self.trash.put("amy", "red", "Novel", folder, "project")
+        self.assertFalse(folder.exists())
+        self.assertFalse((self.data / "_backups" / "red" / "Novel").exists(), "the history went with it")
+        listing = self.trash.list("amy", "red")
+        self.assertEqual([(e["name"], e["restorable"]) for e in listing["entries"]], [("Novel", True)])
+        self.assertEqual(listing["entries"][0]["expiresAt"] - listing["entries"][0]["deletedAt"], 30 * 86400 * 1000)
+        self.assertFalse(self.trash.list("bo", "red")["entries"][0]["restorable"], "only its owner may restore it")
+        with self.assertRaises(PermissionError):
+            self.trash.restore("bo", "red", entry["id"])
+        self.project("Novel")  # a new project took the name meanwhile
+        restored = self.trash.restore("amy", "red", entry["id"])
+        self.assertEqual(restored["path"], "Novel (restored)")
+        self.assertEqual((self.data / "team_red" / "Novel (restored)" / "chapter.md").read_text(), "text")
+        self.assertTrue((self.data / "_backups" / "red" / "Novel (restored)" / "index.json").exists())
+        self.assertEqual(self.trash.list("amy", "red")["entries"], [])
+        again = self.trash.put("amy", "red", "Novel (restored)", self.data / "team_red" / "Novel (restored)", "project")
+        self.assertEqual(self.trash.delete("amy", "red", again["id"]), {"deleted": True})
+        with self.assertRaises(LookupError):
+            self.trash.restore("amy", "red", again["id"])
+
+    def test_sweep_expires_entries_and_adopts_orphaned_history(self):
+        self.trash.put("amy", "red", "Old", self.project("Old"), "project")
+        (self.data / "_backups" / "red" / "Gone").mkdir(parents=True)
+        (self.data / "_backups" / "red" / "Gone" / "index.json").write_text("{}")
+        self.project("Kept")
+        self.assertEqual(self.trash.sweep(), 0)
+        names = {e["name"]: e for e in self.trash.list("amy", "red")["entries"]}
+        self.assertEqual(set(names), {"Old", "Gone"}, "history without a project is adopted; a live project's is not")
+        self.assertEqual((names["Gone"]["kind"], names["Gone"]["restorable"], names["Gone"]["removable"]), ("history", False, True))
+        self.assertEqual(self.trash.sweep(now=time.time() + 31 * 86400), 2)
+        self.assertEqual(self.trash.list("amy", "red")["entries"], [])
+        self.assertTrue((self.data / "_backups" / "red" / "Kept").exists())
 
 
 if __name__ == "__main__":

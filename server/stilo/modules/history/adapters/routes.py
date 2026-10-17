@@ -1,5 +1,6 @@
-"""History's HTTP routes (protocol/history.contract.json): snapshots of files
-and backups of whole workspaces, answered by the HistoryDesk."""
+"""History's HTTP routes (protocol/history.contract.json): snapshots of files,
+backups of whole workspaces and the trash of deleted projects, answered by
+the HistoryDesk."""
 
 
 def add_routes(transport, desk):
@@ -38,3 +39,11 @@ def add_routes(transport, desk):
     transport.add_route("GET", "/api/backups/files", lambda r: desk.list_backup_files(*where(r), r.query("id")))
     transport.add_route("GET", "/api/backups/content", lambda r: desk.get_backup_content(*where(r), r.query("id"), r.query("file")))
     transport.add_route("POST", "/api/backups", create_backup)
+
+    def trash_item(request):
+        payload = request.json()
+        return token_of(request), str(payload.get("team", "")), str(payload.get("id", ""))
+
+    transport.add_route("GET", "/api/trash", lambda r: desk.trash.list(token_of(r), r.query("team")))
+    transport.add_route("POST", "/api/trash/restore", lambda r: desk.trash.restore(*trash_item(r)))
+    transport.add_route("POST", "/api/trash/delete", lambda r: desk.trash.delete(*trash_item(r)))
