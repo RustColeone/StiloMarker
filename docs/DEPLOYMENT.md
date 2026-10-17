@@ -546,3 +546,24 @@ turns), the backend self-test, fifteen browser suites (new:
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261016T215406Z-v0.1.36`.
 Nine project manifests valid, 170/170 files.
 
+
+## Verified release: v0.1.37
+
+Deployed on 2026-10-17 at 02:31 UTC. Module restructure step 6: the
+Assistant module on both ends and the agent's `edit_file` tool (exact
+passages, one match each, no overlaps). App version `0.1.37`; sync
+compatibility unchanged at `117`.
+
+Public checks: ping (`0.1.37`), the journal shows the kernel starting
+assistant, no errors. Live test with the real models (deepseek-flash and
+gpt-6.1-sol, signed in as `test`, the project sent with the request, nothing
+stored): asked to change Mara's age in her character file and nothing else,
+both read the file and called `edit_file` on their own with one edit (the
+sentence holding the age). The proposal was an `update-file` whose
+`preImage` was the file, whose content differed only in that word, and whose
+author's notes were kept byte for byte. Validation: 212 Node tests, all
+Python suites (new: `assistant-edits`), the backend self-test, fifteen
+browser suites (`write-path-browser.py` gained the `edit_file` card and merge).
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T023104Z-v0.1.37`.
+Nine project manifests valid, 170/170 files.
