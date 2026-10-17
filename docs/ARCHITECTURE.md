@@ -15,8 +15,8 @@ This file is the short reference that the structure tests enforce.
 
   | Level | Modules |
   | --- | --- |
-  | 1 | Shell (browser) / Transport (server), Identity and access, File types, Models |
-  | 2 | Workspace |
+  | 1 | Shell (browser) / Transport (server), File types |
+  | 2 | Workspace, Identity and access, Models |
   | 3 | Editor (browser), Sync, Characters |
   | 4 | History, Comments |
   | 5 | Assistant, Chats |
@@ -28,8 +28,14 @@ This file is the short reference that the structure tests enforce.
   views, routes, storage, network). Importing a browser module's `index.js`
   never touches the page; adapters reach the page only once started.
 - **Between the ends**: each module's network messages live in
-  `protocol/<module>.contract.json` with their own version. Until a module
-  takes its share, everything is in `protocol/legacy.contract.json`.
+  `protocol/<module>.contract.json` with their own version (Identity's was
+  the first, in v0.1.38). Until a module takes its share, everything is in
+  `protocol/legacy.contract.json`.
+- **Why Identity and Models sit on level 2** (changed 2026-10-17; the design
+  had them on level 1): they need the frame below them, Transport for their
+  routes on the server and Shell for the server connection and dialogs in the
+  browser. Workspace does not need Identity (who may open a project is asked
+  by the modules above it), so nothing else moved.
 - **Rules in both languages** (the server stays in Python) live only in a
   `model/` and share one case table in `spec/`, run by both test suites.
 
@@ -39,7 +45,7 @@ This file is the short reference that the structure tests enforce.
 
 Arrows are "uses": a module calls only the modules it points at, always on a
 lower level. News travels the other way, as events or extension points, so it
-needs no arrow. Green modules exist (as of v0.1.37); the rest are still legacy
+needs no arrow. Green modules exist (as of v0.1.38); the rest are still legacy
 code. Modules marked *both* have a browser half and a server half that share a
 model and a contract.
 
@@ -58,15 +64,15 @@ flowchart TB
     Sync["Sync (both)"]
     Characters["Characters (both)"]
   end
-  subgraph L2["Level 2 · the workspace"]
+  subgraph L2["Level 2 · the workspace and who uses it"]
     Workspace["Workspace (both)"]
+    Identity["Identity and access (both)"]
+    Models["Models (both)"]
   end
-  subgraph L1["Level 1 · foundations"]
+  subgraph L1["Level 1 · the frame"]
     Shell["Shell (browser)"]
     Transport["Transport (server)"]
-    Identity["Identity and access (both)"]
     FileTypes["File types (both)"]
-    Models["Models (both)"]
   end
   Kernel["Kernel (both): starts modules, hands out declared APIs"]
 
@@ -77,12 +83,14 @@ flowchart TB
   Editor --> Workspace & FileTypes & Shell
   Characters --> Workspace
   Sync --> Workspace & Identity
-  Workspace --> FileTypes & Identity
+  Workspace --> FileTypes
+  Identity --> Shell & Transport
+  Models --> Shell & Transport
   L1 -.started by.-> Kernel
   L5 ~~~ L4 ~~~ L3 ~~~ L2 ~~~ L1
 
   classDef built fill:#d8f5dd,stroke:#2e8b47,color:#123;
-  class Shell,Transport,FileTypes,Workspace,Characters,Assistant,Kernel built;
+  class Shell,Transport,FileTypes,Workspace,Identity,Characters,Assistant,Kernel built;
 ```
 
 ### Inside a module
@@ -218,7 +226,13 @@ refuses to record anything new.
 | 4c | The server's operations (`_apply_operation`) and the sessions/sync parts of CollaborationBroker | with step 7 (Sync) |
 | 5 | Characters on both ends: author's notes (hidden unless `notes: hints`), files characters cannot read (`Plans/`, `*.plan.md`), the agent's update rules and length guidance; every rule in one shared case table | done |
 | 6 | Assistant on both ends: `edit_file` (exact passages, one match each, refused precisely so the model retries; proposals travel as an update-file with their edits and merge through the write path), the agent's tool definitions, the edit review card | done |
-| 7 | Sync, History, Comments, Identity, Models, Chats, Editor | next |
+| 7a | Identity and access on both ends: accounts and the account file, sign-in tokens, who may open a project and in what role (`can(role, action)`), per-account preferences; in the browser the signed-in account and its stored sign-in. Shell gains the server connection. Identity's routes get the first module contract | done |
+| 7b | Models: providers (DeepSeek, OpenAI, own key, local), streaming, MCP | next |
+| 7c | Sync: sessions, presence, leases, the event stream, reconnect; the server's operations (`_apply_operation`, from 4c); a sync contract and version in place of 117 | |
+| 7d | History: snapshots, backups, restore (through `write`) | |
+| 7e | Comments: line comments and their anchors | |
+| 7f | Chats: conversations, members, notes, search, the reply queue | |
+| 7g | Editor (browser): the source editor, preview, tabs within panes, find and replace | |
 | 8 | The URL album as an extension | |
 
 ### Notes for module authors
@@ -239,6 +253,18 @@ refuses to record anything new.
   `node tools/protocol-sync.mjs` writes the browser's copy. Pages mark what
   they need (`data-file-accept`, `data-file-types`, `data-file-type-options`)
   and File types fills it in.
+- The server, from the browser: `shell.server.request(path, { method, query,
+  body, failure })`. Never build the address yourself; `shell.server.url()`
+  is it. Each module's calls live in its `adapters/api.js`.
+- The signed-in account: `identity.account()` (`{ token, username, teams }`
+  or null) and `identity.token()`; listen to `identity.events.on("account")`.
+  Never read the stored password or the sign-in settings: Identity keeps them.
+  On the server, `identity.require(token)`, `require_team`, `may_open`,
+  `role` and `can(identity, action, team, access)`.
+- A module's network messages: list each route in
+  `protocol/<module>.contract.json`. The structure test checks that the
+  server half serves exactly those and that nothing outside the module calls
+  them.
 - Writing a file: never send `update-file` for text and never call
   `controller.updateContent` plus `publishOperation` yourself. Call
   `workspace.write(path, text, { base?, source })`. With `base` (the text you

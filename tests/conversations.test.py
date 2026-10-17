@@ -160,7 +160,7 @@ class RegistryBase(unittest.TestCase):
         self.data = Path(self.tmp.name) / 'data'
         self.reg = server.WorkspaceRegistry('2468', Path(self.tmp.name) / 'state.json', accounts=accounts, data_dir=self.data)
         self.addCleanup(self.reg._close_chat_stores)
-        self.tokens = {name: self.reg.login(name, 'pw')['token'] for name in ('leo', 'amy', 'ben', 'eve')}
+        self.tokens = {name: self.reg.identity.login(name, 'pw')['token'] for name in ('leo', 'amy', 'ben', 'eve')}
         self.reg.create_workspace(self.tokens['leo'], 'qa', 'Novel', share_team=True)
         self.path = 'workspaces/Novel'
         self.sessions = {name: self.reg.open_workspace(self.tokens[name], 'qa', self.path)['token'] for name in ('leo', 'amy', 'ben')}

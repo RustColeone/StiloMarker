@@ -3,15 +3,18 @@
   "oversized": {
     "app/editor/editor-core.js": 1655,
     "app/features/chat-panel.js": 1676,
-    "app/features/cloud-browser.js": 1004,
+    "app/features/cloud-browser.js": 993,
     "app/features/file-actions.js": 1234,
     "app/features/panes.js": 1046,
     "app/main.js": 4747,
     "app/services/collaboration-service.js": 1107,
     "app/ui/bmap-view.js": 4025,
-    "server/mdnotes_server.py": 6048
+    "server/mdnotes_server.py": 5770
   },
   "spellings": {
+    "access file": [],
+    "account file": [],
+    "account prefs file": [],
     "file type .bmap": [],
     "file type .mtree": [],
     "file type .persona.skill": [],

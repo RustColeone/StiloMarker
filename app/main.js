@@ -2,6 +2,7 @@ import { startModules } from "./kernel/index.js";
 import shellModule from "./modules/shell/index.js";
 import fileTypesModule from "./modules/file-types/index.js";
 import workspaceModule from "./modules/workspace/index.js";
+import identityModule from "./modules/identity/index.js";
 import { createWorkspacePorts } from "./features/workspace-ports.js";
 import { rememberedWorkspace, createSessionRecovery } from "./services/session-recovery-service.js";
 import { installMobileViewport } from "./services/chat-ui-service.js";
@@ -15,7 +16,7 @@ import { sendGenerationRequest } from "./services/chat-api-service.js";
 import { renderMarkdown } from "./services/markdown-service.js";
 import { PERSONA_SUFFIX, parsePersona, personaTemplate } from "./services/persona-service.js";
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
-import { applyEditorFont, applyTheme, clampSourceFontSize, loadSettings, patchStoredSettings, saveSettings } from "./services/settings-service.js";
+import { applyEditorFont, applyTheme, clampSourceFontSize, loadSettings, patchStoredSettings, saveSettings, signInSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
 import { clearViewStates, loadViewStates, saveViewStates } from "./services/view-state-service.js";
 import { browseServer, createProjectServer, deleteServer, exportProjectServer, importProjectServer, mkdirServer, normalizeServerUrl } from "./services/sync-service.js";
@@ -280,12 +281,14 @@ const elements = {
 // ---- Modules (docs/ARCHITECTURE.md) ----
 // The app is moving into modules one step at a time. Code still in this file
 // reaches a module only through the public API the kernel hands back.
-const modules = await startModules([shellModule, fileTypesModule, workspaceModule], {
+const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule], {
   log: (owner, ...args) => { try { logDebug("action", `${owner}: ${args.join(" ")}`); } catch { /* log not ready yet */ } }
 });
-const { shell, workspace } = modules;
+const { shell, workspace, identity } = modules;
 
 const settings = loadSettings();
+shell.server.configure({ address: () => settings.serverUrl });
+identity.attach(signInSettings(settings));
 const storedProject = loadProject();
 const controller = workspace.openProject(storedProject ?? seedDefaultProject());
 let sourceOpenTabIds = controller.getProject().activeFileId ? [controller.getProject().activeFileId] : [];
@@ -503,11 +506,9 @@ const syncState = {
   displayName: null,
   clientId: null,
   role: null,
-  // Accounts mode (state 3): whether the last-pinged server supports accounts,
-  // and the currently logged-in account (null when signed out).
+  // Whether the last-pinged server has accounts (the account itself: identity.account()).
   accountsAvailable: false,
-  hostingAvailable: false,
-  account: null // { token, username, teams: [...] }
+  hostingAvailable: false
 };
 
 // "private" = user's local workspace; "synced" = connected server workspace.
@@ -780,8 +781,8 @@ function loadChat() {
       chatWorkspaceKey, clearAgentDecorations, collaboration, controller, createFileInFolder, elements,
       escapeHtmlAttribute, getSelectedParent, isMobileLayout, jumpToAgentChange, logDebug, notify,
       openFileFromExplorer, openSettingsDialog, personaAvatarSrc, promptForName, workspace,
-      registerAgentDecorations, settings, showConfirmDialog, showToast, storedProject, syncState,
-      updateEditorAgentBar,
+      registerAgentDecorations, settings, showConfirmDialog, showToast, storedProject,
+      updateEditorAgentBar, identity,
       get workspaceMode() { return workspaceMode; }
     });
     chat.chatState.shouldScrollToBottom = true;
@@ -1251,7 +1252,7 @@ async function submitLineComment(...args) { return lineCommentsUi().submitLineCo
 // them in this browser's IndexedDB as before. Everything goes through this one
 // adapter so the dialog and diff code never care which backend they talk to.
 function cloudWorkspaceTarget() {
-  const token = syncState.account?.token;
+  const token = identity.token();
   const ws = settings.lastWorkspace;
   if (!token || !ws?.team || !ws?.path) return null;
   if (settings.syncedProjectId !== `${ws.team}/${ws.path}`) return null; // on-screen project IS that workspace
@@ -1613,16 +1614,14 @@ const collaboration = createCollaborationRuntime({
   // previously-proven credentials so reconnect can continue; return null to let
   // the runtime stop retrying instead of looping on a dead token.
   async reauthenticate() {
-    const serverKey = normalizeServerUrl(settings.serverUrl);
-    const proven = settings.accountSuccess?.[serverKey];
-    if (!proven || proven !== settings.accountUsername || !settings.accountPassword) return null;
+    if (!identity.canRestore()) return null;
     const token = collaboration.getConnectionInfo()?.token;
     try {
       await performLogin(settings.accountUsername, settings.accountPassword, {
         silent: true, isCurrent: () => Boolean(token) && collaboration.getConnectionInfo()?.token === token
       });
       logDebug("action", "Re-authenticated after token expiry", settings.accountUsername);
-      return syncState.account?.token ?? null;
+      return identity.token();
     } catch (error) {
       logDebug("response", "Re-authentication failed", error.message);
       if (![401, 403].includes(error.status)) throw error;
@@ -1712,7 +1711,7 @@ const explorer = createExplorerView({
     return node?.kind === "file" && isPreviewableFileName(node.name);
   },
   canManagePreview() {
-    return Boolean(syncState.account)
+    return Boolean(identity.account())
       && workspaceMode === "synced"
       && collaboration.isConnected()
       && Boolean(settings.lastWorkspace?.team);
@@ -1941,6 +1940,7 @@ function panes() {
     get sourceUrlDbEntry() { return sourceUrlDbEntry; },
     set sourceUrlDbEntry(value) { sourceUrlDbEntry = value; },
     get syncState() { return syncState; },
+    get identity() { return identity; },
     get togglePreview() { return togglePreview; },
     get updateFileContentFromPreview() { return updateFileContentFromPreview; },
     get updateStatus() { return updateStatus; },
@@ -2576,10 +2576,10 @@ function updateStatus(project) {
       ? "Local workspace"
       : "In-browser workspace";
   elements.browserStatusText.textContent = browserSupported ? "Chromium directory access available" : "Fallback import/export mode";
-  elements.serverStatusBarText.textContent = syncState.status === "sync-error" ? "Sync paused" : syncState.account
+  elements.serverStatusBarText.textContent = syncState.status === "sync-error" ? "Sync paused" : identity.account()
     ? (syncState.status === "connected"
-        ? syncState.account.username
-        : `Logged in as ${syncState.account.username}`)
+        ? identity.account().username
+        : `Logged in as ${identity.account().username}`)
     : syncState.status === "connected"
       ? "Connected"
       : syncState.status === "reachable"
@@ -3107,7 +3107,7 @@ async function quickGenerateBmapFile(bmapFileId, request) {
       contextFiles: Array.isArray(request?.contextFiles) ? request.contextFiles : [],
       bmapOverview: String(request?.bmapOverview ?? ""),
       projectName: project.name ?? "Workspace",
-      accountToken: syncState.account?.token
+      accountToken: identity.token()
     });
     const content = String(result?.content ?? "").trim();
     logDebug("response", "Quick Generate response received", `model=${result?.model ?? "?"} provider=${result?.provider ?? "?"} length=${content.length} chars`);
@@ -3475,7 +3475,7 @@ shell.commands.add({ id: "workspace.new-project", title: "New Project", menu: { 
   logDebug("action", "New project requested");
   closeMenus();
   // No local store and no server account: keep the legacy in-browser workspace.
-  if (!supportsOpfs() && !syncState.account) {
+  if (!supportsOpfs() && !identity.account()) {
     controller.replaceProject(seedDefaultProject());
     selectionNodeId = controller.getProject().activeFileId ?? controller.getProject().rootId;
     initializePaneState(controller.getProject());
@@ -3520,13 +3520,13 @@ shell.commands.add({ id: "cloud.open-project", title: "Open Project…", menu: {
   logDebug("action", "Open project browser");
   // Default to the server side when signed in (it replaces the old "Open Server
   // Directory"), else start on this device. The in-dialog toggle switches sides.
-  openFileBrowser({ side: syncState.account ? "server" : "local", intent: "open" });
+  openFileBrowser({ side: identity.account() ? "server" : "local", intent: "open" });
 } });
 
 shell.commands.add({ id: "cloud.file-manager", title: "File Manager", menu: { id: "file", group: 0, order: 3 }, run: () => {
   closeMenus();
   logDebug("action", "Open file manager");
-  openFileBrowser({ side: syncState.account ? "server" : "local", mode: "manage" });
+  openFileBrowser({ side: identity.account() ? "server" : "local", mode: "manage" });
 } });
 
 shell.commands.add({ id: "workspace.import-file", title: "Import File or Zip", menu: { id: "file", group: 0, order: 5 }, run: () => elements.importFileInput.click() });
@@ -3920,7 +3920,7 @@ function renderWelcomeState() {
     }
   }
   if (elements.welcomeOpenServer) {
-    elements.welcomeOpenServer.hidden = !syncState.account;
+    elements.welcomeOpenServer.hidden = !identity.account();
   }
 }
 
@@ -4377,6 +4377,7 @@ function cloudBrowser() {
     get snapshotDirtyFiles() { return snapshotDirtyFiles; },
     get switchWorkspaceMode() { return switchWorkspaceMode; },
     get syncState() { return syncState; },
+    get identity() { return identity; },
     get workspaceMode() { return workspaceMode; },
     set workspaceMode(value) { workspaceMode = value; }
   }));
@@ -4417,7 +4418,7 @@ const serverProvider = {
   },
   async list(path) {
     const { team, rel } = splitServerPath(path);
-    const data = await browseServer(settings.serverUrl, syncState.account.token, team, rel);
+    const data = await browseServer(settings.serverUrl, identity.token(), team, rel);
     if (!team) {
       // Team list. Older servers return name strings; newer ones { name, modified }.
       const entries = (data.teams ?? []).map((item) => {
@@ -4432,11 +4433,11 @@ const serverProvider = {
   },
   async mkdir(path, name) {
     const { team, rel } = splitServerPath(path);
-    await mkdirServer(settings.serverUrl, syncState.account.token, team, rel, name);
+    await mkdirServer(settings.serverUrl, identity.token(), team, rel, name);
   },
   async createProject(path, name) {
     const { team, rel } = splitServerPath(path);
-    const created = await createProjectServer(settings.serverUrl, syncState.account.token, team, rel, name);
+    const created = await createProjectServer(settings.serverUrl, identity.token(), team, rel, name);
     return { path: `${team}/${created.path}`, name };
   },
   async openProject(entry) {
@@ -4445,16 +4446,16 @@ const serverProvider = {
   },
   async delete(entry) {
     const { team, rel } = splitServerPath(entry.path);
-    await deleteServer(settings.serverUrl, syncState.account.token, team, rel);
+    await deleteServer(settings.serverUrl, identity.token(), team, rel);
   },
   async exportModel(entry) {
     const { team, rel } = splitServerPath(entry.path);
-    const data = await exportProjectServer(settings.serverUrl, syncState.account.token, team, rel);
+    const data = await exportProjectServer(settings.serverUrl, identity.token(), team, rel);
     return { name: data.name ?? entry.name, project: data.project };
   },
   async importModel(destPath, name, project) {
     const { team, rel } = splitServerPath(destPath);
-    const created = await importProjectServer(settings.serverUrl, syncState.account.token, team, rel, name, project);
+    const created = await importProjectServer(settings.serverUrl, identity.token(), team, rel, name, project);
     return { path: `${team}/${created.path}`, name: created.name };
   },
   async openAccess(entry) {
@@ -4699,12 +4700,11 @@ async function restoreSessionOnBoot({ manual = false, isCurrent = () => true } =
   const ping = await pingCurrentServer({ silent: true });
   if (!isCurrent()) return;
   if (!ping) throw new Error("Waiting for the server — your workspace will resume automatically.");
-  const proven = settings.accountSuccess?.[normalizeServerUrl(settings.serverUrl)];
-  if (syncState.accountsAvailable && proven === settings.accountUsername && proven && settings.accountPassword) {
+  if (syncState.accountsAvailable && identity.canRestore()) {
     await performLogin(settings.accountUsername, settings.accountPassword, { silent: true, isCurrent });
   }
   const target = rememberedWorkspace(settings.lastWorkspace) ?? last;
-  if (target && syncState.account) {
+  if (target && identity.account()) {
     await handleOpenWorkspace(target.team, target.path, { reason: manual ? "welcome-resume" : "automatic-restore", automatic: true, isCurrent });
     return;
   }

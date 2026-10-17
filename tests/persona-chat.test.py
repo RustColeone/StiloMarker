@@ -1,4 +1,5 @@
 """Roleplay persona turns: prompt, read-only tools, transcript mapping, limits."""
+from types import SimpleNamespace
 import copy, json, sys, unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -168,8 +169,7 @@ class PersonaTurnTests(unittest.TestCase):
         })()
         handler.client_address = ('127.0.0.1', 0)
         handler.registry = type('Registry', (), {
-            'accounts': type('Accounts', (), {'enabled': True})(),
-            'account_for_token': lambda self, token: {'username': 'leo', 'teams': []} if token == 'acct' else None,
+            'identity': SimpleNamespace(enabled=True, who=lambda token: {'username': 'leo', 'teams': []} if token == 'acct' else None),
         })()
         handler._read_json = lambda: {'mode': 'persona', 'persona': PERSONA, 'cast': CAST, 'accountToken': 'acct',
                                       'messages': [{'name': 'Leo', 'content': 'hi', 'self': False}]}

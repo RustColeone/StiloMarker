@@ -1,0 +1,11 @@
+{
+  "name": "identity",
+  "level": 2,
+  "uses": ["transport"],
+  "owns": {
+    "names": ["account file", "access file", "account prefs file"],
+    "state": ["account sign-ins"],
+    "routes": ["/api/auth/login", "/api/workspaces/access"],
+    "rules": ["who may open a project", "roles", "what each role may do"]
+  }
+}
