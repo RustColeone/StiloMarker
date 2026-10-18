@@ -537,7 +537,7 @@ export function createFileActions(app) {
       return false;
     }
 
-    const dropOffset = app.editorDragState.dropOffset ?? app.getEditorSelection().start;
+    const dropOffset = app.editorDropOffset() ?? app.getEditorSelection().start;
     app.elements.editorContent.focus();
     const ref = app.createMarkdownReference(activeFile, createdFile);
     app.replaceEditorRange(dropOffset, dropOffset, ref, dropOffset + ref.length, dropOffset + ref.length);
@@ -571,7 +571,7 @@ export function createFileActions(app) {
   }
 
   function insertEditorTextAtDrop(text, event) {
-    const insertOffset = app.editorDragState.dropOffset ?? app.getEditorTextOffsetFromPoint(event.clientX, event.clientY);
+    const insertOffset = app.editorDropOffset() ?? app.getEditorTextOffsetFromPoint(event.clientX, event.clientY);
     app.replaceEditorRange(insertOffset, insertOffset, text, insertOffset + text.length, insertOffset + text.length);
   }
 
@@ -591,7 +591,7 @@ export function createFileActions(app) {
     const draggedSelection = event.dataTransfer?.getData("text/mdnotes-editor-selection");
     if (draggedSelection) {
       try {
-        moveOrInsertDraggedSelection(JSON.parse(draggedSelection), app.editorDragState.dropOffset ?? app.getEditorTextOffsetFromPoint(event.clientX, event.clientY));
+        moveOrInsertDraggedSelection(JSON.parse(draggedSelection), app.editorDropOffset() ?? app.getEditorTextOffsetFromPoint(event.clientX, event.clientY));
       } catch (error) { ignore(error, "dropping dragged editor text failed"); }
       return;
     }

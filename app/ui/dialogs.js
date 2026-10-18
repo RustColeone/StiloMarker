@@ -77,7 +77,7 @@ export function createDialogs(app) {
       lineHtml: formatEditorDebugValue(line?.innerHTML ?? ""),
       nextLineText: formatEditorDebugValue(nextLine?.textContent ?? ""),
       autocomplete: app.elements.editorAutocomplete.hidden ? "hidden" : "visible",
-      history: `${app.editorHistory.index}/${app.editorHistory.stack.length}`,
+      history: app.historyPosition(),
       ...extra
     };
 

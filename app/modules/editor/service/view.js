@@ -11,6 +11,10 @@
 //   selectionNodeId    the node selected in the explorer
 //   draggingTabState   { pane, fileId } while a tab is dragged, else null
 
+// The preview's diff tab (comparing the open file with a snapshot): a preview
+// target that is not a project file.
+export const DIFF_TAB_ID = "__diff__";
+
 export const EMPTY_VIEW = {
   sourceOpenTabIds: [], previewOpenTabIds: [], previewFileId: null, previewPart: null,
   sourcePart: null, selectionNodeId: null, draggingTabState: null

@@ -5,16 +5,15 @@
 import { authorNotesHtml, parsePersona, personaAvatarHtml } from "../modules/characters/index.js";
 import { getNodeIdByPath, getPath, isBmapFileName, isImageFileName, isPersonaFileName } from "../modules/workspace/index.js";
 
-// The diagram editor in the preview, created on first use. main.js asks for
-// it to remember the diagram's pan and zoom.
+// The diagram editor in the preview, created on first use.
 let diagramView = null;
-export const currentDiagramView = () => diagramView;
 
 // Returns `app`, so it can wrap the shared values it is given.
 export function registerPreviews(previews, app) {
 
   previews.add({
     id: "bmap", matches: (file) => isBmapFileName(file.name), cacheable: false,
+    viewState: () => diagramView?.getView?.() ?? null, // the pan and zoom, remembered per file
     render(target, project, file) {
       if (!app.bmapViewModule) {
         target.innerHTML = `<div class="preview-loading">Loading diagram…</div>`;

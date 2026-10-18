@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-18 · release `v0.1.53` (deployed with v0.1.52; public check passed)
+Last updated: 2026-10-18 · release `v0.1.54` (not deployed; v0.1.53 is live)
 
 ---
 
@@ -68,6 +68,25 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.54: the Editor owns all of itself
+
+Step S3a of the follow-up to the restructure. Nothing changes for users.
+
+- The Editor creates and wires its parts itself: the source editor,
+  highlighting, find and replace, autocomplete, links, the tab strips and the
+  preview. `main.js` used to create six of them, each with its own list of
+  main's values (about 100 names in all), and kept their state.
+- Their state moved in with them (undo history, search, autocomplete, the
+  render cache, dragged text, other people's cursors, the file shown, the
+  saved scroll and caret per file), as did the editor's events (typing, IME
+  composition, the find bar, links under the mouse, drag and drop, the wheel),
+  the resize observer and showing the active file.
+- `main.js` attaches one port for what no module owns yet (25 names, listed
+  in `surface.js`); each should find an owner or become an extension point.
+- A preview may now offer `viewState()`: the diagram preview remembers its pan
+  and zoom that way, instead of `main.js` reaching into it.
+- Getters handed out by `main.js`: 227 → 133. `main.js`: 4,539 → 3,731 lines.
 
 ### v0.1.53: one owner for each piece of shared state; the diagram preview is back
 

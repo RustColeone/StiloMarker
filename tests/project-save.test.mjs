@@ -108,7 +108,7 @@ function mainSaveHandlers(controller, write, persist = () => {}, scope = () => '
   const auto = mainSource.slice(mainSource.indexOf('async function runAutoSave(reason) {'), mainSource.indexOf('// Periodic safety net'));
   const manual = mainSource.slice(mainSource.indexOf('async function saveActiveWorkspaceFile() {'), mainSource.indexOf('async function handleSaveCommand()'));
   return new Function('deps', `const { controller, saveProjectToHandles, saveProject, snapshotProjectKey, snapshotProject, savedFileIds } = deps;
-    const settings = { autoSave: true }, editorIsComposing = false, syncMode = { get: () => ({ workspaceMode: 'private' }) };
+    const settings = { autoSave: true }, editorParts = { isComposing: () => false }, syncMode = { get: () => ({ workspaceMode: 'private' }) };
     const logDebug = () => {}, dirtyFileIds = p => Object.values(p.nodes).filter(n => n.dirty).map(n => n.id);
     ${auto}\n${manual}\nreturn { auto: runAutoSave, manual: saveActiveWorkspaceFile };`)
     ({ controller, saveProjectToHandles: write, saveProject: persist, snapshotProjectKey: scope, snapshotProject, savedFileIds });

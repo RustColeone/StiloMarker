@@ -302,7 +302,10 @@ That is where bugs are hard to find. Steps, each its own release:
 | --- | --- | --- |
 | S1 | The trace (kernel) and rule 9: every silent catch (57: 36 browser, 21 server) reports why it carries on | done (v0.1.52) |
 | S2 | One owner per shared variable: the 26 that outside code set (v0.1.53: none left, rule 10). What the editor shows (tabs, the preview's file and part, the selection) is the Editor's `view`; shared or local work and the kept local project is Sync's `mode`; the rest moved into the one file that used them (gestures into layout, snapshot counts into snapshots, the replace target into file actions, MathJax loading into the preview, the editor's two flags into the editor). Getters handed out by `main.js`: 261 → 227 | done (v0.1.53) |
-| S3 | The large legacy files into modules, one per release: file-actions, explorer, cloud-browser, chat-panel. What a module or feature is handed from outside is capped (about 8 names); the getters into `main.js` may only shrink, to 0 | |
+| S3a | The Editor owns all of itself (v0.1.54): it creates and wires its parts (source editor, highlighting, find, autocomplete, links, tabs and preview) instead of `main.js` creating six of them with their own lists of main's values; their state (undo history, search, autocomplete, render cache, dragged text, others' cursors, the file shown, resume positions), the editor's events, the resize observer and showing the active file moved in with them. `main.js` attaches one port (`editor.attach`, listed in `surface.js` as PORT) for what no module owns yet. Getters handed out by `main.js`: 227 → 133; `main.js` 4,539 → 3,731 lines | done (v0.1.54) |
+| S3b | The explorer and file actions as one module (the explorer's tree, creating, renaming, moving, copying, deleting, importing, exporting, dropping into the editor), using `editor.parts()`, Workspace, Sync's session and Shell | next |
+| S3c | The cloud file browser, sign-in and hosting as a module | |
+| S3d | The chat panel into the Assistant module | |
 | S4 | `main.js` only starts the kernel; then the server's `WorkspaceRegistry` the same way | |
 
 ### Notes for module authors
@@ -312,6 +315,10 @@ That is where bugs are hard to find. Steps, each its own release:
   named actions, which call `set(action, patch)`. Each change is recorded in
   the trace with its action's name; lists in it are frozen, and a key it did
   not start with is refused. Never hand out a setter (rule 10).
+- The editor's functions (insert at the caret, open a tab, the selection...):
+  `editor.parts()` after `main.js` has called `editor.attach(port)`. A part
+  needing something the Editor does not own gets it from the port; moving an
+  entry out of PORT (to an owner, or an extension point) is how the port shrinks.
 - What the editor shows: `editor.view` (`get()` → `sourceOpenTabIds`,
   `previewOpenTabIds`, `previewFileId`, `previewPart`, `sourcePart`,
   `selectionNodeId`, `draggingTabState`; actions `reset`, `pick`, `select`,

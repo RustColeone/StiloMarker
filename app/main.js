@@ -19,7 +19,6 @@ import { PERSONA_SUFFIX, parsePersona, personaTemplate } from "./services/person
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
 import { applyEditorFont, applyTheme, clampSourceFontSize, loadSettings, patchStoredSettings, saveSettings, signInSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
-import { clearViewStates, loadViewStates, saveViewStates } from "./services/view-state-service.js";
 import { browseServer, createProjectServer, deleteServer, exportProjectServer, importProjectServer, mkdirServer, normalizeServerUrl, saveUserState, uploadAsset } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { query } from "./ui/dom.js";
@@ -27,9 +26,9 @@ import { createExplorerView } from "./ui/explorer-view.js";
 import { createDefaultBmap } from "./services/bmap-service.js";
 import { createCloudBrowser } from "./features/cloud-browser.js";
 import { createFileActions } from "./features/file-actions.js";
-import { currentDiagramView, registerPreviews } from "./features/previews.js";
+import { registerPreviews } from "./features/previews.js";
 import { createLayout } from "./ui/layout.js";
-import editorModule, { createAutocomplete, createEditorCore, createFindReplace, createHighlighter, createLinks, createPanes, renderMarkdown } from "./modules/editor/index.js";
+import editorModule, { DIFF_TAB_ID, escapeHtmlAttribute, forgetViewStates, getRelativePath, getRelativeProjectPath, normalizePath, renderMarkdown } from "./modules/editor/index.js";
 import { createDialogs } from "./ui/dialogs.js";
 import { createLineComments } from "./modules/comments/index.js";
 import { createSnapshots } from "./features/snapshots.js";
@@ -283,12 +282,35 @@ const editorView = modules.editor.view;
 editorView.reset(controller.getProject());
 // Shared or local work, and the local project kept aside meanwhile: Sync's.
 const syncMode = modules.sync.mode;
+// The Editor's parts (source editor, find, autocomplete, links, tabs, preview),
+// created now and given what no module owns yet: each entry of this port should
+// find an owner or become an extension point (modules/editor/adapters/surface.js).
+var editorParts = modules.editor.attach({
+  get collaboration() { return collaboration; },
+  get workspaceMode() { return syncMode.get().workspaceMode; },
+  settings, elements, identity,
+  saveUserState: (ws, openFiles, activeFile) => saveUserState(settings.serverUrl, identity.token(), ws.team, ws.path, openFiles, activeFile),
+  logDebug, traceEditorEvent, formatEditorDebugValue,
+  commentsForActiveFile, scheduleCommentReanchor, updateEditorAgentBar,
+  get agentPendingDecorations() { return agentPendingDecorations; },
+  imageSrcFor, closeDiff, formatSnapshotTime,
+  get diffState() { return diffState; },
+  render, updateStatus, renderWelcomeState, setMobileExplorerOpen, togglePreview,
+  scope: () => chatWorkspaceKey(), isReadOnly: () => isReadOnlyWorkspace(), onDrop: (event) => handleEditorDrop(event)
+});
+// Diagrams and character sheets add their previews to the Editor's extension point.
+registerPreviews(modules.editor.previews, {
+  view: editorView, settings, escapeHtmlAttribute, normalizePath, getRelativeProjectPath,
+  personaAvatarSrc, loadBmapView, quickGenerateBmapFile, updateFileContentFromPreview, logDebug, render, getViewState, openFileFromExplorer,
+  get bmapViewModule() { return bmapViewModule; },
+  get controller() { return controller; }
+});
 // Total source characters of the active file, cached for the footer counter by
 // updateStatus. null → no text file open (the counter hides). Declared up here so
 // the hoisted updateStatus can never touch it inside its temporal dead zone.
 let statusCharTotal = null;
 // Typing fast path + deferred/debounced work (see render()); whether a keystroke
-// is being applied is the Editor's (editorCoreInstance?.isTyping()).
+// is being applied is the Editor's (editorParts?.isTyping()).
 const DEFERRED_RENDER_IDLE_MS = 250;
 const DEFERRED_RENDER_MAX_MS = 1500;
 let deferredRenderTimer = null;
@@ -298,99 +320,49 @@ const RECOVERY_SAVE_MAX_MS = 3000;
 let recoverySaveTimer = null;
 let recoverySaveDeadline = 0;
 let recoverySavePending = null;
-// ---- Editor core (the Editor module) ----
-// Created on first use. The module reads main's shared values through this
-// context, so it always sees their current values. `var`: a forwarding
-// function can run during startup, before this line is reached.
-var editorCoreInstance;
-function editorCore() {
-  return (editorCoreInstance ??= createEditorCore({
-    toolbars: modules.editor.toolbars,
-    get acceptEditorAutocomplete() { return acceptEditorAutocomplete; },
-    get agentPendingDecorations() { return agentPendingDecorations; },
-    get autocompleteState() { return autocompleteState; },
-    get collaboration() { return collaboration; },
-    get commentsForActiveFile() { return commentsForActiveFile; },
-    get computeSearchMatches() { return computeSearchMatches; },
-    get controller() { return controller; },
-    get editorDragState() { return editorDragState; },
-    get editorHighlightKind() { return editorHighlightKind; },
-    get editorHistory() { return editorHistory; },
-    get editorIsComposing() { return editorIsComposing; },
-    get editorRenderCache() { return editorRenderCache; },
-    get elements() { return elements; },
-    get escapeHtmlAttribute() { return escapeHtmlAttribute; },
-    get formatEditorDebugValue() { return formatEditorDebugValue; },
-    get getSelectedPart() { return getSelectedPart; },
-    fileContentFromEditor(file, text) { // one part of a file (Workspace's `parts`): the edited part goes back into the whole file
-      const selected = getSelectedPart(controller.getProject());
-      return selected ? selected.parts.withBody(file.content, selected.part.id, text) : text;
-    },
-    get hideEditorAutocomplete() { return hideEditorAutocomplete; },
-    get highlightEditorLinesMemo() { return highlightEditorLinesMemo; },
-    get logDebug() { return logDebug; },
-    get openFindBar() { return openFindBar; },
-    get rememberEditorSelection() { return rememberEditorSelection; },
-    get remoteCursorsByClient() { return remoteCursorsByClient; },
-    get renderEditorAutocomplete() { return renderEditorAutocomplete; },
-    get scheduleCommentReanchor() { return scheduleCommentReanchor; },
-    get searchState() { return searchState; },
-    get settings() { return settings; },
-    get showEditorAutocomplete() { return showEditorAutocomplete; },
-    get traceEditorEvent() { return traceEditorEvent; },
-    get updateEditorAgentBar() { return updateEditorAgentBar; },
-    get workspaceMode() { return syncMode.get().workspaceMode; }
-  }));
-}
-function applyEditorEdit(...args) { return editorCore().applyEditorEdit(...args); }
-function applyEditorRender(...args) { return editorCore().applyEditorRender(...args); }
-function attachSelectionChangeListener(...args) { return editorCore().attachSelectionChangeListener(...args); }
-function caretIntoView(...args) { return editorCore().caretIntoView(...args); }
-function clamp(...args) { return editorCore().clamp(...args); }
-function clampEditorSelection(...args) { return editorCore().clampEditorSelection(...args); }
-function clearEditorDropCaret(...args) { return editorCore().clearEditorDropCaret(...args); }
-function clientColor(...args) { return editorCore().clientColor(...args); }
-function consumeExternalEditorSelection(...args) { return editorCore().consumeExternalEditorSelection(...args); }
-function forwardEditorWheel(...args) { return editorCore().forwardEditorWheel(...args); }
-function getEditorLineHeight(...args) { return editorCore().getEditorLineHeight(...args); }
-function getEditorSelection(...args) { return editorCore().getEditorSelection(...args); }
-function getEditorText(...args) { return editorCore().getEditorText(...args); }
-function getEditorTextOffsetFromPoint(...args) { return editorCore().getEditorTextOffsetFromPoint(...args); }
-function handleEditorKeydown(...args) { return editorCore().handleEditorKeydown(...args); }
-function handleIndentKeydown(...args) { return editorCore().handleIndentKeydown(...args); }
-function loadEditorContent(...args) { return editorCore().loadEditorContent(...args); }
-function notifyEditorChanged(...args) { return editorCore().notifyEditorChanged(...args); }
-function onRemoteCursor(...args) { return editorCore().onRemoteCursor(...args); }
-function pruneRemoteCursors(...args) { return editorCore().pruneRemoteCursors(...args); }
-function pushEditorHistoryState(...args) { return editorCore().pushEditorHistoryState(...args); }
-function queueExternalEditorSelection(...args) { return editorCore().queueExternalEditorSelection(...args); }
-function refreshFormatToolbar(...args) { return editorCore().refreshFormatToolbar(...args); }
-function renderEditorContent(...args) { return editorCore().renderEditorContent(...args); }
-function renderRemoteCursors(...args) { return editorCore().renderRemoteCursors(...args); }
-function replaceEditorRange(...args) { return editorCore().replaceEditorRange(...args); }
-function resetEditorHistory(...args) { return editorCore().resetEditorHistory(...args); }
-function scheduleOverviewRuler(...args) { return editorCore().scheduleOverviewRuler(...args); }
-function scheduleRemoteCursorRender(...args) { return editorCore().scheduleRemoteCursorRender(...args); }
-function setEditorSelection(...args) { return editorCore().setEditorSelection(...args); }
-function showEditorDropCaret(...args) { return editorCore().showEditorDropCaret(...args); }
-function syncEditorScroll(...args) { return editorCore().syncEditorScroll(...args); }
-function textOffsetToDomPosition(...args) { return editorCore().textOffsetToDomPosition(...args); }
-function transformEditorSelection(...args) { return editorCore().transformEditorSelection(...args); }
+// ---- The Editor's parts (the Editor module: adapters/surface.js) ----
+// Forwarders: code here still calls the editor's functions by name.
+function applyEditorEdit(...args) { return editorParts.applyEditorEdit(...args); }
+function captureViewState(...args) { return editorParts.captureViewState(...args); }
+function getViewState(...args) { return editorParts.getViewState(...args); }
+function isPreviewableFileName(...args) { return editorParts.isPreviewableFileName(...args); }
+function redrawRemoteCursors(...args) { return editorParts.redrawRemoteCursors(...args); }
+function resolveProjectAssetUrl(...args) { return editorParts.resolveProjectAssetUrl(...args); }
+function showActiveFile(...args) { return editorParts.showActiveFile(...args); }
+function applyEditorRender(...args) { return editorParts.applyEditorRender(...args); }
+function attachSelectionChangeListener(...args) { return editorParts.attachSelectionChangeListener(...args); }
+function caretIntoView(...args) { return editorParts.caretIntoView(...args); }
+function clamp(...args) { return editorParts.clamp(...args); }
+function clampEditorSelection(...args) { return editorParts.clampEditorSelection(...args); }
+function clearEditorDropCaret(...args) { return editorParts.clearEditorDropCaret(...args); }
+function clientColor(...args) { return editorParts.clientColor(...args); }
+function consumeExternalEditorSelection(...args) { return editorParts.consumeExternalEditorSelection(...args); }
+function forwardEditorWheel(...args) { return editorParts.forwardEditorWheel(...args); }
+function getEditorLineHeight(...args) { return editorParts.getEditorLineHeight(...args); }
+function getEditorSelection(...args) { return editorParts.getEditorSelection(...args); }
+function getEditorText(...args) { return editorParts.getEditorText(...args); }
+function getEditorTextOffsetFromPoint(...args) { return editorParts.getEditorTextOffsetFromPoint(...args); }
+function handleEditorKeydown(...args) { return editorParts.handleEditorKeydown(...args); }
+function handleIndentKeydown(...args) { return editorParts.handleIndentKeydown(...args); }
+function loadEditorContent(...args) { return editorParts.loadEditorContent(...args); }
+function notifyEditorChanged(...args) { return editorParts.notifyEditorChanged(...args); }
+function onRemoteCursor(...args) { return editorParts.onRemoteCursor(...args); }
+function pruneRemoteCursors(...args) { return editorParts.pruneRemoteCursors(...args); }
+function pushEditorHistoryState(...args) { return editorParts.pushEditorHistoryState(...args); }
+function queueExternalEditorSelection(...args) { return editorParts.queueExternalEditorSelection(...args); }
+function refreshFormatToolbar(...args) { return editorParts.refreshFormatToolbar(...args); }
+function renderEditorContent(...args) { return editorParts.renderEditorContent(...args); }
+function renderRemoteCursors(...args) { return editorParts.renderRemoteCursors(...args); }
+function replaceEditorRange(...args) { return editorParts.replaceEditorRange(...args); }
+function resetEditorHistory(...args) { return editorParts.resetEditorHistory(...args); }
+function scheduleOverviewRuler(...args) { return editorParts.scheduleOverviewRuler(...args); }
+function scheduleRemoteCursorRender(...args) { return editorParts.scheduleRemoteCursorRender(...args); }
+function setEditorSelection(...args) { return editorParts.setEditorSelection(...args); }
+function showEditorDropCaret(...args) { return editorParts.showEditorDropCaret(...args); }
+function syncEditorScroll(...args) { return editorParts.syncEditorScroll(...args); }
+function textOffsetToDomPosition(...args) { return editorParts.textOffsetToDomPosition(...args); }
+function transformEditorSelection(...args) { return editorParts.transformEditorSelection(...args); }
 
-// Incremental editor render cache (see renderEditorContent). Declared up here
-// because the first render runs before that part of the module has executed.
-const editorRenderCache = {
-  fileId: null,     // file the cache describes
-  kind: null,       // highlighter used
-  els: [],          // line elements, in DOM order, as rendered
-  texts: [],        // each line's text as rendered
-  html: [],         // each line's final HTML as rendered
-  heights: [],      // gutter heights measured for each line
-  gutter: [],       // gutter row HTML as rendered
-  metricsKey: "",   // geometry the heights were measured under (see below)
-  gutterEpoch: "",  // line count / agent range / comments the gutter rows reflect
-  textExact: true   // every line's DOM text equals its source line
-};
 // Declared up here because the hoisted mobile render helpers reach it during
 // the first render, which would otherwise be inside its temporal dead zone.
 const MOBILE_MAX_WIDTH = 900;    // must match the CSS breakpoint
@@ -398,63 +370,6 @@ const MOBILE_MAX_WIDTH = 900;    // must match the CSS breakpoint
 const fontInstalledCache = new Map();
 let fontProbeContext = null;
 const fontProbeBase = {};
-// Per-document view state (bmap pan/zoom, editor scroll), cached so users resume
-// where they left off; persisted to localStorage.
-let viewStates = loadViewStates();
-
-function getViewState(fileId) {
-  return fileId ? viewStates[fileId] : null;
-}
-
-function setViewState(fileId, patch) {
-  if (!fileId) return;
-  viewStates[fileId] = { ...viewStates[fileId], ...patch };
-  saveViewStates(viewStates);
-}
-
-/** Snapshot the current preview bmap and editor position before a file switch
- *  or page suspension. Selection and pointer-down handlers save the caret
- *  before the editor loses focus. */
-function captureViewState() {
-  const project = controller.getProject();
-  const previewBmapView = currentDiagramView();
-  if (editorView.get().previewFileId && previewBmapView) {
-    const pf = project.nodes[editorView.get().previewFileId];
-    if (pf && pf.kind === "file" && isBmapFileName(pf.name)) {
-      const view = previewBmapView.getView?.();
-      if (view) setViewState(editorView.get().previewFileId, { bmap: view });
-    }
-  }
-  const activeId = project.activeFileId;
-  if (activeId && elements.editorContent) {
-    // The REAL scroller is #editor-content (#editor-scroll is overflow:hidden and
-    // always reports scrollTop 0), so persist the content scroll for this file.
-    setViewState(activeId, { editorScroll: elements.editorContent.scrollTop });
-    rememberEditorSelection();
-  }
-}
-
-function savedEditorSelection(fileId, text) {
-  const saved = getViewState(fileId)?.editorSelection;
-  if (!saved || saved.scope !== chatWorkspaceKey() || !Number.isInteger(saved.start) || !Number.isInteger(saved.end)) return null;
-  return clampEditorSelection(text, saved.start, saved.end);
-}
-
-function rememberEditorSelection() {
-  const fileId = controller.getProject().activeFileId;
-  // A blurred contenteditable may retain a ghost range at offset 0. It is not
-  // the user's caret and must never replace a position captured before blur.
-  if (document.activeElement !== elements.editorContent) return;
-  const selection = window.getSelection();
-  if (!fileId || lastRenderedFileId !== fileId || !selection?.rangeCount) return;
-  const range = selection.getRangeAt(0);
-  if (!elements.editorContent.contains(range.startContainer) || !elements.editorContent.contains(range.endContainer)) return;
-  const { start, end } = getEditorSelection();
-  const scope = chatWorkspaceKey();
-  const previous = getViewState(fileId)?.editorSelection;
-  if (previous?.scope === scope && previous.start === start && previous.end === end) return;
-  setViewState(fileId, { editorSelection: { scope, start, end } });
-}
 // The diagram editor is the largest module (~150KB) and most sessions never
 // open a diagram, so it loads the first time one is previewed or exported.
 let bmapViewModule = null;
@@ -493,37 +408,6 @@ const addFileState = {
   content: null,
   sourceLabel: ""
 };
-const autocompleteState = {
-  items: [],
-  activeIndex: 0,
-  // True once the user has deliberately chosen an entry (arrow keys or the
-  // mouse). Enter only accepts a suggestion when this is set — otherwise Enter
-  // means "new line", which is what it means everywhere else in the editor.
-  userChose: false,
-  range: null,
-  kind: ""
-};
-
-const editorDragState = {
-  selection: null,
-  dropOffset: null
-};
-
-// Undo/redo history for the contenteditable editor.
-// Each entry: { start, end, patch } where `patch` turns the previous entry's
-// text into this one's: { at, removed, inserted } (null for the first entry).
-// Only `text` — the text of entry `index` — is held in full. Entries used to
-// carry a full copy of the document each: on a 90k-character chapter that was
-// ~180KB per keystroke, ~72MB at the 400-entry cap, for every open file.
-const editorHistory = {
-  stack: [],
-  index: -1,
-  maxSize: 400,
-  text: ""
-};
-
-let editorIsComposing = false;
-let lastRenderedFileId = null;
 // Set to true while a preview-originated edit (e.g. a bmap inspector change) is
 // being committed. The preview view has already updated itself in place, so the
 // synchronous updateStatus callback must skip re-rendering the preview pane —
@@ -545,13 +429,6 @@ const debugTabs = [...elements.debugTabStrip.querySelectorAll(".debug-tab")].map
 
 
 
-function escapeHtmlAttribute(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
 
 // ---------------------------------------------------------------------------
 // Phase 5 — In-editor decoration state (applied agent ranges only)
@@ -818,43 +695,8 @@ function applyAgentSettingsControls() {
   applyAgentSettingsStatus();
 }
 
-function isPreviewableFileName(name) {
-  return isMarkdownFileName(name) || isImageFileName(name) || isBmapFileName(name)
-    || modules.editor.previews.all().some((preview) => preview.matches({ name, content: "" }));
-}
-
 function looksLikeUrl(value) {
   return /^(https?:\/\/|data:)/i.test(value.trim());
-}
-
-function normalizePath(path) {
-  const nextSegments = [];
-  path.split("/").forEach((segment) => {
-    if (!segment || segment === ".") {
-      return;
-    }
-    if (segment === "..") {
-      nextSegments.pop();
-      return;
-    }
-    nextSegments.push(segment);
-  });
-  return nextSegments.join("/");
-}
-
-function getRelativeProjectPath(fromFilePath, toFilePath) {
-  const fromSegments = fromFilePath.split("/").filter(Boolean);
-  const toSegments = toFilePath.split("/").filter(Boolean);
-  fromSegments.pop();
-
-  while (fromSegments.length > 0 && toSegments.length > 0 && fromSegments[0] === toSegments[0]) {
-    fromSegments.shift();
-    toSegments.shift();
-  }
-
-  const upSegments = fromSegments.map(() => "..");
-  const relative = [...upSegments, ...toSegments].join("/");
-  return relative || toFilePath.split("/").filter(Boolean).pop() || "";
 }
 
 function inferNameFromUrl(value) {
@@ -919,7 +761,7 @@ function dialogs() {
     get controller() { return controller; },
     get debugState() { return debugState; },
     get debugTabs() { return debugTabs; },
-    get editorHistory() { return editorHistory; },
+    historyPosition: () => editorParts.historyPosition(),
     get elements() { return elements; },
     get escapeEditorHtml() { return escapeEditorHtml; },
     get getEditorLineIndexAtOffset() { return getEditorLineIndexAtOffset; },
@@ -942,29 +784,6 @@ function showConfirmDialog(options) { return shell.confirm(options); }
 function showNoticeDialog(message, title) { return shell.notice(message, title); }
 function showToast(message, options) { return shell.toast(message, options); }
 function traceEditorEvent(...args) { return dialogs().traceEditorEvent(...args); }
-
-function resolveProjectAssetUrl(project, sourceFileId, url) {
-  const trimmed = String(url ?? "").trim();
-  if (!trimmed || /^(https?:\/\/|data:|blob:|#|\/)/i.test(trimmed)) {
-    return trimmed;
-  }
-
-  const basePath = sourceFileId ? getPath(project, sourceFileId) : "";
-  const baseSegments = basePath.split("/").filter(Boolean);
-  baseSegments.pop();
-  const resolvedPath = normalizePath([...baseSegments, trimmed].join("/"));
-  const nodeId = getNodeIdByPath(project, resolvedPath);
-  if (!nodeId) {
-    return trimmed;
-  }
-
-  const node = project.nodes[nodeId];
-  if (node?.kind === "file" && isImageFileName(node.name)) {
-    return imageSrcFor(project, node);
-  }
-
-  return trimmed;
-}
 
 /** Resolve an image node to a usable <img> src. Local/PIN workspaces inline the
  *  bytes as a data: URL in content; directory-backed cloud workspaces keep the
@@ -1013,89 +832,21 @@ function fileExtensionOf(name) {
   return dot > 0 ? name.slice(dot) : "";
 }
 
-function splitPathSegments(path) {
-  return path.split("/").filter(Boolean);
-}
+function acceptEditorAutocomplete(...args) { return editorParts.acceptEditorAutocomplete(...args); }
+function hideEditorAutocomplete(...args) { return editorParts.hideEditorAutocomplete(...args); }
+function renderEditorAutocomplete(...args) { return editorParts.renderEditorAutocomplete(...args); }
+function showEditorAutocomplete(...args) { return editorParts.showEditorAutocomplete(...args); }
 
-function getRelativePath(fromPath, toPath) {
-  const fromSegments = splitPathSegments(fromPath);
-  fromSegments.pop();
-  const toSegments = splitPathSegments(toPath);
-  let sharedIndex = 0;
-
-  while (sharedIndex < fromSegments.length && sharedIndex < toSegments.length && fromSegments[sharedIndex] === toSegments[sharedIndex]) {
-    sharedIndex += 1;
-  }
-
-  const upSegments = Array.from({ length: fromSegments.length - sharedIndex }, () => "..");
-  const downSegments = toSegments.slice(sharedIndex);
-  const relative = [...upSegments, ...downSegments].join("/");
-  return relative || "./";
-}
-// ---- Source autocomplete (the Editor module) ----
-// Created on first use. The module reads main's shared values through this
-// context, so it always sees their current values. `var`: a forwarding
-// function can run during startup, before this line is reached.
-var autocompleteInstance;
-function autocomplete() {
-  return (autocompleteInstance ??= createAutocomplete({
-    get autocompleteState() { return autocompleteState; },
-    get controller() { return controller; },
-    get elements() { return elements; },
-    get escapeEditorHtml() { return escapeEditorHtml; },
-    get getEditorSelection() { return getEditorSelection; },
-    get getEditorText() { return getEditorText; },
-    get getRelativePath() { return getRelativePath; },
-    get logDebug() { return logDebug; },
-    get replaceEditorRange() { return replaceEditorRange; }
-  }));
-}
-function acceptEditorAutocomplete(...args) { return autocomplete().acceptEditorAutocomplete(...args); }
-function hideEditorAutocomplete(...args) { return autocomplete().hideEditorAutocomplete(...args); }
-function renderEditorAutocomplete(...args) { return autocomplete().renderEditorAutocomplete(...args); }
-function showEditorAutocomplete(...args) { return autocomplete().showEditorAutocomplete(...args); }
-
-// ============================ Find / Replace ================================
-const searchState = {
-  open: false,
-  replaceMode: false,
-  caseSensitive: false,
-  wholeWord: false,
-  regex: false,
-  matches: [],      // [{ start, end }] plain-text offsets into the active file
-  currentIndex: -1,
-};
-// ---- Find and replace (the Editor module) ----
-// Created on first use. The module reads main's shared values through this
-// context, so it always sees their current values. `var`: a forwarding
-// function can run during startup, before this line is reached.
-var findReplaceInstance;
-function findReplace() {
-  return (findReplaceInstance ??= createFindReplace({
-    get applyEditorEdit() { return applyEditorEdit; },
-    get caretIntoView() { return caretIntoView; },
-    get controller() { return controller; },
-    get elements() { return elements; },
-    get getEditorLineHeight() { return getEditorLineHeight; },
-    get getEditorSelection() { return getEditorSelection; },
-    get getEditorText() { return getEditorText; },
-    get scheduleOverviewRuler() { return scheduleOverviewRuler; },
-    get searchState() { return searchState; },
-    get setEditorSelection() { return setEditorSelection; },
-    get showToast() { return showToast; },
-    get textOffsetToDomPosition() { return textOffsetToDomPosition; }
-  }));
-}
-function closeFindBar(...args) { return findReplace().closeFindBar(...args); }
-function computeSearchMatches(...args) { return findReplace().computeSearchMatches(...args); }
-function findNext(...args) { return findReplace().findNext(...args); }
-function findPrev(...args) { return findReplace().findPrev(...args); }
-function gotoMatch(...args) { return findReplace().gotoMatch(...args); }
-function openFindBar(...args) { return findReplace().openFindBar(...args); }
-function renderSearchHighlights(...args) { return findReplace().renderSearchHighlights(...args); }
-function replaceAllMatches(...args) { return findReplace().replaceAllMatches(...args); }
-function replaceCurrent(...args) { return findReplace().replaceCurrent(...args); }
-function toggleFindOption(...args) { return findReplace().toggleFindOption(...args); }
+function closeFindBar(...args) { return editorParts.closeFindBar(...args); }
+function computeSearchMatches(...args) { return editorParts.computeSearchMatches(...args); }
+function findNext(...args) { return editorParts.findNext(...args); }
+function findPrev(...args) { return editorParts.findPrev(...args); }
+function gotoMatch(...args) { return editorParts.gotoMatch(...args); }
+function openFindBar(...args) { return editorParts.openFindBar(...args); }
+function renderSearchHighlights(...args) { return editorParts.renderSearchHighlights(...args); }
+function replaceAllMatches(...args) { return editorParts.replaceAllMatches(...args); }
+function replaceCurrent(...args) { return editorParts.replaceCurrent(...args); }
+function toggleFindOption(...args) { return editorParts.toggleFindOption(...args); }
 
 // ============================ Snapshots + Diff ==============================
 // Per-file, content-addressed history (the History module). Diff state caches
@@ -1106,7 +857,6 @@ function toggleFindOption(...args) { return findReplace().toggleFindOption(...ar
 // the diff overlay instead of #preview-output. It compares the CURRENT content of
 // `fileId` against the cached `oldText` snapshot — independent of which file the
 // editor has active, so it behaves like any other preview tab.
-const DIFF_TAB_ID = "__diff__";
 const diffState = { active: false, fileId: null, path: null, versionId: null, oldText: "", createdAt: 0, blocks: [], currentChange: -1 };
 
 // A stable-enough key to group snapshots by project: the cloud workspace id when
@@ -1264,9 +1014,6 @@ async function openSnapshotsDialog() {
   }
 }
 
-// Cache of the latest remote cursor events by clientId so we can re-render
-// when the user scrolls or file content changes.
-const remoteCursorsByClient = new Map();
 
 function suggestUniqueFileName(project, parentId, name) {
   const dotIndex = name.lastIndexOf(".");
@@ -1380,11 +1127,7 @@ const collaboration = createCollaborationRuntime({
       // cursor to the end of their insertion so it stays visible and correct
       // without waiting for their next selectionchange broadcast.
       if (operation.type === "patch-file" && clientId) {
-        const cached = remoteCursorsByClient.get(clientId);
-        if (cached) {
-          const newPos = Number(operation.start) + String(operation.text ?? "").length;
-          remoteCursorsByClient.set(clientId, { ...cached, selStart: newPos, selEnd: newPos });
-        }
+        editorParts.moveRemoteCursor(clientId, Number(operation.start) + String(operation.text ?? "").length);
       }
     } catch (error) {
       ignore(error, "applying a remote change failed; reloading from the server");
@@ -1686,157 +1429,42 @@ async function openMtreeToolsDialog(fileId) {
     notify(`Module map tools could not load: ${error.message}`);
   }
 }
-// ---- Source highlighting (the Editor module) ----
-// Created on first use. The module reads main's shared values through this
-// context, so it always sees their current values. `var`: a forwarding
-// function can run during startup, before this line is reached.
-var highlighterInstance;
-function highlighter() {
-  return (highlighterInstance ??= createHighlighter({
-    highlighters: modules.editor.highlighters,
-    get escapeHtmlAttribute() { return escapeHtmlAttribute; }
-  }));
-}
-function editorHighlightKind(...args) { return highlighter().editorHighlightKind(...args); }
-function escapeEditorHtml(...args) { return highlighter().escapeEditorHtml(...args); }
-function highlightEditorLinesMemo(...args) { return highlighter().highlightEditorLinesMemo(...args); }
-function highlightMarkdownSource(...args) { return highlighter().highlightMarkdownSource(...args); }
+function editorHighlightKind(...args) { return editorParts.editorHighlightKind(...args); }
+function escapeEditorHtml(...args) { return editorParts.escapeEditorHtml(...args); }
+function highlightEditorLinesMemo(...args) { return editorParts.highlightEditorLinesMemo(...args); }
+function highlightMarkdownSource(...args) { return editorParts.highlightMarkdownSource(...args); }
 
-document.fonts?.addEventListener?.("loadingdone", () => {
-  if (!editorRenderCache.els.length) return;
-  editorRenderCache.metricsKey = "";
-  renderEditorContent(getEditorText());
-});
+function handleEditorLinkHover(...args) { return editorParts.handleEditorLinkHover(...args); }
+function handleEditorMouseLeave(...args) { return editorParts.handleEditorMouseLeave(...args); }
+function hideLinkTooltip(...args) { return editorParts.hideLinkTooltip(...args); }
+function openLinkFromEditor(...args) { return editorParts.openLinkFromEditor(...args); }
+function renderLinksPanel(...args) { return editorParts.renderLinksPanel(...args); }
 
-// ── Link hover tooltip ───────────────────────────────────────────────────────
 
-const editorLinkTooltip = (() => {
-  const el = document.createElement("div");
-  el.className = "editor-link-tooltip";
-  el.hidden = true;
-  el.setAttribute("aria-hidden", "true");
-
-  const header = document.createElement("div");
-  header.className = "editor-link-tooltip-header";
-
-  const nameEl = document.createElement("span");
-  nameEl.className = "editor-link-tooltip-name";
-
-  const hintEl = document.createElement("span");
-  hintEl.className = "editor-link-tooltip-hint";
-  hintEl.textContent = "Follow Link (Ctrl+Click)";
-
-  header.append(nameEl, hintEl);
-
-  const previewEl = document.createElement("div");
-  previewEl.className = "editor-link-tooltip-preview preview-output";
-
-  el.append(header, previewEl);
-  document.body.append(el);
-  return { el, nameEl, hintEl, previewEl };
-})();
-// ---- Links: editor tooltip and Linked Notes (the Editor module) ----
-// Created on first use. The module reads main's shared values through this
-// context, so it always sees their current values. `var`: a forwarding
-// function can run during startup, before this line is reached.
-var linksInstance;
-function links() {
-  return (linksInstance ??= createLinks({
-    get backlinksListEl() { return backlinksListEl; },
-    get controller() { return controller; },
-    get editorLinkTooltip() { return editorLinkTooltip; },
-    get escapeEditorHtml() { return escapeEditorHtml; },
-    get escapeHtmlAttribute() { return escapeHtmlAttribute; },
-    get imageSrcFor() { return imageSrcFor; },
-    get linksPanelEl() { return linksPanelEl; },
-    get normalizePath() { return normalizePath; },
-    get notify() { return notify; },
-    get openFileFromExplorer() { return openFileFromExplorer; },
-    get outgoingLinksListEl() { return outgoingLinksListEl; },
-    get resolveProjectAssetUrl() { return resolveProjectAssetUrl; }
-  }));
-}
-function handleEditorLinkHover(...args) { return links().handleEditorLinkHover(...args); }
-function handleEditorMouseLeave(...args) { return links().handleEditorMouseLeave(...args); }
-function hideLinkTooltip(...args) { return links().hideLinkTooltip(...args); }
-function openLinkFromEditor(...args) { return links().openLinkFromEditor(...args); }
-function renderLinksPanel(...args) { return links().renderLinksPanel(...args); }
-
-editorLinkTooltip.el.addEventListener("mouseleave", () => hideLinkTooltip(true));
-
-// ── Links panel (outgoing + backlinks) ───────────────────────────────────────
-
-const linksPanelEl = document.getElementById("links-panel");
-const outgoingLinksListEl = document.getElementById("outgoing-links-list");
-const backlinksListEl = document.getElementById("backlinks-list");
-// ---- Tabs, panes and preview (./features/panes.js) ----
-// Created on first use. The module reads main's shared values through this
-// context, so it always sees their current values. `var`: a forwarding
-// function can run during startup, before this line is reached.
-var panesInstance;
-function panes() { // the Editor's panes; diagrams and character sheets add their previews here, extensions their own
-  return (panesInstance ??= createPanes(registerPreviews(modules.editor.previews, {
-    view: editorView,
-    saveUserState: (ws, openFiles, activeFile) => saveUserState(settings.serverUrl, identity.token(), ws.team, ws.path, openFiles, activeFile),
-    get DIFF_TAB_ID() { return DIFF_TAB_ID; },
-    get agentPendingDecorations() { return agentPendingDecorations; },
-    get bmapViewModule() { return bmapViewModule; },
-    get captureViewState() { return captureViewState; },
-    get closeDiff() { return closeDiff; },
-    get collaboration() { return collaboration; },
-    get controller() { return controller; },
-    get diffState() { return diffState; },
-    get elements() { return elements; },
-    get escapeEditorHtml() { return escapeEditorHtml; },
-    get escapeHtmlAttribute() { return escapeHtmlAttribute; },
-    get formatSnapshotTime() { return formatSnapshotTime; },
-    get getRelativeProjectPath() { return getRelativeProjectPath; },
-    get parts() { return modules.workspace.parts; },
-    get getViewState() { return getViewState; },
-    get imageSrcFor() { return imageSrcFor; },
-    get isPreviewableFileName() { return isPreviewableFileName; },
-    get loadBmapView() { return loadBmapView; },
-    get logDebug() { return logDebug; },
-    get normalizePath() { return normalizePath; },
-    get notify() { return notify; },
-    get openFileFromExplorer() { return openFileFromExplorer; },
-    get personaAvatarSrc() { return personaAvatarSrc; },
-    get quickGenerateBmapFile() { return quickGenerateBmapFile; },
-    get render() { return render; },
-    get resolveProjectAssetUrl() { return resolveProjectAssetUrl; },
-    get setMobileExplorerOpen() { return setMobileExplorerOpen; },
-    get settings() { return settings; },
-    get showToast() { return showToast; },
-    get identity() { return identity; },
-    get togglePreview() { return togglePreview; },
-    get updateFileContentFromPreview() { return updateFileContentFromPreview; },
-    get updateStatus() { return updateStatus; },
-    get workspaceMode() { return syncMode.get().workspaceMode; }
-  }), modules.editor.previews));
-}
-function bindPaneDropTarget(...args) { return panes().bindPaneDropTarget(...args); }
-function bindTabStripReorderTarget(...args) { return panes().bindTabStripReorderTarget(...args); }
-function cacheWorkspaceView(...args) { return panes().cacheWorkspaceView(...args); }
-function cachedWorkspaceView(...args) { return panes().cachedWorkspaceView(...args); }
-function clearPaneDropState(...args) { return panes().clearPaneDropState(...args); }
-function closeTabOverflowMenu(...args) { return panes().closeTabOverflowMenu(...args); }
-function currentWorkspaceView(...args) { return panes().currentWorkspaceView(...args); }
-function ensureOpenTabs(...args) { return panes().ensureOpenTabs(...args); }
-function openDroppedFileInPane(...args) { return panes().openDroppedFileInPane(...args); }
-function openFileFromExplorer(...args) { return panes().openFileFromExplorer(...args); }
-function openPreviewTab(...args) { return panes().openPreviewTab(...args); }
-function openSourceTab(...args) { return panes().openSourceTab(...args); }
-function openTabOverflowMenu(...args) { return panes().openTabOverflowMenu(...args); }
-function printPreviewAsPdf(...args) { return panes().printPreviewAsPdf(...args); }
-function renderPreviewContent(...args) { return panes().renderPreviewContent(...args); }
-function renderTabs(...args) { return panes().renderTabs(...args); }
-function restoreResumeState(...args) { return panes().restoreResumeState(...args); }
-function setActiveSourceFile(...args) { return panes().setActiveSourceFile(...args); }
-function setActiveSourcePart(...args) { return panes().setActiveSourcePart(...args); }
-function setPreviewFile(...args) { return panes().setPreviewFile(...args); }
-function showResumedFile(...args) { return panes().showResumedFile(...args); }
-function tabOverflowButton(...args) { return panes().tabOverflowButton(...args); }
-async function typesetPreview(...args) { return panes().typesetPreview(...args); }
+// ---- Tabs, panes and preview (the Editor module) ----
+function bindPaneDropTarget(...args) { return editorParts.bindPaneDropTarget(...args); }
+function bindTabStripReorderTarget(...args) { return editorParts.bindTabStripReorderTarget(...args); }
+function cacheWorkspaceView(...args) { return editorParts.cacheWorkspaceView(...args); }
+function cachedWorkspaceView(...args) { return editorParts.cachedWorkspaceView(...args); }
+function clearPaneDropState(...args) { return editorParts.clearPaneDropState(...args); }
+function closeTabOverflowMenu(...args) { return editorParts.closeTabOverflowMenu(...args); }
+function currentWorkspaceView(...args) { return editorParts.currentWorkspaceView(...args); }
+function ensureOpenTabs(...args) { return editorParts.ensureOpenTabs(...args); }
+function openDroppedFileInPane(...args) { return editorParts.openDroppedFileInPane(...args); }
+function openFileFromExplorer(...args) { return editorParts.openFileFromExplorer(...args); }
+function openPreviewTab(...args) { return editorParts.openPreviewTab(...args); }
+function openSourceTab(...args) { return editorParts.openSourceTab(...args); }
+function openTabOverflowMenu(...args) { return editorParts.openTabOverflowMenu(...args); }
+function printPreviewAsPdf(...args) { return editorParts.printPreviewAsPdf(...args); }
+function renderPreviewContent(...args) { return editorParts.renderPreviewContent(...args); }
+function renderTabs(...args) { return editorParts.renderTabs(...args); }
+function restoreResumeState(...args) { return editorParts.restoreResumeState(...args); }
+function setActiveSourceFile(...args) { return editorParts.setActiveSourceFile(...args); }
+function setActiveSourcePart(...args) { return editorParts.setActiveSourcePart(...args); }
+function setPreviewFile(...args) { return editorParts.setPreviewFile(...args); }
+function showResumedFile(...args) { return editorParts.showResumedFile(...args); }
+function tabOverflowButton(...args) { return editorParts.tabOverflowButton(...args); }
+async function typesetPreview(...args) { return editorParts.typesetPreview(...args); }
 
 // ---- Explorer and file actions (./features/file-actions.js) ----
 // Created on first use. The module reads main's shared values through this
@@ -1855,7 +1483,7 @@ function fileActions() {
     get controller() { return controller; },
     get createMarkdownImageReference() { return createMarkdownImageReference; },
     get createMarkdownReference() { return createMarkdownReference; },
-    get editorDragState() { return editorDragState; },
+    editorDropOffset: () => editorParts.dropOffset(),
     get elements() { return elements; },
     get explorerClipboard() { return explorerClipboard; },
     get fileExtensionOf() { return fileExtensionOf; },
@@ -2152,36 +1780,6 @@ function applyWorkspaceSettings() {
   renderDebugPanel();
 }
 
-// Re-render on resize ONLY when the WIDTH changes (that's what affects soft-wrap
-// and gutter alignment). A height-only change — e.g. the document growing as you
-// press Enter — must NOT trigger renderEditorContent(): it rebuilds innerHTML,
-// which invalidates the current selection and drops the caret to offset 0 (the
-// "Enter/DEL then the caret jumps to line 1" bug, which fired ~16-60ms later via
-// this observer). And when a real width change does re-render, preserve the caret.
-let _lastEditorObservedWidth = 0;
-const editorResizeObserver = typeof ResizeObserver === "function"
-  ? new ResizeObserver(() => {
-    const width = Math.round(elements.editorScroll.getBoundingClientRect().width);
-    if (editorIsComposing || width === _lastEditorObservedWidth) {
-      syncEditorScroll();
-      return;
-    }
-    _lastEditorObservedWidth = width;
-    const sel = getEditorSelection();
-    const hadFocus = document.activeElement === elements.editorContent;
-    const savedScroll = elements.editorContent.scrollTop;
-    renderEditorContent(getEditorText());
-    if (hadFocus) {
-      elements.editorContent.focus({ preventScroll: true });
-      setEditorSelection(sel.start, sel.end);
-    }
-    elements.editorContent.scrollTop = savedScroll;
-    syncEditorScroll();
-  })
-  : null;
-
-editorResizeObserver?.observe(elements.editorScroll);
-editorResizeObserver?.observe(elements.sourcePane);
 
 function startPointerResize(event, onMove) {
   event.preventDefault();
@@ -2479,19 +2077,9 @@ function updateStatus(project) {
 
   const activeFile = project.activeFileId ? project.nodes[project.activeFileId] : null;
   const previewFile = editorView.get().previewFileId ? project.nodes[editorView.get().previewFileId] : null;
-  const selectedPart = getSelectedPart(project);
+  // The source editor shows the active file (the Editor); the total feeds the footer counter.
+  const shownTotal = showActiveFile(project);
   if (!activeFile) {
-    // No file open: make the pane non-editable and show the create-a-file overlay
-    // instead of a plain (typable) placeholder.
-    elements.editorContent.contentEditable = "false";
-    elements.editorContent.dataset.noFile = "true";
-    if (elements.editorEmptyState) elements.editorEmptyState.hidden = false;
-    renderWelcomeState();
-    if (lastRenderedFileId !== null) {
-      lastRenderedFileId = null;
-      loadEditorContent("");
-    }
-    syncEditorScroll();
     renderPreviewOrDiff(project, previewFile); // diff tab still shows if it's the active preview tab
     renderLinksPanel(project, null);
     renderChatPanel(project);
@@ -2500,82 +2088,7 @@ function updateStatus(project) {
     renderVersionLabel();
     return;
   }
-
-  elements.editorContent.dataset.noFile = "false";
-  if (elements.editorEmptyState) elements.editorEmptyState.hidden = true;
-  const isTextFile = isTextFileName(activeFile.name);
-  // A reader may open and read the project but never write to it (the server
-  // refuses their operations regardless; this stops the UI inviting edits that
-  // would only bounce back).
-  const readOnly = isReadOnlyWorkspace();
-  elements.editorContent.contentEditable = isTextFile && !readOnly ? "true" : "false";
-  elements.editorContent.dataset.readonly = readOnly ? "true" : "false";
-  elements.editorContent.dataset.placeholder = isTextFile
-    ? "Select or create a file"
-    : "Image assets are preview-only in the source pane.";
-  const nextText = isTextFile
-    ? selectedPart
-      ? selectedPart.parts.body(selectedPart.file.content, selectedPart.part.id)
-      : activeFile.content
-    : `[${activeFile.name}]\n\nThis image asset is preview-only in the source pane.\nUse the preview pane to inspect it or Explorer > Add File to replace it.`;
-  // Cache the total for the footer counter — the source text the editor holds
-  // (an image placeholder isn't file content, so the counter hides for those).
-  // Painted at the end of this pass, once the editor DOM/selection is in sync.
-  statusCharTotal = isTextFile ? nextText.length : null;
-  const fileChanged = activeFile.id !== lastRenderedFileId;
-  const editorHasFocus = elements.editorContent === document.activeElement;
-  if (fileChanged) {
-    // Clear stale remote cursors when the viewed file changes.
-    renderRemoteCursors([]);
-  }
-  if (!editorCoreInstance?.isRendering() && fileChanged) {
-    const savedSelection = savedEditorSelection(activeFile.id, nextText);
-    lastRenderedFileId = activeFile.id;
-    loadEditorContent(nextText, savedSelection?.start ?? 0, savedSelection?.end ?? savedSelection?.start ?? 0);
-    // Resume the reader's previous scroll position in this document. The real
-    // scroller is #editor-content (#editor-scroll is overflow:hidden).
-    const savedScroll = getViewState(activeFile.id)?.editorScroll;
-    if (savedScroll && elements.editorContent) {
-      elements.editorContent.scrollTop = savedScroll;
-      syncEditorScroll();
-    }
-    // The find bar's matches are offsets into the file it searched. Switching
-    // files must re-run the search against the NEW document — otherwise the
-    // highlights (and next/prev) point at phantom positions carried over from
-    // the old one. Done here, after loadEditorContent, so the DOM we measure is
-    // the new file's.
-    if (searchState.open) {
-      searchState.currentIndex = -1;
-      computeSearchMatches();
-    }
-  } else {
-    const domText = getEditorText();
-    // Never rebuild the editor DOM mid-IME-composition. During composition the
-    // DOM holds in-progress characters the model hasn't received yet (the `input`
-    // handler defers to compositionend), so nextText !== domText transiently. A
-    // rebuild here — triggered by ANY unrelated render (auto-save, presence, a
-    // remote op on another file) — would abort the composition and slam the caret
-    // to offset 0. The model catches up on compositionend, which re-syncs cleanly.
-    if (nextText !== domText && !editorIsComposing) {
-      if (editorHasFocus) {
-        // External same-file changes invalidate snapshot-based undo history.
-        // Keep the caret stable when possible, then fence the history stack at
-        // the new synchronized content so Ctrl+Z cannot replay stale text.
-        const { start, end } = getEditorSelection();
-        const nextSelection = consumeExternalEditorSelection(activeFile.id, nextText, start, end);
-        logDebug("response", "caret", `render resync (same file, focused): read sel=${start}-${end} → applyEditorRender at ${nextSelection.start}`);
-        hideEditorAutocomplete();
-        applyEditorRender(nextText, nextSelection.start, nextSelection.end);
-        resetEditorHistory(nextText, nextSelection.start, nextSelection.end);
-      } else {
-        logDebug("response", "caret", "render→loadEditorContent (same file, NOT focused) → caret to 0");
-        loadEditorContent(nextText);
-      }
-      // Reposition remote cursor overlays after the DOM re-render.
-      renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
-    }
-    syncEditorScroll();
-  }
+  statusCharTotal = shownTotal;
   // Skip the redundant preview rebuild when the change came from the preview
   // itself — re-rendering would reset the diagram's scroll position/selection.
   // Also skip while the user is actively editing INSIDE the preview (e.g. a bmap
@@ -2643,7 +2156,7 @@ function scheduleOpfsFlush(project) {
 }
 
 function render(project) {
-  if (editorCoreInstance?.isTyping()) {
+  if (editorParts?.isTyping()) {
     // A keystroke. The editor has already drawn it; the explorer, tabs, preview,
     // links, chat and status follow once typing pauses (or every
     // DEFERRED_RENDER_MAX_MS during a long burst). Doing them synchronously here
@@ -2744,7 +2257,7 @@ function scheduleAutoSave(project = controller.getProject()) {
 async function runAutoSave(reason) {
   if (!settings.autoSave) return;
   // Don't churn a render (markManySaved) mid-IME-composition; wait until it ends.
-  if (editorIsComposing) return;
+  if (editorParts.isComposing()) return;
   const project = snapshotProject(controller.getProject());
   const scope = snapshotProjectKey();
   if (project.sourceMode === "filesystem") return; // explicit save only
@@ -2979,325 +2492,6 @@ function currentMobileFileId() {
   return controller.getActiveFile()?.id ?? null;
 }
 
-elements.editorContent.addEventListener("compositionstart", () => {
-  editorIsComposing = true;
-});
-
-elements.editorContent.addEventListener("compositionend", () => {
-  editorIsComposing = false;
-  // After IME commit, sync the plain-text representation to the model and
-  // restore the cursor position (which the render cycle would otherwise drop).
-  const { start, end } = getEditorSelection();
-  notifyEditorChanged(getEditorText());
-  // The render triggered by notifyEditorChanged may have re-rendered the DOM
-  // (if a remote op landed simultaneously); restore cursor explicitly.
-  setEditorSelection(start, end);
-  rememberEditorSelection();
-  showEditorAutocomplete();
-});
-
-// Intercept editing operations BEFORE the browser mutates the DOM so we can
-// maintain the .editor-line structure that getEditorText() depends on.
-// Without this, select-all+type erases the structure and paste loses \n.
-elements.editorContent.addEventListener("beforeinput", (event) => {
-  if (editorIsComposing) return;
-  const activeFile = controller.getActiveFile();
-  if (!activeFile || !isTextFileName(activeFile.name)) return;
-
-  if (
-    event.inputType === "insertParagraph" ||
-    event.inputType === "insertLineBreak" ||
-    (event.inputType === "insertText" && /^\s+$/.test(event.data ?? ""))
-  ) {
-    traceEditorEvent("beforeinput", {
-      inputType: event.inputType,
-      data: formatEditorDebugValue(event.data ?? "")
-    });
-  }
-
-  const { start, end } = getEditorSelection();
-  const hasSelection = start !== end;
-  if (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak" || event.inputType.startsWith("delete")) {
-    logDebug("response", "caret", `beforeinput ${event.inputType} reads sel=${start}-${end}`);
-  }
-
-  // Paste: always intercept — browser creates non-.editor-line divs for
-  // multi-line content which causes \n to be silently dropped.
-  if (event.inputType === "insertFromPaste") {
-    event.preventDefault();
-    const text = (event.dataTransfer?.getData("text/plain") ?? "").replace(/\r\n/g, "\n");
-    replaceEditorRange(start, end, text);
-    renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
-    showEditorAutocomplete();
-    return;
-  }
-
-  // Always intercept Enter — letting the browser handle it natively creates a
-  // plain <div> (not .editor-line) inside the contenteditable.  That element
-  // is invisible to getEditorText() and causes getEditorSelection() to return
-  // offset 0, which corrupts every subsequent edit (Space, Tab, backspace…).
-  if (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak") {
-    event.preventDefault();
-    replaceEditorRange(start, end, "\n");
-    renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
-    hideEditorAutocomplete();
-    return;
-  }
-
-  // Non-empty selection: browser may collapse or destroy .editor-line divs
-  // when the operation spans multiple lines. Take over completely.
-  if (hasSelection) {
-    if (event.inputType === "insertText") {
-      event.preventDefault();
-      replaceEditorRange(start, end, event.data ?? "");
-      renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
-      showEditorAutocomplete();
-      return;
-    }
-    if (
-      event.inputType === "deleteByCut" ||
-      event.inputType === "deleteContentBackward" ||
-      event.inputType === "deleteContentForward" ||
-      event.inputType.startsWith("deleteWord") ||
-      event.inputType.startsWith("deleteLine") ||
-      event.inputType.startsWith("deleteHardLine") ||
-      event.inputType.startsWith("deleteSoftLine")
-    ) {
-      event.preventDefault();
-      replaceEditorRange(start, end, "");
-      renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
-      return;
-    }
-  }
-
-  // No selection, single-char delete: intercept when the cursor is right at
-  // a line boundary so the browser doesn't merge two .editor-line divs into
-  // one (which would drop the \n from getEditorText() and corrupt the model).
-  if (!hasSelection) {
-    const value = getEditorText();
-    if (event.inputType === "deleteContentBackward") {
-      // Backspace at the very start of a line (start > 0 and char before is \n)
-      if (start > 0 && value[start - 1] === "\n") {
-        event.preventDefault();
-        replaceEditorRange(start - 1, start, "");
-        renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
-        return;
-      }
-    }
-    if (event.inputType === "deleteContentForward") {
-      // Delete at the very end of a line (char at cursor is \n)
-      if (start < value.length && value[start] === "\n") {
-        event.preventDefault();
-        replaceEditorRange(start, start + 1, "");
-        renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
-        return;
-      }
-    }
-  }
-});
-
-elements.editorContent.addEventListener("input", (event) => {
-  if (editorIsComposing) {
-    return;
-  }
-  const activeFile = controller.getActiveFile();
-  if (!activeFile || !isTextFileName(activeFile.name)) {
-    hideEditorAutocomplete();
-    return;
-  }
-  const currentText = getEditorText();
-  const { start, end } = getEditorSelection();
-  const inputType = (event instanceof InputEvent ? event.inputType : "") ?? "";
-  if (
-    inputType === "insertParagraph" ||
-    inputType === "insertLineBreak" ||
-    (inputType === "insertText" && /^\s+$/.test(event.data ?? ""))
-  ) {
-    traceEditorEvent("input", {
-      inputType,
-      data: formatEditorDebugValue(event.data ?? "")
-    });
-  }
-  // Record every native text edit, including spaces, before the synchronous
-  // model update path can disturb DOM focus/selection state.
-  pushEditorHistoryState(currentText, start, end);
-  notifyEditorChanged(currentText);
-  // Re-render syntax highlighting; must restore selection afterward because
-  // innerHTML replacement destroys the native caret. Rebuilding innerHTML also
-  // resets scrollTop to 0, so save/restore it — otherwise caretIntoView() below
-  // re-scrolls from the top and a mid-document edit (e.g. backspace) jumps the
-  // view. This is the native-edit path; applyEditorRender has the same guard.
-  const savedScroll = elements.editorContent.scrollTop;
-  renderEditorContent(currentText);
-  // Restore focus if innerHTML replacement caused the contenteditable to lose
-  // focus (observed in some browsers); this keeps the caret in place for the
-  // next keystroke rather than falling back to page-level focus.
-  if (document.activeElement !== elements.editorContent) {
-    elements.editorContent.focus({ preventScroll: true });
-  }
-  setEditorSelection(start, end);
-  rememberEditorSelection();
-  elements.editorContent.scrollTop = savedScroll;
-  syncEditorScroll();
-  caretIntoView();
-  if (
-    inputType === "insertParagraph" ||
-    inputType === "insertLineBreak" ||
-    (inputType === "insertText" && /^\s+$/.test(event.data ?? ""))
-  ) {
-    traceEditorEvent("input rendered", {
-      inputType,
-      data: formatEditorDebugValue(event.data ?? "")
-    });
-  }
-  // Reposition remote cursor overlays now that the DOM has changed.
-  renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
-  showEditorAutocomplete();
-});
-
-// File tabs and workspace opens need not move focus into the editor. Restore the
-// saved caret when the user returns with keyboard or pointer focus instead.
-elements.editorContent.addEventListener("focus", () => {
-  const active = controller.getActiveFile();
-  if (!active || lastRenderedFileId !== active.id) return;
-  const saved = savedEditorSelection(active.id, getEditorText());
-  if (saved) setEditorSelection(saved.start, saved.end);
-});
-
-elements.editorContent.addEventListener("scroll", () => {
-  syncEditorScroll();
-  scheduleRemoteCursorRender(); // keep peer carets/highlights pinned to the text while scrolling
-  if (searchState.open) renderSearchHighlights();
-});
-elements.editorContent.addEventListener("keydown", handleEditorKeydown);
-
-// ── Find / Replace controls ─────────────────────────────────────────────────
-let findRecomputeTimer = null;
-elements.findInput?.addEventListener("input", () => {
-  if (findRecomputeTimer) clearTimeout(findRecomputeTimer);
-  findRecomputeTimer = setTimeout(() => {
-    findRecomputeTimer = null;
-    computeSearchMatches({ keepCaret: true });
-    // Jump to the first match as the user refines the query.
-    if (searchState.matches.length) gotoMatch(searchState.currentIndex);
-  }, 100);
-});
-elements.findInput?.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    if (event.shiftKey) findPrev(); else findNext();
-  } else if (event.key === "Escape") {
-    event.preventDefault();
-    closeFindBar();
-  } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
-    event.preventDefault();
-    elements.findInput.select();
-  }
-});
-elements.replaceInput?.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") { event.preventDefault(); replaceCurrent(); }
-  else if (event.key === "Escape") { event.preventDefault(); closeFindBar(); }
-});
-elements.findNext?.addEventListener("click", findNext);
-elements.findPrev?.addEventListener("click", findPrev);
-elements.findClose?.addEventListener("click", closeFindBar);
-elements.findToggleCase?.addEventListener("click", () => toggleFindOption("caseSensitive", elements.findToggleCase));
-elements.findToggleWord?.addEventListener("click", () => toggleFindOption("wholeWord", elements.findToggleWord));
-elements.findToggleRegex?.addEventListener("click", () => toggleFindOption("regex", elements.findToggleRegex));
-elements.findToggleReplace?.addEventListener("click", () => {
-  searchState.replaceMode = !searchState.replaceMode;
-  if (elements.findReplaceRow) elements.findReplaceRow.hidden = !searchState.replaceMode;
-  (searchState.replaceMode ? elements.replaceInput : elements.findInput)?.focus();
-});
-elements.replaceOne?.addEventListener("click", replaceCurrent);
-elements.replaceAll?.addEventListener("click", replaceAllMatches);
-elements.editorContent.addEventListener("mousedown", (event) => {
-  if ((event.ctrlKey || event.metaKey) && event.button === 0) {
-    const linkEl = event.target?.closest?.(".token-link[data-href]");
-    if (linkEl) {
-      event.preventDefault();
-      hideLinkTooltip(true);
-      openLinkFromEditor(linkEl.dataset.href);
-    }
-  }
-});
-elements.editorContent.addEventListener("click", hideEditorAutocomplete);
-elements.editorContent.addEventListener("mousemove", handleEditorLinkHover);
-elements.editorContent.addEventListener("mouseleave", handleEditorMouseLeave);
-
-elements.preview.addEventListener("click", (event) => {
-  const fileLink = event.target.closest("a[data-open-file-id]");
-  if (fileLink) {
-    event.preventDefault();
-    openFileFromExplorer(fileLink.dataset.openFileId);
-    return;
-  }
-  const unresolved = event.target.closest("a[data-unresolved-link]");
-  if (unresolved) {
-    event.preventDefault();
-    notify(`Cannot resolve link: ${unresolved.dataset.unresolvedLink}`);
-  }
-});
-
-elements.editorContent.addEventListener("dragstart", (event) => {
-  const { start: selectionStart, end: selectionEnd } = getEditorSelection();
-  if (selectionStart === selectionEnd) {
-    editorDragState.selection = null;
-    return;
-  }
-  const text = getEditorText().slice(selectionStart, selectionEnd);
-  editorDragState.selection = { start: selectionStart, end: selectionEnd, text };
-  event.dataTransfer?.setData("text/mdnotes-editor-selection", JSON.stringify(editorDragState.selection));
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = "copyMove";
-  }
-});
-elements.editorContent.addEventListener("dragend", () => {
-  editorDragState.selection = null;
-  clearEditorDropCaret();
-});
-elements.editorContent.addEventListener("dragover", (event) => {
-  const types = event.dataTransfer?.types ?? [];
-  // Explorer file drags: let the pane-level handler accept them (don't steal the event here).
-  if (types.includes("text/mdnotes-file-id") || types.includes("text/mdnotes-node-id")) {
-    clearEditorDropCaret();
-    return;
-  }
-
-  const activeFile = controller.getActiveFile();
-  const supportsTextDrop = Boolean(activeFile && isTextFileName(activeFile.name));
-  const supportsPartDrop = Boolean(activeFile && isMarkdownFileName(activeFile.name) && types.includes("text/stilo-file-part"));
-  const supportsTextPayload = types.includes("text/plain") || types.includes("text/mdnotes-editor-selection");
-  if ((!supportsTextDrop || !supportsTextPayload) && !supportsPartDrop) {
-    clearEditorDropCaret();
-    return;
-  }
-
-  event.preventDefault();
-  event.stopPropagation();
-  if (event.dataTransfer) {
-    event.dataTransfer.dropEffect = types.includes("text/mdnotes-editor-selection") ? "move" : "copy";
-  }
-  showEditorDropCaret(event.clientX, event.clientY);
-});
-elements.editorContent.addEventListener("dragleave", (event) => {
-  if (event.currentTarget.contains(event.relatedTarget)) {
-    return;
-  }
-  clearEditorDropCaret();
-});
-elements.editorContent.addEventListener("drop", (event) => {
-  event.preventDefault();
-  event.stopPropagation();
-  void handleEditorDrop(event).catch((error) => notify(error.message));
-});
-elements.editorGutter.addEventListener("wheel", forwardEditorWheel, { passive: false });
-elements.editorScroll.addEventListener("wheel", (event) => {
-  if (event.target === elements.editorContent) {
-    return;
-  }
-  forwardEditorWheel(event);
-}, { passive: false });
 
 shell.commands.add({ id: "workspace.save", title: "Save", menu: { id: "file", group: 0, order: 6 }, keys: ["Mod+S"], run: async () => {
   await handleSaveCommand();
@@ -3627,8 +2821,7 @@ async function emptyEverything() {
   // Persist an empty project so the boot path doesn't fall back to loading the
   // default Template welcome workspace.
   saveProject(createProject("Workspace"));
-  clearViewStates();
-  viewStates = {};
+  forgetViewStates();
   logDebug("action", "Workspace emptied");
   window.location.reload();
 }
@@ -3645,8 +2838,7 @@ async function clearAllCache() {
   }
 
   closeMenus();
-  clearViewStates(); // also drop cached resume positions
-  viewStates = {};
+  forgetViewStates(); // also drop cached resume positions
   try {
     const result = await clearOfflineShellData();
     logDebug(
@@ -4028,8 +3220,8 @@ function applySourceFontChange(label) {
   persistSettings();
   applyEditorFont(settings);
   render(controller.getProject());
-  renderRemoteCursors(Array.from(remoteCursorsByClient.values()));
-  if (searchState.open) computeSearchMatches({ keepCaret: true });
+  redrawRemoteCursors();
+  if (editorParts.isFindOpen()) computeSearchMatches({ keepCaret: true });
   syncEditorScroll();
   syncSourceFontControls(); // refresh availability labels + the status line
   logDebug("action", "Source typography changed", label);
