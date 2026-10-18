@@ -1,0 +1,164 @@
+// Saving the open project (moved from main.js when Workspace took saving):
+//   - this browser's copy (localStorage): a trailing write after edits, and
+//     written at once whenever the page may go away;
+//   - a local (on-device) project mirrored to its folder, debounced per folder;
+//   - auto-save, when idle and every 15 s, which clears a file's dirty mark
+//     once it is durably stored (a real folder on disk saves only on Save);
+//   - the Save command for the open file.
+// Whether a file of a shared workspace is durably stored is the session's to
+// say (Sync, above Workspace): the hooks given to attach() answer it.
+import { saveProject } from "./browser-copy.js";
+import { saveProjectToHandles } from "./disk-folders.js";
+import { savedFileIds, snapshotProject } from "./save-queue.js";
+
+const RECOVERY_SAVE_IDLE_MS = 800;
+const RECOVERY_SAVE_MAX_MS = 3000;
+const AUTOSAVE_IDLE_MS = 1500;
+const AUTOSAVE_PERIODIC_MS = 15000;
+
+const dirtyFileIds = (project) => Object.values(project.nodes)
+  .filter((node) => node.kind === "file" && node.dirty)
+  .map((node) => node.id);
+
+// store(): the open project's store; settings: Shell's; log(...): the module log;
+// io: the two writes (tests give their own).
+export function createSaving({ store, settings, log, io = { saveProject, saveProjectToHandles } }) {
+  // What the app above says (attach): busy() while an IME composition is under
+  // way; scope() names the workspace a save belongs to (a save that finishes
+  // after a switch confirms nothing); shared() when the project is a shared
+  // workspace; confirmed(project, ids) the files the server has confirmed.
+  let hooks = { busy: () => false, scope: () => "local", shared: () => false, confirmed: (project, ids) => ids };
+  let attached = false;
+
+  // ---- This browser's copy. Serialising the whole project used to run on
+  // every render — every keystroke, and every collaborator's keystroke. Now it
+  // trails edits slightly and is flushed whenever the page may go away.
+  let recoveryTimer = null;
+  let recoveryDeadline = 0;
+  let recoveryPending = null;
+
+  function scheduleRecoverySave(project) {
+    recoveryPending = project;
+    const now = performance.now();
+    if (!recoveryDeadline) recoveryDeadline = now + RECOVERY_SAVE_MAX_MS;
+    if (recoveryTimer) clearTimeout(recoveryTimer);
+    recoveryTimer = setTimeout(flushRecoverySave, Math.max(0, Math.min(RECOVERY_SAVE_IDLE_MS, recoveryDeadline - now)));
+  }
+
+  function flushRecoverySave() {
+    if (recoveryTimer) clearTimeout(recoveryTimer);
+    recoveryTimer = null;
+    recoveryDeadline = 0;
+    const project = recoveryPending;
+    recoveryPending = null;
+    if (!project) return;
+    try { io.saveProject(project); }
+    catch (error) { log("browser recovery save failed:", error.message); }
+  }
+
+  // ---- A local (OPFS) project mirrors changes to its folder. Debounced per
+  // folder; the shared writer serializes background, automatic and explicit saves.
+  const folderTimers = new Map();
+
+  function scheduleFolderSave(project) {
+    if (project?.sourceMode !== "opfs") return;
+    const root = project.handles?.[project.rootId];
+    if (!root) return;
+    const previous = folderTimers.get(root);
+    if (previous) clearTimeout(previous);
+    // Capture this workspace: switching views must not redirect its pending save.
+    folderTimers.set(root, setTimeout(() => {
+      folderTimers.delete(root);
+      void io.saveProjectToHandles(project).catch((error) => log("local workspace save failed:", error.message));
+    }, 500));
+  }
+
+  // ---- Auto-save: clears the dirty mark (the tab's dot and the leave-page
+  // question) once content is durably stored: localStorage for an in-browser
+  // workspace, its folder for a local one, the server for a shared one.
+  let autoSaveTimer = null;
+
+  function scheduleAutoSave(project = store().getProject()) {
+    if (!settings.autoSave || project.sourceMode === "filesystem") return;
+    if (!dirtyFileIds(project).length) return;
+    if (autoSaveTimer) clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(() => {
+      autoSaveTimer = null;
+      void runAutoSave("idle");
+    }, AUTOSAVE_IDLE_MS);
+  }
+
+  async function runAutoSave(reason) {
+    if (!settings.autoSave) return;
+    // Don't churn a render (markManySaved) mid-IME-composition; wait until it ends.
+    if (hooks.busy()) return;
+    const project = snapshotProject(store().getProject());
+    const scope = hooks.scope();
+    if (project.sourceMode === "filesystem") return; // explicit save only
+    const dirty = dirtyFileIds(project);
+    if (!dirty.length) return;
+    try {
+      if (project.sourceMode === "opfs") {
+        await io.saveProjectToHandles(project);
+      } else {
+        io.saveProject(project); // propagate quota/storage errors before clearing dirty
+      }
+      if (scope !== hooks.scope()) return;
+      const unchanged = new Set(savedFileIds(store().getProject(), project));
+      const savedDirty = dirty.filter((id) => unchanged.has(id));
+      // A shared workspace's durable home is the SERVER, so a file is only clean
+      // once the server confirmed its text (nothing pending, in flight or
+      // mid-reconnect): the dot must never lie about being saved. While offline
+      // nothing is confirmed, so every edit stays dirty — that mark is what tells
+      // a later reconnect which files still need pushing.
+      const savable = hooks.confirmed(project, savedDirty);
+      if (savable.length) {
+        store().markManySaved(savable, !hooks.shared()); // the host owns the counters when shared
+        log(`auto-saved ${savable.length} file(s) (${reason})`);
+      }
+    } catch (error) {
+      log("auto-save failed:", error.message);
+    }
+  }
+
+  // ---- Save (the command): the open file, to its folder or this browser.
+  async function saveActiveFile() {
+    const saved = snapshotProject(store().getProject());
+    const scope = hooks.scope();
+    const activeId = saved.activeFileId;
+    if (!activeId) return;
+    const wroteToDisk = await io.saveProjectToHandles(saved);
+    if (!wroteToDisk) io.saveProject(saved);
+    if (scope !== hooks.scope()) return;
+    const current = store().getProject();
+    if (!savedFileIds(current, saved).includes(activeId)) return;
+    if (hooks.confirmed(current, [activeId]).includes(activeId)) store().markSaved(activeId, !hooks.shared());
+  }
+
+  // The project changed (or the app rendered it): schedule each kind of save.
+  function schedule(project) {
+    scheduleRecoverySave(project);
+    scheduleFolderSave(project);
+    scheduleAutoSave(project);
+  }
+
+  // Starts the page listeners and the periodic save: only in a page, once.
+  function attach(given) {
+    if (attached) throw new Error("workspace.saving: already attached");
+    attached = true;
+    hooks = { ...hooks, ...given };
+    // Anything that might end the page's life gets the pending copy written now.
+    window.addEventListener("pagehide", () => { flushRecoverySave(); });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") flushRecoverySave();
+    });
+    // A safety net, so a long typing session (the idle timer keeps resetting)
+    // still gets saved regularly.
+    window.setInterval(() => {
+      if (settings.autoSave && dirtyFileIds(store().getProject()).length) void runAutoSave("periodic");
+    }, AUTOSAVE_PERIODIC_MS);
+  }
+
+  return Object.freeze({ attach, schedule, scheduleAutoSave, runAutoSave, saveActiveFile, flush: flushRecoverySave, dirtyFileIds });
+}
+

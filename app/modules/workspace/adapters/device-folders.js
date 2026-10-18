@@ -9,9 +9,9 @@
 // mirrors the server's layout (folders + projects detected by a meta file) so a
 // single File-Browser can later drive both sides.
 
-import { ROOT_ID } from "../domain/project-model.js";
-import { buildProjectFromDirectoryHandle, saveProjectToHandles } from "./fs-access-service.js";
-import { ignore } from "../kernel/index.js";
+import { ROOT_ID } from "../model/project.js";
+import { buildProjectFromDirectoryHandle, saveProjectToHandles } from "./disk-folders.js";
+import { ignore } from "../../../kernel/index.js";
 
 const MANIFEST_NAME = "manifest.json";
 

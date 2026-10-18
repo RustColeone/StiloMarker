@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-18 · release `v0.1.57` (not deployed; v0.1.53 is live)
+Last updated: 2026-10-18 · release `v0.1.58` (not deployed; v0.1.53 is live)
 
 ---
 
@@ -68,6 +68,20 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.58: Workspace owns saving
+
+Step S3o-3. Nothing changes for users.
+
+- The four storage services (this browser's copy, folders on disk,
+  on-device folders, the save queue) are Workspace's adapters now.
+- What `main.js` did around them is Workspace's `saving`: the browser copy
+  written shortly after edits and at once when the page may go away, a local
+  project's folder, auto-save when idle and every 15 seconds, and Save.
+  Whether a shared workspace's file may lose its dirty mark is still decided
+  by the session (the server must have confirmed it), now through a hook.
+- `project-save.test.mjs` tests Workspace's saving directly instead of
+  cutting the functions out of `main.js`'s source.
 
 ### v0.1.57: Sync owns the live session and its status
 

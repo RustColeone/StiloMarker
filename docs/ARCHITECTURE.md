@@ -311,8 +311,8 @@ That is where bugs are hard to find. Steps, each its own release:
 | S3b | The Explorer module (v0.1.55, level 4): the tree, moving and copying files, folders and parts, adding files (and dropping them into the editor), creating, renaming, deleting, exporting, the context menu and its Edit / Create menu items, split by job into files under the budget. It uses Workspace, the Editor's `parts()` and Shell's dialogs; `main.js` attaches a port (16 names). The file-content and ZIP helpers moved into Workspace (shared with legacy saving); diagram export is `app/features/diagram-export.js` until diagrams become an extension. Rule 1 now fails on a module importing legacy code. Getters handed out by `main.js`: 133 → 90; `main.js` 3,731 → 3,328 lines | done (v0.1.55) |
 | S3o-1 | Owners for what every legacy feature still needs, first: the settings (v0.1.56). Shell owns them; everyone holds a read-only view (`settings.theme`), changes go through `settings.change({ key: value }, why?)`, which saves only the changed keys (another tab's changes are never written back) and lands in the trace with the file and line that made it; secrets (the PIN, the stored password, an API key) are hidden there. A plain assignment throws. 64 writes in 5 files converted; `lastLocalProject` gained its missing default | done (v0.1.56) |
 | S3o-2 | Sync owns the live session (v0.1.57): `sync.attach(port)` creates it, given what only the app can do (replace the project, apply a remote change, keep local edits before a reload, sign in again, upload an asset); its news are Sync's events (`status`, `remote-cursor`, `host-counters`, `patch-confirmed`, `event`). The session's status (connected, presence, role, what the server offers) is Sync's too: a live view everyone reads, changed by Sync from the session and by `status.change` where code pings or reconnects (23 direct writes in 2 files before). The Explorer asks Sync for the session instead of `main.js`. The settings' read-only view is now the kernel's `createLiveView`, used by both | done (v0.1.57) |
-| S3o-3 | Saving (this browser's copy, auto-save, folders on disk) owned by Workspace | next |
-| S3o-4 | The app's render as one event modules listen to | |
+| S3o-3 | Workspace owns saving (v0.1.58): the four storage services moved into its adapters (this browser's copy, folders on disk, on-device folders, the save queue), and `workspace.saving` does what `main.js` did: the trailing browser copy flushed when the page may go away, a local project's folder, auto-save (idle and periodic) and Save. What only the app knows comes as hooks (`saving.attach({ busy, scope, shared, confirmed })`): an IME composition, the workspace a save belongs to, which files the server confirmed | done (v0.1.58) |
+| S3o-4 | The app's render requested through Shell (`shell.render`), so modules stop carrying `render` and `updateStatus` in their ports | next |
 | S3c | The cloud file browser, sign-in and hosting as a module | |
 | S3d | The chat panel into the Assistant module | |
 | S4 | `main.js` only starts the kernel; then the server's `WorkspaceRegistry` the same way | |
@@ -336,6 +336,9 @@ That is where bugs are hard to find. Steps, each its own release:
   "host-counters" | "patch-confirmed" | "event", listener)`.
 - A state others read but only its owner changes: `createLiveView(state)`
   (kernel) gives a read-only, always-current view with `change(patch, why?)`.
+- Saving: `workspace.saving.schedule(project)` after a change,
+  `saveActiveFile()`, `runAutoSave(why)`; the storage itself (loadProject,
+  saveProject, folders) is Workspace's static API.
 - Settings: read `shell.settings.key`; change with `shell.settings.change({ key:
   value }, why?)` (a new key needs a default in Shell's `settings-store.js`);
   listen with `shell.settings.on((settings, changedKeys) => …)`.

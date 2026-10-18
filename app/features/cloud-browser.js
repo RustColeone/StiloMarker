@@ -2,7 +2,7 @@
 // guest-PIN hosting, workspace access, and opening a cloud workspace.
 // main.js creates this on first use and passes its shared values in `app`.
 import { seedDefaultProject } from "../modules/workspace/index.js";
-import { openProjectOpfs, supportsOpfs } from "../services/opfs-service.js";
+import { openProjectOpfs, supportsOpfs } from "../modules/workspace/index.js";
 import { createProjectServer, pingServer } from "../services/sync-service.js";
 
 export function createCloudBrowser(app) {

@@ -1,4 +1,7 @@
-import { deserializeProject, serializeProject } from "../domain/project-model.js";
+// The project's copy in this browser (localStorage): the in-browser
+// workspace's only storage, and a crash net for the others. Moved from the
+// legacy storage service when Workspace took saving.
+import { deserializeProject, serializeProject } from "../model/project.js";
 
 const PROJECT_KEY = "mdnotes.project.v1";
 

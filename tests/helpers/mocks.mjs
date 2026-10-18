@@ -33,7 +33,7 @@ export async function loadModules() {
     load("app/modules/editor/model/markdown.js"),
     load("app/services/bmap-service.js"),
     load("app/services/mtree-module-map-service.js"),
-    load("app/services/fs-access-service.js"),
+    load("app/modules/workspace/adapters/disk-folders.js"),
     load("app/services/sync-service.js")
   ]);
   return {

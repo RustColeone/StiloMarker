@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createProject, addFolder, addFile, updateFileContent, toggleFolder, renameNode } from '../app/domain/project-model.js';
-import { buildSourceIndex, saveProjectToHandles } from '../app/services/fs-access-service.js';
-import { snapshotProject, savedFileIds, createProjectSaveQueue } from '../app/services/project-save-service.js';
+import { buildSourceIndex, saveProjectToHandles } from '../app/modules/workspace/adapters/disk-folders.js';
+import { snapshotProject, savedFileIds, createProjectSaveQueue } from '../app/modules/workspace/adapters/save-queue.js';
 const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(setImmediate); };
 const deferred = () => { let resolve; const promise = new Promise(r => resolve = r); return { promise, resolve }; };
 function localProject(root = {}) {
@@ -100,18 +100,14 @@ test('queued renames use the last completed disk index despite model cloning', a
   assert.deepEqual([...root.entries.keys()], ['final.md']);
 });
 
-// Exercise the production main.js handlers as well as their storage service.
-// The UI is replaced by a controller stub; no browser or localhost is needed.
-const { readFile } = await import('node:fs/promises');
-const mainSource = await readFile(new URL('../app/main.js', import.meta.url), 'utf8');
-function mainSaveHandlers(controller, write, persist = () => {}, scope = () => 'workspace') {
-  const auto = mainSource.slice(mainSource.indexOf('async function runAutoSave(reason) {'), mainSource.indexOf('// Periodic safety net'));
-  const manual = mainSource.slice(mainSource.indexOf('async function saveActiveWorkspaceFile() {'), mainSource.indexOf('async function handleSaveCommand()'));
-  return new Function('deps', `const { controller, saveProjectToHandles, saveProject, snapshotProjectKey, snapshotProject, savedFileIds } = deps;
-    const settings = { autoSave: true }, editorParts = { isComposing: () => false }, syncMode = { get: () => ({ workspaceMode: 'private' }) };
-    const logDebug = () => {}, dirtyFileIds = p => Object.values(p.nodes).filter(n => n.dirty).map(n => n.id);
-    ${auto}\n${manual}\nreturn { auto: runAutoSave, manual: saveActiveWorkspaceFile };`)
-    ({ controller, saveProjectToHandles: write, saveProject: persist, snapshotProjectKey: scope, snapshotProject, savedFileIds });
+// Exercise Workspace's saving (auto-save and Save) with its writes replaced.
+// The project store is a stub; no browser or localhost is needed.
+const { createSaving } = await import('../app/modules/workspace/adapters/saving.js');
+function mainSaveHandlers(controller, write, persist = () => {}) {
+  const saving = createSaving({ store: () => controller, settings: { autoSave: true }, log: () => {},
+    io: { saveProjectToHandles: write, saveProject: persist } });
+  // Not attached (no page listeners): the hooks keep their defaults, a local workspace.
+  return { auto: (reason) => saving.runAutoSave(reason), manual: () => saving.saveActiveFile(), saving };
 }
 for (const method of ['auto', 'manual']) test(`${method} save keeps dirty on failure and on edits during the write`, async () => {
   let p = localProject(); const id = fileId(p); p.activeFileId = id; p = updateFileContent(p, id, 'unsaved');

@@ -1,7 +1,11 @@
-import { createProjectSaveQueue } from "./project-save-service.js";
-import { ROOT_ID, addFile, addFolder, createProject, getNode, getPath, isImageFileName, listVisibleNodes } from "../domain/project-model.js";
-import { bytesToDataUrl, dataUrlToBlob, decodeTextBytes, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent, extractZipEntries } from "../modules/workspace/index.js";
-import { builtinTypes } from "../modules/file-types/index.js";
+// Real folders on disk (the File System Access API): opening a folder, a ZIP
+// or a file as a project, and writing a project back to its folder. Moved
+// from the legacy file-system service when Workspace took saving.
+import { createProjectSaveQueue } from "./save-queue.js";
+import { ROOT_ID, addFile, addFolder, createProject, getNode, getPath, isImageFileName, listVisibleNodes } from "../model/project.js";
+import { bytesToDataUrl, dataUrlToBlob, decodeTextBytes, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent } from "./file-content.js";
+import { extractZipEntries } from "./zip.js";
+import { builtinTypes } from "../../file-types/index.js";
 
 function findChildByName(project, parentId, name, kind) {
   const parent = getNode(project, parentId);

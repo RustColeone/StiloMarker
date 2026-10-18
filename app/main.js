@@ -8,17 +8,14 @@ import extensionModules from "./extensions.js";
 import { createWorkspacePorts } from "./features/workspace-ports.js";
 import { rememberedWorkspace, createSessionRecovery } from "./services/session-recovery-service.js";
 import { installMobileViewport } from "./services/chat-ui-service.js";
-import { snapshotProject, savedFileIds } from "./services/project-save-service.js";
 import { APP_VERSION } from "./version.js";
 import { ROOT_ID, seedDefaultProject, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isBmapFileName, isImageFileName, isMarkdownFileName, isPersonaFileName, isTextFileName } from "./domain/project-model.js";
-import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
-import { supportsOpfs, listOpfsDir, mkdirOpfs, createProjectOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs, deleteOpfsEntry, exportProjectModelOpfs, importProjectModelOpfs } from "./services/opfs-service.js";
+import { createProjectOpfs, deleteOpfsEntry, exportProjectModelOpfs, getOpfsDirectoryHandle, importDirectory, importOsFolderIntoOpfs, importProjectModelOpfs, importSingleFile, importZipArchive, listOpfsDir, loadProject, mkdirOpfs, saveProject, supportsDirectoryAccess, supportsOpfs } from "./modules/workspace/index.js";
 import syncModule from "./modules/sync/index.js";
 import { sendGenerationRequest } from "./services/chat-api-service.js";
 import { PERSONA_SUFFIX, parsePersona, personaTemplate } from "./services/persona-service.js";
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
 import { applyEditorFont, applyTheme, clampSourceFontSize, signInSettings } from "./services/settings-service.js";
-import { loadProject, saveProject } from "./services/storage-service.js";
 import { browseServer, createProjectServer, deleteServer, exportProjectServer, importProjectServer, mkdirServer, normalizeServerUrl, saveUserState, uploadAsset } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { query } from "./ui/dom.js";
@@ -286,6 +283,16 @@ const syncMode = modules.sync.mode;
 // The session as the app sees it (status, presence, role...): Sync's, read-only;
 // say what happened with syncState.change({ ... }).
 const syncState = modules.sync.status;
+// Saving is Workspace's; what it cannot know is said here: an IME composition
+// under way, which workspace a save belongs to, and which files of a shared
+// workspace the server has confirmed (only those may lose their dirty mark).
+workspace.saving.attach({
+  busy: () => editorParts.isComposing(),
+  scope: () => snapshotProjectKey(),
+  shared: () => syncMode.get().workspaceMode === "synced",
+  confirmed: (project, ids) => (syncMode.get().workspaceMode !== "synced" ? ids
+    : collaboration.isConnected?.() ? ids.filter((id) => !collaboration.hasUnsyncedText?.(getPath(project, id))) : [])
+});
 // The Editor's parts (source editor, find, autocomplete, links, tabs, preview),
 // created now and given what no module owns yet: each entry of this port should
 // find an owner or become an extension point (modules/editor/adapters/surface.js).
@@ -327,11 +334,6 @@ const DEFERRED_RENDER_IDLE_MS = 250;
 const DEFERRED_RENDER_MAX_MS = 1500;
 let deferredRenderTimer = null;
 let deferredRenderDeadline = 0;
-const RECOVERY_SAVE_IDLE_MS = 800;
-const RECOVERY_SAVE_MAX_MS = 3000;
-let recoverySaveTimer = null;
-let recoverySaveDeadline = 0;
-let recoverySavePending = null;
 // ---- The Editor's parts (the Editor module: adapters/surface.js) ----
 // Forwarders: code here still calls the editor's functions by name.
 function applyEditorEdit(...args) { return editorParts.applyEditorEdit(...args); }
@@ -1292,23 +1294,6 @@ async function stageAddFileFromLocalFile(...args) { return explorerParts.stageAd
 async function submitAddFile(...args) { return explorerParts.submitAddFile(...args); }
 
 
-async function saveActiveWorkspaceFile() {
-  const saved = snapshotProject(controller.getProject());
-  const scope = snapshotProjectKey();
-  const activeId = saved.activeFileId;
-  if (!activeId) return;
-  const wroteToDisk = await saveProjectToHandles(saved);
-  if (!wroteToDisk) saveProject(saved);
-  if (scope !== snapshotProjectKey()) return;
-  const current = controller.getProject();
-  if (!savedFileIds(current, saved).includes(activeId)) return;
-  const confirmed = syncMode.get().workspaceMode !== "synced" || (collaboration.isConnected?.()
-    && !collaboration.hasUnsyncedText?.(getPath(current, activeId)));
-  if (confirmed) {
-    controller.markSaved(activeId, syncMode.get().workspaceMode !== "synced");
-  }
-}
-
 async function handleSaveCommand() {
   if (moduleMapTools?.isOpen() && moduleMapTools.contains(document.activeElement)) {
     logDebug("action", "Module map written to target");
@@ -1318,7 +1303,7 @@ async function handleSaveCommand() {
 
   try {
     logDebug("action", "Workspace save requested");
-    await saveActiveWorkspaceFile();
+    await workspace.saving.saveActiveFile();
     logDebug("response", "Workspace saved");
   } catch (error) {
     notify(error.message);
@@ -1793,25 +1778,6 @@ function renderPreviewOrDiff(project, previewFile) {
   }
 }
 
-// Local (OPFS) projects mirror changes to disk. Debounce per directory; the
-// shared writer serializes background, automatic, and explicit saves.
-const opfsFlushTimers = new Map();
-
-function scheduleOpfsFlush(project) {
-  if (project?.sourceMode !== "opfs") return;
-  const root = project.handles?.[project.rootId];
-  if (!root) return;
-  const previous = opfsFlushTimers.get(root);
-  if (previous) clearTimeout(previous);
-  // Capture this workspace. Switching views must not redirect its pending save.
-  opfsFlushTimers.set(root, setTimeout(() => {
-    opfsFlushTimers.delete(root);
-    void saveProjectToHandles(project).catch((error) => {
-      logDebug("response", "Local workspace save failed", error.message);
-    });
-  }, 500));
-}
-
 function render(project) {
   if (editorParts?.isTyping()) {
     // A keystroke. The editor has already drawn it; the explorer, tabs, preview,
@@ -1819,17 +1785,13 @@ function render(project) {
     // DEFERRED_RENDER_MAX_MS during a long burst). Doing them synchronously here
     // cost a full app render plus a whole-project localStorage write per key.
     scheduleDeferredRender();
-    scheduleRecoverySave(project);
-    scheduleOpfsFlush(project);
-    scheduleAutoSave(project);
+    workspace.saving.schedule(project);
     return;
   }
   cancelDeferredRender(); // this full render covers whatever was pending
   explorerParts.renderTree(project, new Set(agentPendingDecorations.keys()));
   updateStatus(project);
-  scheduleRecoverySave(project);
-  scheduleOpfsFlush(project);
-  scheduleAutoSave(project);
+  workspace.saving.schedule(project); // this browser's copy, a local project's folder, auto-save (Workspace)
 }
 
 function scheduleDeferredRender() {
@@ -1850,114 +1812,7 @@ function cancelDeferredRender() {
   deferredRenderDeadline = 0;
 }
 
-// The browser-recovery copy in localStorage (the in-browser workspace's only
-// storage, and a crash net for the others). Serialising the whole project used
-// to run on every render — every keystroke, and every collaborator's keystroke.
-// Now it trails edits slightly and is flushed whenever the page may go away.
-function scheduleRecoverySave(project) {
-  recoverySavePending = project;
-  const now = performance.now();
-  if (!recoverySaveDeadline) recoverySaveDeadline = now + RECOVERY_SAVE_MAX_MS;
-  if (recoverySaveTimer) clearTimeout(recoverySaveTimer);
-  const delay = Math.max(0, Math.min(RECOVERY_SAVE_IDLE_MS, recoverySaveDeadline - now));
-  recoverySaveTimer = setTimeout(flushRecoverySave, delay);
-}
-
-function flushRecoverySave() {
-  if (recoverySaveTimer) clearTimeout(recoverySaveTimer);
-  recoverySaveTimer = null;
-  recoverySaveDeadline = 0;
-  const project = recoverySavePending;
-  recoverySavePending = null;
-  if (!project) return;
-  try { saveProject(project); }
-  catch (error) { logDebug("response", "Browser recovery save failed", error.message); }
-}
-
-// Anything that might end the page's life gets the pending copy written now.
-window.addEventListener("pagehide", () => { flushRecoverySave(); });
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") flushRecoverySave();
-});
-
-// ---- Auto-save: idle + periodic durable flush for non-real-disk workspaces.
-// Clears the dirty flag (and thus the ● tab dot + beforeunload nag) once content
-// is durably stored: localStorage for memory/import, OPFS for local workspaces,
-// the server for synced cloud workspaces. A real OS folder (sourceMode
-// "filesystem") still requires an explicit Ctrl+S, so it is left untouched.
-// These MUST be declared BEFORE controller.subscribe(render): subscribe() calls
-// the listener immediately, and render() calls scheduleAutoSave(), so the timer
-// state must already exist — otherwise a temporal-dead-zone ReferenceError at
-// startup (the initial project has an active file, so render reaches this).
-const AUTOSAVE_IDLE_MS = 1500;
-const AUTOSAVE_PERIODIC_MS = 15000;
-let autoSaveIdleTimer = null;
-
 controller.subscribe(render);
-
-function dirtyFileIds(project) {
-  return Object.values(project.nodes)
-    .filter((node) => node.kind === "file" && node.dirty)
-    .map((node) => node.id);
-}
-
-function scheduleAutoSave(project = controller.getProject()) {
-  if (!settings.autoSave || project.sourceMode === "filesystem") return;
-  if (!dirtyFileIds(project).length) return;
-  if (autoSaveIdleTimer) clearTimeout(autoSaveIdleTimer);
-  autoSaveIdleTimer = setTimeout(() => {
-    autoSaveIdleTimer = null;
-    void runAutoSave("idle");
-  }, AUTOSAVE_IDLE_MS);
-}
-
-async function runAutoSave(reason) {
-  if (!settings.autoSave) return;
-  // Don't churn a render (markManySaved) mid-IME-composition; wait until it ends.
-  if (editorParts.isComposing()) return;
-  const project = snapshotProject(controller.getProject());
-  const scope = snapshotProjectKey();
-  if (project.sourceMode === "filesystem") return; // explicit save only
-  const dirty = dirtyFileIds(project);
-  if (!dirty.length) return;
-  try {
-    if (project.sourceMode === "opfs") {
-      await saveProjectToHandles(project);
-    } else {
-      saveProject(project); // propagate quota/storage errors before clearing dirty
-    }
-    if (scope !== snapshotProjectKey()) return;
-    const unchanged = new Set(savedFileIds(controller.getProject(), project));
-    const savedDirty = dirty.filter((id) => unchanged.has(id));
-    // memory/import already mirror to localStorage on every render.
-    // A cloud workspace's durable home is the SERVER, so only clear dirty once the
-    // server confirmed the text (nothing pending / in-flight / mid-reconnect) —
-    // the ● must never lie about being saved. While OFFLINE nothing is confirmed,
-    // so every edit stays dirty: that flag is exactly what tells a later reconnect
-    // (and the pull guards in collaboration-service) which files still need
-    // pushing. Clearing it offline is what let a reconnect drop hours of work.
-    const cloud = syncMode.get().workspaceMode === "synced";
-    const savable = cloud
-      ? (collaboration.isConnected?.()
-          ? savedDirty.filter((id) => !collaboration.hasUnsyncedText?.(getPath(project, id)))
-          : [])
-      : savedDirty;
-    if (savable.length) {
-      controller.markManySaved(savable, !cloud);  // host owns the counters when synced
-      logDebug("response", `Auto-saved ${savable.length} file(s) (${reason})`);
-    }
-  } catch (error) {
-    logDebug("response", "Auto-save failed", error.message);
-  }
-}
-
-// Periodic safety net so a long, uninterrupted typing session (idle timer keeps
-// resetting) still gets flushed regularly.
-window.setInterval(() => {
-  if (settings.autoSave && dirtyFileIds(controller.getProject()).length) {
-    void runAutoSave("periodic");
-  }
-}, AUTOSAVE_PERIODIC_MS);
 
 if (!storedProject) {
   const placeholder = controller.getProject();
@@ -2836,7 +2691,7 @@ elements.bmapGenerateScopeSelect.addEventListener("change", (event) => {
 elements.autoSaveInput?.addEventListener("change", (event) => {
   settings.change({ autoSave: event.target.checked });
   logDebug("action", "Auto-save setting changed", settings.autoSave ? "on" : "off");
-  if (settings.autoSave) scheduleAutoSave();
+  if (settings.autoSave) workspace.saving.scheduleAutoSave();
 });
 elements.formatToolbarInput?.addEventListener("change", (event) => {
   settings.change({ showFormatToolbar: event.target.checked });

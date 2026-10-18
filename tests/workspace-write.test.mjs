@@ -43,7 +43,8 @@ test("an edit lands beside other people's changes, and refuses to guess", () => 
 
 // A real project in the module, with fake editing/sync ports beside it.
 async function harness(files) {
-  const { workspace } = await startModules([fileTypesModule, workspaceModule]);
+  const shell = { name: "shell", level: 1, uses: [], owns: {}, start: () => ({ settings: { autoSave: false } }) };
+  const { workspace } = await startModules([shell, fileTypesModule, workspaceModule]);
   let project = createProject("W");
   for (const [name, content] of Object.entries(files)) project = addFile(project, ROOT_ID, name, content);
   const store = workspace.openProject(project);

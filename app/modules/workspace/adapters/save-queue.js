@@ -1,4 +1,6 @@
-import { cloneModelData, getPath } from "../domain/project-model.js";
+// Writing a project to its folder one save at a time (a later save waits for
+// the one before it), and which files a finished save really confirmed.
+import { cloneModelData, getPath } from "../model/project.js";
 
 export function snapshotProject(project) {
   const { handles, ...model } = project;
