@@ -1,4 +1,4 @@
-// The nine structure rules (docs/ARCHITECTURE.md). Each failure says which
+// The ten structure rules (docs/ARCHITECTURE.md). Each failure says which
 // rule broke and how to fix it. Today's violations are recorded in
 // baseline.json and may only shrink: `node tools/structure-baseline.mjs`
 // lowers it after a cleanup and refuses to raise it.
@@ -9,7 +9,7 @@ import { join } from "node:path";
 
 import {
   ROOT, GENERATED, codeFiles, codeOf, read, lineCount, oversized, spellings, jsImports, pyImports,
-  loadModules, moduleOf, silentCatches, KERNEL_MAX_LINES, DOMAIN_WORDS, MAX_LINES
+  loadModules, moduleOf, silentCatches, setters, mainGetters, KERNEL_MAX_LINES, DOMAIN_WORDS, MAX_LINES
 } from "./scan.mjs";
 
 const json = (path) => JSON.parse(readFileSync(join(ROOT, path), "utf8"));
@@ -272,6 +272,14 @@ test("no catch swallows an error without a word (rule 9)", () => {
   assert.deepEqual(found, []);
 });
 
+test("no code writes another file's variables, and main.js hands out fewer and fewer of them (rule 10)", () => {
+  const found = setters(files).map((where) => `${where}: a setter lets other code write this file's variable, so nobody owns it. ` +
+    "Give the state one owner (kernel createState) and change it through the owner's named actions, or keep it inside the one file that uses it");
+  assert.deepEqual(found, []);
+  const getters = mainGetters();
+  assert.ok(getters <= baseline.mainGetters, `app/main.js hands out ${getters} getters (recorded ${baseline.mainGetters}); it may only shrink`);
+});
+
 test("the baseline lists nothing that has already been fixed", () => {
   const now = oversized(files);
   const stale = Object.keys(baseline.oversized).filter((file) => !(file in now) || now[file] < baseline.oversized[file]);
@@ -279,6 +287,7 @@ test("the baseline lists nothing that has already been fixed", () => {
   for (const [name, list] of Object.entries(baseline.spellings)) {
     for (const file of list) if (!spelled[name]?.includes(file)) stale.push(`${name} in ${file}`);
   }
+  if (mainGetters() < baseline.mainGetters) stale.push(`main.js getters (${mainGetters()} now, ${baseline.mainGetters} recorded)`);
   assert.deepEqual(stale, [], "run `node tools/structure-baseline.mjs` to lower the baseline after a cleanup");
 });
 

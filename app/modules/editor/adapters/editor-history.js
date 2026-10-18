@@ -161,11 +161,11 @@ export function installHistory(ed, app) {
     // The editor DOM already shows this text (every caller renders or reads it
     // first), so the app-wide render this triggers can catch up a moment later
     // instead of running synchronously inside the keystroke. See render().
-    app.typingUpdate = true;
+    ed.typing = true;
     try {
       app.controller.updateContent(activeFile.id, nextContent);
     } finally {
-      app.typingUpdate = false;
+      ed.typing = false;
     }
     if (app.collaboration.isConnected() && app.workspaceMode === "synced") {
       app.collaboration.scheduleTextPatch(getPath(app.controller.getProject(), activeFile.id), activeFile.content, nextContent);

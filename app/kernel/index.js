@@ -11,11 +11,12 @@
 //   });
 //
 // ctx.use(name) returns a declared dependency's api; ctx.registry() and
-// ctx.emitter() make the module's own extension points and events.
+// ctx.emitter() make the module's own extension points and events, and
+// ctx.state(initial) the state it owns (see createState).
 
-import { trace, describe } from "./trace.js";
+import { trace, describe, brief } from "./trace.js";
 
-export { trace, ignore, ignored, describe, createTrace, formatEntry } from "./trace.js";
+export { trace, ignore, ignored, describe, brief, createTrace, formatEntry } from "./trace.js";
 
 const MODULE_KEYS = ["name", "level", "uses", "owns", "start"];
 
@@ -62,6 +63,7 @@ export async function startModules(definitions, { log = () => {} } = {}) {
       },
       registry: (options) => createRegistry({ ...options, owner: definition.name }),
       emitter: () => createEmitter(definition.name, log),
+      state: (initial) => createState(definition.name, initial),
       log: (...args) => { trace.record("log", definition.name, args.join(" ")); log(definition.name, ...args); }
     });
     const api = await definition.start(ctx);
@@ -92,6 +94,45 @@ export function createRegistry({ key = "id", validate = () => {}, owner = "" } =
     has: (id) => entries.has(id),
     all: () => [...entries.values()],
     onChange(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }
+  });
+}
+
+// State one owner keeps. Only the owner holds this object; what it hands out
+// is get() and on() and its own named actions, which call set(action, patch).
+// Every change names the action that made it and lands in the trace, so "who
+// changed this?" has an answer. A key it did not start with is refused, and
+// arrays in it are frozen: pushing onto one throws instead of changing state
+// behind the owner's back. Listeners get (state, changedKeys, action).
+export function createState(owner, initial, into = trace) {
+  const seal = (state) => {
+    for (const value of Object.values(state)) if (Array.isArray(value)) Object.freeze(value);
+    return Object.freeze(state);
+  };
+  let current = seal({ ...initial });
+  const listeners = new Set();
+  return Object.freeze({
+    get: () => current,
+    set(action, patch) {
+      for (const key of Object.keys(patch)) {
+        if (!(key in current)) throw new Error(`${owner}: "${key}" is not part of its state`);
+      }
+      const changed = Object.keys(patch).filter((key) => !Object.is(current[key], patch[key]));
+      if (!changed.length) return current;
+      current = seal({ ...current, ...patch });
+      into.record("state", owner, action, changed.map((key) => `${key}=${brief(current[key])}`).join(" "));
+      for (const listener of [...listeners]) {
+        try {
+          listener(current, changed, action);
+        } catch (error) {
+          into.record("failed", owner, `a listener for ${action}`, describe(error));
+        }
+      }
+      return current;
+    },
+    on(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     }

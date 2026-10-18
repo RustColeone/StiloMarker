@@ -13,7 +13,7 @@ import { APP_VERSION } from "./version.js";
 import { ROOT_ID, seedDefaultProject, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isBmapFileName, isImageFileName, isMarkdownFileName, isPersonaFileName, isTextFileName } from "./domain/project-model.js";
 import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
 import { supportsOpfs, listOpfsDir, mkdirOpfs, createProjectOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs, deleteOpfsEntry, exportProjectModelOpfs, importProjectModelOpfs } from "./services/opfs-service.js";
-import { createCollaborationRuntime } from "./modules/sync/index.js";
+import syncModule, { createCollaborationRuntime } from "./modules/sync/index.js";
 import { sendGenerationRequest } from "./services/chat-api-service.js";
 import { PERSONA_SUFFIX, parsePersona, personaTemplate } from "./services/persona-service.js";
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
@@ -27,7 +27,7 @@ import { createExplorerView } from "./ui/explorer-view.js";
 import { createDefaultBmap } from "./services/bmap-service.js";
 import { createCloudBrowser } from "./features/cloud-browser.js";
 import { createFileActions } from "./features/file-actions.js";
-import { registerPreviews } from "./features/previews.js";
+import { currentDiagramView, registerPreviews } from "./features/previews.js";
 import { createLayout } from "./ui/layout.js";
 import editorModule, { createAutocomplete, createEditorCore, createFindReplace, createHighlighter, createLinks, createPanes, renderMarkdown } from "./modules/editor/index.js";
 import { createDialogs } from "./ui/dialogs.js";
@@ -268,7 +268,7 @@ const elements = {
 // ---- Modules (docs/ARCHITECTURE.md) ----
 // The app is moving into modules one step at a time. Code still in this file
 // reaches a module only through the public API the kernel hands back.
-const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, historyModule, ...extensionModules], {
+const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, syncModule, historyModule, ...extensionModules], {
   log: (owner, ...args) => { try { logDebug("action", `${owner}: ${args.join(" ")}`); } catch (error) { ignore(error, "the log panel is not ready yet"); } }
 });
 const { shell, workspace, identity } = modules;
@@ -278,16 +278,17 @@ shell.server.configure({ address: () => settings.serverUrl });
 identity.attach(signInSettings(settings));
 const storedProject = loadProject();
 const controller = workspace.openProject(storedProject ?? seedDefaultProject());
-let sourceOpenTabIds = controller.getProject().activeFileId ? [controller.getProject().activeFileId] : [];
-let previewOpenTabIds = controller.getProject().activeFileId ? [controller.getProject().activeFileId] : [];
-let previewFileId = controller.getProject().activeFileId ?? null;
+// What the editor shows (tabs, the preview's file and part, the selection): the Editor's.
+const editorView = modules.editor.view;
+editorView.reset(controller.getProject());
+// Shared or local work, and the local project kept aside meanwhile: Sync's.
+const syncMode = modules.sync.mode;
 // Total source characters of the active file, cached for the footer counter by
 // updateStatus. null → no text file open (the counter hides). Declared up here so
 // the hoisted updateStatus can never touch it inside its temporal dead zone.
 let statusCharTotal = null;
-// Typing fast path + deferred/debounced work (see render()). Declared up here:
-// render() runs during module initialisation, before its own section executes.
-let typingUpdate = false;
+// Typing fast path + deferred/debounced work (see render()); whether a keystroke
+// is being applied is the Editor's (editorCoreInstance?.isTyping()).
 const DEFERRED_RENDER_IDLE_MS = 250;
 const DEFERRED_RENDER_MAX_MS = 1500;
 let deferredRenderTimer = null;
@@ -305,8 +306,6 @@ var editorCoreInstance;
 function editorCore() {
   return (editorCoreInstance ??= createEditorCore({
     toolbars: modules.editor.toolbars,
-    get _editorUpdating() { return _editorUpdating; },
-    set _editorUpdating(value) { _editorUpdating = value; },
     get acceptEditorAutocomplete() { return acceptEditorAutocomplete; },
     get agentPendingDecorations() { return agentPendingDecorations; },
     get autocompleteState() { return autocompleteState; },
@@ -339,10 +338,8 @@ function editorCore() {
     get settings() { return settings; },
     get showEditorAutocomplete() { return showEditorAutocomplete; },
     get traceEditorEvent() { return traceEditorEvent; },
-    get typingUpdate() { return typingUpdate; },
-    set typingUpdate(value) { typingUpdate = value; },
     get updateEditorAgentBar() { return updateEditorAgentBar; },
-    get workspaceMode() { return workspaceMode; }
+    get workspaceMode() { return syncMode.get().workspaceMode; }
   }));
 }
 function applyEditorEdit(...args) { return editorCore().applyEditorEdit(...args); }
@@ -394,30 +391,13 @@ const editorRenderCache = {
   gutterEpoch: "",  // line count / agent range / comments the gutter rows reflect
   textExact: true   // every line's DOM text equals its source line
 };
-// Touch-gesture tuning and state. Declared up here because the hoisted mobile
-// render helpers reach them during the first render, which would otherwise be
-// inside their temporal dead zone.
+// Declared up here because the hoisted mobile render helpers reach it during
+// the first render, which would otherwise be inside its temporal dead zone.
 const MOBILE_MAX_WIDTH = 900;    // must match the CSS breakpoint
-const EDGE_ZONE = 24;            // px from the left edge that opens the drawer
-const SLOP = 10;                 // px before a gesture is claimed at all
-const DIRECTION_BIAS = 1.3;      // |dx| must exceed |dy| by this much
-const SNAP_FRACTION = 0.35;      // past this share of travel, snap onward
-const FLICK_VELOCITY = 0.45;     // px/ms that snaps regardless of distance
-const PANE_ORDER = ["source", "preview", "chat"];
-let gesture = null;
-let drawerWidth = 1;
-let paneDrag = null;
-// Newest snapshot per file path: { count, editSessions, sessionEdits }. The
-// baseline the S.E.N version label counts from. Refreshed on workspace open and
-// whenever snapshots change — never per keystroke.
-let snapshotBaselines = new Map();
-let snapshotBaselinesInFlight = null;
 // Installed-font detection state for the source-font picker (see isFontInstalled).
 const fontInstalledCache = new Map();
 let fontProbeContext = null;
 const fontProbeBase = {};
-let previewPart = null;
-let sourcePart = null;
 // Per-document view state (bmap pan/zoom, editor scroll), cached so users resume
 // where they left off; persisted to localStorage.
 let viewStates = loadViewStates();
@@ -437,11 +417,12 @@ function setViewState(fileId, patch) {
  *  before the editor loses focus. */
 function captureViewState() {
   const project = controller.getProject();
-  if (previewFileId && previewBmapView) {
-    const pf = project.nodes[previewFileId];
+  const previewBmapView = currentDiagramView();
+  if (editorView.get().previewFileId && previewBmapView) {
+    const pf = project.nodes[editorView.get().previewFileId];
     if (pf && pf.kind === "file" && isBmapFileName(pf.name)) {
       const view = previewBmapView.getView?.();
-      if (view) setViewState(previewFileId, { bmap: view });
+      if (view) setViewState(editorView.get().previewFileId, { bmap: view });
     }
   }
   const activeId = project.activeFileId;
@@ -474,8 +455,6 @@ function rememberEditorSelection() {
   if (previous?.scope === scope && previous.start === start && previous.end === end) return;
   setViewState(fileId, { editorSelection: { scope, start, end } });
 }
-let mathJaxLoadPromise = null;
-let previewBmapView = null;
 // The diagram editor is the largest module (~150KB) and most sessions never
 // open a diagram, so it loads the first time one is previewed or exported.
 let bmapViewModule = null;
@@ -488,7 +467,6 @@ function loadBmapView() {
   return bmapViewLoading;
 }
 
-let selectionNodeId = controller.getProject().activeFileId ?? controller.getProject().rootId;
 const syncState = {
   status: "offline",
   detail: "No server checked yet.",
@@ -504,13 +482,8 @@ const syncState = {
 };
 
 // "private" = user's local workspace; "synced" = connected server workspace.
-let workspaceMode = "private";
 let sessionRestorer = null;
 
-// Mobile pane state (drives #app[data-mobile-view]). Declared here so the layout
-// pass that runs during module load can read it before its helpers execute.
-let mobileView = "source";         // source | preview | chat
-let privateProjectSnapshot = null;
 // Forward declaration — assigned after `collaboration` is created.
 let switchWorkspaceMode;
 
@@ -551,10 +524,6 @@ const editorHistory = {
 
 let editorIsComposing = false;
 let lastRenderedFileId = null;
-// Set to true while applyEditorRender is executing so that the synchronous
-// updateStatus callback triggered by notifyEditorChanged does not mistake a
-// transient focus state during innerHTML replacement for "editor lost focus".
-let _editorUpdating = false;
 // Set to true while a preview-originated edit (e.g. a bmap inspector change) is
 // being committed. The preview view has already updated itself in place, so the
 // synchronous updateStatus callback must skip re-rendering the preview pane —
@@ -573,17 +542,8 @@ const explorerClipboard = {
 
 const debugTabs = [...elements.debugTabStrip.querySelectorAll(".debug-tab")].map((element) => ({ id: element.dataset.tab, element }));
 
-let draggingTabState = null;
 
-let replaceFileTargetId = null;
 
-function initializePaneState(project) {
-  sourceOpenTabIds = project.activeFileId ? [project.activeFileId] : [];
-  previewOpenTabIds = project.activeFileId ? [project.activeFileId] : [];
-  previewFileId = project.activeFileId ?? null;
-  sourcePart = null;
-  previewPart = null;
-}
 
 function escapeHtmlAttribute(value) {
   return String(value)
@@ -756,7 +716,7 @@ let chat = null;
 let chatLoading = null;
 
 function chatNeeded() {
-  return settings.chatPanel === "shown" || mobileView === "chat" || Boolean(elements.settingsDialog?.open);
+  return settings.chatPanel === "shown" || layout().mobileView() === "chat" || Boolean(elements.settingsDialog?.open);
 }
 
 function loadChat() {
@@ -769,7 +729,7 @@ function loadChat() {
       openFileFromExplorer, openSettingsDialog, personaAvatarSrc, promptForName, workspace,
       registerAgentDecorations, settings, showConfirmDialog, showToast, storedProject,
       updateEditorAgentBar, identity,
-      get workspaceMode() { return workspaceMode; }
+      get workspaceMode() { return syncMode.get().workspaceMode; }
     });
     chat.chatState.shouldScrollToBottom = true;
     chat.renderChatPanel(controller.getProject());
@@ -813,14 +773,14 @@ function remapPersonaPaths(oldPath, newPath) {
 }
 
 function chatConnectionInfo() {
-  return workspaceMode === "synced" ? collaboration.getConnectionInfo?.() : null;
+  return syncMode.get().workspaceMode === "synced" ? collaboration.getConnectionInfo?.() : null;
 }
 
 function chatWorkspaceKey(project = controller.getProject()) {
   const connection = chatConnectionInfo();
   if (connection?.sessionId) return `cloud:${normalizeServerUrl(connection.serverUrl)}/${connection.sessionId}`;
   // Keep cloud drafts scoped while its transport reconnects.
-  if (workspaceMode === "synced" && settings.syncedProjectId) {
+  if (syncMode.get().workspaceMode === "synced" && settings.syncedProjectId) {
     return `cloud:${normalizeServerUrl(settings.serverUrl)}/${settings.syncedProjectId}`;
   }
   return project.id;
@@ -1016,7 +976,7 @@ function imageSrcFor(project, node) {
     return content;
   }
   const conn = collaboration.getConnectionInfo?.();
-  if (conn && workspaceMode === "synced") {
+  if (conn && syncMode.get().workspaceMode === "synced") {
     const base = normalizeServerUrl(conn.serverUrl);
     const path = getPath(project, node.id);
     return `${base}/api/workspaces/asset?token=${encodeURIComponent(conn.token)}&path=${encodeURIComponent(path)}`;
@@ -1038,10 +998,10 @@ function getEditorLineIndexAtOffset(textOffset) {
 }
 
 function getSelectedTarget() {
-  if (sourcePart) {
-    return { nodeId: sourcePart.fileId, partId: sourcePart.partId };
+  if (editorView.get().sourcePart) {
+    return { nodeId: editorView.get().sourcePart.fileId, partId: editorView.get().sourcePart.partId };
   }
-  return { nodeId: selectionNodeId, partId: null };
+  return { nodeId: editorView.get().selectionNodeId, partId: null };
 }
 
 // The extension to manage for a filename ("" for folders / no extension).
@@ -1153,7 +1113,7 @@ const diffState = { active: false, fileId: null, path: null, versionId: null, ol
 // synced, otherwise the local project id.
 // True when this session only has read access to the open cloud workspace.
 function isReadOnlyWorkspace() {
-  return workspaceMode === "synced" && syncState.role === "reader";
+  return syncMode.get().workspaceMode === "synced" && syncState.role === "reader";
 }
 
 function snapshotProjectKey() {
@@ -1186,7 +1146,7 @@ function lineCommentsUi() {
     get renderEditorContent() { return renderEditorContent; },
     get setEditorSelection() { return setEditorSelection; },
     get showToast() { return showToast; },
-    get workspaceMode() { return workspaceMode; }
+    get workspaceMode() { return syncMode.get().workspaceMode; }
   }));
 }
 function closeCommentPopover(...args) { return lineCommentsUi().closeCommentPopover(...args); }
@@ -1218,6 +1178,7 @@ function cloudWorkspaceTarget() {
 var snapshotsInstance;
 function snapshots() {
   return (snapshotsInstance ??= createSnapshots({
+    view: editorView,
     get workspace() { return workspace; },
     get DIFF_TAB_ID() { return DIFF_TAB_ID; },
     get cloudWorkspaceTarget() { return cloudWorkspaceTarget; },
@@ -1227,16 +1188,9 @@ function snapshots() {
     get elements() { return elements; },
     get escapeHtmlAttribute() { return escapeHtmlAttribute; },
     get logDebug() { return logDebug; },
-    get previewFileId() { return previewFileId; },
-    set previewFileId(value) { previewFileId = value; },
-    get previewOpenTabIds() { return previewOpenTabIds; },
     get render() { return render; },
     get settings() { return settings; },
     get showToast() { return showToast; },
-    get snapshotBaselines() { return snapshotBaselines; },
-    set snapshotBaselines(value) { snapshotBaselines = value; },
-    get snapshotBaselinesInFlight() { return snapshotBaselinesInFlight; },
-    set snapshotBaselinesInFlight(value) { snapshotBaselinesInFlight = value; },
     get snapshotProjectKey() { return snapshotProjectKey; },
     get togglePreview() { return togglePreview; },
     get updateStatus() { return updateStatus; }
@@ -1293,7 +1247,7 @@ let snapshotsDialogLoading = null;
 async function openSnapshotsDialog() {
   snapshotsDialogLoading ??= import("./features/snapshots-dialog.js").then(({ createSnapshotsDialog }) => {
     snapshotsDialog = createSnapshotsDialog({
-      controller, collaboration, getPath, getWorkspaceMode: () => workspaceMode, snapshotStore, ensureSnapshotsMigrated,
+      controller, collaboration, getPath, getWorkspaceMode: () => syncMode.get().workspaceMode, snapshotStore, ensureSnapshotsMigrated,
       setSnapshotBaselines, refreshSnapshotBaselines, createSnapshotNow, showFileDiff, showToast, notify,
       confirmAction, formatSnapshotTime, formatBytes, projectPaths, writeAtPathOperations,
       applyHistoryOperations, workspace
@@ -1473,14 +1427,14 @@ const collaboration = createCollaborationRuntime({
     // while we're genuinely in sync. It decides, on the next open, whether this
     // device may push its copy over the server or must pull. Persisted on unload;
     // if it's ever missing we treat this device as stale and pull (fail-safe).
-    if (nextState.status === "connected" && workspaceMode === "synced" && settings.syncedProjectId) {
+    if (nextState.status === "connected" && syncMode.get().workspaceMode === "synced" && settings.syncedProjectId) {
       settings.syncedRevision = syncState.revision;
     }
     syncState.displayName = nextState.displayName ?? null;
     syncState.clientId = nextState.clientId ?? null;
     syncState.role = nextState.role ?? null;
     // Auto-switch workspace mode on connect/disconnect.
-    if (!wasConnected && nextState.status === "connected" && workspaceMode === "private") {
+    if (!wasConnected && nextState.status === "connected" && syncMode.get().workspaceMode === "private") {
       if (syncState.role === "client") {
         // User already confirmed before connect() was called; just sync.
         switchWorkspaceMode?.("synced");
@@ -1490,8 +1444,7 @@ const collaboration = createCollaborationRuntime({
         // Master just connected: enter synced mode without reloading from server.
         // The master already pushed its own project as the authoritative state;
         // calling reloadFromServer here would just fetch it back unnecessarily.
-        privateProjectSnapshot = controller.getProject();
-        workspaceMode = "synced";
+        syncMode.share(controller.getProject());
         render(controller.getProject());
         return;
       }
@@ -1501,7 +1454,7 @@ const collaboration = createCollaborationRuntime({
       // (Guarded against firing during a deliberate reconnect handshake.)
       scheduleReconnect?.();
     }
-    if (nextState.status === "offline" && workspaceMode === "synced") {
+    if (nextState.status === "offline" && syncMode.get().workspaceMode === "synced") {
       // A cloud workspace's content is what the user is actively editing; reverting
       // to the pre-open private snapshot here is what made "everything suddenly go
       // empty / back to a previous version". Keep the current project ON SCREEN and
@@ -1517,7 +1470,7 @@ const collaboration = createCollaborationRuntime({
         // next server pull replaced hours of work with the stale snapshot. Staying
         // synced means patches resume as soon as the stream is back, and
         // reconcileLocalIntoServer() pushes everything changed while offline.
-        privateProjectSnapshot = null; // don't later clobber the on-screen content
+        syncMode.forgetKept(); // don't later clobber the on-screen content
         syncState.detail = "Offline — edits are saved locally and will sync when the connection returns.";
         render(controller.getProject());
         return;
@@ -1585,26 +1538,22 @@ const collaboration = createCollaborationRuntime({
   uploadAsset
 });
 workspace.attach(createWorkspacePorts({ controller, collaboration, publishOperation, getEditorSelection, applyEditorEdit,
-  get workspaceMode() { return workspaceMode; },
-  editorShowsWholeFile: () => !sourcePart && isTextFileName(controller.getActiveFile()?.name ?? "") }));
+  get workspaceMode() { return syncMode.get().workspaceMode; },
+  editorShowsWholeFile: () => !editorView.get().sourcePart && isTextFileName(controller.getActiveFile()?.name ?? "") }));
 
 attachSelectionChangeListener();
 
 // Assign the forward-declared switchWorkspaceMode now that `collaboration` exists.
 switchWorkspaceMode = function (nextMode) {
-  if (nextMode === workspaceMode) return;
+  if (nextMode === syncMode.get().workspaceMode) return;
   if (nextMode === "synced") {
-    privateProjectSnapshot = controller.getProject();
-    workspaceMode = nextMode;
+    syncMode.share(controller.getProject());
     // reloadFromServer replaces the project internally, triggering render.
     collaboration.reloadFromServer("Switched to synced workspace.").catch(ignored("loading the synced workspace failed"));
   } else {
     sessionRestorer?.cancel();
-    workspaceMode = nextMode;
-    if (privateProjectSnapshot) {
-      controller.replaceProject(privateProjectSnapshot);
-    }
-    privateProjectSnapshot = null;
+    const kept = syncMode.leave();
+    if (kept) controller.replaceProject(kept);
     // The local project is no longer a cloud workspace's content.
     settings.syncedProjectId = null;
     saveSettings(settings);
@@ -1613,7 +1562,7 @@ switchWorkspaceMode = function (nextMode) {
 };
 
 elements.workspaceModeToggle?.addEventListener("click", () => {
-  switchWorkspaceMode(workspaceMode === "synced" ? "private" : "synced");
+  switchWorkspaceMode(syncMode.get().workspaceMode === "synced" ? "private" : "synced");
 });
 
 const explorer = createExplorerView({
@@ -1629,18 +1578,15 @@ const explorer = createExplorerView({
     if (!file || file.kind !== "file" || !modules.workspace.parts.of(file.name)) return;
     setActiveSourcePart(fileId, partId);
     openPreviewTab(fileId);
-    previewFileId = fileId;
-    previewPart = partId;
+    editorView.showPreview(fileId, partId);
     updateStatus(project);
   },
   onToggleFolder(nodeId) {
-    selectionNodeId = nodeId;
-    sourcePart = null;
+    editorView.pick(nodeId);
     controller.toggleFolder(nodeId);
   },
   onSelectNode(target) {
-    selectionNodeId = target.nodeId;
-    sourcePart = target.partId ? { fileId: target.nodeId, partId: target.partId } : null;
+    editorView.pick(target.nodeId, target.partId);
     render(controller.getProject());
   },
   canPasteTarget(target) {
@@ -1652,13 +1598,12 @@ const explorer = createExplorerView({
   },
   canManagePreview() {
     return Boolean(identity.account())
-      && workspaceMode === "synced"
+      && syncMode.get().workspaceMode === "synced"
       && collaboration.isConnected()
       && Boolean(settings.lastWorkspace?.team);
   },
   onAction(action, target, options) {
-    selectionNodeId = target.nodeId;
-    sourcePart = target.partId ? { fileId: target.nodeId, partId: target.partId } : null;
+    editorView.pick(target.nodeId, target.partId);
     return handleExplorerAction(action, target, options);
   },
   onDragNodeStart(nodeId, event) {
@@ -1831,6 +1776,7 @@ const backlinksListEl = document.getElementById("backlinks-list");
 var panesInstance;
 function panes() { // the Editor's panes; diagrams and character sheets add their previews here, extensions their own
   return (panesInstance ??= createPanes(registerPreviews(modules.editor.previews, {
+    view: editorView,
     saveUserState: (ws, openFiles, activeFile) => saveUserState(settings.serverUrl, identity.token(), ws.team, ws.path, openFiles, activeFile),
     get DIFF_TAB_ID() { return DIFF_TAB_ID; },
     get agentPendingDecorations() { return agentPendingDecorations; },
@@ -1840,8 +1786,6 @@ function panes() { // the Editor's panes; diagrams and character sheets add thei
     get collaboration() { return collaboration; },
     get controller() { return controller; },
     get diffState() { return diffState; },
-    get draggingTabState() { return draggingTabState; },
-    set draggingTabState(value) { draggingTabState = value; },
     get elements() { return elements; },
     get escapeEditorHtml() { return escapeEditorHtml; },
     get escapeHtmlAttribute() { return escapeHtmlAttribute; },
@@ -1853,36 +1797,21 @@ function panes() { // the Editor's panes; diagrams and character sheets add thei
     get isPreviewableFileName() { return isPreviewableFileName; },
     get loadBmapView() { return loadBmapView; },
     get logDebug() { return logDebug; },
-    get mathJaxLoadPromise() { return mathJaxLoadPromise; },
-    set mathJaxLoadPromise(value) { mathJaxLoadPromise = value; },
     get normalizePath() { return normalizePath; },
     get notify() { return notify; },
+    get openFileFromExplorer() { return openFileFromExplorer; },
     get personaAvatarSrc() { return personaAvatarSrc; },
-    get previewBmapView() { return previewBmapView; },
-    set previewBmapView(value) { previewBmapView = value; },
-    get previewFileId() { return previewFileId; },
-    set previewFileId(value) { previewFileId = value; },
-    get previewOpenTabIds() { return previewOpenTabIds; },
-    set previewOpenTabIds(value) { previewOpenTabIds = value; },
-    get previewPart() { return previewPart; },
-    set previewPart(value) { previewPart = value; },
     get quickGenerateBmapFile() { return quickGenerateBmapFile; },
     get render() { return render; },
     get resolveProjectAssetUrl() { return resolveProjectAssetUrl; },
-    get selectionNodeId() { return selectionNodeId; },
-    set selectionNodeId(value) { selectionNodeId = value; },
     get setMobileExplorerOpen() { return setMobileExplorerOpen; },
     get settings() { return settings; },
     get showToast() { return showToast; },
-    get sourceOpenTabIds() { return sourceOpenTabIds; },
-    set sourceOpenTabIds(value) { sourceOpenTabIds = value; },
-    get sourcePart() { return sourcePart; },
-    set sourcePart(value) { sourcePart = value; },
     get identity() { return identity; },
     get togglePreview() { return togglePreview; },
     get updateFileContentFromPreview() { return updateFileContentFromPreview; },
     get updateStatus() { return updateStatus; },
-    get workspaceMode() { return workspaceMode; }
+    get workspaceMode() { return syncMode.get().workspaceMode; }
   }), modules.editor.previews));
 }
 function bindPaneDropTarget(...args) { return panes().bindPaneDropTarget(...args); }
@@ -1916,6 +1845,7 @@ async function typesetPreview(...args) { return panes().typesetPreview(...args);
 var fileActionsInstance;
 function fileActions() {
   return (fileActionsInstance ??= createFileActions({
+    view: editorView,
     get workspace() { return workspace; },
     get addFileState() { return addFileState; },
     get applyEditorEdit() { return applyEditorEdit; },
@@ -1947,28 +1877,18 @@ function fileActions() {
     get openMtreeToolsDialog() { return openMtreeToolsDialog; },
     get openPreviewTab() { return openPreviewTab; },
     get persistSettings() { return persistSettings; },
-    get previewFileId() { return previewFileId; },
-    set previewFileId(value) { previewFileId = value; },
-    get previewPart() { return previewPart; },
-    set previewPart(value) { previewPart = value; },
     get promptForName() { return promptForName; },
     get publishOperation() { return publishOperation; },
     get publishSnapshot() { return publishSnapshot; },
     get remapPersonaPaths() { return remapPersonaPaths; },
     get render() { return render; },
     get replaceEditorRange() { return replaceEditorRange; },
-    get replaceFileTargetId() { return replaceFileTargetId; },
-    set replaceFileTargetId(value) { replaceFileTargetId = value; },
-    get selectionNodeId() { return selectionNodeId; },
-    set selectionNodeId(value) { selectionNodeId = value; },
     get setActiveSourceFile() { return setActiveSourceFile; },
     get setActiveSourcePart() { return setActiveSourcePart; },
     get setEditorSelection() { return setEditorSelection; },
     get setPreviewFile() { return setPreviewFile; },
     get settings() { return settings; },
     get showToast() { return showToast; },
-    get sourcePart() { return sourcePart; },
-    set sourcePart(value) { sourcePart = value; },
     get suggestUniqueFileName() { return suggestUniqueFileName; },
     get suggestUniqueFolderName() { return suggestUniqueFolderName; },
   }));
@@ -1993,7 +1913,6 @@ function moveExplorerPart(...args) { return fileActions().moveExplorerPart(...ar
 function openNewFileDialog(...args) { return fileActions().openNewFileDialog(...args); }
 async function renameFileById(...args) { return fileActions().renameFileById(...args); }
 async function renameSelected(...args) { return fileActions().renameSelected(...args); }
-async function replaceImageFile(...args) { return fileActions().replaceImageFile(...args); }
 function resetAddFileState(...args) { return fileActions().resetAddFileState(...args); }
 function setAddFileStatus(...args) { return fileActions().setAddFileStatus(...args); }
 function setExplorerDropState(...args) { return fileActions().setExplorerDropState(...args); }
@@ -2096,10 +2015,10 @@ async function saveActiveWorkspaceFile() {
   if (scope !== snapshotProjectKey()) return;
   const current = controller.getProject();
   if (!savedFileIds(current, saved).includes(activeId)) return;
-  const confirmed = workspaceMode !== "synced" || (collaboration.isConnected?.()
+  const confirmed = syncMode.get().workspaceMode !== "synced" || (collaboration.isConnected?.()
     && !collaboration.hasUnsyncedText?.(getPath(current, activeId)));
   if (confirmed) {
-    controller.markSaved(activeId, workspaceMode !== "synced");
+    controller.markSaved(activeId, syncMode.get().workspaceMode !== "synced");
   }
 }
 
@@ -2541,8 +2460,8 @@ function updateStatus(project) {
     if (showToggle) {
       elements.workspaceModeRow.removeAttribute("hidden");
       if (elements.workspaceModeToggle) {
-        elements.workspaceModeToggle.textContent = workspaceMode === "synced" ? "⟳ Synced" : "◑ Private";
-        elements.workspaceModeToggle.title = workspaceMode === "synced"
+        elements.workspaceModeToggle.textContent = syncMode.get().workspaceMode === "synced" ? "⟳ Synced" : "◑ Private";
+        elements.workspaceModeToggle.title = syncMode.get().workspaceMode === "synced"
           ? "Click to switch to your private local workspace"
           : "Click to switch back to the shared synced workspace";
       }
@@ -2559,7 +2478,7 @@ function updateStatus(project) {
   renderMobilePaneCaption(); // tracks the active/preview file, not just the view
 
   const activeFile = project.activeFileId ? project.nodes[project.activeFileId] : null;
-  const previewFile = previewFileId ? project.nodes[previewFileId] : null;
+  const previewFile = editorView.get().previewFileId ? project.nodes[editorView.get().previewFileId] : null;
   const selectedPart = getSelectedPart(project);
   if (!activeFile) {
     // No file open: make the pane non-editable and show the create-a-file overlay
@@ -2609,7 +2528,7 @@ function updateStatus(project) {
     // Clear stale remote cursors when the viewed file changes.
     renderRemoteCursors([]);
   }
-  if (!_editorUpdating && fileChanged) {
+  if (!editorCoreInstance?.isRendering() && fileChanged) {
     const savedSelection = savedEditorSelection(activeFile.id, nextText);
     lastRenderedFileId = activeFile.id;
     loadEditorContent(nextText, savedSelection?.start ?? 0, savedSelection?.end ?? savedSelection?.start ?? 0);
@@ -2677,7 +2596,7 @@ function updateStatus(project) {
 // preview tab) or the normal preview for `previewFile`. The two are mutually
 // exclusive and each hides the other's DOM.
 function renderPreviewOrDiff(project, previewFile) {
-  const showingDiff = diffState.active && previewFileId === DIFF_TAB_ID;
+  const showingDiff = diffState.active && editorView.get().previewFileId === DIFF_TAB_ID;
   if (showingDiff) {
     const wasHidden = elements.previewDiffView ? elements.previewDiffView.hidden : true;
     if (elements.previewDiffView) elements.previewDiffView.hidden = false;
@@ -2724,7 +2643,7 @@ function scheduleOpfsFlush(project) {
 }
 
 function render(project) {
-  if (typingUpdate) {
+  if (editorCoreInstance?.isTyping()) {
     // A keystroke. The editor has already drawn it; the explorer, tabs, preview,
     // links, chat and status follow once typing pauses (or every
     // DEFERRED_RENDER_MAX_MS during a long burst). Doing them synchronously here
@@ -2847,7 +2766,7 @@ async function runAutoSave(reason) {
     // so every edit stays dirty: that flag is exactly what tells a later reconnect
     // (and the pull guards in collaboration-service) which files still need
     // pushing. Clearing it offline is what let a reconnect drop hours of work.
-    const cloud = workspaceMode === "synced";
+    const cloud = syncMode.get().workspaceMode === "synced";
     const savable = cloud
       ? (collaboration.isConnected?.()
           ? savedDirty.filter((id) => !collaboration.hasUnsyncedText?.(getPath(project, id)))
@@ -2882,13 +2801,12 @@ if (!storedProject) {
       // with a slow connection: the welcome files appeared in the workspace.
       const current = controller.getProject();
       const edited = Object.values(current.nodes ?? {}).some((node) => node?.dirty);
-      if (workspaceMode === "synced" || current.id !== placeholder.id || edited) {
+      if (syncMode.get().workspaceMode === "synced" || current.id !== placeholder.id || edited) {
         logDebug("action", "Default template not installed", "a workspace or edits arrived first");
         return;
       }
       controller.replaceProject(project);
-      selectionNodeId = project.activeFileId ?? project.rootId;
-      initializePaneState(project);
+      editorView.reset(project);
       logDebug("action", "Default template loaded", project.name);
     })
     .catch((error) => {
@@ -2899,13 +2817,13 @@ if (!storedProject) {
 logDebug("response", "Debug log initialized", `panel=${settings.debugPanel ? "visible" : "hidden"}`);
 
 function publishSnapshot() {
-  if (collaboration.isConnected() && workspaceMode === "synced") {
+  if (collaboration.isConnected() && syncMode.get().workspaceMode === "synced") {
     collaboration.scheduleSnapshot(controller.getProject());
   }
 }
 
 async function publishOperation(operation) {
-  if (!collaboration.isConnected() || workspaceMode !== "synced") {
+  if (!collaboration.isConnected() || syncMode.get().workspaceMode !== "synced") {
     return;
   }
   let op = operation;
@@ -3056,8 +2974,8 @@ async function quickGenerateBmapFile(bmapFileId, request) {
 // The file the mobile pane's pen button should act on: the previewed file in
 // preview view, otherwise the active source file. Null in chat view.
 function currentMobileFileId() {
-  if (mobileView === "chat") return null;
-  if (mobileView === "preview") return previewFileId === DIFF_TAB_ID ? null : previewFileId;
+  if (layout().mobileView() === "chat") return null;
+  if (layout().mobileView() === "preview") return editorView.get().previewFileId === DIFF_TAB_ID ? null : editorView.get().previewFileId;
   return controller.getActiveFile()?.id ?? null;
 }
 
@@ -3395,8 +3313,7 @@ shell.commands.add({ id: "workspace.new-project", title: "New Project", menu: { 
   // No local store and no server account: keep the legacy in-browser workspace.
   if (!supportsOpfs() && !identity.account()) {
     controller.replaceProject(seedDefaultProject());
-    selectionNodeId = controller.getProject().activeFileId ?? controller.getProject().rootId;
-    initializePaneState(controller.getProject());
+    editorView.reset(controller.getProject());
     publishSnapshot();
     logDebug("action", "New in-browser project created");
     return;
@@ -3423,8 +3340,7 @@ shell.commands.add({ id: "workspace.import-folder", title: "Import Local Folder"
       settings.lastLocalProject = { path: project.localPath };
       saveSettings(settings);
     }
-    selectionNodeId = project.activeFileId ?? project.rootId;
-    initializePaneState(project);
+    editorView.reset(project);
     publishSnapshot();
     logDebug("action", "Imported folder", project.localPath ?? project.name);
   } catch (error) {
@@ -3456,8 +3372,7 @@ elements.importFileInput.addEventListener("change", async (event) => {
     logDebug("action", "Import requested", file.name);
     const project = file.name.toLowerCase().endsWith(".zip") ? await importZipArchive(file) : await importSingleFile(file);
     controller.replaceProject(project);
-    selectionNodeId = project.activeFileId ?? project.rootId;
-    initializePaneState(project);
+    editorView.reset(project);
     publishSnapshot();
   } catch (error) {
     notify(error.message);
@@ -3466,27 +3381,13 @@ elements.importFileInput.addEventListener("change", async (event) => {
   }
 });
 
-elements.replaceFileInput.addEventListener("change", async (event) => {
-  const file = event.target.files?.[0];
-  if (!file || !replaceFileTargetId) {
-    event.target.value = "";
-    return;
-  }
-  try {
-    await replaceImageFile(replaceFileTargetId, file);
-  } catch (error) {
-    notify(error.message);
-  } finally {
-    replaceFileTargetId = null;
-    event.target.value = "";
-  }
-});
+elements.replaceFileInput.addEventListener("change", (event) => fileActions().replaceWithChosenFile(event));
 
 elements.explorerAddButton.addEventListener("click", (event) => {
   event.stopPropagation();
   const project = controller.getProject();
   const parent = getSelectedParent(project);
-  selectionNodeId = parent.id;
+  editorView.select(parent.id);
   const opened = explorer.toggleQuickAddMenu(elements.explorerAddButton, parent.id);
   logDebug("action", opened ? "Explorer add menu opened" : "Explorer add menu closed", getPath(project, parent.id) || project.name);
 });
@@ -3495,7 +3396,7 @@ elements.explorerFilterButton.addEventListener("click", (event) => {
   event.stopPropagation();
   const project = controller.getProject();
   const parent = getSelectedParent(project);
-  selectionNodeId = parent.id;
+  editorView.select(parent.id);
   const opened = explorer.toggleFilterMenu(elements.explorerFilterButton, parent.id);
   logDebug("action", opened ? "Explorer filter menu opened" : "Explorer filter menu closed", settings.explorerFilter);
 });
@@ -3620,32 +3521,18 @@ document.addEventListener("drop", () => {
 var layoutInstance;
 function layout() {
   return (layoutInstance ??= createLayout({
+    view: editorView,
     get DIFF_TAB_ID() { return DIFF_TAB_ID; },
-    get DIRECTION_BIAS() { return DIRECTION_BIAS; },
-    get EDGE_ZONE() { return EDGE_ZONE; },
-    get FLICK_VELOCITY() { return FLICK_VELOCITY; },
-    get PANE_ORDER() { return PANE_ORDER; },
-    get SLOP() { return SLOP; },
-    get SNAP_FRACTION() { return SNAP_FRACTION; },
     get chat() { return chat; },
     get closeMenus() { return closeMenus; },
     get controller() { return controller; },
     get currentMobileFileId() { return currentMobileFileId; },
     get diffState() { return diffState; },
-    get drawerWidth() { return drawerWidth; },
-    set drawerWidth(value) { drawerWidth = value; },
     get elements() { return elements; },
-    get gesture() { return gesture; },
-    set gesture(value) { gesture = value; },
     get isMobileLayout() { return isMobileLayout; },
     get isPreviewableFileName() { return isPreviewableFileName; },
     get logDebug() { return logDebug; },
-    get mobileView() { return mobileView; },
-    set mobileView(value) { mobileView = value; },
-    get paneDrag() { return paneDrag; },
-    set paneDrag(value) { paneDrag = value; },
     get persistSettings() { return persistSettings; },
-    get previewFileId() { return previewFileId; },
     get refreshChatStatus() { return refreshChatStatus; },
     get renderChatPanel() { return renderChatPanel; },
     get setPreviewFile() { return setPreviewFile; },
@@ -3822,7 +3709,7 @@ function renderWelcomeState() {
   const last = settings.lastWorkspace;
   const target = rememberedWorkspace(last);
   const alreadyOpen = target && settings.syncedProjectId === `${target.team}/${target.path}`
-    && workspaceMode === "synced"
+    && syncMode.get().workspaceMode === "synced"
     && (["connected", "reconnecting"].includes(syncState.status) || sessionRestorer?.isPending());
   const canResume = Boolean(target) && !alreadyOpen;
   if (elements.welcomeResume) {
@@ -4255,6 +4142,7 @@ elements.autoReconnectInput?.addEventListener("change", (event) => {
 var cloudBrowserInstance;
 function cloudBrowser() {
   return (cloudBrowserInstance ??= createCloudBrowser({
+    view: editorView,
     get browserState() { return browserState; },
     get history() { return modules.history; },
     get cachedWorkspaceView() { return cachedWorkspaceView; },
@@ -4264,20 +4152,15 @@ function cloudBrowser() {
     get elements() { return elements; },
     get ensureSnapshotsMigrated() { return ensureSnapshotsMigrated; },
     get flashStatusPanel() { return flashStatusPanel; },
-    get initializePaneState() { return initializePaneState; },
     get loadLineComments() { return loadLineComments; },
     get logDebug() { return logDebug; },
     get notify() { return notify; },
     get openSettingsDialog() { return openSettingsDialog; },
     get opfsProvider() { return opfsProvider; },
-    get privateProjectSnapshot() { return privateProjectSnapshot; },
-    set privateProjectSnapshot(value) { privateProjectSnapshot = value; },
     get promptForName() { return promptForName; },
     get refreshChatStatus() { return refreshChatStatus; },
     get refreshSnapshotBaselines() { return refreshSnapshotBaselines; },
     get render() { return render; },
-    get selectionNodeId() { return selectionNodeId; },
-    set selectionNodeId(value) { selectionNodeId = value; },
     get serverProvider() { return serverProvider; },
     get sessionRestorer() { return sessionRestorer; },
     get setMobileExplorerOpen() { return setMobileExplorerOpen; },
@@ -4289,8 +4172,7 @@ function cloudBrowser() {
     get switchWorkspaceMode() { return switchWorkspaceMode; },
     get syncState() { return syncState; },
     get identity() { return identity; },
-    get workspaceMode() { return workspaceMode; },
-    set workspaceMode(value) { workspaceMode = value; }
+    mode: syncMode
   }));
 }
 function activateBrowserEntry(...args) { return cloudBrowser().activateBrowserEntry(...args); }
@@ -4602,7 +4484,7 @@ void reopenLocalProjectOnBoot();
 //   3. Auto-reconnect a PIN session if one was active last time.
 async function restoreSessionOnBoot({ manual = false, isCurrent = () => true } = {}) {
   const last = rememberedWorkspace(settings.lastWorkspace);
-  if (workspaceMode === "synced" && collaboration.getConnectionInfo()) {
+  if (syncMode.get().workspaceMode === "synced" && collaboration.getConnectionInfo()) {
     const resumed = await collaboration.resumeConnection();
     if (!resumed && settings.autoReconnect && settings.wasConnected && settings.serverPin) await establishConnection({ auto: true });
     if (manual || !controller.getActiveFile()) showResumedFile(cachedWorkspaceView(settings.syncedProjectId));
@@ -4638,7 +4520,7 @@ sessionRestorer = createSessionRecovery({
 let suspendedCloudWorkspace = false;
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
-    suspendedCloudWorkspace = workspaceMode === "synced" || !controller.getActiveFile() || sessionRestorer.isPending();
+    suspendedCloudWorkspace = syncMode.get().workspaceMode === "synced" || !controller.getActiveFile() || sessionRestorer.isPending();
   } else if (suspendedCloudWorkspace) {
     suspendedCloudWorkspace = false;
     void sessionRestorer.run();
@@ -4646,10 +4528,10 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("online", () => {
   if (document.visibilityState === "hidden") return;
-  if (workspaceMode === "synced" || !controller.getActiveFile() || sessionRestorer.isPending()) void sessionRestorer.run();
+  if (syncMode.get().workspaceMode === "synced" || !controller.getActiveFile() || sessionRestorer.isPending()) void sessionRestorer.run();
 });
 window.addEventListener("pageshow", event => {
-  if (event.persisted && (workspaceMode === "synced" || !controller.getActiveFile() || sessionRestorer.isPending())) void sessionRestorer.run();
+  if (event.persisted && (syncMode.get().workspaceMode === "synced" || !controller.getActiveFile() || sessionRestorer.isPending())) void sessionRestorer.run();
 });
 
 void sessionRestorer.run();

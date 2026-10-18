@@ -9,8 +9,11 @@ export function installRender(ed, app) {
 
   /** Re-render the syntax-highlighted DOM from plain text, then restore the
    *  given selection.  All programmatic edits go through this. */
+  // ed.rendering is true while applyEditorRender runs, so the synchronous
+  // updateStatus callback triggered by notifyEditorChanged does not mistake a
+  // transient focus state during innerHTML replacement for "editor lost focus".
   function applyEditorRender(text, selStart, selEnd) {
-    app._editorUpdating = true;
+    ed.rendering = true;
     try {
       // renderEditorContent replaces innerHTML, which resets scrollTop to 0. Save
       // and restore it so an in-place edit (e.g. backspacing one char mid-document)
@@ -54,7 +57,7 @@ export function installRender(ed, app) {
       syncEditorScroll();
       caretIntoView();
     } finally {
-      app._editorUpdating = false;
+      ed.rendering = false;
     }
   }
 

@@ -1,10 +1,24 @@
 // Layout: showing / hiding the explorer, preview, source and chat panels, the
 // phone layout's single-pane view, and the touch gestures (explorer drawer,
 // swiping between panes). main.js creates this on first use and passes its
-// shared values in `app`.
+// shared values in `app`; the phone's pane and the gestures are its own.
 
+
+// Touch-gesture tuning.
+const EDGE_ZONE = 24;            // px from the left edge that opens the drawer
+const SLOP = 10;                 // px before a gesture is claimed at all
+const DIRECTION_BIAS = 1.3;      // |dx| must exceed |dy| by this much
+const SNAP_FRACTION = 0.35;      // past this share of travel, snap onward
+const FLICK_VELOCITY = 0.45;     // px/ms that snaps regardless of distance
+const PANE_ORDER = ["source", "preview", "chat"];
 
 export function createLayout(app) {
+  // This file's own state: the phone's pane and the touch gesture in progress.
+  let mobileView = "source";     // source | preview | chat
+  let gesture = null;
+  let drawerWidth = 1;
+  let paneDrag = null;
+
   function toggleExplorer() {
     if (app.isMobileLayout()) { toggleMobileExplorer(); return; }
     app.settings.explorer = app.settings.explorer === "collapsed" ? "expanded" : "collapsed";
@@ -40,7 +54,7 @@ export function createLayout(app) {
   }
 
   function togglePreview() {
-    if (app.isMobileLayout()) { selectMobilePane(app.mobileView === "preview" ? "source" : "preview"); return; }
+    if (app.isMobileLayout()) { selectMobilePane(mobileView === "preview" ? "source" : "preview"); return; }
     app.settings.preview = app.settings.preview === "hidden" ? "shown" : "hidden";
     // Never collapse both panes.
     if (app.settings.preview === "hidden" && app.settings.source === "hidden") {
@@ -52,7 +66,7 @@ export function createLayout(app) {
   }
 
   function toggleSource() {
-    if (app.isMobileLayout()) { selectMobilePane(app.mobileView === "source" ? "preview" : "source"); return; }
+    if (app.isMobileLayout()) { selectMobilePane(mobileView === "source" ? "preview" : "source"); return; }
     app.settings.source = app.settings.source === "hidden" ? "shown" : "hidden";
     // Collapsing the source is a reading-focused mode — keep the preview visible.
     if (app.settings.source === "hidden" && app.settings.preview === "hidden") {
@@ -65,7 +79,7 @@ export function createLayout(app) {
 
   function toggleChat() {
     if (app.isMobileLayout()) {
-      selectMobilePane(app.mobileView === "chat" ? "source" : "chat");
+      selectMobilePane(mobileView === "chat" ? "source" : "chat");
       return;
     }
     app.settings.chatPanel = app.settings.chatPanel === "hidden" ? "shown" : "hidden";
@@ -84,16 +98,16 @@ export function createLayout(app) {
   // (the mobile CSS is gated behind a media query) but keep the button state and
   // ARIA in sync everywhere.
   function applyMobileViewState() {
-    app.elements.app.dataset.mobileView = app.mobileView;
+    app.elements.app.dataset.mobileView = mobileView;
     // The chat panel is normally gated by the global `[hidden] { display:none
     // !important }` rule (driven by settings.chatPanel). In the mobile chat view
     // it must win over that, so drop the attribute and let the cascade decide per
     // viewport. A desktop window may retain a previous mobile pane selection;
     // only the active mobile layout can override the saved chat preference.
     if (app.elements.chatPanel) {
-      app.elements.chatPanel.hidden = app.settings.chatPanel === "hidden" && !(app.isMobileLayout() && app.mobileView === "chat");
+      app.elements.chatPanel.hidden = app.settings.chatPanel === "hidden" && !(app.isMobileLayout() && mobileView === "chat");
     }
-    renderMobilePaneButtons(app.mobileView);
+    renderMobilePaneButtons(mobileView);
     renderMobilePaneCaption();
   }
 
@@ -116,12 +130,12 @@ export function createLayout(app) {
   function renderMobilePaneCaption() {
     if (app.elements.mobilePaneCaption) {
       let caption = "";
-      if (app.mobileView === "chat") {
+      if (mobileView === "chat") {
         caption = "CHAT";
-      } else if (app.mobileView === "preview") {
-        const name = app.previewFileId === app.DIFF_TAB_ID
+      } else if (mobileView === "preview") {
+        const name = app.view.get().previewFileId === app.DIFF_TAB_ID
           ? (app.diffState.active ? `${app.diffState.path.split("/").pop()} (diff)` : null)
-          : app.controller.getProject()?.nodes?.[app.previewFileId]?.name;
+          : app.controller.getProject()?.nodes?.[app.view.get().previewFileId]?.name;
         caption = name ? `PREVIEW — ${name}` : "PREVIEW";
       } else {
         const name = app.controller.getActiveFile()?.name;
@@ -137,12 +151,12 @@ export function createLayout(app) {
 
   function setMobileView(view) {
     cancelMobileGesture();
-    app.mobileView = view;
+    mobileView = view;
     if (view === "preview") {
       // Mobile has a single pane toggle, so the preview should mirror the file
       // you're editing rather than a stale/independent preview target.
       const activeFile = app.controller.getActiveFile();
-      if (activeFile && app.isPreviewableFileName(activeFile.name) && app.previewFileId !== activeFile.id) {
+      if (activeFile && app.isPreviewableFileName(activeFile.name) && app.view.get().previewFileId !== activeFile.id) {
         app.setPreviewFile(activeFile.id);
       }
     }
@@ -153,8 +167,8 @@ export function createLayout(app) {
   // a no-op rather than a toggle: with three dedicated buttons the highlight has
   // to mean "this is what you are looking at", and toggling would contradict it.
   function selectMobilePane(view) {
-    if (!app.PANE_ORDER.includes(view)) return;
-    if (view === app.mobileView) { cancelMobileGesture(); return; }
+    if (!PANE_ORDER.includes(view)) return;
+    if (view === mobileView) { cancelMobileGesture(); return; }
     setMobileView(view);
     if (view === "chat") openMobileChatView();
   }
@@ -194,8 +208,8 @@ export function createLayout(app) {
 
   function onGestureStart(event) {
     if (event.touches.length !== 1) { cancelMobileGesture(); return; }
-    if (!app.isMobileLayout() || app.paneDrag) return;
-    app.gesture = null;
+    if (!app.isMobileLayout() || paneDrag) return;
+    gesture = null;
     // Editing, canvas interaction, menus, and horizontal content own their drags.
     // Check before the edge gesture too, so a table at the left edge can scroll.
     if (event.target.closest?.("dialog, .menu-bar, .explorer-context-menu, .tab-overflow-menu, input, textarea, select, button, a, [contenteditable], .bmap-editor, .cm-editor")) return;
@@ -203,7 +217,7 @@ export function createLayout(app) {
 
     const touch = event.touches[0];
     const drawerOpen = app.elements.app.dataset.mobileExplorer === "open";
-    app.gesture = {
+    gesture = {
       startX: touch.clientX,
       startY: touch.clientY,
       lastX: touch.clientX,
@@ -212,49 +226,49 @@ export function createLayout(app) {
       kind: null,           // "drawer" | "pane", decided on first qualifying move
       claimed: false,
       drawerOpen,
-      fromEdge: touch.clientX <= app.EDGE_ZONE,
+      fromEdge: touch.clientX <= EDGE_ZONE,
       allowPane: !drawerOpen && !claimsHorizontalScroll(event.target)
     };
   }
 
   function onGestureMove(event) {
     if (event.touches.length !== 1) { cancelMobileGesture(); return; }
-    if (!app.gesture) return;
+    if (!gesture) return;
     const touch = event.touches[0];
-    const dx = touch.clientX - app.gesture.startX;
-    const dy = touch.clientY - app.gesture.startY;
+    const dx = touch.clientX - gesture.startX;
+    const dy = touch.clientY - gesture.startY;
 
-    if (!app.gesture.claimed) {
-      if (Math.abs(dx) < app.SLOP || Math.abs(dx) < Math.abs(dy) * app.DIRECTION_BIAS) {
+    if (!gesture.claimed) {
+      if (Math.abs(dx) < SLOP || Math.abs(dx) < Math.abs(dy) * DIRECTION_BIAS) {
         // Vertical or not yet decisive — let the page have it, and stop looking
         // once it is clearly a scroll so we don't fight it later in the gesture.
-        if (Math.abs(dy) > app.SLOP * 2) app.gesture = null;
+        if (Math.abs(dy) > SLOP * 2) gesture = null;
         return;
       }
-      if (app.gesture.drawerOpen && dx < 0) app.gesture.kind = "drawer";
-      else if (!app.gesture.drawerOpen && app.gesture.fromEdge && dx > 0) app.gesture.kind = "drawer";
-      else if (app.gesture.allowPane) app.gesture.kind = "pane";
-      if (!app.gesture.kind) { app.gesture = null; return; }
-      app.gesture.claimed = true;
-      if (app.gesture.kind === "drawer") beginDrawerDrag();
-      else if (!beginPaneDrag(dx)) { app.gesture = null; return; }
+      if (gesture.drawerOpen && dx < 0) gesture.kind = "drawer";
+      else if (!gesture.drawerOpen && gesture.fromEdge && dx > 0) gesture.kind = "drawer";
+      else if (gesture.allowPane) gesture.kind = "pane";
+      if (!gesture.kind) { gesture = null; return; }
+      gesture.claimed = true;
+      if (gesture.kind === "drawer") beginDrawerDrag();
+      else if (!beginPaneDrag(dx)) { gesture = null; return; }
     }
 
-    const dt = Math.max(1, event.timeStamp - app.gesture.lastT);
-    app.gesture.velocity = (touch.clientX - app.gesture.lastX) / dt;
-    app.gesture.lastX = touch.clientX;
-    app.gesture.lastT = event.timeStamp;
+    const dt = Math.max(1, event.timeStamp - gesture.lastT);
+    gesture.velocity = (touch.clientX - gesture.lastX) / dt;
+    gesture.lastX = touch.clientX;
+    gesture.lastT = event.timeStamp;
 
     event.preventDefault();  // we own it now — suppress scroll/selection
-    if (app.gesture.kind === "drawer") updateDrawerDrag(dx);
+    if (gesture.kind === "drawer") updateDrawerDrag(dx);
     else updatePaneDrag(dx);
   }
 
   function onGestureEnd(event) {
     if (event.type === "touchcancel") { cancelMobileGesture(); return; }
-    if (!app.gesture) return;
-    const g = app.gesture;
-    app.gesture = null;
+    if (!gesture) return;
+    const g = gesture;
+    gesture = null;
     if (!g.claimed) return;
     if (g.kind === "drawer") endDrawerDrag(g);
     else endPaneDrag(g);
@@ -263,12 +277,12 @@ export function createLayout(app) {
   // Cancelled touches, rotation, and button navigation must restore the original
   // pane immediately, without a delayed animation switching it back afterward.
   function cancelMobileGesture() {
-    app.gesture = null;
+    gesture = null;
     delete app.elements.app.dataset.drawerDrag;
     setDrawerProgress(app.elements.app.dataset.mobileExplorer === "open" ? 1 : 0);
-    const drag = app.paneDrag;
+    const drag = paneDrag;
     if (!drag) return;
-    app.paneDrag = null;
+    paneDrag = null;
     drag.cancelSettle?.();
     for (const el of [drag.current, drag.incoming]) {
       el.classList.remove("pane-swipe-layer");
@@ -284,39 +298,39 @@ export function createLayout(app) {
 
   function beginDrawerDrag() {
     const sidebar = app.elements.explorerPanel ?? document.querySelector(".workspace-shell > .sidebar");
-    app.drawerWidth = Math.max(1, sidebar?.offsetWidth ?? 1);
+    drawerWidth = Math.max(1, sidebar?.offsetWidth ?? 1);
     app.elements.app.dataset.drawerDrag = "1";
   }
 
   function updateDrawerDrag(dx) {
-    const base = app.gesture.drawerOpen ? app.drawerWidth : 0;
-    setDrawerProgress((base + dx) / app.drawerWidth);
+    const base = gesture.drawerOpen ? drawerWidth : 0;
+    setDrawerProgress((base + dx) / drawerWidth);
   }
 
   function endDrawerDrag(g) {
     delete app.elements.app.dataset.drawerDrag;
     const dx = g.lastX - g.startX;
-    const progress = ((g.drawerOpen ? app.drawerWidth : 0) + dx) / app.drawerWidth;
-    const flicked = Math.abs(g.velocity) > app.FLICK_VELOCITY;
+    const progress = ((g.drawerOpen ? drawerWidth : 0) + dx) / drawerWidth;
+    const flicked = Math.abs(g.velocity) > FLICK_VELOCITY;
     const open = flicked
       ? g.velocity > 0
-      : progress > (g.drawerOpen ? 1 - app.SNAP_FRACTION : app.SNAP_FRACTION);
+      : progress > (g.drawerOpen ? 1 - SNAP_FRACTION : SNAP_FRACTION);
     setMobileExplorerOpen(open);
   }
 
   // ---- Pane carousel ---------------------------------------------------------
 
   function beginPaneDrag(dx) {
-    const index = app.PANE_ORDER.indexOf(app.mobileView);
+    const index = PANE_ORDER.indexOf(mobileView);
     const nextIndex = index + (dx < 0 ? 1 : -1);
-    if (nextIndex < 0 || nextIndex >= app.PANE_ORDER.length) return false;  // at an end
-    const current = paneElement(app.mobileView);
-    const incoming = paneElement(app.PANE_ORDER[nextIndex]);
+    if (nextIndex < 0 || nextIndex >= PANE_ORDER.length) return false;  // at an end
+    const current = paneElement(mobileView);
+    const incoming = paneElement(PANE_ORDER[nextIndex]);
     if (!current || !incoming) return false;
 
     // The incoming pane is normally display:none and, for chat, also [hidden].
     // Lift both into the grid cell as layers the drag can translate.
-    app.paneDrag = {
+    paneDrag = {
       index,
       nextIndex,
       current,
@@ -333,32 +347,32 @@ export function createLayout(app) {
   }
 
   function updatePaneDrag(dx) {
-    if (!app.paneDrag) return;
-    const direction = app.paneDrag.nextIndex > app.paneDrag.index ? -1 : 1;
-    const limited = direction * Math.max(0, Math.min(app.paneDrag.width, dx * direction));
-    const offset = -direction * app.paneDrag.width;
-    app.paneDrag.current.style.transform = `translateX(${limited}px)`;
-    app.paneDrag.incoming.style.transform = `translateX(${offset + limited}px)`;
+    if (!paneDrag) return;
+    const direction = paneDrag.nextIndex > paneDrag.index ? -1 : 1;
+    const limited = direction * Math.max(0, Math.min(paneDrag.width, dx * direction));
+    const offset = -direction * paneDrag.width;
+    paneDrag.current.style.transform = `translateX(${limited}px)`;
+    paneDrag.incoming.style.transform = `translateX(${offset + limited}px)`;
   }
 
   function endPaneDrag(g) {
-    if (!app.paneDrag) return;
-    const drag = app.paneDrag;
+    if (!paneDrag) return;
+    const drag = paneDrag;
     const dx = g.lastX - g.startX;
-    const flicked = Math.abs(g.velocity) > app.FLICK_VELOCITY
+    const flicked = Math.abs(g.velocity) > FLICK_VELOCITY
       && Math.sign(g.velocity) === Math.sign(dx);
     const direction = drag.nextIndex > drag.index ? -1 : 1;
-    const commit = Math.sign(dx) === direction && (flicked || Math.abs(dx) > drag.width * app.SNAP_FRACTION);
+    const commit = Math.sign(dx) === direction && (flicked || Math.abs(dx) > drag.width * SNAP_FRACTION);
     const settleTo = commit ? direction * drag.width : 0;
 
-    if (commit) renderMobilePaneButtons(app.PANE_ORDER[drag.nextIndex]);
+    if (commit) renderMobilePaneButtons(PANE_ORDER[drag.nextIndex]);
     app.elements.app.dataset.paneSettling = "1";
     drag.current.style.transform = `translateX(${settleTo}px)`;
     drag.incoming.style.transform = `translateX(${settleTo - direction * drag.width}px)`;
 
     const finish = () => {
-      if (app.paneDrag !== drag) return;
-      app.paneDrag = null;
+      if (paneDrag !== drag) return;
+      paneDrag = null;
       for (const el of [drag.current, drag.incoming]) {
         el.classList.remove("pane-swipe-layer");
         el.style.transform = "";
@@ -366,14 +380,14 @@ export function createLayout(app) {
       delete app.elements.app.dataset.paneDrag;
       delete app.elements.app.dataset.paneSettling;
       if (commit) {
-        setMobileView(app.PANE_ORDER[drag.nextIndex]);
-        if (app.PANE_ORDER[drag.nextIndex] === "chat") openMobileChatView();
+        setMobileView(PANE_ORDER[drag.nextIndex]);
+        if (PANE_ORDER[drag.nextIndex] === "chat") openMobileChatView();
       } else {
         // Restore whatever [hidden] state the incoming pane had before the drag.
         drag.incoming.hidden = drag.incomingWasHidden;
         applyMobileViewState();
       }
-      app.paneDrag = null;
+      paneDrag = null;
     };
     // Settle on transitionend, with a timer as the backstop for a cancelled or
     // zero-duration transition (reduced motion), so panes can never stay stuck.
@@ -421,6 +435,7 @@ export function createLayout(app) {
   }
 
   return {
+    mobileView: () => mobileView,
     applyMobileViewState, cancelMobileGesture, handleFloatingExplorerOutsidePress, onGestureEnd,
     onGestureMove, onGestureStart, renderMobilePaneCaption, selectMobilePane, setExplorerAnchor,
     setMobileExplorerOpen, setMobileMenuOpen, toggleChat, toggleExplorer, toggleExplorerAnchor,

@@ -5,6 +5,13 @@
 // its extension point for other kinds of file (adapters/preview.js), and the
 // Markdown renderer.
 //
+// API: previews, highlighters, toolbars (extension points) and view: what the
+// editor shows, read with view.get() and changed only through its actions
+// (service/view.js): reset(project), pick(nodeId, partId?), select(nodeId),
+// openTab/closeTab(pane, fileId), moveTab(pane, id, targetId, after?),
+// showPreview(fileId, partId?), showDiff(id), clearParts(), dragTab(state),
+// keepTabs(project, { diffTabId, diffActive }).
+//
 // Static, for code from before the restructure (each takes the app's shared
 // values, as before):
 //   createEditorCore(app)   createHighlighter(app)   createFindReplace(app)
@@ -22,6 +29,7 @@ export { createAutocomplete } from "./adapters/autocomplete.js";
 export { createLinks } from "./adapters/links.js";
 import { createPreview } from "./adapters/preview.js";
 import { createTabs } from "./adapters/tabs.js";
+import { EMPTY_VIEW, createView } from "./service/view.js";
 
 export function createPanes(app, previews) {
   return { ...createTabs(app), ...createPreview(app, previews) };
@@ -34,6 +42,7 @@ export default defineModule({
   level: 3,
   uses: ["shell", "file-types", "workspace"],
   owns: { elements: ["the source editor", "the formatting toolbar", "the find bar", "the tab strips", "the preview pane"],
+    state: ["the open tabs", "what each pane shows", "the explorer selection"],
     registries: ["previews", "highlighters", "toolbars"], rules: ["Markdown rendering"] },
   start(ctx) {
     // Previews of other kinds of file: { id, matches(file), render(target, project, file, tools), cacheable?, printHtml? }
@@ -43,6 +52,8 @@ export default defineModule({
     // Formatting-toolbar buttons for such a format: { id: format, groups: [[{ id, html, title, action }]] }
     const toolbars = ctx.registry({ validate: (entry) => { if (!Array.isArray(entry.groups)) throw new Error(`toolbar ${entry.id} needs groups`); } });
     const open = (registry) => ({ add: registry.add, get: registry.get, all: registry.all });
-    return { previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars) };
+    // What the editor shows (tabs, the preview's file and part, the selection): read view.get(), change it through its actions.
+    const view = createView(ctx.state(EMPTY_VIEW));
+    return { previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars), view };
   }
 });

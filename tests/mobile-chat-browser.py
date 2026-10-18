@@ -56,7 +56,7 @@ async def main():
             if file.is_file():
                 body = inject_chat_internals(path, file.read_bytes())
                 if path == '/app/main.js':
-                    body += b'\nwindow.__chatTest = {controller, renderChatPanel, collaboration, setChatConnection: connection => { workspaceMode = connection ? "synced" : "private"; collaboration.getConnectionInfo = () => connection; }, ' + CHAT_HOOK.encode() + b'};\n'
+                    body += b'\nwindow.__chatTest = {controller, renderChatPanel, collaboration, setChatConnection: connection => { if (connection) syncMode.share(controller.getProject()); else syncMode.leave(); collaboration.getConnectionInfo = () => connection; }, ' + CHAT_HOOK.encode() + b'};\n'
                 await route.fulfill(status=200, content_type=mimetypes.guess_type(str(file))[0] or 'application/octet-stream', body=body)
             else: await route.continue_()
         await context.route('**/*', route_request)

@@ -5,9 +5,93 @@
 import { authorNotesHtml, parsePersona, personaAvatarHtml } from "../modules/characters/index.js";
 import { getNodeIdByPath, getPath, isBmapFileName, isImageFileName, isPersonaFileName } from "../modules/workspace/index.js";
 
+// The diagram editor in the preview, created on first use. main.js asks for
+// it to remember the diagram's pan and zoom.
+let diagramView = null;
+export const currentDiagramView = () => diagramView;
+
 // Returns `app`, so it can wrap the shared values it is given.
 export function registerPreviews(previews, app) {
 
+  previews.add({
+    id: "bmap", matches: (file) => isBmapFileName(file.name), cacheable: false,
+    render(target, project, file) {
+      if (!app.bmapViewModule) {
+        target.innerHTML = `<div class="preview-loading">Loading diagram…</div>`;
+        app.loadBmapView().then(() => {
+          if (app.view.get().previewFileId === file.id) app.render(app.controller.getProject());
+        }).catch((error) => {
+          if (app.view.get().previewFileId !== file.id) return;
+          target.innerHTML = `<div class="preview-loading">The diagram editor could not load. Check your connection, then reopen the file.</div>`;
+          app.logDebug("error", "Diagram editor failed to load", error.message);
+        });
+        return { shouldTypeset: false, content: "" };
+      }
+      if (!diagramView) {
+        diagramView = app.bmapViewModule.createBmapView({ container: target });
+      }
+      const basePath = getPath(project, file.id);
+      diagramView.render({
+        documentKey: file.id,
+        source: file.content,
+        initialView: app.getViewState(file.id)?.bmap ?? null,
+        onOpenLinkedFile(filePath) {
+          const baseSegments = basePath.split("/").filter(Boolean);
+          baseSegments.pop();
+          const resolvedPath = app.normalizePath([...baseSegments, filePath].join("/"));
+          const nodeId = getNodeIdByPath(project, resolvedPath);
+          if (nodeId) {
+            app.openFileFromExplorer(nodeId);
+          }
+        },
+        resolveFileContent(filePath) {
+          const baseSegments = basePath.split("/").filter(Boolean);
+          baseSegments.pop();
+          const resolvedPath = app.normalizePath([...baseSegments, filePath].join("/"));
+          const nodeId = getNodeIdByPath(project, resolvedPath);
+          if (!nodeId) {
+            return null;
+          }
+          const node = project.nodes[nodeId];
+          return node?.kind === "file" ? (node.content ?? null) : null;
+        },
+        listProjectFiles() {
+          return Object.values(project.nodes)
+            .filter((node) => node?.kind === "file" && node.id !== file.id)
+            .map((node) => {
+              const path = getPath(project, node.id);
+              return {
+                fileId: node.id,
+                kind: isImageFileName(node.name) ? "image" : "file",
+                label: path,
+                path: app.getRelativeProjectPath(basePath, path)
+              };
+            })
+            .sort((left, right) => left.label.localeCompare(right.label));
+        },
+        resolveRelativeFilePath(targetFileId) {
+          const targetNode = project.nodes[targetFileId];
+          if (!targetNode || targetNode.kind !== "file" || targetNode.id === file.id) {
+            return null;
+          }
+          return app.getRelativeProjectPath(basePath, getPath(project, targetNode.id));
+        },
+        onCommit(nextSource, detail) {
+          app.updateFileContentFromPreview(file.id, nextSource, detail?.reason ?? "bmap preview edit");
+        },
+        generateScope: app.settings.bmapGenerateScope,
+        autoPan: app.settings.bmapAutoPan,
+        onQuickGenerate(request) {
+          return app.quickGenerateBmapFile(file.id, request);
+        },
+        logDebug: app.logDebug,
+      });
+      return { shouldTypeset: false, content: "" };
+    }
+  });
+
+  // A character sheet previews as a card (avatar, name, @handle) over its body,
+  // instead of showing the raw header lines as text.
   previews.add({
     id: "persona", matches: (file) => isPersonaFileName(file.name), cacheable: true,
     render(target, project, file, tools) {

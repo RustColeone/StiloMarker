@@ -196,7 +196,7 @@ sequenceDiagram
   WS-->>S: event to every other tab
 ```
 
-## The nine rules
+## The ten rules
 
 `tests/structure/structure.test.mjs` checks each one.
 
@@ -216,6 +216,10 @@ sequenceDiagram
    `.catch(() => {})` (or `=> null`), no `except ...: pass`. Handle the error,
    or carry on with `ignore(error, "why")` from the kernel so it still reaches
    the trace (browser) or the server log.
+10. No code writes another file's variables: no setter (`set name(value)`)
+    in browser code. Shared state has one owner (`ctx.state(...)`, below) and
+    changes through the owner's named actions. The getters `main.js` hands to
+    the code it wires are counted in the baseline and may only shrink.
 
 ## Finding a bug: the trace
 
@@ -297,12 +301,23 @@ That is where bugs are hard to find. Steps, each its own release:
 | Step | What | State |
 | --- | --- | --- |
 | S1 | The trace (kernel) and rule 9: every silent catch (57: 36 browser, 21 server) reports why it carries on | done (v0.1.52) |
-| S2 | One owner per shared variable: the 26 that outside code sets move into their module (the open file, selection and album part to Editor, `workspaceMode` to Sync); others read through the owner's API and change them only through its named actions, each recorded in the trace | next |
+| S2 | One owner per shared variable: the 26 that outside code set (v0.1.53: none left, rule 10). What the editor shows (tabs, the preview's file and part, the selection) is the Editor's `view`; shared or local work and the kept local project is Sync's `mode`; the rest moved into the one file that used them (gestures into layout, snapshot counts into snapshots, the replace target into file actions, MathJax loading into the preview, the editor's two flags into the editor). Getters handed out by `main.js`: 261 → 227 | done (v0.1.53) |
 | S3 | The large legacy files into modules, one per release: file-actions, explorer, cloud-browser, chat-panel. What a module or feature is handed from outside is capped (about 8 names); the getters into `main.js` may only shrink, to 0 | |
 | S4 | `main.js` only starts the kernel; then the server's `WorkspaceRegistry` the same way | |
 
 ### Notes for module authors
 
+- State other code needs to see: the owner makes it with `ctx.state(initial)`
+  (kernel `createState`) and hands out `get()`, `on(listener)` and its own
+  named actions, which call `set(action, patch)`. Each change is recorded in
+  the trace with its action's name; lists in it are frozen, and a key it did
+  not start with is refused. Never hand out a setter (rule 10).
+- What the editor shows: `editor.view` (`get()` → `sourceOpenTabIds`,
+  `previewOpenTabIds`, `previewFileId`, `previewPart`, `sourcePart`,
+  `selectionNodeId`, `draggingTabState`; actions `reset`, `pick`, `select`,
+  `openTab`, `closeTab`, `moveTab`, `showPreview`, `showDiff`, `clearParts`,
+  `dragTab`, `keepTabs`). Shared or local work: `sync.mode` (`get()` →
+  `workspaceMode`, `privateProject`; `share`, `leave`, `forgetKept`, `restore`).
 - Browser: a command id is `<owner>.<action>`; add it with
   `shell.commands.add({ id, title, run, keys?, menu? })`. Menus are drawn
   from commands, so `index.html` holds no menu items.

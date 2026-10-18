@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { defineModule, startModules, createRegistry, createEmitter, createTrace, trace, ignore, ignored, describe } from "../app/kernel/index.js";
+import { defineModule, startModules, createRegistry, createEmitter, createState, createTrace, trace, ignore, ignored, describe } from "../app/kernel/index.js";
 import { callerOf } from "../app/kernel/trace.js";
 
 const mod = (name, level, uses, start = () => ({})) => defineModule({ name, level, uses, owns: {}, start });
@@ -98,4 +98,26 @@ test("ignore() and ignored() put the error, the reason and the caller in the pag
   assert.equal(second.detail, "Error: offline");
   assert.equal(callerOf("Error\n    at f (https://host/app/x/y.js?v=2:12:5)"), "app/x/y.js:12");
   assert.equal(describe({ a: 1, b: 2 }), "{a, b}");
+});
+
+test("state: changes go through named actions, are traced, and cannot happen behind the owner's back", async () => {
+  const log = createTrace({ now: () => 0 });
+  const view = createState("editor", { tabs: [], open: null }, log);
+  const seen = [];
+  view.on((state, changed, action) => seen.push([action, changed, state.open]));
+  view.set("open a file", { open: "a", tabs: ["a"] });
+  view.set("open a file", { open: "a" }); // no change: nothing recorded
+  assert.deepEqual(seen, [["open a file", ["open", "tabs"], "a"]]);
+  assert.deepEqual(log.entries().map((e) => [e.kind, e.owner, e.message, e.detail]), [["state", "editor", "open a file", "open=a tabs=[a]"]]);
+  assert.throws(() => view.get().tabs.push("b"), TypeError, "its lists are frozen");
+  assert.throws(() => { view.get().open = "b"; }, TypeError, "the state object is frozen");
+  assert.throws(() => view.set("typo", { opne: "b" }), /not part of its state/);
+  const failing = view.on(() => { throw new Error("listener broke"); });
+  view.set("close", { open: null });
+  assert.equal(view.get().open, null);
+  assert.ok(log.entries().some((e) => e.kind === "failed" && e.detail === "Error: listener broke"));
+  failing();
+  const apis = await startModules([defineModule({ name: "m", level: 1, uses: [], owns: {}, start: (ctx) => ({ state: ctx.state({ n: 0 }) }) })]);
+  apis.m.state.set("count", { n: 1 });
+  assert.ok(trace.entries().some((e) => e.kind === "state" && e.owner === "m" && e.message === "count"));
 });

@@ -8,6 +8,12 @@ import { createFileSnapshot, createServerSnapshot, deleteServerSnapshot, deleteV
 import { ignore } from "../kernel/index.js";
 
 export function createSnapshots(app) {
+  // Newest snapshot per file path: { count, editSessions, sessionEdits }. The
+  // baseline the S.E.N version label counts from. Refreshed on workspace open and
+  // whenever snapshots change — never per keystroke.
+  let snapshotBaselines = new Map();
+  let snapshotBaselinesInFlight = null;
+
   // ---- Version label (S.E.N) --------------------------------------------------
   // S — snapshots you have deliberately cut of this file
   // E — writing sittings since that snapshot
@@ -21,30 +27,30 @@ export function createSnapshots(app) {
   // exactly why they are free to reset.
 
   function setSnapshotBaselines(baselines) {
-    app.snapshotBaselines = new Map(Object.entries(baselines ?? {}));
+    snapshotBaselines = new Map(Object.entries(baselines ?? {}));
     scheduleVersionLabel();
   }
 
   function refreshSnapshotBaselines() {
-    if (app.snapshotBaselinesInFlight) return app.snapshotBaselinesInFlight;
-    app.snapshotBaselinesInFlight = (async () => {
+    if (snapshotBaselinesInFlight) return snapshotBaselinesInFlight;
+    snapshotBaselinesInFlight = (async () => {
       try {
         const listing = await snapshotStore().paths();
         setSnapshotBaselines(listing?.baselines);
       } catch (error) {
         ignore(error, "snapshot counts are unavailable; the label says no snapshots");
       } finally {
-        app.snapshotBaselinesInFlight = null;
+        snapshotBaselinesInFlight = null;
       }
     })();
-    return app.snapshotBaselinesInFlight;
+    return snapshotBaselinesInFlight;
   }
 
   // Snapshots taken before this feature carry no baseline, so E/N count from 0
   // and read high once. That self-heals the next time the file is snapshotted.
   function fileVersionLabel(file, path) {
     if (!file || file.kind !== "file") return null;
-    const base = (path && app.snapshotBaselines.get(path)) || null;
+    const base = (path && snapshotBaselines.get(path)) || null;
     const sessions = Number(file.editSessions) || 0;
     const edits = Number(file.sessionEdits) || 0;
     const s = base ? Number(base.count) || 0 : 0;
@@ -311,7 +317,7 @@ export function createSnapshots(app) {
     app.diffState.createdAt = createdAt;
     app.diffState.currentChange = -1;
     if (app.settings.preview === "hidden") app.togglePreview();
-    app.previewFileId = app.DIFF_TAB_ID; // make the diff the active preview tab
+    app.view.showDiff(app.DIFF_TAB_ID); // make the diff the active preview tab
     app.updateStatus(project); // renders the tab strip + shows the diff pane
     renderDiff(); // immediate full render so blocks are fresh (updateStatus may have debounced)
     if (app.diffState.blocks.length) gotoChange(1); // jump to the first change
@@ -335,9 +341,7 @@ export function createSnapshots(app) {
   // preview back to whatever file tab was last open.
   function closeDiff() {
     resetDiffState();
-    if (app.previewFileId === app.DIFF_TAB_ID) {
-      app.previewFileId = app.previewOpenTabIds[app.previewOpenTabIds.length - 1] ?? null;
-    }
+    app.view.closeTab("preview", app.DIFF_TAB_ID); // the preview falls back to the last file tab
     app.render(app.controller.getProject());
   }
 

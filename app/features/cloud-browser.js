@@ -79,7 +79,7 @@ export function createCloudBrowser(app) {
     // Only surface hosting once a server advertising it has been pinged (or while
     // a host session is live), so the button can never 404 an older backend.
     if (app.elements.collabHosting) {
-      const hosting = app.collaboration.isConnected() && app.workspaceMode === "synced";
+      const hosting = app.collaboration.isConnected() && app.mode.get().workspaceMode === "synced";
       app.elements.collabHosting.hidden = !(app.syncState.hostingAvailable || hosting);
     }
     const previous = app.elements.hostTeamSelect.value;
@@ -100,12 +100,9 @@ export function createCloudBrowser(app) {
     const team = app.elements.hostTeamSelect?.value ?? "";
     const displayName = app.settings.displayName || app.identity.account()?.username || "";
     try {
-      if (app.workspaceMode === "private") {
-        app.privateProjectSnapshot = app.controller.getProject();
-      }
       if (team === "") {
         // Ephemeral guest session hosting the current local project.
-        app.workspaceMode = "synced";
+        app.mode.share(app.controller.getProject());
         const { guestPin } = await app.collaboration.hostForGuests(app.settings.serverUrl, displayName);
         app.settings.wasConnected = false;
         app.elements.hostPinText.textContent = `Sharing! Guests join with PIN ${guestPin} (enter it under PIN above). Ends when you disconnect.`;
@@ -122,7 +119,7 @@ export function createCloudBrowser(app) {
         // Publish into a new project directory under the team's workspaces/ folder,
         // then open and push into it — same path the file browser's Publish uses.
         const created = await createProjectServer(app.settings.serverUrl, app.identity.token(), team, "workspaces", name);
-        app.workspaceMode = "synced";
+        app.mode.share(app.controller.getProject());
         await app.collaboration.openWorkspace(app.settings.serverUrl, app.identity.token(), team, created.path, { reason: "create-project" });
         // The freshly-opened workspace is empty; push our local project into it.
         app.controller.replaceProject(localProject);
@@ -135,11 +132,8 @@ export function createCloudBrowser(app) {
       }
       app.render(app.controller.getProject());
     } catch (error) {
-      app.workspaceMode = "private";
-      if (app.privateProjectSnapshot) {
-        app.controller.replaceProject(app.privateProjectSnapshot);
-        app.privateProjectSnapshot = null;
-      }
+      const kept = app.mode.leave();
+      if (kept) app.controller.replaceProject(kept);
       app.notify(error.message || "Could not share workspace.");
       app.logDebug("response", "Host/share failed", error.message);
       app.render(app.controller.getProject());
@@ -232,17 +226,15 @@ export function createCloudBrowser(app) {
   async function openLocalProjectFromBrowser(entry) {
     app.sessionRestorer?.cancel();
     const project = await openProjectOpfs(entry.path);
-    if (app.collaboration.isConnected() && app.workspaceMode === "synced") {
+    if (app.collaboration.isConnected() && app.mode.get().workspaceMode === "synced") {
       app.collaboration.disconnect("Opened a local workspace.");
     }
-    app.workspaceMode = "private";
-    app.privateProjectSnapshot = null;
+    app.mode.leave(); // the kept project is not brought back: another one opens
     app.settings.wasConnected = false;
     app.settings.lastLocalProject = { path: entry.path };
     saveSettings(app.settings);
     app.controller.replaceProject(project);
-    app.selectionNodeId = project.activeFileId ?? project.rootId;
-    app.initializePaneState(project);
+    app.view.reset(project);
     if (app.elements.openServerDialog?.open) app.elements.openServerDialog.close();
     app.logDebug("action", "Opened local project", entry.path);
     app.render(project);
@@ -564,7 +556,7 @@ export function createCloudBrowser(app) {
     if (provider?.id === "local") {
       return within(app.controller.getProject()?.localPath);
     }
-    if (provider?.id === "server" && app.workspaceMode === "synced" && app.settings.lastWorkspace) {
+    if (provider?.id === "server" && app.mode.get().workspaceMode === "synced" && app.settings.lastWorkspace) {
       return within(`${app.settings.lastWorkspace.team}/${app.settings.lastWorkspace.path}`);
     }
     return false;
@@ -574,19 +566,17 @@ export function createCloudBrowser(app) {
   // drop back to a fresh default workspace (no reload, no extra confirmation).
   function fallbackToDefaultAfterDelete() {
     app.sessionRestorer?.cancel();
-    if (app.collaboration.isConnected() && app.workspaceMode === "synced") {
+    if (app.collaboration.isConnected() && app.mode.get().workspaceMode === "synced") {
       app.collaboration.disconnect("The open workspace was deleted.");
     }
-    app.workspaceMode = "private";
-    app.privateProjectSnapshot = null;
+    app.mode.leave(); // the kept project is not brought back: another one opens
     app.settings.lastLocalProject = null;
     app.settings.lastWorkspace = null;
     app.settings.wasConnected = false;
     saveSettings(app.settings);
     const project = seedDefaultProject();
     app.controller.replaceProject(project);
-    app.selectionNodeId = project.activeFileId ?? project.rootId;
-    app.initializePaneState(project);
+    app.view.reset(project);
     app.render(project);
   }
 
@@ -709,12 +699,9 @@ export function createCloudBrowser(app) {
     if (!name) return;
     const path = rel;
     try {
-      if (app.workspaceMode === "private") {
-        app.privateProjectSnapshot = app.controller.getProject();
-      }
       const localProject = app.controller.getProject();
       const created = await createProjectServer(app.settings.serverUrl, app.identity.token(), team, path, name);
-      app.workspaceMode = "synced";
+      app.mode.share(localProject);
       await app.collaboration.openWorkspace(app.settings.serverUrl, app.identity.token(), team, created.path, { reason: "create-project" });
       app.controller.replaceProject(localProject);
       await app.collaboration.publishSnapshot(localProject);
@@ -725,11 +712,8 @@ export function createCloudBrowser(app) {
       if (app.elements.openServerDialog?.open) app.elements.openServerDialog.close();
       app.render(app.controller.getProject());
     } catch (error) {
-      app.workspaceMode = "private";
-      if (app.privateProjectSnapshot) {
-        app.controller.replaceProject(app.privateProjectSnapshot);
-        app.privateProjectSnapshot = null;
-      }
+      const kept = app.mode.leave();
+      if (kept) app.controller.replaceProject(kept);
       app.notify(error.message || "Could not publish workspace.");
       app.logDebug("response", "Publish failed", error.message);
       app.render(app.controller.getProject());
@@ -815,7 +799,7 @@ export function createCloudBrowser(app) {
     if (!options.force
         && app.collaboration.isConnected?.()
         && app.syncState.status === "connected"
-        && app.workspaceMode === "synced"
+        && app.mode.get().workspaceMode === "synced"
         && app.settings.syncedProjectId === workspaceId) {
       app.showResumedFile(app.cachedWorkspaceView(workspaceId));
       app.logDebug("action", "Skipped redundant workspace open", `${workspaceId} (${reason})`);
@@ -832,18 +816,14 @@ export function createCloudBrowser(app) {
     }
     if (!options.automatic) app.sessionRestorer.cancel();
     openWorkspaceInFlight = workspaceId;
-    const previousMode = app.workspaceMode;
-    const previousPrivate = app.privateProjectSnapshot;
+    const previousMode = app.mode.get();
     const previousView = app.settings.syncedProjectId === workspaceId
       ? (app.currentWorkspaceView().activeFile ? app.currentWorkspaceView() : app.cachedWorkspaceView(workspaceId)) : null;
     try {
       // Preserve the user's local project once, so leaving the cloud workspace
       // restores it. Setting synced mode up-front stops onStatusChange's master
       // auto-switch from snapshotting the (just-pulled) cloud project by mistake.
-      if (app.workspaceMode === "private") {
-        app.privateProjectSnapshot = app.controller.getProject();
-      }
-      app.workspaceMode = "synced";
+      app.mode.share(app.controller.getProject());
       // Reopening the workspace the local project ALREADY is (boot auto-restore, a
       // second tab, a manual reopen): if this browser still holds unsaved edits for
       // it, ASK to push them instead of pulling. Whether that push actually happens
@@ -904,8 +884,7 @@ export function createCloudBrowser(app) {
       // private snapshot (often the empty welcome project).
       if (error.status !== 499) {
         app.collaboration.disconnect("Workspace open interrupted; local copy kept.");
-        app.workspaceMode = previousMode;
-        app.privateProjectSnapshot = previousPrivate;
+        app.mode.restore(previousMode);
       }
       if (!options.automatic) app.showToast(error.message || "Could not open workspace.");
       app.logDebug("response", "Open workspace failed", error.message);
@@ -964,7 +943,7 @@ export function createCloudBrowser(app) {
     // Invalidate even a handshake that has not installed a connection yet.
     app.collaboration.disconnect("Logged out.");
     // Leaving the account also leaves any cloud workspace it opened.
-    if (app.workspaceMode === "synced") app.switchWorkspaceMode?.("private");
+    if (app.mode.get().workspaceMode === "synced") app.switchWorkspaceMode?.("private");
     // Identity forgets the stored password and that this server knew the
     // account, so it is not signed in again by itself (the username stays).
     app.identity.signOut();

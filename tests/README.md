@@ -39,6 +39,8 @@ node --test tests/       # raw test runner
 | `collaboration-runtime.test.mjs` | Production sync runtime: reconnect conflicts, recovery snapshots, request races, patch rejection, join gaps, Unicode. |
 | `collaboration-broker.test.mjs` | Two real clients + the Python broker over stdio, both send/ack orders. |
 | `text-patch.test.mjs` | Exhaustive short splice-pair convergence and overlap rejection. |
+| `editor-view.test.mjs` | The Editor's view (tabs, what each pane shows, the selection): changed only through named actions, each traced; reset, pick and select, tabs opened once, closed (the preview falls back), moved, the diff tab, keeping tabs after the project changed. |
+| `sync-mode.test.mjs` | Sync's mode: sharing keeps the local project aside once, leaving hands it back, forgetKept, restore after a failed open; only actions change it. |
 | `project-save.test.mjs` | Queued writes, errors, typing during saves, collapsed folders, rename retries, UI save handlers. |
 | `server-reliability.test.py` | Production broker: UTF-16, disk-failure recovery, ordered events, and existing broker regressions. |
 | `sync-service.test.mjs` | Collaboration transport against a mock HTTP server. |

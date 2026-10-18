@@ -1,50 +1,15 @@
 // Tabs and panes: the source and preview tab strips (overflow menu, reorder,
 // drag files in), which file each pane shows, and resuming the last view
 // (the open tabs per workspace, kept on the server through app.saveUserState).
-// main.js creates this through createPanes and passes its shared values in `app`.
+// main.js creates this through createPanes and passes its shared values in `app`;
+// what the panes show is the Editor's view (app.view, service/view.js).
 import { normalizeServerUrl } from "../../shell/index.js";
 import { getPath, isBmapFileName } from "../../workspace/index.js";
 
 export function createTabs(app) {
 
   function ensureOpenTabs(project) {
-    app.sourceOpenTabIds = app.sourceOpenTabIds.filter((fileId) => {
-      const node = project.nodes[fileId];
-      return node?.kind === "file";
-    });
-
-    app.previewOpenTabIds = app.previewOpenTabIds.filter((fileId) => {
-      const node = project.nodes[fileId];
-      return node?.kind === "file";
-    });
-
-    if (project.activeFileId && !app.sourceOpenTabIds.includes(project.activeFileId)) {
-      app.sourceOpenTabIds.push(project.activeFileId);
-    }
-
-    if (!project.activeFileId && app.sourceOpenTabIds.length > 0) {
-      app.sourceOpenTabIds = [];
-    }
-
-    // The diff tab is a valid preview target but not a project file — leave it be.
-    if (app.previewFileId === app.DIFF_TAB_ID) {
-      if (!app.diffState.active) {
-        app.previewFileId = app.previewOpenTabIds[app.previewOpenTabIds.length - 1] ?? null;
-      }
-    } else if (app.previewFileId) {
-      const previewNode = project.nodes[app.previewFileId];
-      if (previewNode?.kind !== "file") {
-        app.previewFileId = null;
-      }
-    }
-
-    if (app.previewFileId && app.previewFileId !== app.DIFF_TAB_ID && !app.previewOpenTabIds.includes(app.previewFileId)) {
-      app.previewOpenTabIds.push(app.previewFileId);
-    }
-
-    if (!app.previewFileId && app.previewOpenTabIds.length > 0) {
-      app.previewFileId = app.previewOpenTabIds[app.previewOpenTabIds.length - 1] ?? null;
-    }
+    app.view.keepTabs(project, { diffTabId: app.DIFF_TAB_ID, diffActive: Boolean(app.diffState.active) });
   }
 
   function openSourceTab(fileId) {
@@ -54,9 +19,7 @@ export function createTabs(app) {
       return;
     }
 
-    if (!app.sourceOpenTabIds.includes(fileId)) {
-      app.sourceOpenTabIds.push(fileId);
-    }
+    app.view.openTab("source", fileId);
   }
 
   function openPreviewTab(fileId) {
@@ -66,15 +29,12 @@ export function createTabs(app) {
       return;
     }
 
-    if (!app.previewOpenTabIds.includes(fileId)) {
-      app.previewOpenTabIds.push(fileId);
-    }
+    app.view.openTab("preview", fileId);
   }
 
   function setActiveSourceFile(fileId) {
     app.captureViewState(); // resume-position: snapshot the outgoing document first
-    app.selectionNodeId = fileId;
-    app.sourcePart = null;
+    app.view.pick(fileId);
     openSourceTab(fileId);
     app.controller.setActiveFile(fileId);
     scheduleSaveUserState();
@@ -85,7 +45,7 @@ export function createTabs(app) {
   function currentWorkspaceView() {
     const project = app.controller.getProject();
     const pathFor = id => project.nodes[id]?.kind === "file" ? getPath(project, id) : null;
-    return { openFiles: app.sourceOpenTabIds.map(pathFor).filter(Boolean), activeFile: pathFor(project.activeFileId) };
+    return { openFiles: app.view.get().sourceOpenTabIds.map(pathFor).filter(Boolean), activeFile: pathFor(project.activeFileId) };
   }
   function cacheWorkspaceView() {
     if (app.workspaceMode !== "synced" || !app.settings.syncedProjectId) return;
@@ -120,7 +80,7 @@ export function createTabs(app) {
     saveUserStateTimer = setTimeout(() => {
       saveUserStateTimer = null;
       const project = app.controller.getProject();
-      const openFiles = app.sourceOpenTabIds
+      const openFiles = app.view.get().sourceOpenTabIds
         .map((id) => (project.nodes[id]?.kind === "file" ? getPath(project, id) : null))
         .filter(Boolean);
       const activeId = project.activeFileId;
@@ -158,8 +118,7 @@ export function createTabs(app) {
   }
 
   function setActiveSourcePart(fileId, partId) {
-    app.selectionNodeId = fileId;
-    app.sourcePart = { fileId, partId };
+    app.view.pick(fileId, partId);
     openSourceTab(fileId);
     app.controller.setActiveFile(fileId);
   }
@@ -169,7 +128,7 @@ export function createTabs(app) {
     if (fileId === app.DIFF_TAB_ID) {
       if (!app.diffState.active) return;
       app.captureViewState();
-      app.previewFileId = app.DIFF_TAB_ID;
+      app.view.showDiff(app.DIFF_TAB_ID);
       app.updateStatus(project);
       return;
     }
@@ -179,8 +138,7 @@ export function createTabs(app) {
     }
     app.captureViewState(); // resume-position: snapshot the outgoing preview first
     openPreviewTab(fileId);
-    app.previewFileId = fileId;
-    app.previewPart = null;
+    app.view.showPreview(fileId);
     app.updateStatus(project);
   }
 
@@ -201,7 +159,7 @@ export function createTabs(app) {
       if (app.settings.preview === "hidden") {
         app.togglePreview();
       }
-    } else if (app.previewFileId === null && app.isPreviewableFileName(node.name)) {
+    } else if (app.view.get().previewFileId === null && app.isPreviewableFileName(node.name)) {
       setPreviewFile(fileId);
     }
   }
@@ -252,8 +210,7 @@ export function createTabs(app) {
 
     if (pane === "preview") {
       openPreviewTab(fileId);
-      app.previewFileId = fileId;
-      app.previewPart = partId;
+      app.view.showPreview(fileId, partId);
       app.updateStatus(project);
       return;
     }
@@ -313,7 +270,7 @@ export function createTabs(app) {
   function closeSourceTab(fileId) {
     const project = app.controller.getProject();
     const wasActive = project.activeFileId === fileId;
-    app.sourceOpenTabIds = app.sourceOpenTabIds.filter((tabId) => tabId !== fileId);
+    app.view.closeTab("source", fileId);
     scheduleSaveUserState();
 
     if (!wasActive) {
@@ -321,9 +278,9 @@ export function createTabs(app) {
       return;
     }
 
-    const fallbackId = app.sourceOpenTabIds[app.sourceOpenTabIds.length - 1] ?? null;
+    const fallbackId = app.view.get().sourceOpenTabIds[app.view.get().sourceOpenTabIds.length - 1] ?? null;
     if (fallbackId) {
-      app.selectionNodeId = fallbackId;
+      app.view.select(fallbackId);
       app.controller.setActiveFile(fallbackId);
       return;
     }
@@ -334,31 +291,12 @@ export function createTabs(app) {
   }
 
   function closePreviewTab(fileId) {
-    app.previewOpenTabIds = app.previewOpenTabIds.filter((tabId) => tabId !== fileId);
-    if (app.previewFileId === fileId) {
-      app.previewFileId = app.previewOpenTabIds[app.previewOpenTabIds.length - 1] ?? null;
-    }
+    app.view.closeTab("preview", fileId);
     app.updateStatus(app.controller.getProject());
   }
 
-  function moveTabWithinList(tabIds, draggedFileId, targetFileId, placeAfter = false) {
-    const next = tabIds.filter((tabId) => tabId !== draggedFileId);
-    const targetIndex = next.indexOf(targetFileId);
-    if (targetIndex < 0) {
-      next.push(draggedFileId);
-      return next;
-    }
-
-    next.splice(targetIndex + (placeAfter ? 1 : 0), 0, draggedFileId);
-    return next;
-  }
-
   function reorderPaneTabs(pane, draggedFileId, targetFileId, placeAfter = false) {
-    if (pane === "source") {
-      app.sourceOpenTabIds = moveTabWithinList(app.sourceOpenTabIds, draggedFileId, targetFileId, placeAfter);
-    } else {
-      app.previewOpenTabIds = moveTabWithinList(app.previewOpenTabIds, draggedFileId, targetFileId, placeAfter);
-    }
+    app.view.moveTab(pane, draggedFileId, targetFileId, placeAfter);
 
     renderTabs(app.controller.getProject());
   }
@@ -516,29 +454,29 @@ export function createTabs(app) {
       tab.addEventListener("click", () => onActivate(fileId));
       if (allowReorder) {
         tab.addEventListener("dragstart", (event) => {
-          app.draggingTabState = { pane, fileId };
-          event.dataTransfer?.setData("text/mdnotes-tab", JSON.stringify(app.draggingTabState));
+          app.view.dragTab({ pane, fileId });
+          event.dataTransfer?.setData("text/mdnotes-tab", JSON.stringify({ pane, fileId }));
           if (event.dataTransfer) {
             event.dataTransfer.effectAllowed = "move";
           }
         });
         tab.addEventListener("dragend", () => {
-          app.draggingTabState = null;
+          app.view.dragTab(null);
         });
         tab.addEventListener("dragover", (event) => {
-          if (app.draggingTabState?.pane !== pane || app.draggingTabState.fileId === fileId) {
+          if (app.view.get().draggingTabState?.pane !== pane || app.view.get().draggingTabState.fileId === fileId) {
             return;
           }
           event.preventDefault();
         });
         tab.addEventListener("drop", (event) => {
-          if (app.draggingTabState?.pane !== pane || app.draggingTabState.fileId === fileId) {
+          if (app.view.get().draggingTabState?.pane !== pane || app.view.get().draggingTabState.fileId === fileId) {
             return;
           }
           event.preventDefault();
           const rect = tab.getBoundingClientRect();
           const placeAfter = event.clientX > rect.left + (rect.width / 2);
-          reorderPaneTabs(pane, app.draggingTabState.fileId, fileId, placeAfter);
+          reorderPaneTabs(pane, app.view.get().draggingTabState.fileId, fileId, placeAfter);
         });
       }
       close.addEventListener("click", (event) => {
@@ -599,7 +537,7 @@ export function createTabs(app) {
       strip: app.elements.sourceTabStrip,
       pane: "source",
       project,
-      tabIds: app.sourceOpenTabIds,
+      tabIds: app.view.get().sourceOpenTabIds,
       activeFileId: project.activeFileId,
       emptyText: "No source file selected",
       onActivate: setActiveSourceFile,
@@ -622,8 +560,8 @@ export function createTabs(app) {
       strip: app.elements.previewTabStrip,
       pane: "preview",
       project,
-      tabIds: app.previewOpenTabIds,
-      activeFileId: app.previewFileId,
+      tabIds: app.view.get().previewOpenTabIds,
+      activeFileId: app.view.get().previewFileId,
       emptyText: "No preview file selected",
       onActivate: setPreviewFile,
       onClose: closePreviewTab,
@@ -634,14 +572,14 @@ export function createTabs(app) {
 
   function bindTabStripReorderTarget(strip, pane) {
     strip.addEventListener("dragover", (event) => {
-      if (app.draggingTabState?.pane !== pane) {
+      if (app.view.get().draggingTabState?.pane !== pane) {
         return;
       }
       event.preventDefault();
     });
 
     strip.addEventListener("drop", (event) => {
-      if (app.draggingTabState?.pane !== pane) {
+      if (app.view.get().draggingTabState?.pane !== pane) {
         return;
       }
       const targetTab = event.target.closest(".editor-tab[data-file-id]");
@@ -650,18 +588,10 @@ export function createTabs(app) {
       }
 
       event.preventDefault();
-      const targetList = pane === "source" ? app.sourceOpenTabIds : app.previewOpenTabIds;
-      const draggedId = app.draggingTabState.fileId;
-      const next = targetList.filter((tabId) => tabId !== draggedId);
-      next.push(draggedId);
-      if (pane === "source") {
-        app.sourceOpenTabIds = next;
-      } else {
-        app.previewOpenTabIds = next;
-      }
+      app.view.moveTab(pane, app.view.get().draggingTabState.fileId, null);
       renderTabs(app.controller.getProject());
     });
   }
 
-  return { ensureOpenTabs, openSourceTab, openPreviewTab, setActiveSourceFile, currentWorkspaceView, cacheWorkspaceView, cachedWorkspaceView, showResumedFile, scheduleSaveUserState, restoreResumeState, setActiveSourcePart, setPreviewFile, openFileFromExplorer, canOpenFileInPane, setPaneDropActive, clearPaneDropState, openDroppedFileInPane, openPartInPane, bindPaneDropTarget, closeSourceTab, closePreviewTab, moveTabWithinList, reorderPaneTabs, tabOverflowButton, closeTabOverflowMenu, openTabOverflowMenu, renderTabStrip, renderTabs, bindTabStripReorderTarget };
+  return { ensureOpenTabs, openSourceTab, openPreviewTab, setActiveSourceFile, currentWorkspaceView, cacheWorkspaceView, cachedWorkspaceView, showResumedFile, scheduleSaveUserState, restoreResumeState, setActiveSourcePart, setPreviewFile, openFileFromExplorer, canOpenFileInPane, setPaneDropActive, clearPaneDropState, openDroppedFileInPane, openPartInPane, bindPaneDropTarget, closeSourceTab, closePreviewTab, reorderPaneTabs, tabOverflowButton, closeTabOverflowMenu, openTabOverflowMenu, renderTabStrip, renderTabs, bindTabStripReorderTarget };
 }

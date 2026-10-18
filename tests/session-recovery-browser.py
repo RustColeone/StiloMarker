@@ -55,7 +55,7 @@ async def main():
      if path!='/app/main.js':await route.continue_();return
      response=await route.fetch();body=await response.body()
     else:body=file.read_bytes()
-    if path=='/app/main.js':body+=b'\nwindow.recoveryTest={controller,collaboration,sessionRestorer,render,setActiveSourceFile,handleAccountLogout,getMode:()=>workspaceMode,getStatus:()=>syncState.status,hasAccount:()=>Boolean(identity.account())};'
+    if path=='/app/main.js':body+=b'\nwindow.recoveryTest={controller,collaboration,sessionRestorer,render,setActiveSourceFile,handleAccountLogout,getMode:()=>syncMode.get().workspaceMode,getStatus:()=>syncState.status,hasAccount:()=>Boolean(identity.account())};'
     await route.fulfill(content_type=mimetypes.guess_type(str(file))[0] or 'text/plain',body=body)
    else:await route.continue_()
   await context.route('**/*',route)

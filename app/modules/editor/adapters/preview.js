@@ -14,19 +14,20 @@ import { renderMarkdown } from "../model/markdown.js";
 import { ignore } from "../../../kernel/index.js";
 
 export function createPreview(app, previews) {
+  let mathJaxLoadPromise = null; // MathJax loads once, on the first formula
   function hasMathMarkup(value) {
     return /\$\$[\s\S]+?\$\$|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\]|\$(?!\s)[^$\n]+\$/.test(value);
   }
 
   function ensureMathJax() {
     if (globalThis.MathJax?.typesetPromise) return Promise.resolve(globalThis.MathJax);
-    if (app.mathJaxLoadPromise) return app.mathJaxLoadPromise;
+    if (mathJaxLoadPromise) return mathJaxLoadPromise;
     globalThis.MathJax = globalThis.MathJax ?? {
       tex: { inlineMath: [["$", "$"], ["\\(", "\\)"]], displayMath: [["$$", "$$"], ["\\[", "\\]"]] },
       svg: { fontCache: "global" },
       startup: { typeset: false }
     };
-    app.mathJaxLoadPromise = new Promise((resolve, reject) => {
+    mathJaxLoadPromise = new Promise((resolve, reject) => {
       const script = document.createElement("script");
       script.src = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js";
       script.async = true;
@@ -34,7 +35,7 @@ export function createPreview(app, previews) {
       script.onerror = () => reject(new Error("MathJax failed to load."));
       document.head.append(script);
     });
-    return app.mathJaxLoadPromise;
+    return mathJaxLoadPromise;
   }
 
   async function typesetPreview(content, target = app.elements.preview) {
@@ -115,12 +116,12 @@ export function createPreview(app, previews) {
     previewRenderKey = key;
     target.replaceChildren();
     if (!file) return { shouldTypeset: false, content: "" };
-    return preview.render(target, project, file, { ...tools, part: app.previewFileId === file.id ? app.previewPart ?? null : null });
+    return preview.render(target, project, file, { ...tools, part: app.view.get().previewFileId === file.id ? app.view.get().previewPart ?? null : null });
   }
 
   function printPreviewAsPdf() {
     const project = app.controller.getProject();
-    const previewFile = app.previewFileId ? project.nodes[app.previewFileId] : null;
+    const previewFile = app.view.get().previewFileId ? project.nodes[app.view.get().previewFileId] : null;
     if (!previewFile) {
       app.notify("Open a markdown or image file before exporting PDF.");
       return;

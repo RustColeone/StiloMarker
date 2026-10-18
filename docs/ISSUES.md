@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-18 · release `v0.1.52` (not deployed yet)
+Last updated: 2026-10-18 · release `v0.1.53` (not deployed yet; v0.1.52 neither)
 
 ---
 
@@ -68,6 +68,32 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.53: one owner for each piece of shared state; the diagram preview is back
+
+Step S2 of the follow-up to the restructure. For users, one thing changes:
+diagrams preview as diagrams again.
+
+- **Diagram preview (a bug since v0.1.48):** moving the URL album into an
+  extension also deleted the `.bmap` preview, so a diagram showed as text in
+  the preview instead of the diagram editor, and its pan and zoom were no
+  longer remembered. Restored; `shell-browser.py` now opens a diagram. Also:
+  a link to another file inside a diagram called a function the preview was
+  never given (an error on click, older than v0.1.48); it is passed now.
+- **One owner per variable:** `main.js` handed out 26 setters, so any of
+  several files could change, for example, the selected node (written in 23
+  places). None are left, and rule 10 fails on a new one:
+  - what the editor shows (open tabs, the preview's file and part, the
+    explorer selection, a dragged tab) is the Editor's `view`;
+  - shared or local work and the local project kept aside meanwhile is Sync's
+    `mode` (Sync now starts through the kernel);
+  - the rest moved into the only file that used it.
+- Every change of `view` and `mode` goes through a named action (`pick`,
+  `showPreview`, `share`, `leave`...) and appears in the Trace tab with what
+  it changed. Their lists are frozen, so code that pushes onto a tab list
+  fails loudly instead of changing it behind the owner's back.
+- The getters `main.js` hands to the code it wires: 261 → 227, now counted
+  and allowed only to shrink. `main.js` is 4,539 lines (was 4,667).
 
 ### v0.1.52: the trace, and no error swallowed in silence
 

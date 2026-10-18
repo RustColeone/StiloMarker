@@ -132,8 +132,7 @@ export function createFileActions(app) {
     const oldPath = getPath(project, nodeId);
     const parentPath = destination.parentId === ROOT_ID ? "" : getPath(project, destination.parentId);
     app.controller.move(nodeId, destination.parentId, destination.index);
-    app.selectionNodeId = nodeId;
-    app.sourcePart = null;
+    app.view.pick(nodeId);
     // Tell the server. A move used to change only this browser's tree; the server
     // kept the old path, and the next reconnect's reconcile — which can only add
     // what the server lacks — uploaded the file again at its new path, leaving
@@ -167,14 +166,10 @@ export function createFileActions(app) {
     if (part) {
       app.setActiveSourcePart(fileId, part.id);
     } else {
-      app.selectionNodeId = fileId;
-      app.sourcePart = null;
+      app.view.pick(fileId);
       app.controller.setActiveFile(fileId);
     }
-    if (previewToo) {
-      app.previewFileId = fileId;
-      app.previewPart = part?.id ?? null;
-    }
+    if (previewToo) app.view.showPreview(fileId, part?.id ?? null);
   }
 
   function moveExplorerPart(sourceFileId, sourcePartId, targetNodeId, targetPartId, placement) {
@@ -218,19 +213,19 @@ export function createFileActions(app) {
       report(error);
       return false;
     }
-    showMovedPart(targetNodeId, parts, nextTargetContent, moving.name, app.previewFileId === sourceFileId || app.previewFileId === targetNodeId);
+    showMovedPart(targetNodeId, parts, nextTargetContent, moving.name, app.view.get().previewFileId === sourceFileId || app.view.get().previewFileId === targetNodeId);
     app.logDebug("action", "Part moved", `${getPath(app.controller.getProject(), targetNodeId)} :: ${moving.name}`);
     return true;
   }
 
   function getSelectedNode(project) {
-    return project.nodes[app.selectionNodeId] ?? (project.activeFileId ? project.nodes[project.activeFileId] : project.nodes[project.rootId]);
+    return project.nodes[app.view.get().selectionNodeId] ?? (project.activeFileId ? project.nodes[project.activeFileId] : project.nodes[project.rootId]);
   }
 
   // The part open in the source editor: { file, parts, part }, or null.
   function getSelectedPart(project) {
-    const found = app.sourcePart ? partsFile(project, app.sourcePart.fileId) : null;
-    const part = found?.parts.list(found.file.content).find((candidate) => candidate.id === app.sourcePart.partId);
+    const found = app.view.get().sourcePart ? partsFile(project, app.view.get().sourcePart.fileId) : null;
+    const part = found?.parts.list(found.file.content).find((candidate) => candidate.id === app.view.get().sourcePart.partId);
     return part ? { ...found, part } : null;
   }
 
@@ -353,8 +348,7 @@ export function createFileActions(app) {
       return false;
     }
 
-    app.selectionNodeId = createdId;
-    app.sourcePart = null;
+    app.view.pick(createdId);
     const createdNode = app.controller.getProject().nodes[createdId];
     if (createdNode?.kind === "file") {
       app.setActiveSourceFile(createdId);
@@ -629,6 +623,16 @@ export function createFileActions(app) {
     }
   }
 
+  // The image a "Replace File" action is choosing a new file for.
+  let replaceFileTargetId = null;
+  async function replaceWithChosenFile(event) {
+    const [file, target] = [event.target.files?.[0], replaceFileTargetId];
+    replaceFileTargetId = null;
+    event.target.value = ""; // the same file can be chosen again next time
+    if (!file || !target) return;
+    await replaceImageFile(target, file).catch((error) => app.notify(error.message));
+  }
+
   async function replaceImageFile(targetFileId, file) {
     const project = app.controller.getProject();
     const targetFile = project.nodes[targetFileId];
@@ -647,7 +651,7 @@ export function createFileActions(app) {
     app.logDebug("action", "Image file replaced", getPath(project, targetFile.id));
   }
 
-  function openAddFileDialog(nodeId = app.selectionNodeId) {
+  function openAddFileDialog(nodeId = app.view.get().selectionNodeId) {
     const project = app.controller.getProject();
     const node = project.nodes[nodeId] ?? project.nodes[project.rootId];
     const parent = node.kind === "folder" ? node : project.nodes[node.parentId];
@@ -677,8 +681,7 @@ export function createFileActions(app) {
       void app.workspace.write(getPath(project, file.id), nextContent, { source: "file part" }).catch((error) => app.notify(error.message));
       showMovedPart(file.id, parts, nextContent, part.name, false);
       app.openPreviewTab(file.id);
-      app.previewFileId = file.id;
-      app.previewPart = null;
+      app.view.showPreview(file.id);
       app.logDebug("action", "Part added", `${getPath(project, file.id)} :: ${part.name}`);
     } catch (error) {
       app.notify(error.message);
@@ -715,7 +718,6 @@ export function createFileActions(app) {
       const nextProject = app.controller.getProject();
       const createdFile = findChildByName(nextProject, parent.id, fileName);
       if (createdFile?.kind === "file") {
-        app.selectionNodeId = createdFile.id;
         app.setActiveSourceFile(createdFile.id);
         if (app.isPreviewableFileName(createdFile.name)) {
           app.setPreviewFile(createdFile.id);
@@ -743,7 +745,7 @@ export function createFileActions(app) {
         // Select the new folder so the next create/rename targets it; keep the
         // explorer open so the user can rename or add inside it right away.
         const created = findChildByName(app.controller.getProject(), parent.id, name);
-        if (created) app.selectionNodeId = created.id;
+        if (created) app.view.select(created.id);
         app.render(app.controller.getProject());
         app.showToast(`Created folder ${name}`);
         return;
@@ -756,10 +758,7 @@ export function createFileActions(app) {
       // Open the new file as the active document (so it's what you're editing) but
       // leave the explorer open so it can be renamed/managed without reopening it.
       const created = findChildByName(app.controller.getProject(), parent.id, name);
-      if (created) {
-        app.selectionNodeId = created.id;
-        app.setActiveSourceFile(created.id);
-      }
+      if (created) app.setActiveSourceFile(created.id);
       app.showToast(`Created ${name}`);
     } catch (error) {
       app.notify(error.message);
@@ -826,10 +825,7 @@ export function createFileActions(app) {
     app.controller.createFile(parent.id, name, content);
     app.publishOperation({ type: "create-file", parentPath, name, content });
     const created = findChildByName(app.controller.getProject(), parent.id, name);
-    if (created) {
-      app.selectionNodeId = created.id;
-      app.setActiveSourceFile(created.id);
-    }
+    if (created) app.setActiveSourceFile(created.id);
     app.showToast(`Created ${name}`);
     return created;
   }
@@ -931,8 +927,7 @@ export function createFileActions(app) {
       try {
         const nextContent = parts.remove(file.content, part.id);
         void app.workspace.write(getPath(project, file.id), nextContent, { source: "file part" }).catch((error) => app.notify(error.message));
-        app.sourcePart = null;
-        app.previewPart = null;
+        app.view.clearParts();
         app.setActiveSourceFile(file.id);
       } catch (error) {
         app.notify(error.message);
@@ -1076,8 +1071,7 @@ export function createFileActions(app) {
     }
 
     const nodeId = target.nodeId;
-    app.selectionNodeId = nodeId;
-    app.sourcePart = target.partId ? { fileId: nodeId, partId: target.partId } : null;
+    app.view.pick(nodeId, target.partId);
     app.logDebug("action", "Explorer action", action);
     if (action === "open-source") {
       app.setActiveSourceFile(nodeId);
@@ -1135,7 +1129,7 @@ export function createFileActions(app) {
       return;
     }
     if (action === "replace-file") {
-      app.replaceFileTargetId = nodeId;
+      replaceFileTargetId = nodeId;
       app.elements.replaceFileInput.click();
       return;
     }
@@ -1178,7 +1172,7 @@ export function createFileActions(app) {
     deleteSelected, exportNode, getExplorerDropPayloadKind, getExplorerDropPlacement,
     getSelectedNode, getSelectedParent, getSelectedPart, handleAddFileTransfer,
     handleEditorDrop, handleExplorerAction, handleNewFileSubmit, moveExplorerNode,
-    moveExplorerPart, openNewFileDialog, renameFileById, renameSelected, replaceImageFile,
+    moveExplorerPart, openNewFileDialog, renameFileById, renameSelected, replaceImageFile, replaceWithChosenFile,
     resetAddFileState, setAddFileStatus, setExplorerDropState, stageAddFileFromLocalFile,
     submitAddFile
   };

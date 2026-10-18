@@ -30,7 +30,11 @@ const API = [
 ];
 
 export function createEditorCore(app) {
-  const ed = {};
+  const ed = { rendering: false, typing: false };
   for (const install of [installDom, installRender, installHistory, installCursors, installToolbar, installKeys]) install(ed, app);
-  return Object.fromEntries(API.map((name) => [name, ed[name]]));
+  return {
+    ...Object.fromEntries(API.map((name) => [name, ed[name]])),
+    isRendering: () => ed.rendering, // redrawing the text (the page may report focus oddly meanwhile)
+    isTyping: () => ed.typing        // applying a keystroke: the rest of the app may catch up later
+  };
 }

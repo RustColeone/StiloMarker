@@ -10,7 +10,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { ROOT, codeFiles, loadModules, moduleOf, oversized, spellings } from "../tests/structure/scan.mjs";
+import { ROOT, codeFiles, loadModules, mainGetters, moduleOf, oversized, spellings } from "../tests/structure/scan.mjs";
 
 const path = join(ROOT, "tests/structure/baseline.json");
 const init = process.argv.includes("--init");
@@ -23,7 +23,7 @@ const ownedBy = (file, name) => {
   return Boolean(m && (m.owns.names ?? []).includes(name));
 };
 const legacy = Object.fromEntries(Object.entries(spellings(files)).map(([name, list]) => [name, list.filter((file) => !ownedBy(file, name))]));
-const now = { oversized: oversized(files), spellings: legacy, uncoveredTwins: twins.uncovered.length };
+const now = { oversized: oversized(files), spellings: legacy, uncoveredTwins: twins.uncovered.length, mainGetters: mainGetters() };
 
 if (!init) {
   if (!existsSync(path)) {
@@ -40,6 +40,7 @@ if (!init) {
     for (const file of list) if (!(old.spellings[name] ?? []).includes(file)) grew.push(`${file} newly spells ${name}`);
   }
   if (now.uncoveredTwins > old.uncoveredTwins) grew.push("more twins without a case table");
+  if (old.mainGetters !== undefined && now.mainGetters > old.mainGetters) grew.push(`main.js hands out ${now.mainGetters} getters (recorded ${old.mainGetters})`);
   if (grew.length) {
     console.error("The baseline may only shrink. Fix these instead of recording them:\n  " + grew.join("\n  "));
     process.exit(1);
@@ -51,7 +52,9 @@ writeFileSync(path, JSON.stringify({
   about: "Structure violations that existed when the rules were introduced (2026-10-16). They may only shrink; see tools/structure-baseline.mjs.",
   oversized: sorted(now.oversized),
   spellings: sorted(now.spellings),
-  uncoveredTwins: now.uncoveredTwins
+  uncoveredTwins: now.uncoveredTwins,
+  mainGetters: now.mainGetters
 }, null, 2) + "\n");
 console.log(`Baseline written: ${Object.keys(now.oversized).length} oversized files, ` +
-  `${Object.values(now.spellings).reduce((n, l) => n + l.length, 0)} legacy spellings, ${now.uncoveredTwins} uncovered twins.`);
+  `${Object.values(now.spellings).reduce((n, l) => n + l.length, 0)} legacy spellings, ${now.uncoveredTwins} uncovered twins, ` +
+  `${now.mainGetters} getters handed out by main.js.`);

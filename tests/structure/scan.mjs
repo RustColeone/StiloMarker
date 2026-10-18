@@ -123,6 +123,27 @@ export function silentCatches(files = codeFiles()) {
   return out;
 }
 
+// Shared state handed out of a file (rule 10). A setter in an object literal
+// (`set name(value) { name = value; }`) lets other code write that file's
+// variables, so nobody owns them; none may exist. The getters main.js hands to
+// the code it wires are counted: the count may only shrink (to 0, when main.js
+// only starts the kernel).
+const SETTER = /^\s*set [A-Za-z_$][\w$]*\(\s*\w+\s*\)\s*\{/gm;
+const MAIN_GETTER = /^\s+get [A-Za-z_$][\w$]*\(\) \{ return /gm;
+
+export function setters(files = codeFiles()) {
+  const out = [];
+  for (const file of files.filter((f) => /^(app|extensions)\/.*\.m?js$/.test(f))) {
+    const code = codeOf(file);
+    for (const m of code.matchAll(SETTER)) out.push(`${file}:${code.slice(0, m.index).split("\n").length}`);
+  }
+  return out;
+}
+
+export function mainGetters() {
+  return (codeOf("app/main.js").match(MAIN_GETTER) ?? []).length;
+}
+
 // Relative imports of a JavaScript file, resolved to repo paths.
 export function jsImports(file) {
   const text = read(file);

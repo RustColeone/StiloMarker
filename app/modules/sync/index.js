@@ -12,12 +12,16 @@
 //     uploadAsset, clock? }) -> the runtime (connect, openWorkspace, …)
 //     Events Sync does not own (other modules' events on its stream) go to onEvent.
 //   syncVersion          the sync compatibility level this tab speaks
+// API: mode, whether this tab works on a shared workspace or its own local
+// project (service/mode.js): get() -> { workspaceMode, privateProject },
+// share(currentProject), leave() -> the kept project, forgetKept(), restore(saved).
 //   transformTextPatch   sanitizeProjectForSync
 import { defineModule } from "../../kernel/index.js";
 import * as api from "./adapters/api.js";
 import { pageClock } from "./adapters/page.js";
 import contract from "./model/contract.js";
 import { createRuntime } from "./service/runtime.js";
+import { LOCAL_MODE, createMode } from "./service/mode.js";
 
 export { transformTextPatch } from "./model/rebase.js";
 export { sanitizeProjectForSync } from "./model/paths.js";
@@ -33,10 +37,12 @@ export default defineModule({
   uses: ["shell", "file-types", "workspace"],
   owns: {
     names: ["sync protocol number"],
-    state: ["the live session", "unconfirmed typing"],
+    state: ["the live session", "unconfirmed typing", "shared or local work, and the local project kept aside"],
     rules: ["rebasing a text patch"]
   },
-  start() {
-    return { createCollaborationRuntime, syncVersion };
+  start(ctx) {
+    // Shared or local work: read mode.get(), change it through its actions.
+    const mode = createMode(ctx.state(LOCAL_MODE));
+    return { createCollaborationRuntime, syncVersion, mode };
   }
 });

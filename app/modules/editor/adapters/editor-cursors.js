@@ -315,7 +315,7 @@ export function installCursors(ed, app) {
       if (!app.elements.editorContent.contains(event.target)) app.rememberEditorSelection();
     }, true);
     document.addEventListener("selectionchange", () => {
-      if (document.activeElement === app.elements.editorContent && !app._editorUpdating && !app.editorIsComposing) app.rememberEditorSelection();
+      if (document.activeElement === app.elements.editorContent && !ed.rendering && !app.editorIsComposing) app.rememberEditorSelection();
       if (!app.collaboration.isConnected()) return;
       const activeFile = app.controller.getActiveFile();
       if (!activeFile) return;

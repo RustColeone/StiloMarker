@@ -16,13 +16,14 @@ from playwright.async_api import async_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get('STILO_TEST_URL', 'http://127.0.0.1:8765')
-HOOK = b'\nwindow.__shellTest = { shell, renameFileById, get log() { return debugState.entries.map((e) => e.message); } };\n'
+HOOK = b'\nwindow.__shellTest = { shell, renameFileById, openFileFromExplorer, get log() { return debugState.entries.map((e) => e.message); } };\n'
 
 
 def project():
     return {'id': 'shell-test', 'name': 'Shell', 'sourceMode': 'memory', 'rootId': 'root', 'activeFileId': 'a', 'nodes': {
-        'root': {'id': 'root', 'kind': 'folder', 'name': 'Shell', 'children': ['a'], 'expanded': True},
-        'a': {'id': 'a', 'kind': 'file', 'parentId': 'root', 'name': 'notes.md', 'content': '# Notes', 'dirty': False}}}
+        'root': {'id': 'root', 'kind': 'folder', 'name': 'Shell', 'children': ['a', 'd'], 'expanded': True},
+        'a': {'id': 'a', 'kind': 'file', 'parentId': 'root', 'name': 'notes.md', 'content': '# Notes', 'dirty': False},
+        'd': {'id': 'd', 'kind': 'file', 'parentId': 'root', 'name': 'welcome.bmap', 'content': (ROOT / 'Template/welcome.bmap').read_text(), 'dirty': False}}}
 
 
 async def open_page(browser, viewport, **options):
@@ -139,6 +140,11 @@ async def main():
         await page.wait_for_function('stiloTrace().length === 0')
         errors[:] = [e for e in errors if 'trace check' not in e]
         assert not errors, errors
+
+        # A diagram previews as the diagram editor, not as its text (lost in v0.1.48).
+        await page.evaluate('window.__shellTest.openFileFromExplorer("d")')
+        await page.wait_for_selector('#preview-output .bmap-editor', timeout=15000)
+        assert not errors, errors
         await context.close()
 
         # Phone: the ⋮ panel shows the same groups.
@@ -155,7 +161,7 @@ async def main():
         await browser.close()
         print(json.dumps({'checks': ['file-type lists from File types', 'five menus with their items', 'one menu open at a time', 'live titles',
                                      'menu item runs its command', 'Ctrl+S runs Save', 'rename keeps the extension',
-                                     'late menus and commands appear', 'the trace and its tab', 'phone menu panel'], 'runtimeErrors': 0}))
+                                     'late menus and commands appear', 'the trace and its tab', 'a diagram previews as a diagram', 'phone menu panel'], 'runtimeErrors': 0}))
 
 
 asyncio.run(main())

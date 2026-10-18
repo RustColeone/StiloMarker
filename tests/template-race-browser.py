@@ -63,7 +63,7 @@ async def main():
             if file.is_file():
                 body = file.read_bytes()
                 if path == '/app/main.js':
-                    body += b'\nwindow.__race={controller,getMode:()=>workspaceMode};\n'
+                    body += b'\nwindow.__race={controller,getMode:()=>syncMode.get().workspaceMode};\n'
                 await route.fulfill(content_type=mimetypes.guess_type(str(file))[0] or 'text/plain', body=body)
             else:
                 await route.continue_()

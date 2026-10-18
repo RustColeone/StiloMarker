@@ -76,6 +76,14 @@ export function describe(value) {
   return `{${Object.keys(value).slice(0, 6).join(", ")}}`;
 }
 
+// A short description of a value in a state change: lists show their first
+// items, objects their naming fields.
+export function brief(value) {
+  if (Array.isArray(value)) return `[${value.slice(0, 5).map((item) => brief(item)).join(", ")}${value.length > 5 ? `, +${value.length - 5}` : ""}]`;
+  if (value && typeof value === "object") return describe(value);
+  return value === undefined ? "undefined" : String(value).slice(0, 80);
+}
+
 // "app/x/y.js:12" for the first stack frame outside this file.
 export function callerOf(stack = "") {
   for (const line of String(stack).split("\n").slice(1)) {
