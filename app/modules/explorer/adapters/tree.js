@@ -14,7 +14,7 @@ function getFileIconClass(node) {
 
 const isExpandableFile = (node) => node.kind === "file" && builtinTypes.typeOf(node.name)?.expandable === true;
 
-function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenPart, onToggleFolder, onSelectNode, onAction, canPasteTarget, canPreviewFile, canManagePreview, onDragNodeStart, onDragPartStart, getFilterMode, getAssetPreviewSrc, listParts, getPartAdder, getSelectedTarget, markOf = () => null }) {
+function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenPart, onToggleFolder, onSelectNode, onAction, canPasteTarget, canPreviewFile, canManagePreview, onDragNodeStart, onDragPartStart, getFilterMode, getAssetPreviewSrc, listParts, getPartAdder, getSelectedTarget, markOf = () => null, extraEntriesFor = () => [] }) {
   let menuTarget = null;
   let currentProject = null;
   let activeMenuMode = null;
@@ -110,22 +110,12 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
         typeEntries = [["Copy", "copy"], ["Generate Module Map", "generate-module-map"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
       } else if (format === "image") {
         typeEntries = [["Copy", "copy"], ["Replace File", "replace-file"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
-      } else if (format === "bmap") {
-        typeEntries = [
-          ["Copy", "copy"],
-          ["Export", "export"],
-          ["Export As", null, [
-            ["Image (PNG)", "export-bmap-png"],
-            ["Image (JPG)", "export-bmap-jpg"],
-            ["Vector (SVG)", "export-bmap-svg"],
-          ]],
-          ["Rename", "rename"],
-          ["Delete", "delete"],
-        ];
       } else {
         typeEntries = [["Copy", "copy"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
       }
 
+      // A file type's own entries (explorer.fileMenus: a diagram's Export As).
+      typeEntries.push(...extraEntriesFor(node));
       const addPart = getPartAdder?.(node.id);
       if (addPart) {
         typeEntries.splice(1, 0, [addPart, "add-part"]);

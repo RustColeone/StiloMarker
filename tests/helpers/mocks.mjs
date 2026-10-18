@@ -31,7 +31,7 @@ export async function loadModules() {
     load("app/domain/project-model.js"),
     load("app/modules/workspace/adapters/zip.js"),
     load("app/modules/editor/model/markdown.js"),
-    load("app/services/bmap-service.js"),
+    load("extensions/bmap-diagram/browser/model/bmap.js"),
     load("app/services/mtree-module-map-service.js"),
     load("app/modules/workspace/adapters/disk-folders.js"),
     load("app/modules/cloud/adapters/api.js")

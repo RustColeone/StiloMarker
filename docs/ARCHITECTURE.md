@@ -328,9 +328,10 @@ That is where bugs are hard to find. Steps, each its own release:
 | S4c-1 | Sync owns the connection's life (v0.1.69, `adapters/connection.js`): joining a PIN session (Join, after the user agrees) and keeping it (auto-reconnect with backoff), what changes as the status does (the shared or own workspace, the in-step revision, reconnect toasts, a too-old app upgraded), switching between the shared workspace and the tab's own (`sync.switchMode`, the Session panel's switch), and sending a change (`sync.publish`: the base revision stamped, an image's bytes uploaded first, a refused write reloaded). Chats and the Agent page hear their own events on Sync's stream; the Assistant asks the agent again when a session connects or drops; the Explorer and Cloud call Sync directly. A deliberate switch to the tab's own workspace is announced (`"switched"`), so only that cancels an automatic resume | done (v0.1.69) |
 | S4c-2 | Resuming and leaving (v0.1.70): Cloud resumes the last session (`adapters/resume.js`, `service/recovery.js`: at start, back on the page, back online, the welcome page's Resume; a deliberate switch to the tab's own workspace cancels it); Workspace reattaches the device folder when the project opens; when the page hides or goes, each module keeps its own part (the Editor where the reader was, Workspace this browser's copy and the unsaved-changes warning, Sync the in-step revision and leaving the session). `main.js` keeps one call to start the resume | done (v0.1.70) |
 | S4d-1 | History owns snapshots on the page (v0.1.71, `history.attach(port)`, `adapters/surface.js`): the snapshots, the version label (drawn as the project changes), the host's counters, the Snapshots and Workspace History dialogs and their commands, all moved from `app/features`. The diff is a tab in the preview pane through a new Editor extension point, `editor.paneViews` (a tab that is not a file: `{ id, element, tab(), show({ fresh }), close() }`); the Editor draws the preview pane (a file's preview or a pane view) and takes edits made in a preview. Which cloud workspace is open is Sync's (`sync.cloudWorkspace()`). The diff names left the Editor's port, the snapshot ones Cloud's; `main.js` hands out 40 getters (58 before) | done (v0.1.71) |
-| S4d-2 | Diagrams as an extension: generating, loading the view, their settings and export | next |
+| S4d-2a | Diagrams' browser code is an extension (v0.1.72, `extensions/bmap-diagram`): the diagram editor (moved whole from `app/ui/bmap-view.js`, still over budget, recorded under its new path), the format, the preview, Quick Generate, export, its two settings. Two Explorer extension points: `explorer.fileMenus` (a file type's own context-menu entries, e.g. Export As) and `explorer.newFiles` (a new file's first content; character sheets use it too). The name `bmap-diagram` keeps the "the core never names an extension" check meaningful ("diagram" is an everyday word in the core) | done (v0.1.72) |
+| S4d-2b | The `.bmap` file type moves into the extension's manifest, with its styles; the core's by-name checks (the Editor's tabs and autocomplete) become extension points | next |
 | S4d-3 | The comments glue (Comments), the welcome page (Editor), the maintenance commands (Workspace) | |
-| S4e | Connecting and boot (Sync, Cloud); snapshots, the diagram's generate, the welcome screen (History, the diagram, Editor); the `elements` table, then `main.js` only starts the kernel | |
+| S4e | Layout and gestures (Shell, the groundwork for step 5's areas), the `elements` table; then `main.js` only starts the kernel | |
 | S4 | `main.js` only starts the kernel; then the server's `WorkspaceRegistry` the same way | |
 
 ### Notes for module authors
@@ -433,6 +434,10 @@ That is where bugs are hard to find. Steps, each its own release:
   `editor.highlighters.add({ id: format, line(rawLine, { escape, blank }) })`
   and `editor.toolbars.add({ id: format, groups })` (groups as in
   `TOOLBAR_SPECS`).
+- A file type's own entries in the explorer's context menu:
+  `explorer.fileMenus.add({ id: type, entries: [[label, action] | [label,
+  null, [[label, action]]]], run(action, nodeId) })`; a new file's first
+  content: `explorer.newFiles.add({ id: type, content(name) })`.
 - An item in the status bar: `shell.statusBar.add({ id, order, title?,
   action?, dot?, grow?, hidden? })` returns `{ set({ text, tone, title,
   hidden }), element, extra }`; draw it from your own state when that changes.

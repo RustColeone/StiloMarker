@@ -69,6 +69,20 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.72: diagrams are an extension
+
+Step S4d-2a. One small change for users:
+
+- A diagram's **Export As** now comes after **Export** in the explorer's
+  menu, as other file types' own entries do (it was between Export and
+  Rename).
+- The diagram editor, Quick Generate, export and the diagrams' settings moved
+  from `app/ui`, `app/services`, `app/features` and `main.js` into
+  `extensions/bmap-diagram`. The Explorer gained extension points for a file
+  type's menu entries and a new file's content.
+- `shell-browser.py` now exports a diagram as SVG from the explorer and
+  creates a new diagram.
+
 ### v0.1.71: History owns snapshots and the diff tab
 
 Step S4d-1. Nothing changes for users.

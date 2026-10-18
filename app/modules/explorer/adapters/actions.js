@@ -92,17 +92,10 @@ export function createActions(app) {
       app.exportNode(nodeId);
       return;
     }
-    if (action === "export-bmap-png") {
-      await app.exportDiagram(nodeId, "png");
-      return;
-    }
-    if (action === "export-bmap-jpg") {
-      await app.exportDiagram(nodeId, "jpg");
-      return;
-    }
-    if (action === "export-bmap-svg") {
-      await app.exportDiagram(nodeId, "svg");
-    }
+    // One of a file type's own entries (explorer.fileMenus).
+    const node = app.controller.getProject().nodes[nodeId];
+    const menu = node?.kind === "file" ? app.fileMenuOf(node.name) : null;
+    if (menu) await menu.run(action, nodeId);
   }
 
   return { handleExplorerAction };

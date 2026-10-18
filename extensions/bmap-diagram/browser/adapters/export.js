@@ -1,8 +1,6 @@
-// Legacy (before the module restructure): exporting a diagram (.bmap) as SVG,
-// PNG or JPG. The Explorer's "Export As" actions reach it through their port
-// (exportDiagram). It goes with the diagram code when that becomes an extension.
-import { downloadBlob, fileBaseName, fileTypeExtension, isBmapFileName } from "../modules/workspace/index.js";
-import { normalizeBmapAst, parseBmap } from "../services/bmap-service.js";
+// Exporting a diagram as SVG, PNG or JPG (the Explorer's "Export As" for it).
+import { downloadBlob, fileBaseName, fileTypeExtension, isBmapFileName } from "../../../../app/modules/workspace/index.js";
+import { normalizeBmapAst, parseBmap } from "../model/bmap.js";
 
 export function createDiagramExport(app) {
   /** Rasterize an SVG string to a PNG/JPG Blob. `background` (e.g. white) is

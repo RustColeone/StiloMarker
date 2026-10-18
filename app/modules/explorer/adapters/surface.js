@@ -23,7 +23,7 @@ import { createExplorerView } from "./tree.js";
 export const PORT = [
   "settings", "persistSettings",
   "elements", "logDebug", "imageSrcFor", "canManagePreview", "openAccessEditor", "openMtreeToolsDialog",
-  "remapPersonaPaths", "initialContentForKind", "exportDiagram"
+  "remapPersonaPaths"
 ];
 
 // The editor's functions the explorer calls (editor.parts()).
@@ -33,7 +33,7 @@ const EDITOR = [
   "setActiveSourceFile", "setActiveSourcePart", "setEditorSelection", "setPreviewFile"
 ];
 
-export function createSurface({ port, workspace, editor, shell, sync }) {
+export function createSurface({ port, workspace, editor, shell, sync, types, fileMenus, newFiles }) {
   const missing = PORT.filter((name) => !(name in port));
   if (missing.length) throw new Error(`explorer.attach: the port lacks ${missing.join(", ")}`);
   const editorParts = editor.parts();
@@ -45,6 +45,9 @@ export function createSurface({ port, workspace, editor, shell, sync }) {
     // What Copy put aside for Paste.
     explorerClipboard: { payload: null },
     workspace, view: editor.view, parts: workspace.parts,
+    // A file type's own context-menu entries, and a new file's first content (extension points).
+    fileMenuOf: (name) => fileMenus.get(types.typeOf(name)?.id ?? "") ?? null,
+    newFileContent: (kind, name) => newFiles.get(kind)?.content(name) ?? "",
     // Changes made here reach the shared workspace through Sync.
     publishOperation: (operation) => sync.publish(operation),
     publishSnapshot: () => sync.publishSnapshot(),
@@ -83,6 +86,7 @@ export function createSurface({ port, workspace, editor, shell, sync }) {
     surface: app.elements.explorerPanel,
     contextMenu: app.elements.explorerContextMenu,
     markOf: (path) => editor.marks.get(path),
+    extraEntriesFor: (node) => app.fileMenuOf(node.name)?.entries ?? [],
     onOpenFile(fileId) {
       app.openFileFromExplorer(fileId);
     },

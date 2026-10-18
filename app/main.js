@@ -18,12 +18,10 @@ import cloudModule, { saveUserState, uploadAsset } from "./modules/cloud/index.j
 import modelsModule from "./modules/models/index.js";
 import chatsModule from "./modules/chats/index.js";
 import charactersModule from "./modules/characters/index.js";
-import assistantModule, { sendGenerationRequest } from "./modules/assistant/index.js";
+import assistantModule from "./modules/assistant/index.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { query } from "./ui/dom.js";
-import { createDefaultBmap } from "./services/bmap-service.js";
 import explorerModule from "./modules/explorer/index.js";
-import { createDiagramExport } from "./features/diagram-export.js";
 import { registerPreviews } from "./features/previews.js";
 import { createLayout } from "./ui/layout.js";
 import editorModule, { escapeHtmlAttribute, forgetViewStates, getRelativeProjectPath, normalizePath, renderMarkdown } from "./modules/editor/index.js";
@@ -254,9 +252,13 @@ var explorerParts = modules.explorer.attach({
   settings, persistSettings, elements, logDebug, imageSrcFor,
   canManagePreview: () => Boolean(identity.account()) && syncMode.get().workspaceMode === "synced"
     && collaboration.isConnected() && Boolean(settings.lastWorkspace?.team),
-  openAccessEditor, openMtreeToolsDialog, remapPersonaPaths, initialContentForKind,
-  exportDiagram: createDiagramExport({ get controller() { return controller; }, loadBmapView, notify, logDebug })
+  openAccessEditor, openMtreeToolsDialog, remapPersonaPaths
 });
+// A new character sheet starts from the template (diagrams add their own: extensions/bmap-diagram).
+modules.explorer.newFiles.add({ id: "persona", content(name) {
+  const base = parsePersona("", name).name;
+  return personaTemplate(/^new character( \d+)?$/i.test(base) ? "New Character" : base);
+} });
 // Snapshots, the version label, the diff tab and History's dialogs (modules/history/adapters/surface.js).
 var historyParts = modules.history.attach({ togglePreview, logDebug });
 // The cloud file browser, accounts and hosting (modules/cloud/adapters/surface.js).
@@ -268,8 +270,7 @@ var chatsPage = modules.chats.attach({ cloudWorkspaceTarget, chatWorkspaceKey, p
 // Diagrams and character sheets add their previews to the Editor's extension point.
 registerPreviews(modules.editor.previews, {
   view: editorView, settings, escapeHtmlAttribute, normalizePath, getRelativeProjectPath,
-  personaAvatarSrc, loadBmapView, quickGenerateBmapFile, updateFileContentFromPreview, logDebug, render, getViewState, openFileFromExplorer,
-  get bmapViewModule() { return bmapViewModule; },
+  personaAvatarSrc,
   get controller() { return controller; }
 });
 // Total source characters of the active file, cached for the footer counter by
@@ -310,27 +311,6 @@ function transformEditorSelection(...args) { return editorParts.transformEditorS
 // Declared up here because the hoisted mobile render helpers reach it during
 // the first render, which would otherwise be inside its temporal dead zone.
 const MOBILE_MAX_WIDTH = 900;    // must match the CSS breakpoint
-// The diagram editor is the largest module (~150KB) and most sessions never
-// open a diagram, so it loads the first time one is previewed or exported.
-let bmapViewModule = null;
-let bmapViewLoading = null;
-
-function loadBmapView() {
-  bmapViewLoading ??= import("./ui/bmap-view.js")
-    .then((module) => (bmapViewModule = module))
-    .catch((error) => { bmapViewLoading = null; throw error; });
-  return bmapViewLoading;
-}
-
-
-// "private" = user's local workspace; "synced" = connected server workspace.
-
-// Forward declaration — assigned after `collaboration` is created.
-
-// Set to true while a preview-originated edit (e.g. a bmap inspector change) is
-// being committed. The preview view has already updated itself in place, so the
-// synchronous updateStatus callback must skip re-rendering the preview pane —
-// re-rendering would rebuild the diagram and reset its scroll/selection.
 
 const debugState = {
   entries: [],
@@ -412,16 +392,6 @@ function personaAvatarSrc(project, personaNodeId, avatar) {
   return resolved && resolved !== value ? resolved : "";
 }
 
-// Starting content for a new file of `kind`: a default diagram, a character
-// sheet template, or nothing.
-function initialContentForKind(kind, name) {
-  if (kind === "bmap") return createDefaultBmap();
-  if (kind === "persona") {
-    const base = parsePersona("", name).name;
-    return personaTemplate(/^new character( \d+)?$/i.test(base) ? "New Character" : base);
-  }
-  return "";
-}
 
 // ---- Dialogs, toasts and the debug log (./ui/dialogs.js) ----
 // Created on first use. The module reads main's shared values through this
@@ -1049,87 +1019,7 @@ function publishOperation(operation) { return modules.sync.publish(operation); }
 
 function updateFileContentFromPreview(...args) { return editorParts.updateFileContentFromPreview(...args); }
 
-function sanitizeGeneratedFileName(name) {
-  const cleaned = String(name ?? "")
-    .trim()
-    .replace(/[\\/:*?"<>|]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 80);
-  return cleaned || "generated";
-}
 
-let bmapGenerationInFlight = false;
-
-async function quickGenerateBmapFile(bmapFileId, request) {
-  const subject = String(request?.subject ?? "").trim();
-  if (!subject) {
-    notify("This node has no name or text to generate from. Add some content first.");
-    logDebug("action", "Quick Generate skipped", "node has no subject text");
-    return;
-  }
-  if (bmapGenerationInFlight) {
-    logDebug("action", "Quick Generate skipped", "another generation is already in flight");
-    return;
-  }
-
-  // Empty serverUrl resolves to the page origin (same-origin proxy), so it is
-  // valid — only block if the resolved URL would be empty (no window.location).
-  const serverUrl = settings.serverUrl?.trim();
-  const resolvedUrl = serverUrl || (typeof window !== "undefined" ? window.location.origin : "");
-  if (!resolvedUrl) {
-    notify("Could not determine server URL. Set one in Settings to use Quick Generate.");
-    logDebug("action", "Quick Generate skipped", "no server URL");
-    return;
-  }
-
-  const project = controller.getProject();
-  const bmapNode = project.nodes[bmapFileId];
-  if (!bmapNode || bmapNode.kind !== "file") {
-    return;
-  }
-  const parentId = bmapNode.parentId ?? project.rootId;
-  const parentPath = parentId === project.rootId ? "" : getPath(project, parentId);
-  const baseName = sanitizeGeneratedFileName(request?.nodeName || request?.nodeId || "generated");
-  const fileName = suggestUniqueFileName(project, parentId, `${baseName}.md`);
-  const contextCount = Array.isArray(request?.contextFiles) ? request.contextFiles.length : 0;
-
-  bmapGenerationInFlight = true;
-  logDebug("action", "Quick Generate started", `node="${request?.nodeName}" file="${fileName}" context=${contextCount} scope=${settings.bmapGenerateScope}`);
-  logDebug("request", "POST /api/generate", `subject=${subject.slice(0, 80)}${subject.length > 80 ? "…" : ""}`);
-  try {
-    const result = await sendGenerationRequest(resolvedUrl, {
-      subject,
-      contextFiles: Array.isArray(request?.contextFiles) ? request.contextFiles : [],
-      bmapOverview: String(request?.bmapOverview ?? ""),
-      projectName: project.name ?? "Workspace",
-      accountToken: identity.token()
-    });
-    const content = String(result?.content ?? "").trim();
-    logDebug("response", "Quick Generate response received", `model=${result?.model ?? "?"} provider=${result?.provider ?? "?"} length=${content.length} chars`);
-    if (!content) {
-      notify("Generation returned no content.");
-      logDebug("error", "Quick Generate empty response", "provider returned no content");
-      return;
-    }
-
-    controller.createFile(parentId, fileName, content);
-    publishOperation({ type: "create-file", parentPath, name: fileName, content });
-    logDebug("action", "Quick Generate file created", fileName);
-
-    const created = findChildByName(controller.getProject(), parentId, fileName);
-    if (created && created.kind === "file") {
-      openFileFromExplorer(created.id);
-    }
-    notify(`Generated: ${fileName}`);
-    logDebug("action", "Quick Generate complete", fileName);
-  } catch (error) {
-    notify(error?.message ?? "Generation failed.");
-    logDebug("error", "Quick Generate failed", error?.message ?? String(error));
-  } finally {
-    bmapGenerationInFlight = false;
-  }
-}
 
 // The file the mobile pane's pen button should act on: the previewed file in
 // preview view, otherwise the active source file. Null in chat view.
@@ -1516,12 +1406,6 @@ shell.commands.add({ id: "shell.open-settings", title: "Open Settings", menu: { 
 function openSettingsDialog(tab = "appearance") { shell.settingsDialog.open(tab); }
 // The Agent page draws Settings → Agent's connected tools: load it with Settings.
 shell.settingsDialog.onOpen(() => { if (!chat) void loadChat(); });
-// The diagram's settings (until diagrams are a module).
-shell.settingsDialog.fields.add({ page: "appearance", id: "bmap-generate-scope-select", order: 110, label: "Bmap Generate Context",
-  key: "bmapGenerateScope", control: "select", options: [["connected", "Connected nodes only"], ["all", "All linked files"]],
-  read: (s) => (s.bmapGenerateScope === "all" ? "all" : "connected") });
-shell.settingsDialog.fields.add({ page: "appearance", id: "bmap-auto-pan-input", order: 120, label: "Auto-pan diagrams to content on open",
-  key: "bmapAutoPan", control: "checkbox", read: (s) => s.bmapAutoPan !== false });
 // The frame's layout follows its settings, whoever changed them.
 settings.on((view, changed) => {
   if (changed.some((key) => ["explorer", "explorerAnchor", "preview"].includes(key))) persistSettings();

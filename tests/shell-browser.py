@@ -224,6 +224,15 @@ async def main():
         # A diagram previews as the diagram editor, not as its text (lost in v0.1.48).
         await page.evaluate('window.__shellTest.openFileFromExplorer("d")')
         await page.wait_for_selector('#preview-output .bmap-editor', timeout=15000)
+        # Diagrams are an extension (extensions/bmap-diagram): its Export As in the
+        # explorer's menu, and a new diagram's first content.
+        await page.locator('.tree-row[title="welcome.bmap"]').click(button='right')
+        await page.locator('#explorer-context-menu').get_by_text('Export As', exact=True).hover()
+        async with page.expect_download() as download:
+            await page.locator('#explorer-context-menu').get_by_text('Vector (SVG)', exact=True).click()
+        assert (await download.value).suggested_filename.endswith('.svg'), (await download.value).suggested_filename
+        await page.evaluate('window.__shellTest.shell.run("file-types.new-bmap")')
+        await page.wait_for_function('Object.values(window.__shellTest.controller.getProject().nodes).some((n) => /^new diagram.*\\.bmap$/.test(n.name) && n.content.includes("{"))')
         assert not errors, errors
         await context.close()
 
@@ -241,7 +250,7 @@ async def main():
         await browser.close()
         print(json.dumps({'checks': ['file-type lists from File types', 'five menus with their items', 'one menu open at a time', 'live titles',
                                      'menu item runs its command', 'Ctrl+S runs Save', 'a snapshot compared in the diff tab', 'rename keeps the extension',
-                                     'late menus and commands appear', 'Replace File replaces an image', 'status bar items from their owners', 'Settings sections and fields', 'the trace and its tab', 'a diagram previews as a diagram', 'phone menu panel'], 'runtimeErrors': 0}))
+                                     'late menus and commands appear', 'Replace File replaces an image', 'status bar items from their owners', 'Settings sections and fields', 'the trace and its tab', 'a diagram previews as a diagram', 'diagram Export As and new diagram (extension)', 'phone menu panel'], 'runtimeErrors': 0}))
 
 
 asyncio.run(main())

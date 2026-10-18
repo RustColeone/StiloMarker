@@ -100,9 +100,8 @@ test("main.js wires core feature symbols", async () => {
     /mode\.share\(/,
     /mode\.leave\(/,
     /switchWorkspaceMode/,
-    /quickGenerateBmapFile/,
-    /sendGenerationRequest/,
-    /bmap-generate-scope-select/
+    /explorer\.newFiles\.add/,
+    /sendGenerationRequest/
   ];
   symbols.forEach((pattern) => assert.match(mainSource, pattern));
 });
@@ -112,7 +111,9 @@ test("feature modules split out of main.js load on demand", async () => {
   const moduleMap = await readFile(resolveFromRoot("app/features/module-map-tools.js"), "utf8");
   assert.match(moduleMap, /buildModuleMapSection/);
   assert.match(mainSource, /import\("\.\/features\/module-map-tools\.js"\)/);
-  assert.match(mainSource, /import\("\.\/ui\/bmap-view\.js"\)/);
+  // The diagram editor is the diagram extension's, loaded the first time a diagram is shown.
+  const diagramPreview = await readFile(resolveFromRoot("extensions/bmap-diagram/browser/adapters/preview.js"), "utf8");
+  assert.match(diagramPreview, /import\("\.\/view\.js"\)/);
   // Not imported statically any more (that would load them at startup).
   assert.doesNotMatch(mainSource, /^import .*(bmap-view|module-map-tools|mtree-module-map-service)/m);
 });
@@ -157,8 +158,8 @@ test("every on-demand import points at a file that exists", async () => {
   assert.ok(checked >= 6, `expected the on-demand modules, found ${checked}`);
 });
 
-test("bmap-view.js wires interaction controls", async () => {
-  const bmapViewSource = await readFile(resolveFromRoot("app/ui/bmap-view.js"), "utf8");
+test("the diagram editor (extensions/bmap-diagram) wires interaction controls", async () => {
+  const bmapViewSource = await readFile(resolveFromRoot("extensions/bmap-diagram/browser/adapters/view.js"), "utf8");
   assert.match(bmapViewSource, /const MIN_SNAP_STEP = 10/);
   assert.match(bmapViewSource, /let interactionMode = "readonly"/);
   assert.match(bmapViewSource, /function toggleInspectorCollapsed\(\)/);
@@ -168,6 +169,11 @@ test("bmap-view.js wires interaction controls", async () => {
   assert.match(bmapViewSource, /function collectGenerationContextFiles\(/);
   assert.match(bmapViewSource, /function buildBmapOverview\(/);
   assert.match(bmapViewSource, /onQuickGenerate/);
+  // Its settings, its Export As entries and a new diagram's content are registered by the extension.
+  const extension = await readFile(resolveFromRoot("extensions/bmap-diagram/browser/index.js"), "utf8");
+  assert.match(extension, /bmap-generate-scope-select/);
+  assert.match(extension, /explorer\.fileMenus\.add/);
+  assert.match(extension, /explorer\.newFiles\.add/);
 });
 
 test("the Assistant's api.js exposes generation request", async () => {

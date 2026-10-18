@@ -1,0 +1,5 @@
+{
+  "about": "Diagrams (.bmap): the diagram editor in the preview, Quick Generate from a node, export as an image, and their settings. Everything about them in the browser lives in this folder; the core only offers extension points. The file type itself is still one of File types' built-in types (protocol/file-types.json) until it moves here as 'fileTypes'.",
+  "name": "bmap-diagram",
+  "browser": "browser/index.js"
+}

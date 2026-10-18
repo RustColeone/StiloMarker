@@ -1,5 +1,5 @@
 /**
- * bmap-service.js
+ * model/bmap.js (the diagram extension)
  * Parser and serializer for the .bmap brainstorm diagram format.
  *
  * File format: CSS-like blocks

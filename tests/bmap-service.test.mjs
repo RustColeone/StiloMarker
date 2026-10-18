@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { loadModules } from "./helpers/mocks.mjs";
-import { renderBmapToSvg } from "../app/ui/bmap-view.js";
+import { renderBmapToSvg } from "../extensions/bmap-diagram/browser/adapters/view.js";
 import { builtinTypes } from "../app/modules/file-types/index.js";
 
 const { bmapService } = await loadModules();

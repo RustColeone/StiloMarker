@@ -13,9 +13,9 @@ import {
   normalizeBmapAst,
   parseBmap,
   serializeBmap,
-} from "../services/bmap-service.js";
-import { renderMarkdown } from "../modules/editor/index.js";
-import { builtinTypes } from "../modules/file-types/index.js";
+} from "../model/bmap.js";
+import { renderMarkdown } from "../../../../app/modules/editor/index.js";
+import { builtinTypes } from "../../../../app/modules/file-types/index.js";
 
 const GRID_BASE = 5;
 const GRID_MIN_SCREEN_STEP = 4;

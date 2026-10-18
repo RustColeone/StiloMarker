@@ -24,7 +24,7 @@ export function createNaming(app) {
       }
 
       const name = app.getNextDefaultFileName(project, parent.id, kind);
-      const content = app.initialContentForKind(kind, name);
+      const content = app.newFileContent(kind, name);
       app.controller.createFile(parent.id, name, content);
       app.publishOperation({ type: "create-file", parentPath, name, content });
       // Open the new file as the active document (so it's what you're editing) but
@@ -93,7 +93,7 @@ export function createNaming(app) {
     let name = String(baseName || "").trim();
     if (!name) name = app.getNextDefaultFileName(project, parent.id, kind);
     else if (!name.toLowerCase().endsWith(ext)) name = `${name}${ext}`;
-    const content = app.initialContentForKind(kind, name);
+    const content = app.newFileContent(kind, name);
     app.controller.createFile(parent.id, name, content);
     app.publishOperation({ type: "create-file", parentPath, name, content });
     const created = findChildByName(app.controller.getProject(), parent.id, name);
