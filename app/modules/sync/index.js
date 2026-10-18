@@ -16,10 +16,17 @@
 // publish, reconnect...), created once main.js gives it what only the app can
 // do: { replaceProject(project), applyOperation(clientId, operation),
 // preserveLocalFiles(files), reauthenticate(), uploadAsset(...) }.
-// session() -> the same. status: the session as the app sees it, read-only
+// session() -> the same. The connection's life (adapters/connection.js; the
+// port also gives upgrade(detail), confirmJoin(), flash(type)): publish(op)
+// sends a change (stamped, an image's bytes uploaded first, a refused write
+// reloaded), publishSnapshot(), switchMode("synced" | "private"),
+// connectSaved({ auto }), reconnectLater(); Join, the shared/own switch and
+// auto-reconnect are bound here, and the app follows the status as it changes.
+// status: the session as the app sees it, read-only
 // (status.status, status.presence, status.role...; service/status.js); code
 // that pings or reconnects says what happened with status.change({ … }).
-// events.on(name, listener): "status" ({ next, previous }), "remote-cursor"
+// events.on(name, listener): "status" ({ next, previous }), "switched" ({ mode }),
+// "remote-cursor"
 // (event), "host-counters" ({ path, counters }), "patch-confirmed", and
 // "event" ({ event, ownClientId }): other modules' events on Sync's stream.
 // mode, whether this tab works on a shared workspace or its own local
@@ -34,6 +41,7 @@ import { createRuntime } from "./service/runtime.js";
 import { LOCAL_MODE, createMode } from "./service/mode.js";
 import { SESSION_STATUS, statusFromSession } from "./service/status.js";
 import { addSessionView } from "./adapters/session-view.js";
+import { createConnection } from "./adapters/connection.js";
 
 export { transformTextPatch } from "./model/rebase.js";
 export { sanitizeProjectForSync } from "./model/paths.js";
@@ -61,10 +69,11 @@ export default defineModule({
     const statusState = ctx.state(SESSION_STATUS);
     const status = createLiveView(statusState);
     let session = null;
+    let connection = null; // joining, reconnecting, switching, sending (adapters/connection.js)
 
     function attach(port) {
       if (session) throw new Error("sync: already attached");
-      for (const name of ["replaceProject", "applyOperation", "preserveLocalFiles", "reauthenticate", "uploadAsset"]) {
+      for (const name of ["replaceProject", "applyOperation", "preserveLocalFiles", "reauthenticate", "uploadAsset", "upgrade", "confirmJoin", "flash"]) {
         if (typeof port[name] !== "function") throw new Error(`sync.attach: the port lacks ${name}`);
       }
       session = createCollaborationRuntime({
@@ -84,10 +93,18 @@ export default defineModule({
         onPatchConfirmed: () => events.emit("patch-confirmed"),
         onEvent: (event, { ownClientId }) => events.emit("event", { event, ownClientId })
       });
+      connection = createConnection({ session, status, mode, events, workspace, shell: ctx.use("shell"), port,
+        log: (...parts) => ctx.log(parts.join(" ")) });
       return session;
     }
+    const connected = (name) => (...args) => {
+      if (!connection) throw new Error(`sync.${name}: attach Sync first`);
+      return connection[name](...args);
+    };
     // The session on the page: the status bar's collaborators and the Session panel.
     addSessionView({ shell: ctx.use("shell"), status, mode });
-    return { createCollaborationRuntime, syncVersion, mode, status, attach, session: () => session, events: { on: events.on } };
+    return { createCollaborationRuntime, syncVersion, mode, status, attach, session: () => session, events: { on: events.on },
+      publish: connected("publish"), publishSnapshot: connected("publishSnapshot"), switchMode: connected("switchMode"),
+      connectSaved: connected("connectSaved"), reconnectLater: connected("reconnectLater") };
   }
 });

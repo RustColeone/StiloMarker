@@ -127,6 +127,10 @@ export function createAgentPanel({ port, shell, workspace, identity, sync, edito
     } : null
   });
 
+  // Another tab changed the agent's conversations: they arrive on Sync's stream.
+  sync.events.on("event", ({ event, ownClientId }) => {
+    if (event.type === "chat-workspace-update" && event.clientId !== ownClientId) receiveChatWorkspace(app.controller.getProject(), event.workspace);
+  });
   // The page follows the agent's status (Models'), whoever asked the server.
   models.agent.on(() => app.renderChatPanel(app.controller.getProject()));
   // Settings → Agent's connected tools are this page's: drawn when Settings opens.
@@ -141,7 +145,6 @@ export function createAgentPanel({ port, shell, workspace, identity, sync, edito
 
   // Test access (tests/helpers/chat_hook.py adds a line here).
   return {
-    receiveChatEvent: (event) => chatsPage.receive(event),
     receiveChatWorkspace, renderChatPanel: app.renderChatPanel, refreshChatStatus: app.refreshChatStatus,
     findBatchMessage: app.findBatchMessage, remapPersonaPaths: chatsPage.remapPersonaPaths,
     ensureChatWorkspaceLoaded: app.ensureChatWorkspaceLoaded,

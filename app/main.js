@@ -261,7 +261,7 @@ var editorParts = modules.editor.attach({
 });
 // The explorer and file actions, given what no module owns yet (modules/explorer/adapters/surface.js).
 var explorerParts = modules.explorer.attach({
-  publishOperation, publishSnapshot, settings, persistSettings, elements, logDebug, imageSrcFor,
+  settings, persistSettings, elements, logDebug, imageSrcFor,
   canManagePreview: () => Boolean(identity.account()) && syncMode.get().workspaceMode === "synced"
     && collaboration.isConnected() && Boolean(settings.lastWorkspace?.team),
   openAccessEditor, openMtreeToolsDialog, remapPersonaPaths, initialContentForKind,
@@ -271,8 +271,7 @@ var explorerParts = modules.explorer.attach({
 var cloudParts = modules.cloud.attach({
   elements, logDebug, flashStatusPanel, openSettingsDialog, refreshChatStatus, loadLineComments,
   ensureSnapshotsMigrated, refreshSnapshotBaselines, snapshotDirtyFiles, setMobileExplorerOpen,
-  get sessionRestorer() { return sessionRestorer; },
-  get switchWorkspaceMode() { return switchWorkspaceMode; }
+  get sessionRestorer() { return sessionRestorer; }
 });
 var chatsPage = modules.chats.attach({ cloudWorkspaceTarget, chatWorkspaceKey, personaAvatarSrc, isMobileLayout, logDebug }); // the side panel's Chats page
 // Diagrams and character sheets add their previews to the Editor's extension point.
@@ -338,7 +337,6 @@ function loadBmapView() {
 let sessionRestorer = null;
 
 // Forward declaration — assigned after `collaboration` is created.
-let switchWorkspaceMode;
 
 // Set to true while a preview-originated edit (e.g. a bmap inspector change) is
 // being committed. The preview view has already updated itself in place, so the
@@ -744,87 +742,16 @@ const collaboration = modules.sync.attach({
       return null;
     }
   },
-  uploadAsset
+  uploadAsset,
+  upgrade: (detail) => forceAppUpgrade(detail),
+  confirmJoin: () => showAcceptConnectionDialog(),
+  flash: (type) => flashStatusPanel(type, elements.sharedSessionSection)
 });
-modules.sync.events.on("status", ({ next: nextState, previous }) => {
-  const prevStatus = previous.status;
-  const wasConnected = prevStatus === "connected";
-  // Server refused this client as too old (stale cached service worker). Stop
-  // syncing and force the app up to date rather than letting it clobber content.
-  if (nextState.status === "upgrade-required") {
-    forceAppUpgrade(nextState.detail);
-    return;
-  }
-  // Cloud sync now recovers dropped streams on its own (see collaboration-
-  // service). Surface it so the user knows their work is safe, not lost.
-  if (nextState.status === "reconnecting" && prevStatus !== "reconnecting") {
-    showToast("Connection lost — reconnecting… your changes are kept.");
-  }
-  if (nextState.status === "connected" && prevStatus === "reconnecting") {
-    showToast("Reconnected to the cloud workspace.");
-  }
-  if (nextState.status === "connected") {
-    // A clean connect means we're on a good version — reset the one-shot upgrade
-    // guard so a future min-version bump can auto-refresh again.
-    try { sessionStorage.removeItem("mdnotes.upgradeReloaded"); } catch (error) { ignore(error, "session storage is blocked"); }
-  }
-  // Reconcile remote carets against who's actually present, so a departed
-  // peer's cursor/selection doesn't linger.
-  pruneRemoteCursors(syncState.presence);
-  // Keep the "what revision is this browser's copy based on" marker current
-  // while we're genuinely in sync. It decides, on the next open, whether this
-  // device may push its copy over the server or must pull. Persisted on unload;
-  // if it's ever missing we treat this device as stale and pull (fail-safe).
-  if (nextState.status === "connected" && syncMode.get().workspaceMode === "synced" && settings.syncedProjectId) {
-    settings.change({ syncedRevision: syncState.revision });
-  }
-  // Auto-switch workspace mode on connect/disconnect.
-  if (!wasConnected && nextState.status === "connected" && syncMode.get().workspaceMode === "private") {
-    if (syncState.role === "client") {
-      // User already confirmed before connect() was called; just sync.
-      switchWorkspaceMode?.("synced");
-      return;
-    }
-    if (syncState.role === "master") {
-      // Master just connected: enter synced mode without reloading from server.
-      // The master already pushed its own project as the authoritative state;
-      // calling reloadFromServer here would just fetch it back unnecessarily.
-      syncMode.share(controller.getProject());
-      render(controller.getProject());
-      return;
-    }
-  }
-  if (nextState.status === "offline") {
-    // Dropped while we had an intended session — try to re-establish it.
-    // (Guarded against firing during a deliberate reconnect handshake.)
-    scheduleReconnect?.();
-  }
-  if (nextState.status === "offline" && syncMode.get().workspaceMode === "synced") {
-    // A cloud workspace's content is what the user is actively editing; reverting
-    // to the pre-open private snapshot here is what made "everything suddenly go
-    // empty / back to a previous version". Keep the current project ON SCREEN and
-    // just drop to private mode (edits stay local, safe in localStorage); a
-    // reconnect or reload re-syncs. Only a PIN/guest session (no cloud workspace)
-    // should restore the user's own private project.
-    const wasCloud = Boolean(settings.syncedProjectId) || Boolean(settings.lastWorkspace?.team);
-    if (wasCloud) {
-      // STAY in synced mode. Flipping to "private" here is what silently killed
-      // syncing for good: notifyEditorChanged only schedules a patch while
-      // workspaceMode === "synced", so after one dropped stream every later
-      // keystroke lived only in this tab (server revision never moved) — and the
-      // next server pull replaced hours of work with the stale snapshot. Staying
-      // synced means patches resume as soon as the stream is back, and
-      // reconcileLocalIntoServer() pushes everything changed while offline.
-      syncMode.forgetKept(); // don't later clobber the on-screen content
-      syncState.change({ detail: "Offline — edits are saved locally and will sync when the connection returns." });
-      render(controller.getProject());
-      return;
-    }
-    switchWorkspaceMode?.("private");
-    return;
-  }
-  render(controller.getProject());
-});
+// What happens as the session changes is Sync's (adapters/connection.js); the
+// editor drops the carets of people who left.
+modules.sync.events.on("status", () => pruneRemoteCursors(syncState.presence));
+// Switched back to this tab's own workspace: an automatic resume no longer applies.
+modules.sync.events.on("switched", ({ mode }) => { if (mode === "private") sessionRestorer?.cancel(); });
 modules.sync.events.on("remote-cursor", (event) => {
   onRemoteCursor(event);
 });
@@ -849,18 +776,14 @@ modules.sync.events.on("patch-confirmed", () => {
     collaboration.scheduleAwareness(path, sel.start, sel.end);
   }
 });
-// Other modules' events on Sync's stream: comments, Chats, the agent's threads.
-modules.sync.events.on("event", ({ event, ownClientId }) => {
+// Comments' events on Sync's stream (Chats and the Agent page hear their own).
+modules.sync.events.on("event", ({ event }) => {
   if (event.type === "comments") {
     // A collaborator added/edited/moved a comment: adopt the server's list and
     // repaint the gutter + overview ruler without waiting for a reopen.
     if (!commentsAvailable()) return;
     lineComments.byFile = new Map(Object.entries(event.files ?? {}));
     renderEditorFromModel();
-  } else if (event.type === "chat-message" || event.type === "chat-typing" || event.type === "chat-update") {
-    chat?.receiveChatEvent(event);
-  } else if (event.type === "chat-workspace-update" && event.clientId !== ownClientId) {
-    chat?.receiveChatWorkspace(controller.getProject(), event.workspace); // nothing listens until the panel loads
   }
 });
 workspace.attach(createWorkspacePorts({ controller, collaboration, publishOperation, getEditorSelection, applyEditorEdit,
@@ -869,26 +792,6 @@ workspace.attach(createWorkspacePorts({ controller, collaboration, publishOperat
 
 attachSelectionChangeListener();
 
-// Assign the forward-declared switchWorkspaceMode now that `collaboration` exists.
-switchWorkspaceMode = function (nextMode) {
-  if (nextMode === syncMode.get().workspaceMode) return;
-  if (nextMode === "synced") {
-    syncMode.share(controller.getProject());
-    // reloadFromServer replaces the project internally, triggering render.
-    collaboration.reloadFromServer("Switched to synced workspace.").catch(ignored("loading the synced workspace failed"));
-  } else {
-    sessionRestorer?.cancel();
-    const kept = syncMode.leave();
-    if (kept) controller.replaceProject(kept);
-    // The local project is no longer a cloud workspace's content.
-    settings.change({ syncedProjectId: null });
-    render(controller.getProject());
-  }
-};
-
-elements.workspaceModeToggle?.addEventListener("click", () => {
-  switchWorkspaceMode(syncMode.get().workspaceMode === "synced" ? "private" : "synced");
-});
 
 
 shell.menus.add({ id: "file", label: "File", order: 1 });
@@ -1319,57 +1222,9 @@ if (!storedProject) {
 
 logDebug("response", "Debug log initialized", `panel=${settings.debugPanel ? "visible" : "hidden"}`);
 
-function publishSnapshot() {
-  if (collaboration.isConnected() && syncMode.get().workspaceMode === "synced") {
-    collaboration.scheduleSnapshot(controller.getProject());
-  }
-}
-
-async function publishOperation(operation) {
-  if (!collaboration.isConnected() || syncMode.get().workspaceMode !== "synced") {
-    return;
-  }
-  let op = operation;
-  // A whole-file write must declare the revision it is based on, so the server
-  // can refuse one that would overwrite newer content. Stamped centrally here so
-  // every caller is covered — a missed call site would be exactly the hole that
-  // let an old tab clobber the server.
-  if (op.type === "update-file" && op.baseRevision === undefined) {
-    op = { ...op, baseRevision: collaboration.getRevision?.() ?? 0 };
-  }
-  // In a directory-backed cloud workspace, an image's bytes upload out-of-band
-  // (chunked binary) so a large image can't blow the op-stream body limit (413)
-  // or bloat sync as base64; the op then carries empty content and peers fetch
-  // the image by URL.
-  const opFileName = op.name ?? op.path?.split("/").pop() ?? "";
-  if (collaboration.isDirectoryBacked?.()
-    && (op.type === "create-file" || op.type === "update-file")
-    && isImageFileName(opFileName)
-    && typeof op.content === "string"
-    && op.content.startsWith("data:")) {
-    try {
-      const path = op.type === "create-file"
-        ? [op.parentPath, op.name].filter(Boolean).join("/")
-        : op.path;
-      await collaboration.uploadAsset(path, op.content);
-      op = { ...op, content: "" };
-    } catch (error) {
-      notify(error.message);
-      return;
-    }
-  }
-  collaboration.publishOperation(op).catch((error) => {
-    if (error?.status === 409) {
-      // The server has a newer version of this file. Take it rather than
-      // overwrite it, and say so — silently dropping the write would leave the
-      // two sides diverged with no sign anything happened.
-      notify("That file changed on the server — loading the newer version instead of overwriting it.");
-      collaboration.reloadFromServer?.("Stale write refused — pulled the newer copy.").catch(ignored("pulling the newer copy after a refused write failed"));
-      return;
-    }
-    notify(error.message);
-  });
-}
+// Sending a change is Sync's (adapters/connection.js).
+function publishSnapshot() { modules.sync.publishSnapshot(); }
+function publishOperation(operation) { return modules.sync.publish(operation); }
 
 function updateFileContentFromPreview(fileId, nextContent, reason = "preview edit") {
   const project = controller.getProject();
@@ -1942,12 +1797,6 @@ window.matchMedia(`(max-width: ${MOBILE_MAX_WIDTH}px)`)
     applyMobileViewState();
   });
 
-// Turning auto-reconnect off cancels any pending retry and forgets the session.
-settings.on((view, changed) => {
-  if (!changed.includes("autoReconnect") || view.autoReconnect) return;
-  clearReconnectTimer();
-  settings.change({ wasConnected: false }, "auto-reconnect turned off");
-});
 // ---- The cloud file browser, accounts and hosting (the Cloud module) ----
 function handleAccountLogout(...args) { return cloudParts.handleAccountLogout(...args); }
 async function handleOpenWorkspace(...args) { return cloudParts.handleOpenWorkspace(...args); }
@@ -1962,85 +1811,6 @@ function renderHostTargets(...args) { return cloudParts.renderHostTargets(...arg
 
 
 renderHostTargets(); // needs the live session, which exists from here on
-
-// ── Auto-reconnect ──────────────────────────────────────────────────────────
-// Remember the last intended session (settings.wasConnected) and transparently
-// re-establish it on startup and after a dropped connection, with backoff.
-const reconnectState = { timer: null, attempts: 0, connecting: false };
-const RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 20000, 30000];
-const MAX_RECONNECT_ATTEMPTS = 10;
-
-function clearReconnectTimer() {
-  if (reconnectState.timer) {
-    window.clearTimeout(reconnectState.timer);
-    reconnectState.timer = null;
-  }
-}
-
-/** Connect using the saved credentials. `auto` skips the confirm dialog (the
- *  user already consented to this session when they first connected). */
-async function establishConnection({ auto = false } = {}) {
-  if (reconnectState.connecting) return false;
-  if (!settings.serverPin) {
-    if (auto) return false;
-    throw new Error("PIN is required.");
-  }
-  reconnectState.connecting = true;
-  try {
-    await collaboration.connect(settings.serverUrl, settings.serverPin, settings.displayName);
-    settings.change({ wasConnected: true });
-    reconnectState.attempts = 0;
-    clearReconnectTimer();
-    flashStatusPanel("success", elements.sharedSessionSection);
-    logDebug("response", "Server connected", settings.displayName || "anonymous");
-    await refreshChatStatus({ silent: true });
-    return true;
-  } finally {
-    reconnectState.connecting = false;
-  }
-}
-
-function scheduleReconnect() {
-  if (!settings.autoReconnect || !settings.wasConnected || !settings.serverPin) return;
-  if (reconnectState.connecting || reconnectState.timer) return;
-  if (reconnectState.attempts >= MAX_RECONNECT_ATTEMPTS) {
-    syncState.change({ detail: "Reconnect failed. Open collaboration settings to retry." });
-    render(controller.getProject());
-    logDebug("response", "Auto-reconnect gave up", `after ${reconnectState.attempts} attempts`);
-    return;
-  }
-  const delay = RECONNECT_DELAYS[Math.min(reconnectState.attempts, RECONNECT_DELAYS.length - 1)];
-  reconnectState.attempts += 1;
-  syncState.change({ detail: `Reconnecting in ${Math.round(delay / 1000)}s… (attempt ${reconnectState.attempts})` });
-  render(controller.getProject());
-  reconnectState.timer = window.setTimeout(() => {
-    reconnectState.timer = null;
-    establishConnection({ auto: true }).catch((error) => {
-      logDebug("response", "Auto-reconnect attempt failed", error.message);
-      scheduleReconnect();
-    });
-  }, delay);
-}
-
-elements.connectServerButton.addEventListener("click", async () => {
-  // Persist the latest field values before connecting so reconnect uses them.
-  settings.change({ serverUrl: elements.serverUrlInput.value.trim(), serverPin: elements.serverPinInput.value, displayName: elements.displayNameInput.value.trim() });
-  // Ask the user to confirm before making any network call or touching the workspace.
-  const confirmed = await showAcceptConnectionDialog();
-  if (!confirmed) return;
-  reconnectState.attempts = 0;
-  clearReconnectTimer();
-  try {
-    logDebug("action", "Server connect requested", settings.serverUrl);
-    await establishConnection({ auto: false });
-  } catch (error) {
-    syncState.change({ status: "offline", detail: error.message });
-    logDebug("response", "Server connect failed", error.message);
-    flashStatusPanel("error", elements.sharedSessionSection);
-    await refreshChatStatus({ silent: true });
-    render(controller.getProject());
-  }
-});
 
 function persistBeforeSuspension() {
   captureViewState();
@@ -2114,7 +1884,7 @@ async function restoreSessionOnBoot({ manual = false, isCurrent = () => true } =
   const last = rememberedWorkspace(settings.lastWorkspace);
   if (syncMode.get().workspaceMode === "synced" && collaboration.getConnectionInfo()) {
     const resumed = await collaboration.resumeConnection();
-    if (!resumed && settings.autoReconnect && settings.wasConnected && settings.serverPin) await establishConnection({ auto: true });
+    if (!resumed && settings.autoReconnect && settings.wasConnected && settings.serverPin) await modules.sync.connectSaved({ auto: true });
     if (manual || !controller.getActiveFile()) showResumedFile(cachedWorkspaceView(settings.syncedProjectId));
     return;
   }
@@ -2134,7 +1904,7 @@ async function restoreSessionOnBoot({ manual = false, isCurrent = () => true } =
     showToast("Sign in to resume this workspace.");
     return;
   }
-  if (settings.autoReconnect && settings.wasConnected && settings.serverPin) await establishConnection({ auto: true });
+  if (settings.autoReconnect && settings.wasConnected && settings.serverPin) await modules.sync.connectSaved({ auto: true });
 }
 
 sessionRestorer = createSessionRecovery({

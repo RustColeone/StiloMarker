@@ -17,7 +17,7 @@ import { createProviders } from "./providers.js";
 export const PORT = [
   "elements", "logDebug", "flashStatusPanel", "openSettingsDialog", "refreshChatStatus", "loadLineComments",
   "ensureSnapshotsMigrated", "refreshSnapshotBaselines", "snapshotDirtyFiles", "sessionRestorer",
-  "switchWorkspaceMode", "setMobileExplorerOpen"
+  "setMobileExplorerOpen"
 ];
 
 // The editor's functions the cloud parts call (editor.parts()).
@@ -31,6 +31,7 @@ export function createSurface({ port, shell, workspace, identity, sync, editor, 
 
   const app = {
     view: editor.view, identity, history, mode: sync.mode, settings: shell.settings, syncState: sync.status,
+    switchWorkspaceMode: (next) => sync.switchMode(next),
     notify: (message) => shell.notify(message),
     showToast: (message, options) => shell.toast(message, options),
     showConfirmDialog: (options) => shell.confirm(options),

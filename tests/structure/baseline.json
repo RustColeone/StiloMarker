@@ -1,7 +1,7 @@
 {
   "about": "Structure violations that existed when the rules were introduced (2026-10-16). They may only shrink; see tools/structure-baseline.mjs.",
   "oversized": {
-    "app/main.js": 2168,
+    "app/main.js": 1938,
     "app/ui/bmap-view.js": 4025,
     "server/mdnotes_server.py": 2577
   },
@@ -24,11 +24,10 @@
     "operation replace-project": [],
     "operation update-file": [
       "app/features/workspace-history.js",
-      "app/main.js",
       "server/mdnotes_server.py"
     ],
     "sync protocol number": []
   },
   "uncoveredTwins": 0,
-  "mainGetters": 60
+  "mainGetters": 59
 }

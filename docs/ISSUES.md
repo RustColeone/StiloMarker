@@ -69,6 +69,20 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.69: Sync owns the connection
+
+Step S4c-1. One fix for users:
+
+- **Chats' live events:** another person's message, typing or change in
+  Chats was passed on only once this tab had loaded its Agent page (on first
+  opening the side panel or Settings); before that it was dropped. Chats now
+  hears its own events on the session's stream.
+- Joining, reconnecting, switching between the shared workspace and your own,
+  and sending changes moved from `main.js` into the Sync module.
+- `session-recovery-browser.py` caught a slip on the way: cancelling the
+  automatic resume whenever the workspace became private (a failed open does
+  too) stopped the retry. Only a deliberate switch cancels it.
+
 ### v0.1.68: the status bar is Shell's, its items their owners'
 
 Step S4b. Nothing changes for users.

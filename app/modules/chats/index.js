@@ -53,6 +53,10 @@ export default defineModule({
       };
       Object.defineProperty(app, "controller", { get: () => workspace.project(), enumerable: true });
       page = createChatsPage(app);
+      // Chats' messages, typing and changes from others arrive on Sync's stream.
+      sync.events.on("event", ({ event }) => {
+        if (["chat-message", "chat-typing", "chat-update"].includes(event.type)) page.receive(event);
+      });
       return page;
     }
     return { attach, page: () => page };

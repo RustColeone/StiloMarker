@@ -21,7 +21,7 @@ import { createExplorerView } from "./tree.js";
 // What main.js attaches (explorer.attach(port)); each entry should move to an
 // owner, or become an extension point, and leave this list.
 export const PORT = [
-  "publishOperation", "publishSnapshot", "settings", "persistSettings",
+  "settings", "persistSettings",
   "elements", "logDebug", "imageSrcFor", "canManagePreview", "openAccessEditor", "openMtreeToolsDialog",
   "remapPersonaPaths", "initialContentForKind", "exportDiagram"
 ];
@@ -45,6 +45,9 @@ export function createSurface({ port, workspace, editor, shell, sync }) {
     // What Copy put aside for Paste.
     explorerClipboard: { payload: null },
     workspace, view: editor.view, parts: workspace.parts,
+    // Changes made here reach the shared workspace through Sync.
+    publishOperation: (operation) => sync.publish(operation),
+    publishSnapshot: () => sync.publishSnapshot(),
     notify: (message) => shell.notify(message),
     showToast: (message, options) => shell.toast(message, options),
     confirmAction: (message) => shell.confirm(String(message)),

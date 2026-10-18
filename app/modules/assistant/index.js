@@ -23,6 +23,14 @@ export default defineModule({
   owns: { tools: ["edit_file review"], elements: ["the Agent page"], data: ["the agent's conversations in this browser"] },
   start(ctx) {
     let panel = null, loading = null;
+    // Joining or leaving a session can change whether the server's agent may be
+    // used: ask it again (the agent's connection is Models').
+    const models = ctx.use("models"), identity = ctx.use("identity");
+    ctx.use("sync").events.on("status", ({ next, previous }) => {
+      if ((next.status === "connected") !== (previous.status === "connected")) {
+        void models.agent.refresh({ signedIn: Boolean(identity.account()), silent: true });
+      }
+    });
     function load(port) {
       loading ??= import("./adapters/panel.js").then(({ createAgentPanel }) => {
         panel = createAgentPanel({ port, shell: ctx.use("shell"), workspace: ctx.use("workspace"), identity: ctx.use("identity"),

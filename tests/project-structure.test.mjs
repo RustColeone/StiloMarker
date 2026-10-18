@@ -74,7 +74,7 @@ test("main.js wires core feature symbols", async () => {
   // the wiring may be in any of them.
   const { readdir } = await import("node:fs/promises");
   const split = [];
-  for (const dir of ["app/features", "app/ui", "app/modules/editor/adapters", "app/modules/comments/adapters", "app/modules/explorer/adapters", "app/modules/cloud/adapters", "app/modules/assistant/adapters"]) {
+  for (const dir of ["app/features", "app/ui", "app/modules/editor/adapters", "app/modules/comments/adapters", "app/modules/explorer/adapters", "app/modules/cloud/adapters", "app/modules/assistant/adapters", "app/modules/sync/adapters"]) {
     for (const name of (await readdir(resolveFromRoot(dir))).filter((n) => n.endsWith(".js"))) split.push(`${dir}/${name}`);
   }
   const mainSource = [await readFile(resolveFromRoot("app/main.js"), "utf8"),
@@ -97,8 +97,8 @@ test("main.js wires core feature symbols", async () => {
     /shell\.menus\.add\(\{ id: "settings"/,
     /toggleQuickAddMenu/,
     /toggleFilterMenu/,
-    /syncMode\.share/,
-    /syncMode\.leave/,
+    /mode\.share\(/,
+    /mode\.leave\(/,
     /switchWorkspaceMode/,
     /quickGenerateBmapFile/,
     /sendGenerationRequest/,
