@@ -34,7 +34,7 @@ export async function loadModules() {
     load("app/services/bmap-service.js"),
     load("app/services/mtree-module-map-service.js"),
     load("app/modules/workspace/adapters/disk-folders.js"),
-    load("app/services/sync-service.js")
+    load("app/modules/cloud/adapters/api.js")
   ]);
   return {
     projectModel,

@@ -15,7 +15,7 @@ test("required workspace files exist", () => {
     "app/domain/project-model.js",
     "app/modules/workspace/adapters/zip.js",
     "app/services/offline-service.js",
-    "app/services/sync-service.js",
+    "app/modules/cloud/adapters/api.js",
     "server/mdnotes_server.py",
     "service-worker.js",
     // Docs: the planning files were consolidated into docs/ (see docs/HISTORY.md).
@@ -75,7 +75,7 @@ test("main.js wires core feature symbols", async () => {
   // the wiring may be in any of them.
   const { readdir } = await import("node:fs/promises");
   const split = [];
-  for (const dir of ["app/features", "app/ui", "app/modules/editor/adapters", "app/modules/comments/adapters", "app/modules/explorer/adapters"]) {
+  for (const dir of ["app/features", "app/ui", "app/modules/editor/adapters", "app/modules/comments/adapters", "app/modules/explorer/adapters", "app/modules/cloud/adapters"]) {
     for (const name of (await readdir(resolveFromRoot(dir))).filter((n) => n.endsWith(".js"))) split.push(`${dir}/${name}`);
   }
   const mainSource = [await readFile(resolveFromRoot("app/main.js"), "utf8"),

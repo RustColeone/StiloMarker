@@ -1,6 +1,8 @@
-import { dataUrlToBytes } from "../modules/workspace/index.js";
-
-import { normalizeServerUrl, parseResponse, throwForResponse } from "../modules/shell/index.js";
+// The server's routes for cloud workspaces (still the legacy contract): ping,
+// browse, make a folder, create, delete, export, import, the resume state, and
+// uploading an image. Moved from the legacy sync service.
+import { dataUrlToBytes } from "../../workspace/index.js";
+import { normalizeServerUrl, parseResponse, throwForResponse } from "../../shell/index.js";
 
 async function pingServer(serverUrl) {
   const baseUrl = normalizeServerUrl(serverUrl);
@@ -16,32 +18,6 @@ async function pingServer(serverUrl) {
     await throwForResponse("Ping failed.", response);
   }
 
-  return parseResponse(response);
-}
-
-async function listWorkspaces(serverUrl, accountToken) {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const response = await fetch(`${baseUrl}/api/workspaces?token=${encodeURIComponent(accountToken)}`, {
-    method: "GET",
-    headers: { accept: "application/json" }
-  });
-  if (!response.ok) {
-    await throwForResponse("Could not list workspaces.", response);
-  }
-  const data = await parseResponse(response);
-  return data.workspaces ?? [];
-}
-
-async function createWorkspace(serverUrl, accountToken, team, name, shareTeam = false) {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const response = await fetch(`${baseUrl}/api/workspaces?token=${encodeURIComponent(accountToken)}`, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({ team, name, shareTeam: Boolean(shareTeam) })
-  });
-  if (!response.ok) {
-    await throwForResponse("Could not create workspace.", response);
-  }
   return parseResponse(response);
 }
 
@@ -165,13 +141,10 @@ async function importProjectServer(serverUrl, accountToken, team, path, name, pr
 export {
   browseServer,
   createProjectServer,
-  createWorkspace,
   deleteServer,
   exportProjectServer,
   importProjectServer,
-  listWorkspaces,
   mkdirServer,
-  normalizeServerUrl,
   pingServer,
   saveUserState,
   uploadAsset

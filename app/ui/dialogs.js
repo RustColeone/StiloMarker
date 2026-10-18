@@ -8,10 +8,14 @@ import { ignore, trace } from "../kernel/index.js";
 
 export function createDialogs(app) {
   // The Trace tab shows the kernel's trace; it redraws at most once a frame.
+  // (Checked in the frame: during start-up the panel's state does not exist yet.)
   let traceFrame = 0;
   trace.onRecord(() => {
-    if (traceFrame || app.debugState.activeTab !== "trace" || !app.settings.debugPanel) return;
-    traceFrame = requestAnimationFrame(() => { traceFrame = 0; renderDebugPanel(); });
+    if (traceFrame) return;
+    traceFrame = requestAnimationFrame(() => {
+      traceFrame = 0;
+      if (app.debugState.activeTab === "trace" && app.settings.debugPanel) renderDebugPanel();
+    });
   });
 
   function clearDebugLog() {

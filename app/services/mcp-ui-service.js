@@ -1,4 +1,4 @@
-import { normalizeServerUrl } from './sync-service.js';
+import { normalizeServerUrl } from '../modules/shell/index.js';
 
 // Optional controls. No request runs until the user loads or tests connections.
 export function createMcpControls({ list, status, loadButton, summary, getIdentity, fetchImpl = fetch }) {

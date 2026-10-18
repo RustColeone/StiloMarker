@@ -1,5 +1,5 @@
 import { syncVersion } from "../modules/sync/index.js";
-import { normalizeServerUrl } from "./sync-service.js";
+import { normalizeServerUrl } from "../modules/shell/index.js";
 
 async function parseResponse(response) {
   const contentType = response.headers.get("content-type") || "";

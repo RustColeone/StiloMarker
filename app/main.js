@@ -1,5 +1,5 @@
 import { startModules, ignore, ignored } from "./kernel/index.js";
-import shellModule, { patchStoredSettings } from "./modules/shell/index.js";
+import shellModule, { normalizeServerUrl, patchStoredSettings } from "./modules/shell/index.js";
 import fileTypesModule, { builtinTypes } from "./modules/file-types/index.js";
 import workspaceModule from "./modules/workspace/index.js";
 import identityModule from "./modules/identity/index.js";
@@ -16,11 +16,10 @@ import { sendGenerationRequest } from "./services/chat-api-service.js";
 import { PERSONA_SUFFIX, parsePersona, personaTemplate } from "./services/persona-service.js";
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
 import { applyEditorFont, applyTheme, clampSourceFontSize, signInSettings } from "./services/settings-service.js";
-import { browseServer, createProjectServer, deleteServer, exportProjectServer, importProjectServer, mkdirServer, normalizeServerUrl, saveUserState, uploadAsset } from "./services/sync-service.js";
+import cloudModule, { saveUserState, uploadAsset } from "./modules/cloud/index.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { query } from "./ui/dom.js";
 import { createDefaultBmap } from "./services/bmap-service.js";
-import { createCloudBrowser } from "./features/cloud-browser.js";
 import explorerModule from "./modules/explorer/index.js";
 import { createDiagramExport } from "./features/diagram-export.js";
 import { registerPreviews } from "./features/previews.js";
@@ -264,7 +263,7 @@ const elements = {
 // ---- Modules (docs/ARCHITECTURE.md) ----
 // The app is moving into modules one step at a time. Code still in this file
 // reaches a module only through the public API the kernel hands back.
-const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, syncModule, historyModule, explorerModule, ...extensionModules], {
+const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, syncModule, historyModule, explorerModule, cloudModule, ...extensionModules], {
   log: (owner, ...args) => { try { logDebug("action", `${owner}: ${args.join(" ")}`); } catch (error) { ignore(error, "the log panel is not ready yet"); } }
 });
 const { shell, workspace, identity } = modules;
@@ -316,6 +315,13 @@ var explorerParts = modules.explorer.attach({
     && collaboration.isConnected() && Boolean(settings.lastWorkspace?.team),
   openAccessEditor, openMtreeToolsDialog, remapPersonaPaths, initialContentForKind,
   exportDiagram: createDiagramExport({ get controller() { return controller; }, loadBmapView, notify, logDebug })
+});
+// The cloud file browser, accounts and hosting (modules/cloud/adapters/surface.js).
+var cloudParts = modules.cloud.attach({
+  elements, logDebug, flashStatusPanel, openSettingsDialog, refreshChatStatus, loadLineComments,
+  ensureSnapshotsMigrated, refreshSnapshotBaselines, snapshotDirtyFiles, setMobileExplorerOpen,
+  get sessionRestorer() { return sessionRestorer; },
+  get switchWorkspaceMode() { return switchWorkspaceMode; }
 });
 // Diagrams and character sheets add their previews to the Editor's extension point.
 registerPreviews(modules.editor.previews, {
@@ -2746,200 +2752,20 @@ elements.autoReconnectInput?.addEventListener("change", (event) => {
   }
   logDebug("action", "Auto-reconnect setting changed", settings.autoReconnect ? "on" : "off");
 });
-// ---- Cloud file browser, accounts and hosting (./features/cloud-browser.js) ----
-// Created on first use. The module reads main's shared values through this
-// context, so it always sees their current values. `var`: a forwarding
-// function can run during startup, before this line is reached.
-var cloudBrowserInstance;
-function cloudBrowser() {
-  return (cloudBrowserInstance ??= createCloudBrowser({
-    view: editorView,
-    get browserState() { return browserState; },
-    get history() { return modules.history; },
-    get cachedWorkspaceView() { return cachedWorkspaceView; },
-    get collaboration() { return collaboration; },
-    get controller() { return controller; },
-    get currentWorkspaceView() { return currentWorkspaceView; },
-    get elements() { return elements; },
-    get ensureSnapshotsMigrated() { return ensureSnapshotsMigrated; },
-    get flashStatusPanel() { return flashStatusPanel; },
-    get loadLineComments() { return loadLineComments; },
-    get logDebug() { return logDebug; },
-    get notify() { return notify; },
-    get openSettingsDialog() { return openSettingsDialog; },
-    get opfsProvider() { return opfsProvider; },
-    get promptForName() { return promptForName; },
-    get refreshChatStatus() { return refreshChatStatus; },
-    get refreshSnapshotBaselines() { return refreshSnapshotBaselines; },
-    get render() { return render; },
-    get serverProvider() { return serverProvider; },
-    get sessionRestorer() { return sessionRestorer; },
-    get setMobileExplorerOpen() { return setMobileExplorerOpen; },
-    get settings() { return settings; },
-    get showConfirmDialog() { return showConfirmDialog; },
-    get showResumedFile() { return showResumedFile; },
-    get showToast() { return showToast; },
-    get snapshotDirtyFiles() { return snapshotDirtyFiles; },
-    get switchWorkspaceMode() { return switchWorkspaceMode; },
-    get syncState() { return syncState; },
-    get identity() { return identity; },
-    mode: syncMode
-  }));
-}
-function activateBrowserEntry(...args) { return cloudBrowser().activateBrowserEntry(...args); }
-function beginTransfer(...args) { return cloudBrowser().beginTransfer(...args); }
-function cancelPick(...args) { return cloudBrowser().cancelPick(...args); }
-async function handleAccountLogin(...args) { return cloudBrowser().handleAccountLogin(...args); }
-function handleAccountLogout(...args) { return cloudBrowser().handleAccountLogout(...args); }
-async function handleDeleteSelected(...args) { return cloudBrowser().handleDeleteSelected(...args); }
-async function handleHost(...args) { return cloudBrowser().handleHost(...args); }
-async function handleNewFolder(...args) { return cloudBrowser().handleNewFolder(...args); }
-async function handleNewProject(...args) { return cloudBrowser().handleNewProject(...args); }
-async function handleOpenWorkspace(...args) { return cloudBrowser().handleOpenWorkspace(...args); }
-async function handlePublishHere(...args) { return cloudBrowser().handlePublishHere(...args); }
-async function handleSelectDestination(...args) { return cloudBrowser().handleSelectDestination(...args); }
-async function openAccessEditor(...args) { return cloudBrowser().openAccessEditor(...args); }
-function openFileBrowser(...args) { return cloudBrowser().openFileBrowser(...args); }
-async function openLocalProjectFromBrowser(...args) { return cloudBrowser().openLocalProjectFromBrowser(...args); }
-async function performLogin(...args) { return cloudBrowser().performLogin(...args); }
-async function pingCurrentServer(...args) { return cloudBrowser().pingCurrentServer(...args); }
-function renderHostTargets(...args) { return cloudBrowser().renderHostTargets(...args); }
-async function saveAccessEditor(...args) { return cloudBrowser().saveAccessEditor(...args); }
-function splitServerPath(...args) { return cloudBrowser().splitServerPath(...args); }
-function switchBrowserSide(...args) { return cloudBrowser().switchBrowserSide(...args); }
-function toggleMultiSelect(...args) { return cloudBrowser().toggleMultiSelect(...args); }
+// ---- The cloud file browser, accounts and hosting (the Cloud module) ----
+function handleAccountLogout(...args) { return cloudParts.handleAccountLogout(...args); }
+async function handleOpenWorkspace(...args) { return cloudParts.handleOpenWorkspace(...args); }
+async function openAccessEditor(...args) { return cloudParts.openAccessEditor(...args); }
+function openFileBrowser(...args) { return cloudParts.openFileBrowser(...args); }
+async function performLogin(...args) { return cloudParts.performLogin(...args); }
+async function pingCurrentServer(...args) { return cloudParts.pingCurrentServer(...args); }
+function renderHostTargets(...args) { return cloudParts.renderHostTargets(...args); }
 
-elements.pingServerButton.addEventListener("click", () => { void pingCurrentServer(); });
 
-const serverProvider = {
-  id: "server",
-  rootLabel: "Teams",
-  supportsAccess: true,
-  supportsPublish: true,
-  canCreateAt(path) {
-    return splitServerPath(path).team !== "";
-  },
-  async list(path) {
-    const { team, rel } = splitServerPath(path);
-    const data = await browseServer(settings.serverUrl, identity.token(), team, rel);
-    if (!team) {
-      // Team list. Older servers return name strings; newer ones { name, modified }.
-      const entries = (data.teams ?? []).map((item) => {
-        const name = typeof item === "string" ? item : item.name;
-        const modified = typeof item === "string" ? null : item.modified;
-        return { name, kind: "team", path: name, modified };
-      });
-      return { path: "", entries, atRoot: true };
-    }
-    const entries = (data.entries ?? []).map((entry) => ({ ...entry, path: `${team}/${entry.path}` }));
-    return { path, entries, atRoot: false };
-  },
-  async mkdir(path, name) {
-    const { team, rel } = splitServerPath(path);
-    await mkdirServer(settings.serverUrl, identity.token(), team, rel, name);
-  },
-  async createProject(path, name) {
-    const { team, rel } = splitServerPath(path);
-    const created = await createProjectServer(settings.serverUrl, identity.token(), team, rel, name);
-    return { path: `${team}/${created.path}`, name };
-  },
-  async openProject(entry) {
-    const { team, rel } = splitServerPath(entry.path);
-    await handleOpenWorkspace(team, rel, { reason: "file-manager-open" });
-  },
-  async delete(entry) {
-    const { team, rel } = splitServerPath(entry.path);
-    await deleteServer(settings.serverUrl, identity.token(), team, rel);
-  },
-  async exportModel(entry) {
-    const { team, rel } = splitServerPath(entry.path);
-    const data = await exportProjectServer(settings.serverUrl, identity.token(), team, rel);
-    return { name: data.name ?? entry.name, project: data.project };
-  },
-  async importModel(destPath, name, project) {
-    const { team, rel } = splitServerPath(destPath);
-    const created = await importProjectServer(settings.serverUrl, identity.token(), team, rel, name, project);
-    return { path: `${team}/${created.path}`, name: created.name };
-  },
-  async openAccess(entry) {
-    const { team, rel } = splitServerPath(entry.path);
-    await openAccessEditor(team, rel, entry.name);
-  }
-};
 
-const opfsProvider = {
-  id: "local",
-  rootLabel: "This device",
-  supportsAccess: false,
-  supportsPublish: false,
-  canCreateAt() {
-    return true;
-  },
-  async list(path) {
-    const { entries } = await listOpfsDir(path);
-    return { path, entries, atRoot: path === "" };
-  },
-  async mkdir(path, name) {
-    await mkdirOpfs(path, name);
-  },
-  async createProject(path, name) {
-    const created = await createProjectOpfs(path, name);
-    return { path: created.path, name };
-  },
-  async openProject(entry) {
-    await openLocalProjectFromBrowser(entry);
-  },
-  async delete(entry) {
-    await deleteOpfsEntry(entry.path);
-  },
-  async exportModel(entry) {
-    const pkg = await exportProjectModelOpfs(entry.path);
-    return { name: pkg.name ?? entry.name, project: pkg.project };
-  },
-  async importModel(destPath, name, project) {
-    return importProjectModelOpfs(destPath, name, project);
-  }
-};
 
-// Current browser view. `provider` is one of the objects above, `path` is that
-// provider's opaque location, `selection` is the highlighted entry (or null).
-let browserState = { provider: opfsProvider, intent: "open", mode: "open", multiSelect: false, checked: new Set(), pendingTransfer: null, path: "", entries: [], atRoot: true, selection: null };
 
-elements.accountLoginButton?.addEventListener("click", () => { void handleAccountLogin(); });
-elements.accountLogoutButton?.addEventListener("click", handleAccountLogout);
-elements.browserNewFolder?.addEventListener("click", () => { void handleNewFolder(); });
-elements.browserNewProject?.addEventListener("click", () => { void handleNewProject(); });
-elements.browserTrash?.addEventListener("click", () => { void cloudBrowser().handleOpenTrash(); });
-elements.browserPublishHere?.addEventListener("click", () => { void handlePublishHere(); });
-elements.browserSideLocal?.addEventListener("click", () => switchBrowserSide("local"));
-elements.browserSideServer?.addEventListener("click", () => switchBrowserSide("server"));
-elements.browserOpenBtn?.addEventListener("click", () => {
-  if (browserState.selection) activateBrowserEntry(browserState.selection);
-});
-elements.browserAccessBtn?.addEventListener("click", () => {
-  const sel = browserState.selection;
-  if (sel && browserState.provider?.openAccess) void browserState.provider.openAccess(sel);
-});
-elements.browserSelectToggle?.addEventListener("click", toggleMultiSelect);
-elements.browserDeleteBtn?.addEventListener("click", () => { void handleDeleteSelected(); });
-elements.browserMoveBtn?.addEventListener("click", () => beginTransfer("move"));
-elements.browserCopyBtn?.addEventListener("click", () => beginTransfer("copy"));
-elements.browserPickBtn?.addEventListener("click", () => { void handleSelectDestination(); });
-elements.browserPickCancel?.addEventListener("click", cancelPick);
-elements.accessDialog?.querySelector("form")?.addEventListener("submit", (event) => {
-  // "Cancel" (value=cancel) lets the dialog close normally; Save persists first.
-  if (event.submitter && event.submitter.value === "cancel") return;
-  event.preventDefault();
-  void saveAccessEditor();
-});
-elements.hostButton?.addEventListener("click", () => { void handleHost(); });
-renderHostTargets();
-elements.accountPasswordInput?.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    void handleAccountLogin();
-  }
-});
+renderHostTargets(); // needs the live session, which exists from here on
 
 // ── Auto-reconnect ──────────────────────────────────────────────────────────
 // Remember the last intended session (settings.wasConnected) and transparently

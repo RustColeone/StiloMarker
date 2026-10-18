@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-18 · release `v0.1.59` (not deployed; v0.1.53 is live)
+Last updated: 2026-10-18 · release `v0.1.60` (not deployed; v0.1.53 is live)
 
 ---
 
@@ -68,6 +68,24 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.60: the Cloud module
+
+Step S3c. Nothing changes for users.
+
+- Signing in and out, the file browser (the server's teams, folders and
+  projects, and this device's projects), deleting to the Trash, moving and
+  copying, project access, hosting, publishing and opening a cloud workspace
+  are one browser module on level 5 (`app/modules/cloud`), split by job.
+- It reaches the settings and dialogs through Shell, the session and its
+  status through Sync, the project through Workspace, the trash through
+  History and the resume positions through the Editor. `main.js` attaches a
+  port for the rest (12 names).
+- The server's workspace routes moved from the legacy sync service into the
+  module (`api.js`); two calls nothing used were dropped.
+- Fixed on the way: since v0.1.52 the Trace tab's listener read the log
+  panel's state before it existed during start-up, so the console showed a
+  few harmless "Cannot access 'debugState'" errors at every load.
 
 ### v0.1.59: redrawing is asked of Shell
 

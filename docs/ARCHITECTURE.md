@@ -20,7 +20,7 @@ This file is the short reference that the structure tests enforce.
   | 2 | Workspace, Identity and access, Models |
   | 3 | Editor (browser), Sync, Characters |
   | 4 | History, Comments, Explorer (browser) |
-  | 5 | Assistant, Chats |
+  | 5 | Assistant, Chats, Cloud (browser) |
   | 6 | Extensions (`extensions/<name>/`): the URL album |
 
 - **Inside every module**: its definition (name, level, uses, owns: in a
@@ -61,6 +61,7 @@ flowchart TB
   subgraph L5["Level 5 · features"]
     Assistant["Assistant (both)"]
     Chats["Chats (both)"]
+    Cloud["Cloud (browser)"]
   end
   subgraph L4["Level 4 · on top of the editor"]
     History["History (both)"]
@@ -86,6 +87,7 @@ flowchart TB
 
   Assistant --> Editor & Characters & Models
   Chats --> Characters & Identity & Models
+  Cloud --> History & Sync & Identity
   History --> Editor
   Comments --> Editor & Identity
   Explorer --> Editor & Workspace & Shell
@@ -99,7 +101,7 @@ flowchart TB
   L5 ~~~ L4 ~~~ L3 ~~~ L2 ~~~ L1
 
   classDef built fill:#d8f5dd,stroke:#2e8b47,color:#123;
-  class Shell,Transport,FileTypes,Workspace,Identity,Models,Sync,Editor,Characters,History,Comments,Explorer,Assistant,Chats,Kernel built;
+  class Shell,Transport,FileTypes,Workspace,Identity,Models,Sync,Editor,Characters,History,Comments,Explorer,Assistant,Chats,Cloud,Kernel built;
 ```
 
 ### Inside a module
@@ -313,8 +315,8 @@ That is where bugs are hard to find. Steps, each its own release:
 | S3o-2 | Sync owns the live session (v0.1.57): `sync.attach(port)` creates it, given what only the app can do (replace the project, apply a remote change, keep local edits before a reload, sign in again, upload an asset); its news are Sync's events (`status`, `remote-cursor`, `host-counters`, `patch-confirmed`, `event`). The session's status (connected, presence, role, what the server offers) is Sync's too: a live view everyone reads, changed by Sync from the session and by `status.change` where code pings or reconnects (23 direct writes in 2 files before). The Explorer asks Sync for the session instead of `main.js`. The settings' read-only view is now the kernel's `createLiveView`, used by both | done (v0.1.57) |
 | S3o-3 | Workspace owns saving (v0.1.58): the four storage services moved into its adapters (this browser's copy, folders on disk, on-device folders, the save queue), and `workspace.saving` does what `main.js` did: the trailing browser copy flushed when the page may go away, a local project's folder, auto-save (idle and periodic) and Save. What only the app knows comes as hooks (`saving.attach({ busy, scope, shared, confirmed })`): an IME composition, the workspace a save belongs to, which files the server confirmed | done (v0.1.58) |
 | S3o-4 | Drawing the app again is asked of Shell (v0.1.59): `shell.render(project, { only: "status" }?)` announces a `render` event that `main.js` answers; the Editor and the Explorer no longer carry `render` and `updateStatus` in their ports (Editor port 25 → 23 names, Explorer 16 → 13 since S3b). Splitting `main.js`'s render into each module's own listener is step 4 | done (v0.1.59) |
-| S3c | The cloud file browser, sign-in and hosting as a module | next |
-| S3d | The chat panel into the Assistant module | |
+| S3c | The Cloud module (v0.1.60, level 5): signing in and out, the file browser (the server's teams and folders, this device's projects) and its two providers, deleting to the Trash, moving and copying, project access, hosting and publishing, opening a cloud workspace, and its dialogs' controls. The server's workspace routes (the legacy sync service) are its `api.js`; two unused calls were dropped. `main.js` attaches a port (12 names); the 967-line cloud browser is split by job. Getters handed out by `main.js`: 89 → 62; `main.js` 3,146 → 2,971 lines | done (v0.1.60) |
+| S3d | The chat panel into the Assistant module | next |
 | S4 | `main.js` only starts the kernel; then the server's `WorkspaceRegistry` the same way | |
 
 ### Notes for module authors

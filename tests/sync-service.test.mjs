@@ -73,7 +73,7 @@ function startSyncServer() {
   return server;
 }
 
-test("ping (sync-service), then Sync's calls: connect, fetch, push state and operations", async () => {
+test("ping (the Cloud module's API), then Sync's calls: connect, fetch, push state and operations", async () => {
   const syncServer = startSyncServer();
   const port = await new Promise((resolvePort) => {
     syncServer.listen(0, () => resolvePort(syncServer.address().port));

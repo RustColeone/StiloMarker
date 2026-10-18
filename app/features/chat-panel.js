@@ -15,7 +15,7 @@ import { createMcpControls } from "../services/mcp-ui-service.js";
 import { charactersView, parsePersona, personaSummary } from "../modules/characters/index.js";
 import { createCloudChats, createLocalChats, loadChatsView } from "../modules/chats/index.js";
 import { chosenModel, groupByProvider, runDirectReply } from "../modules/models/index.js";
-import { normalizeServerUrl } from "../services/sync-service.js";
+import { normalizeServerUrl } from "../modules/shell/index.js";
 import { query } from "../ui/dom.js";
 import { ignored } from "../kernel/index.js";
 
