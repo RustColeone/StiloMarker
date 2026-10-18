@@ -1,4 +1,4 @@
-import { dataUrlToBytes } from "./file-content-service.js";
+import { dataUrlToBytes } from "../modules/workspace/index.js";
 
 import { normalizeServerUrl, parseResponse, throwForResponse } from "../modules/shell/index.js";
 

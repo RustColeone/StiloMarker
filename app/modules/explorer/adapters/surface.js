@@ -1,0 +1,175 @@
+// The Explorer's parts, created and wired here (main.js used to create the
+// tree and file actions with long lists of its values): the tree, moving and
+// copying, adding files, creating, renaming and deleting, exporting, the
+// context-menu actions, and the explorer's events. They share one context,
+// `app`: the Explorer's own state (the clipboard, a file being added), every
+// part's functions, the editor's functions it uses, Shell's dialogs, and PORT,
+// what main.js still provides because no module owns it yet.
+import { getPath, isImageFileName } from "../../workspace/index.js";
+import {
+  createMarkdownReference, fileExtensionOf, getNextDefaultFileName, getNextDefaultFolderName, inferNameFromUrl,
+  looksLikeUrl, suggestUniqueFileName, suggestUniqueFolderName
+} from "../model/names.js";
+import { createActions } from "./actions.js";
+import { createAdding } from "./adding.js";
+import { installExplorerEvents } from "./events.js";
+import { createExporting } from "./exporting.js";
+import { createMoves } from "./moves.js";
+import { createNaming } from "./naming.js";
+import { createExplorerView } from "./tree.js";
+
+// What main.js attaches (explorer.attach(port)); each entry should move to an
+// owner, or become an extension point, and leave this list.
+export const PORT = [
+  "collaboration", "publishOperation", "publishSnapshot", "render", "updateStatus", "settings", "persistSettings",
+  "elements", "logDebug", "imageSrcFor", "canManagePreview", "openAccessEditor", "openMtreeToolsDialog",
+  "remapPersonaPaths", "initialContentForKind", "exportDiagram"
+];
+
+// The editor's functions the explorer calls (editor.parts()).
+const EDITOR = [
+  "applyEditorEdit", "clearEditorDropCaret", "getEditorSelection", "getEditorText", "getEditorTextOffsetFromPoint",
+  "isPreviewableFileName", "openDroppedFileInPane", "openFileFromExplorer", "openPreviewTab", "replaceEditorRange",
+  "setActiveSourceFile", "setActiveSourcePart", "setEditorSelection", "setPreviewFile"
+];
+
+export function createSurface({ port, workspace, editor, shell }) {
+  const missing = PORT.filter((name) => !(name in port));
+  if (missing.length) throw new Error(`explorer.attach: the port lacks ${missing.join(", ")}`);
+  const editorParts = editor.parts();
+  if (!editorParts) throw new Error("explorer.attach: attach the editor first");
+
+  const app = {
+    // A file staged in the Add File dialog.
+    addFileState: { parentId: null, fileName: "", content: null, sourceLabel: "" },
+    // What Copy put aside for Paste.
+    explorerClipboard: { payload: null },
+    workspace, view: editor.view, parts: workspace.parts,
+    notify: (message) => shell.notify(message),
+    showToast: (message, options) => shell.toast(message, options),
+    confirmAction: (message) => shell.confirm(String(message)),
+    promptForName: (message, value = "", options = {}) => shell.input({ title: message, message, value, submitLabel: "Save", ...options }),
+    shell,
+    fileExtensionOf, getNextDefaultFileName, getNextDefaultFolderName, suggestUniqueFileName, suggestUniqueFolderName,
+    looksLikeUrl, inferNameFromUrl,
+    createMarkdownReference: (activeFile, targetFile) => createMarkdownReference(workspace.project().getProject(), activeFile, targetFile),
+    editorDropOffset: () => editorParts.dropOffset(),
+    getSelectedTarget
+  };
+  Object.defineProperty(app, "controller", { get: () => workspace.project(), enumerable: true });
+  for (const name of PORT) Object.defineProperty(app, name, { get: () => port[name], enumerable: true });
+  for (const name of EDITOR) app[name] = editorParts[name];
+
+  const add = (part) => {
+    for (const [name, fn] of Object.entries(part)) {
+      if (name in app) throw new Error(`explorer: "${name}" is defined twice`);
+      app[name] = fn;
+    }
+  };
+  add(createMoves(app));
+  add(createAdding(app));
+  add(createNaming(app));
+  add(createExporting(app));
+  add(createActions(app));
+  app.tree = createExplorerView({
+    container: app.elements.explorerTree,
+    surface: app.elements.explorerPanel,
+    contextMenu: app.elements.explorerContextMenu,
+    onOpenFile(fileId) {
+      app.openFileFromExplorer(fileId);
+    },
+    onOpenPart(fileId, partId) {
+      const project = app.controller.getProject();
+      const file = project.nodes[fileId];
+      if (!file || file.kind !== "file" || !app.parts.of(file.name)) return;
+      app.setActiveSourcePart(fileId, partId);
+      app.openPreviewTab(fileId);
+      app.view.showPreview(fileId, partId);
+      app.updateStatus(project);
+    },
+    onToggleFolder(nodeId) {
+      app.view.pick(nodeId);
+      app.controller.toggleFolder(nodeId);
+    },
+    onSelectNode(target) {
+      app.view.pick(target.nodeId, target.partId);
+      app.render(app.controller.getProject());
+    },
+    canPasteTarget(target) {
+      return app.canPasteIntoExplorerTarget(target);
+    },
+    canPreviewFile(nodeId) {
+      const node = app.controller.getProject().nodes[nodeId];
+      return node?.kind === "file" && app.isPreviewableFileName(node.name);
+    },
+    canManagePreview() {
+      return app.canManagePreview();
+    },
+    onAction(action, target, options) {
+      app.view.pick(target.nodeId, target.partId);
+      return app.handleExplorerAction(action, target, options);
+    },
+    onDragNodeStart(nodeId, event) {
+      const project = app.controller.getProject();
+      const node = project.nodes[nodeId];
+      if (!node) return;
+      event.dataTransfer?.setData("text/mdnotes-node-id", nodeId);
+      if (node.kind === "file") {
+        event.dataTransfer?.setData("text/mdnotes-file-id", nodeId);
+        event.dataTransfer?.setData("text/plain", nodeId);
+      }
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "copyMove";
+      }
+      app.logDebug("action", "Explorer drag started", getPath(project, nodeId));
+    },
+    onDragPartStart(fileId, partId, event) {
+      const project = app.controller.getProject();
+      const file = project.nodes[fileId];
+      const parts = file?.kind === "file" ? app.parts.of(file.name) : null;
+      const part = parts?.list(file.content).find((candidate) => candidate.id === partId);
+      if (!part) return;
+      event.dataTransfer?.setData("text/stilo-file-part", JSON.stringify({ fileId, partId }));
+      event.dataTransfer?.setData("text/plain", part.image || part.name);
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "copyMove";
+      }
+    },
+    getFilterMode() {
+      return app.settings.explorerFilter;
+    },
+    getAssetPreviewSrc(fileId) {
+      const project = app.controller.getProject();
+      const file = project.nodes[fileId];
+      return file?.kind === "file" && isImageFileName(file.name) ? app.imageSrcFor(project, file) : "";
+    },
+    listParts(fileId) {
+      const file = app.controller.getProject().nodes[fileId];
+      const parts = file?.kind === "file" ? app.parts.of(file.name) : null;
+      return parts ? parts.list(file.content) : null;
+    },
+    getPartAdder(fileId) {
+      const file = app.controller.getProject().nodes[fileId];
+      return file?.kind === "file" ? app.parts.of(file.name)?.add?.label ?? null : null;
+    },
+    getSelectedTarget() {
+      return getSelectedTarget();
+    }
+  });
+  installExplorerEvents(app);
+
+  // The explorer's target: the part open in the source editor, else the selected node.
+  function getSelectedTarget() {
+    const { sourcePart, selectionNodeId } = editor.view.get();
+    return sourcePart ? { nodeId: sourcePart.fileId, partId: sourcePart.partId } : { nodeId: selectionNodeId, partId: null };
+  }
+
+  return Object.freeze({
+    ...Object.fromEntries(Object.entries(Object.getOwnPropertyDescriptors(app))
+      .filter(([name, d]) => typeof d.value === "function" && !EDITOR.includes(name)
+        && !["notify", "showToast", "confirmAction", "promptForName"].includes(name))
+      .map(([name, d]) => [name, d.value])),
+    // The tree, with the files that have an agent edit waiting marked.
+    renderTree: (project, decorated) => app.tree.render(project, decorated)
+  });
+}

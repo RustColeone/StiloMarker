@@ -33,7 +33,10 @@
 //         linkText?(part) -> what a part dropped into Markdown becomes
 //         add?: { label, run(file) -> Promise<part | null> }   (a menu item that asks for a new part)
 //   parts.of(name) -> the provider for a file name, or null
-// Static, for code from before the restructure: the pure project model
+// Static: a file's content as bytes and back (bytesToDataUrl, dataUrlToBlob,
+// decodeTextBytes, getExportBytes, getMimeTypeForFileName,
+// readFileAsProjectContent) and ZIP archives (createZip, downloadBlob,
+// extractZipEntries). Static, for code from before the restructure: the pure project model
 // (applySyncOperation, getPath, isImageFileName…), seedDefaultProject, and
 // the text-patch rules.
 import { defineModule } from "../../kernel/index.js";
@@ -54,6 +57,8 @@ function checkParts(provider) {
 export * from "./model/project.js";
 export { seedDefaultProject } from "./service/project-store.js";
 export { buildTextPatch, isTextPatch } from "./model/text-patch.js";
+export { bytesToDataUrl, dataUrlToBlob, dataUrlToBytes, decodeTextBytes, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent } from "./adapters/file-content.js";
+export { createZip, downloadBlob, extractZipEntries } from "./adapters/zip.js";
 
 export default defineModule({
   name: "workspace",

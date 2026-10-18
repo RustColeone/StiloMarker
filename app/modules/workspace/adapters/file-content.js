@@ -1,5 +1,7 @@
-import { isImageFileName } from "../domain/project-model.js";
-import { builtinTypes } from "../modules/file-types/index.js";
+// A file's content as bytes and back: text, data URLs, MIME types (moved from
+// the legacy file-content service; Workspace owns files and their contents).
+import { isImageFileName } from "../model/project.js";
+import { builtinTypes } from "../../file-types/index.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();

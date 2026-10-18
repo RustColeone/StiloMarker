@@ -19,7 +19,7 @@ This file is the short reference that the structure tests enforce.
   | 1 | Shell (browser) / Transport (server), File types |
   | 2 | Workspace, Identity and access, Models |
   | 3 | Editor (browser), Sync, Characters |
-  | 4 | History, Comments |
+  | 4 | History, Comments, Explorer (browser) |
   | 5 | Assistant, Chats |
   | 6 | Extensions (`extensions/<name>/`): the URL album |
 
@@ -65,6 +65,7 @@ flowchart TB
   subgraph L4["Level 4 · on top of the editor"]
     History["History (both)"]
     Comments["Comments (both)"]
+    Explorer["Explorer (browser)"]
   end
   subgraph L3["Level 3 · on top of the workspace"]
     Editor["Editor (browser)"]
@@ -87,6 +88,7 @@ flowchart TB
   Chats --> Characters & Identity & Models
   History --> Editor
   Comments --> Editor & Identity
+  Explorer --> Editor & Workspace & Shell
   Editor --> Workspace & FileTypes & Shell
   Characters --> Workspace
   Sync --> Workspace & Identity
@@ -97,7 +99,7 @@ flowchart TB
   L5 ~~~ L4 ~~~ L3 ~~~ L2 ~~~ L1
 
   classDef built fill:#d8f5dd,stroke:#2e8b47,color:#123;
-  class Shell,Transport,FileTypes,Workspace,Identity,Models,Sync,Editor,Characters,History,Comments,Assistant,Chats,Kernel built;
+  class Shell,Transport,FileTypes,Workspace,Identity,Models,Sync,Editor,Characters,History,Comments,Explorer,Assistant,Chats,Kernel built;
 ```
 
 ### Inside a module
@@ -201,6 +203,9 @@ sequenceDiagram
 `tests/structure/structure.test.mjs` checks each one.
 
 1. Import another module only through its public API (`index.js`, `__init__.py`).
+   A browser module never imports code from before the restructure (`main.js`,
+   `app/features`, `app/ui`, `app/services`, `app/domain`); that code may use
+   modules, not the other way round.
 2. Use only modules listed in `uses`, all on a lower level; no cycles.
 3. Calls go down, news goes up: call lower APIs; tell higher modules through
    events or extension points.
@@ -303,8 +308,8 @@ That is where bugs are hard to find. Steps, each its own release:
 | S1 | The trace (kernel) and rule 9: every silent catch (57: 36 browser, 21 server) reports why it carries on | done (v0.1.52) |
 | S2 | One owner per shared variable: the 26 that outside code set (v0.1.53: none left, rule 10). What the editor shows (tabs, the preview's file and part, the selection) is the Editor's `view`; shared or local work and the kept local project is Sync's `mode`; the rest moved into the one file that used them (gestures into layout, snapshot counts into snapshots, the replace target into file actions, MathJax loading into the preview, the editor's two flags into the editor). Getters handed out by `main.js`: 261 → 227 | done (v0.1.53) |
 | S3a | The Editor owns all of itself (v0.1.54): it creates and wires its parts (source editor, highlighting, find, autocomplete, links, tabs and preview) instead of `main.js` creating six of them with their own lists of main's values; their state (undo history, search, autocomplete, render cache, dragged text, others' cursors, the file shown, resume positions), the editor's events, the resize observer and showing the active file moved in with them. `main.js` attaches one port (`editor.attach`, listed in `surface.js` as PORT) for what no module owns yet. Getters handed out by `main.js`: 227 → 133; `main.js` 4,539 → 3,731 lines | done (v0.1.54) |
-| S3b | The explorer and file actions as one module (the explorer's tree, creating, renaming, moving, copying, deleting, importing, exporting, dropping into the editor), using `editor.parts()`, Workspace, Sync's session and Shell | next |
-| S3c | The cloud file browser, sign-in and hosting as a module | |
+| S3b | The Explorer module (v0.1.55, level 4): the tree, moving and copying files, folders and parts, adding files (and dropping them into the editor), creating, renaming, deleting, exporting, the context menu and its Edit / Create menu items, split by job into files under the budget. It uses Workspace, the Editor's `parts()` and Shell's dialogs; `main.js` attaches a port (16 names). The file-content and ZIP helpers moved into Workspace (shared with legacy saving); diagram export is `app/features/diagram-export.js` until diagrams become an extension. Rule 1 now fails on a module importing legacy code. Getters handed out by `main.js`: 133 → 90; `main.js` 3,731 → 3,328 lines | done (v0.1.55) |
+| S3c | The cloud file browser, sign-in and hosting as a module | next |
 | S3d | The chat panel into the Assistant module | |
 | S4 | `main.js` only starts the kernel; then the server's `WorkspaceRegistry` the same way | |
 
@@ -319,6 +324,8 @@ That is where bugs are hard to find. Steps, each its own release:
   `editor.parts()` after `main.js` has called `editor.attach(port)`. A part
   needing something the Editor does not own gets it from the port; moving an
   entry out of PORT (to an owner, or an extension point) is how the port shrinks.
+- The explorer's functions (the selected folder, creating a file in a folder,
+  the context-menu actions): `explorer.parts()` after `explorer.attach(port)`.
 - What the editor shows: `editor.view` (`get()` → `sourceOpenTabIds`,
   `previewOpenTabIds`, `previewFileId`, `previewPart`, `sourcePart`,
   `selectionNodeId`, `draggingTabState`; actions `reset`, `pick`, `select`,

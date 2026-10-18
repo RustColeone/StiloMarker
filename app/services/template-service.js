@@ -1,5 +1,5 @@
 import { ROOT_ID, addFile, addFolder, createProject, findChildByName, isImageFileName } from "../domain/project-model.js";
-import { bytesToDataUrl, getMimeTypeForFileName } from "./file-content-service.js";
+import { bytesToDataUrl, getMimeTypeForFileName } from "../modules/workspace/index.js";
 
 async function fetchTemplateEntry(path) {
   const response = await fetch(`./Template/${path}`, { cache: "no-store" });

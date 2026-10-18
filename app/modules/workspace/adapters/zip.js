@@ -1,3 +1,5 @@
+// Writing and reading ZIP archives (exporting a folder, importing one), moved
+// from the legacy zip service.
 function createCrc32Table() {
   const table = new Uint32Array(256);
   for (let index = 0; index < 256; index += 1) {

@@ -10,10 +10,10 @@ test("required workspace files exist", () => {
     "index.html",
     "app/main.js",
     "app/modules/sync/service/runtime.js",
-    "app/services/file-content-service.js",
+    "app/modules/workspace/adapters/file-content.js",
     "app/services/mtree-module-map-service.js",
     "app/domain/project-model.js",
-    "app/services/zip-service.js",
+    "app/modules/workspace/adapters/zip.js",
     "app/services/offline-service.js",
     "app/services/sync-service.js",
     "server/mdnotes_server.py",
@@ -75,7 +75,7 @@ test("main.js wires core feature symbols", async () => {
   // the wiring may be in any of them.
   const { readdir } = await import("node:fs/promises");
   const split = [];
-  for (const dir of ["app/features", "app/ui", "app/modules/editor/adapters", "app/modules/comments/adapters"]) {
+  for (const dir of ["app/features", "app/ui", "app/modules/editor/adapters", "app/modules/comments/adapters", "app/modules/explorer/adapters"]) {
     for (const name of (await readdir(resolveFromRoot(dir))).filter((n) => n.endsWith(".js"))) split.push(`${dir}/${name}`);
   }
   const mainSource = [await readFile(resolveFromRoot("app/main.js"), "utf8"),

@@ -1,5 +1,8 @@
-import { ROOT_ID, listVisibleNodes } from "../domain/project-model.js";
-import { builtinTypes } from "../modules/file-types/index.js";
+// The explorer's tree: rows for folders, files and a file's parts, the context
+// menu, the quick-add and filter menus, renaming in place. Moved from
+// app/ui/explorer-view.js; it reports what the user does through callbacks.
+import { ROOT_ID, listVisibleNodes } from "../../workspace/index.js";
+import { builtinTypes } from "../../file-types/index.js";
 
 function getFileIconClass(node) {
   if (node.kind === "folder") {

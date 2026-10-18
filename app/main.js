@@ -22,10 +22,10 @@ import { loadProject, saveProject } from "./services/storage-service.js";
 import { browseServer, createProjectServer, deleteServer, exportProjectServer, importProjectServer, mkdirServer, normalizeServerUrl, saveUserState, uploadAsset } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { query } from "./ui/dom.js";
-import { createExplorerView } from "./ui/explorer-view.js";
 import { createDefaultBmap } from "./services/bmap-service.js";
 import { createCloudBrowser } from "./features/cloud-browser.js";
-import { createFileActions } from "./features/file-actions.js";
+import explorerModule from "./modules/explorer/index.js";
+import { createDiagramExport } from "./features/diagram-export.js";
 import { registerPreviews } from "./features/previews.js";
 import { createLayout } from "./ui/layout.js";
 import editorModule, { DIFF_TAB_ID, escapeHtmlAttribute, forgetViewStates, getRelativePath, getRelativeProjectPath, normalizePath, renderMarkdown } from "./modules/editor/index.js";
@@ -267,7 +267,7 @@ const elements = {
 // ---- Modules (docs/ARCHITECTURE.md) ----
 // The app is moving into modules one step at a time. Code still in this file
 // reaches a module only through the public API the kernel hands back.
-const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, syncModule, historyModule, ...extensionModules], {
+const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, syncModule, historyModule, explorerModule, ...extensionModules], {
   log: (owner, ...args) => { try { logDebug("action", `${owner}: ${args.join(" ")}`); } catch (error) { ignore(error, "the log panel is not ready yet"); } }
 });
 const { shell, workspace, identity } = modules;
@@ -297,6 +297,15 @@ var editorParts = modules.editor.attach({
   get diffState() { return diffState; },
   render, updateStatus, renderWelcomeState, setMobileExplorerOpen, togglePreview,
   scope: () => chatWorkspaceKey(), isReadOnly: () => isReadOnlyWorkspace(), onDrop: (event) => handleEditorDrop(event)
+});
+// The explorer and file actions, given what no module owns yet (modules/explorer/adapters/surface.js).
+var explorerParts = modules.explorer.attach({
+  get collaboration() { return collaboration; },
+  publishOperation, publishSnapshot, render, updateStatus, settings, persistSettings, elements, logDebug, imageSrcFor,
+  canManagePreview: () => Boolean(identity.account()) && syncMode.get().workspaceMode === "synced"
+    && collaboration.isConnected() && Boolean(settings.lastWorkspace?.team),
+  openAccessEditor, openMtreeToolsDialog, remapPersonaPaths, initialContentForKind,
+  exportDiagram: createDiagramExport({ get controller() { return controller; }, loadBmapView, notify, logDebug })
 });
 // Diagrams and character sheets add their previews to the Editor's extension point.
 registerPreviews(modules.editor.previews, {
@@ -402,12 +411,6 @@ let sessionRestorer = null;
 // Forward declaration — assigned after `collaboration` is created.
 let switchWorkspaceMode;
 
-const addFileState = {
-  parentId: null,
-  fileName: "",
-  content: null,
-  sourceLabel: ""
-};
 // Set to true while a preview-originated edit (e.g. a bmap inspector change) is
 // being committed. The preview view has already updated itself in place, so the
 // synchronous updateStatus callback must skip re-rendering the preview pane —
@@ -420,9 +423,6 @@ const debugState = {
   activeTab: "all"
 };
 
-const explorerClipboard = {
-  payload: null
-};
 
 const debugTabs = [...elements.debugTabStrip.querySelectorAll(".debug-tab")].map((element) => ({ id: element.dataset.tab, element }));
 
@@ -482,7 +482,7 @@ function registerAgentDecorations(ops, batchId) {
     renderEditorContent(activeFile.content);
   }
   // Refresh explorer and tabs so pending-edit indicators appear.
-  explorer.render(project, new Set(agentPendingDecorations.keys()));
+  explorerParts.renderTree(project, new Set(agentPendingDecorations.keys()));
   renderTabs(project);
 }
 
@@ -500,7 +500,7 @@ function clearAgentDecorations(batchId) {
     if (activeFile) renderEditorContent(activeFile.content);
     // Refresh explorer and tabs so pending-edit indicators are cleared.
     const project = controller.getProject();
-    explorer.render(project, new Set(agentPendingDecorations.keys()));
+    explorerParts.renderTree(project, new Set(agentPendingDecorations.keys()));
     renderTabs(project);
   }
 }
@@ -695,50 +695,6 @@ function applyAgentSettingsControls() {
   applyAgentSettingsStatus();
 }
 
-function looksLikeUrl(value) {
-  return /^(https?:\/\/|data:)/i.test(value.trim());
-}
-
-function inferNameFromUrl(value) {
-  try {
-    const url = new URL(value);
-    const rawName = decodeURIComponent(url.pathname.split("/").filter(Boolean).pop() ?? "").trim();
-    return rawName || "remote-file";
-  } catch {
-    return "remote-file";
-  }
-}
-
-function createMarkdownImageReference(name, url) {
-  return `![${name}](${url})`;
-}
-
-function slugTitle(base, index, extension = "") {
-  return `${base} ${index}${extension}`;
-}
-
-function getNextDefaultFolderName(project, parentId) {
-  let index = 1;
-  let candidate = slugTitle("new folder", index);
-  while (findChildByName(project, parentId, candidate)) {
-    index += 1;
-    candidate = slugTitle("new folder", index);
-  }
-  return candidate;
-}
-
-function getNextDefaultFileName(project, parentId, kind) {
-  const label = builtinTypes.creatable().find((type) => type.id === kind)?.create.name ?? "new file";
-  const extension = builtinTypes.extensionsOf(kind)[0] ?? "";
-  let index = 1;
-  let candidate = slugTitle(label, index, extension);
-  while (findChildByName(project, parentId, candidate)) {
-    index += 1;
-    candidate = slugTitle(label, index, extension);
-  }
-  return candidate;
-}
-
 // Starting content for a new file of `kind`: a default diagram, a character
 // sheet template, or nothing.
 function initialContentForKind(kind, name) {
@@ -814,22 +770,6 @@ function getEditorLineIndexAtOffset(textOffset) {
     remaining -= lineLen + 1;
   }
   return Math.max(0, lineEls.length - 1);
-}
-
-function getSelectedTarget() {
-  if (editorView.get().sourcePart) {
-    return { nodeId: editorView.get().sourcePart.fileId, partId: editorView.get().sourcePart.partId };
-  }
-  return { nodeId: editorView.get().selectionNodeId, partId: null };
-}
-
-// The extension to manage for a filename ("" for folders / no extension).
-function fileExtensionOf(name) {
-  // A character file's extension is the whole ".persona.skill": renaming
-  // "aria.persona.skill" to "captain" must keep it a character file.
-  if (isPersonaFileName(name) && name.length > PERSONA_SUFFIX.length) return name.slice(-PERSONA_SUFFIX.length);
-  const dot = String(name || "").lastIndexOf(".");
-  return dot > 0 ? name.slice(dot) : "";
 }
 
 function acceptEditorAutocomplete(...args) { return editorParts.acceptEditorAutocomplete(...args); }
@@ -1014,40 +954,6 @@ async function openSnapshotsDialog() {
   }
 }
 
-
-function suggestUniqueFileName(project, parentId, name) {
-  const dotIndex = name.lastIndexOf(".");
-  const baseName = dotIndex >= 0 ? name.slice(0, dotIndex) : name;
-  const extension = dotIndex >= 0 ? name.slice(dotIndex) : "";
-  let candidate = name;
-  let counter = 2;
-
-  while (findChildByName(project, parentId, candidate)) {
-    candidate = `${baseName}-${counter}${extension}`;
-    counter += 1;
-  }
-
-  return candidate;
-}
-
-function suggestUniqueFolderName(project, parentId, name) {
-  let candidate = name;
-  let counter = 2;
-  while (findChildByName(project, parentId, candidate)) {
-    candidate = `${name}-${counter}`;
-    counter += 1;
-  }
-  return candidate;
-}
-
-function createMarkdownReference(activeFile, targetFile) {
-  const activePath = getPath(controller.getProject(), activeFile.id);
-  const targetPath = getPath(controller.getProject(), targetFile.id);
-  const relativePath = getRelativePath(activePath, targetPath);
-  return isImageFileName(targetFile.name)
-    ? createMarkdownImageReference(targetFile.name, relativePath)
-    : `[${targetFile.name}](${relativePath})`;
-}
 
 applyTheme(settings);
 applyEditorFont(settings);
@@ -1308,94 +1214,6 @@ elements.workspaceModeToggle?.addEventListener("click", () => {
   switchWorkspaceMode(syncMode.get().workspaceMode === "synced" ? "private" : "synced");
 });
 
-const explorer = createExplorerView({
-  container: elements.explorerTree,
-  surface: elements.explorerPanel,
-  contextMenu: elements.explorerContextMenu,
-  onOpenFile(fileId) {
-    openFileFromExplorer(fileId);
-  },
-  onOpenPart(fileId, partId) {
-    const project = controller.getProject();
-    const file = project.nodes[fileId];
-    if (!file || file.kind !== "file" || !modules.workspace.parts.of(file.name)) return;
-    setActiveSourcePart(fileId, partId);
-    openPreviewTab(fileId);
-    editorView.showPreview(fileId, partId);
-    updateStatus(project);
-  },
-  onToggleFolder(nodeId) {
-    editorView.pick(nodeId);
-    controller.toggleFolder(nodeId);
-  },
-  onSelectNode(target) {
-    editorView.pick(target.nodeId, target.partId);
-    render(controller.getProject());
-  },
-  canPasteTarget(target) {
-    return canPasteIntoExplorerTarget(target);
-  },
-  canPreviewFile(nodeId) {
-    const node = controller.getProject().nodes[nodeId];
-    return node?.kind === "file" && isPreviewableFileName(node.name);
-  },
-  canManagePreview() {
-    return Boolean(identity.account())
-      && syncMode.get().workspaceMode === "synced"
-      && collaboration.isConnected()
-      && Boolean(settings.lastWorkspace?.team);
-  },
-  onAction(action, target, options) {
-    editorView.pick(target.nodeId, target.partId);
-    return handleExplorerAction(action, target, options);
-  },
-  onDragNodeStart(nodeId, event) {
-    const project = controller.getProject();
-    const node = project.nodes[nodeId];
-    if (!node) return;
-    event.dataTransfer?.setData("text/mdnotes-node-id", nodeId);
-    if (node.kind === "file") {
-      event.dataTransfer?.setData("text/mdnotes-file-id", nodeId);
-      event.dataTransfer?.setData("text/plain", nodeId);
-    }
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = "copyMove";
-    }
-    logDebug("action", "Explorer drag started", getPath(project, nodeId));
-  },
-  onDragPartStart(fileId, partId, event) {
-    const project = controller.getProject();
-    const file = project.nodes[fileId];
-    const parts = file?.kind === "file" ? modules.workspace.parts.of(file.name) : null;
-    const part = parts?.list(file.content).find((candidate) => candidate.id === partId);
-    if (!part) return;
-    event.dataTransfer?.setData("text/stilo-file-part", JSON.stringify({ fileId, partId }));
-    event.dataTransfer?.setData("text/plain", part.image || part.name);
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = "copyMove";
-    }
-  },
-  getFilterMode() {
-    return settings.explorerFilter;
-  },
-  getAssetPreviewSrc(fileId) {
-    const project = controller.getProject();
-    const file = project.nodes[fileId];
-    return file?.kind === "file" && isImageFileName(file.name) ? imageSrcFor(project, file) : "";
-  },
-  listParts(fileId) {
-    const file = controller.getProject().nodes[fileId];
-    const parts = file?.kind === "file" ? modules.workspace.parts.of(file.name) : null;
-    return parts ? parts.list(file.content) : null;
-  },
-  getPartAdder(fileId) {
-    const file = controller.getProject().nodes[fileId];
-    return file?.kind === "file" ? modules.workspace.parts.of(file.name)?.add?.label ?? null : null;
-  },
-  getSelectedTarget() {
-    return getSelectedTarget();
-  }
-});
 
 shell.menus.add({ id: "file", label: "File", order: 1 });
 shell.menus.add({ id: "edit", label: "Edit", order: 2 });
@@ -1466,172 +1284,34 @@ function showResumedFile(...args) { return editorParts.showResumedFile(...args);
 function tabOverflowButton(...args) { return editorParts.tabOverflowButton(...args); }
 async function typesetPreview(...args) { return editorParts.typesetPreview(...args); }
 
-// ---- Explorer and file actions (./features/file-actions.js) ----
-// Created on first use. The module reads main's shared values through this
-// context, so it always sees their current values. `var`: a forwarding
-// function can run during startup, before this line is reached.
-var fileActionsInstance;
-function fileActions() {
-  return (fileActionsInstance ??= createFileActions({
-    view: editorView,
-    get workspace() { return workspace; },
-    get addFileState() { return addFileState; },
-    get applyEditorEdit() { return applyEditorEdit; },
-    get clearEditorDropCaret() { return clearEditorDropCaret; },
-    get collaboration() { return collaboration; },
-    get confirmAction() { return confirmAction; },
-    get controller() { return controller; },
-    get createMarkdownImageReference() { return createMarkdownImageReference; },
-    get createMarkdownReference() { return createMarkdownReference; },
-    editorDropOffset: () => editorParts.dropOffset(),
-    get elements() { return elements; },
-    get explorerClipboard() { return explorerClipboard; },
-    get fileExtensionOf() { return fileExtensionOf; },
-    get getEditorSelection() { return getEditorSelection; },
-    get getEditorText() { return getEditorText; },
-    get getEditorTextOffsetFromPoint() { return getEditorTextOffsetFromPoint; },
-    get getNextDefaultFileName() { return getNextDefaultFileName; },
-    get getNextDefaultFolderName() { return getNextDefaultFolderName; },
-    get parts() { return modules.workspace.parts; },
-    get inferNameFromUrl() { return inferNameFromUrl; },
-    get initialContentForKind() { return initialContentForKind; },
-    get isPreviewableFileName() { return isPreviewableFileName; },
-    get loadBmapView() { return loadBmapView; },
-    get logDebug() { return logDebug; },
-    get looksLikeUrl() { return looksLikeUrl; },
-    get notify() { return notify; },
-    get openAccessEditor() { return openAccessEditor; },
-    get openDroppedFileInPane() { return openDroppedFileInPane; },
-    get openMtreeToolsDialog() { return openMtreeToolsDialog; },
-    get openPreviewTab() { return openPreviewTab; },
-    get persistSettings() { return persistSettings; },
-    get promptForName() { return promptForName; },
-    get publishOperation() { return publishOperation; },
-    get publishSnapshot() { return publishSnapshot; },
-    get remapPersonaPaths() { return remapPersonaPaths; },
-    get render() { return render; },
-    get replaceEditorRange() { return replaceEditorRange; },
-    get setActiveSourceFile() { return setActiveSourceFile; },
-    get setActiveSourcePart() { return setActiveSourcePart; },
-    get setEditorSelection() { return setEditorSelection; },
-    get setPreviewFile() { return setPreviewFile; },
-    get settings() { return settings; },
-    get showToast() { return showToast; },
-    get suggestUniqueFileName() { return suggestUniqueFileName; },
-    get suggestUniqueFolderName() { return suggestUniqueFolderName; },
-  }));
-}
-function canPasteIntoExplorerTarget(...args) { return fileActions().canPasteIntoExplorerTarget(...args); }
-function clearExplorerDropState(...args) { return fileActions().clearExplorerDropState(...args); }
-function createFileInFolder(...args) { return fileActions().createFileInFolder(...args); }
-function createItem(...args) { return fileActions().createItem(...args); }
-async function deleteSelected(...args) { return fileActions().deleteSelected(...args); }
-function exportNode(...args) { return fileActions().exportNode(...args); }
-function getExplorerDropPayloadKind(...args) { return fileActions().getExplorerDropPayloadKind(...args); }
-function getExplorerDropPlacement(...args) { return fileActions().getExplorerDropPlacement(...args); }
-function getSelectedNode(...args) { return fileActions().getSelectedNode(...args); }
-function getSelectedParent(...args) { return fileActions().getSelectedParent(...args); }
-function getSelectedPart(...args) { return fileActions().getSelectedPart(...args); }
-async function handleAddFileTransfer(...args) { return fileActions().handleAddFileTransfer(...args); }
-async function handleEditorDrop(...args) { return fileActions().handleEditorDrop(...args); }
-async function handleExplorerAction(...args) { return fileActions().handleExplorerAction(...args); }
-function handleNewFileSubmit(...args) { return fileActions().handleNewFileSubmit(...args); }
-function moveExplorerNode(...args) { return fileActions().moveExplorerNode(...args); }
-function moveExplorerPart(...args) { return fileActions().moveExplorerPart(...args); }
-function openNewFileDialog(...args) { return fileActions().openNewFileDialog(...args); }
-async function renameFileById(...args) { return fileActions().renameFileById(...args); }
-async function renameSelected(...args) { return fileActions().renameSelected(...args); }
-function resetAddFileState(...args) { return fileActions().resetAddFileState(...args); }
-function setAddFileStatus(...args) { return fileActions().setAddFileStatus(...args); }
-function setExplorerDropState(...args) { return fileActions().setExplorerDropState(...args); }
-async function stageAddFileFromLocalFile(...args) { return fileActions().stageAddFileFromLocalFile(...args); }
-async function submitAddFile(...args) { return fileActions().submitAddFile(...args); }
+// ---- The explorer and file actions (the Explorer module) ----
+function canPasteIntoExplorerTarget(...args) { return explorerParts.canPasteIntoExplorerTarget(...args); }
+function suggestUniqueFileName(...args) { return explorerParts.suggestUniqueFileName(...args); }
+function clearExplorerDropState(...args) { return explorerParts.clearExplorerDropState(...args); }
+function createFileInFolder(...args) { return explorerParts.createFileInFolder(...args); }
+function createItem(...args) { return explorerParts.createItem(...args); }
+async function deleteSelected(...args) { return explorerParts.deleteSelected(...args); }
+function exportNode(...args) { return explorerParts.exportNode(...args); }
+function getExplorerDropPayloadKind(...args) { return explorerParts.getExplorerDropPayloadKind(...args); }
+function getExplorerDropPlacement(...args) { return explorerParts.getExplorerDropPlacement(...args); }
+function getSelectedNode(...args) { return explorerParts.getSelectedNode(...args); }
+function getSelectedParent(...args) { return explorerParts.getSelectedParent(...args); }
+function getSelectedPart(...args) { return explorerParts.getSelectedPart(...args); }
+async function handleAddFileTransfer(...args) { return explorerParts.handleAddFileTransfer(...args); }
+async function handleEditorDrop(...args) { return explorerParts.handleEditorDrop(...args); }
+async function handleExplorerAction(...args) { return explorerParts.handleExplorerAction(...args); }
+function handleNewFileSubmit(...args) { return explorerParts.handleNewFileSubmit(...args); }
+function moveExplorerNode(...args) { return explorerParts.moveExplorerNode(...args); }
+function moveExplorerPart(...args) { return explorerParts.moveExplorerPart(...args); }
+function openNewFileDialog(...args) { return explorerParts.openNewFileDialog(...args); }
+async function renameFileById(...args) { return explorerParts.renameFileById(...args); }
+async function renameSelected(...args) { return explorerParts.renameSelected(...args); }
+function resetAddFileState(...args) { return explorerParts.resetAddFileState(...args); }
+function setAddFileStatus(...args) { return explorerParts.setAddFileStatus(...args); }
+function setExplorerDropState(...args) { return explorerParts.setExplorerDropState(...args); }
+async function stageAddFileFromLocalFile(...args) { return explorerParts.stageAddFileFromLocalFile(...args); }
+async function submitAddFile(...args) { return explorerParts.submitAddFile(...args); }
 
-function bindExplorerDropTarget() {
-  elements.explorerTree.addEventListener("dragover", (event) => {
-    const payloadKind = getExplorerDropPayloadKind(event.dataTransfer?.types ?? []);
-    if (!payloadKind) {
-      clearExplorerDropState();
-      return;
-    }
-
-    const row = event.target.closest(".tree-row");
-    if (!row) {
-      if (payloadKind === "file" || payloadKind === "node") {
-        event.preventDefault();
-        if (event.dataTransfer) {
-          event.dataTransfer.dropEffect = "move";
-        }
-        setExplorerDropState(null, "into");
-        return;
-      }
-      clearExplorerDropState();
-      return;
-    }
-
-    const project = controller.getProject();
-    const node = project.nodes[row.dataset.nodeId];
-    if (!node) {
-      clearExplorerDropState();
-      return;
-    }
-
-    const placement = getExplorerDropPlacement(row, node, row.dataset.partId || null, payloadKind, event);
-    if (!placement) {
-      clearExplorerDropState();
-      return;
-    }
-
-    event.preventDefault();
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = "move";
-    }
-    setExplorerDropState(row, placement);
-  });
-
-  elements.explorerTree.addEventListener("dragleave", (event) => {
-    if (event.currentTarget?.contains(event.relatedTarget)) {
-      return;
-    }
-    clearExplorerDropState();
-  });
-
-  elements.explorerTree.addEventListener("drop", (event) => {
-    clearExplorerDropState();
-    const nodeId = event.dataTransfer?.getData("text/mdnotes-node-id");
-    const fileId = event.dataTransfer?.getData("text/mdnotes-file-id");
-    const partPayload = event.dataTransfer?.getData("text/stilo-file-part");
-    if (!nodeId && !partPayload) {
-      return;
-    }
-
-    const row = event.target.closest(".tree-row");
-    const project = controller.getProject();
-    const targetNodeId = row?.dataset.nodeId ?? null;
-    const targetPartId = row?.dataset.partId ?? null;
-    const targetNode = targetNodeId ? project.nodes[targetNodeId] : null;
-    const placement = row && targetNode
-      ? getExplorerDropPlacement(row, targetNode, targetPartId, partPayload ? "part" : "node", event)
-      : (nodeId ? "into" : null);
-
-    if (!placement) {
-      return;
-    }
-
-    event.preventDefault();
-    try {
-      if (nodeId) {
-        moveExplorerNode(nodeId, targetNodeId, placement);
-        return;
-      }
-
-      const parsed = JSON.parse(partPayload);
-      moveExplorerPart(parsed.fileId, parsed.partId, targetNodeId, targetPartId, placement);
-    } catch (error) {
-      notify(error.message);
-    }
-  });
-}
 
 async function saveActiveWorkspaceFile() {
   const saved = snapshotProject(controller.getProject());
@@ -2168,7 +1848,7 @@ function render(project) {
     return;
   }
   cancelDeferredRender(); // this full render covers whatever was pending
-  explorer.render(project, new Set(agentPendingDecorations.keys()));
+  explorerParts.renderTree(project, new Set(agentPendingDecorations.keys()));
   updateStatus(project);
   scheduleRecoverySave(project);
   scheduleOpfsFlush(project);
@@ -2575,25 +2255,7 @@ elements.importFileInput.addEventListener("change", async (event) => {
   }
 });
 
-elements.replaceFileInput.addEventListener("change", (event) => fileActions().replaceWithChosenFile(event));
 
-elements.explorerAddButton.addEventListener("click", (event) => {
-  event.stopPropagation();
-  const project = controller.getProject();
-  const parent = getSelectedParent(project);
-  editorView.select(parent.id);
-  const opened = explorer.toggleQuickAddMenu(elements.explorerAddButton, parent.id);
-  logDebug("action", opened ? "Explorer add menu opened" : "Explorer add menu closed", getPath(project, parent.id) || project.name);
-});
-
-elements.explorerFilterButton.addEventListener("click", (event) => {
-  event.stopPropagation();
-  const project = controller.getProject();
-  const parent = getSelectedParent(project);
-  editorView.select(parent.id);
-  const opened = explorer.toggleFilterMenu(elements.explorerFilterButton, parent.id);
-  logDebug("action", opened ? "Explorer filter menu opened" : "Explorer filter menu closed", settings.explorerFilter);
-});
 
 shell.commands.add({ id: "editor.find-replace", title: "Find & Replace", menu: { id: "edit", group: 0, order: 1 }, run: () => openFindBar(true) });
 shell.commands.add({ id: "history.create-snapshot", title: "Create Snapshot", menu: { id: "create", group: 1, order: 1 }, run: () => void createSnapshotNow() });
@@ -2627,74 +2289,11 @@ document.addEventListener("click", (event) => {
 });
 elements.diffNextChange?.addEventListener("click", () => gotoChange(1));
 elements.diffPrevChange?.addEventListener("click", () => gotoChange(-1));
-shell.commands.add({ id: "workspace.rename-selected", title: "Rename Selected", menu: { id: "edit", group: 0, order: 4 }, run: () => {
-  void renameSelected();
-} });
-shell.commands.add({ id: "workspace.delete-selected", title: "Delete Selected", menu: { id: "edit", group: 0, order: 5 }, run: () => {
-  void deleteSelected();
-} });
-for (const type of builtinTypes.creatable()) { // New Markdown, New Diagram…: every type that says how to create one
-  shell.commands.add({ id: `file-types.new-${type.id}`, title: type.create.label, menu: { id: "create", group: 0, order: type.create.order }, run: () => createItem(type.id) });
-}
-elements.addFilePickerButton.addEventListener("click", () => elements.addFilePickerInput.click());
-elements.addFilePickerInput.addEventListener("change", async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) {
-    return;
-  }
-  try {
-    await stageAddFileFromLocalFile(file);
-  } catch (error) {
-    notify(error.message);
-    setAddFileStatus(error.message);
-  } finally {
-    event.target.value = "";
-  }
-});
-elements.addFileNameInput.addEventListener("input", (event) => {
-  addFileState.fileName = event.target.value.trim();
-});
-elements.addFileSubmitButton.addEventListener("click", () => {
-  void submitAddFile();
-});
-elements.addFileDropzone.addEventListener("dragenter", (event) => {
-  event.preventDefault();
-  elements.addFileDropzone.classList.add("is-active");
-});
-elements.addFileDropzone.addEventListener("dragover", (event) => {
-  event.preventDefault();
-  elements.addFileDropzone.classList.add("is-active");
-});
-elements.addFileDropzone.addEventListener("dragleave", (event) => {
-  if (event.currentTarget.contains(event.relatedTarget)) {
-    return;
-  }
-  elements.addFileDropzone.classList.remove("is-active");
-});
-elements.addFileDropzone.addEventListener("drop", (event) => {
-  event.preventDefault();
-  elements.addFileDropzone.classList.remove("is-active");
-  void handleAddFileTransfer(event.dataTransfer).catch((error) => {
-    notify(error.message);
-    setAddFileStatus(error.message);
-  });
-});
-elements.addFileDropzone.addEventListener("paste", (event) => {
-  void handleAddFileTransfer(event.clipboardData).catch((error) => {
-    notify(error.message);
-    setAddFileStatus(error.message);
-  });
-});
-elements.addFileDialog.addEventListener("close", () => {
-  elements.addFileDropzone.classList.remove("is-active");
-  resetAddFileState();
-});
 
 bindPaneDropTarget(elements.sourcePane, "source");
 bindPaneDropTarget(elements.sourceTabStrip, "source");
 bindPaneDropTarget(elements.previewPane, "preview");
 bindPaneDropTarget(elements.previewTabStrip, "preview");
-bindExplorerDropTarget();
 bindTabStripReorderTarget(elements.sourceTabStrip, "source");
 bindTabStripReorderTarget(elements.previewTabStrip, "preview");
 
@@ -2922,8 +2521,6 @@ elements.welcomeOpenServer?.addEventListener("click", () => elements.openServerD
 elements.welcomeResume?.addEventListener("click", () => {
   void sessionRestorer.run({ manual: true });
 });
-elements.newFileDialog?.querySelector("form")?.addEventListener("submit", handleNewFileSubmit);
-elements.newFileCancelButton?.addEventListener("click", () => elements.newFileDialog.close("cancel"));
 elements.mobileMenuButton?.addEventListener("click", (event) => {
   event.stopPropagation();
   toggleMobileMenu();

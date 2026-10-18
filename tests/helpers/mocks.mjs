@@ -29,7 +29,7 @@ export async function loadModules() {
     syncService
   ] = await Promise.all([
     load("app/domain/project-model.js"),
-    load("app/services/zip-service.js"),
+    load("app/modules/workspace/adapters/zip.js"),
     load("app/modules/editor/model/markdown.js"),
     load("app/services/bmap-service.js"),
     load("app/services/mtree-module-map-service.js"),

@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-18 · release `v0.1.54` (not deployed; v0.1.53 is live)
+Last updated: 2026-10-18 · release `v0.1.55` (not deployed; v0.1.53 is live)
 
 ---
 
@@ -68,6 +68,25 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.55: the Explorer module
+
+Step S3b of the follow-up to the restructure. Nothing changes for users.
+
+- The explorer's tree and the file actions are one browser module on level 4
+  (`app/modules/explorer`): moving and copying files, folders and parts, the
+  Add File dialog and files dropped into the editor, creating, renaming,
+  deleting, exporting, the context menu, and the Edit / Create menu items it
+  registers itself. The 1,188-line file-actions file is split by job.
+- It reaches the project through Workspace, the editor through the Editor's
+  functions and the dialogs through Shell. `main.js` attaches a port for the
+  rest (16 names: the sync session, saving, the app's render...).
+- The file-content and ZIP helpers moved into Workspace (legacy saving uses
+  them too); diagram export waits in `app/features/diagram-export.js` until
+  diagrams become an extension.
+- A structure rule now fails when a module imports code from before the
+  restructure.
+- Getters handed out by `main.js`: 133 → 90. `main.js`: 3,731 → 3,328 lines.
 
 ### v0.1.54: the Editor owns all of itself
 

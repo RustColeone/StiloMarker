@@ -70,6 +70,22 @@ test("modules are reached only through their public API, and only if declared (r
   assert.deepEqual(problems, []);
 });
 
+test("modules never import code from before the restructure (rule 1)", () => {
+  // A module (or an extension) imports the kernel, its own files and other
+  // modules' index.js; legacy code (main.js, app/features, app/ui,
+  // app/services, app/domain) may use modules, never the other way round.
+  const problems = [];
+  for (const file of files.filter((f) => /\.m?js$/.test(f))) {
+    const from = moduleOf(file, all);
+    if (!from || from.root !== "app/modules") continue;
+    for (const target of jsImports(file)) {
+      if (target.startsWith("app/kernel/") || moduleOf(target, all)) continue;
+      problems.push(`${file} imports ${target}, which is not a module: move what it needs into a module (or behind a port)`);
+    }
+  }
+  assert.deepEqual(problems, []);
+});
+
 test("each owned name is spelled only by its owner, and the legacy spellings only shrink (rule 4)", () => {
   const now = spellings(files);
   const problems = [];

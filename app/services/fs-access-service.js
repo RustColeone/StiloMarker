@@ -1,7 +1,6 @@
 import { createProjectSaveQueue } from "./project-save-service.js";
 import { ROOT_ID, addFile, addFolder, createProject, getNode, getPath, isImageFileName, listVisibleNodes } from "../domain/project-model.js";
-import { bytesToDataUrl, dataUrlToBlob, decodeTextBytes, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent } from "./file-content-service.js";
-import { extractZipEntries } from "./zip-service.js";
+import { bytesToDataUrl, dataUrlToBlob, decodeTextBytes, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent, extractZipEntries } from "../modules/workspace/index.js";
 import { builtinTypes } from "../modules/file-types/index.js";
 
 function findChildByName(project, parentId, name, kind) {

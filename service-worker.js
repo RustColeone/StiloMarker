@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v0.1.54";
+const CACHE_NAME = "mdnotes-shell-v0.1.55";
 // The extensions' files (EXTENSION_FILES), written by tools/protocol-sync.mjs.
 importScripts("./extensions/offline.js");
 const APP_SHELL = [
@@ -17,7 +17,6 @@ const APP_SHELL = [
   "./app/services/chat-storage-service.js",
   "./app/services/bmap-service.js",
   "./app/services/project-save-service.js",
-  "./app/services/file-content-service.js",
   "./app/services/fs-access-service.js",
   "./app/services/mtree-module-map-service.js",
   "./app/services/offline-service.js",
@@ -27,10 +26,8 @@ const APP_SHELL = [
   "./app/services/storage-service.js",
   "./app/services/sync-service.js",
   "./app/services/template-service.js",
-  "./app/services/zip-service.js",
   "./app/ui/bmap-view.js",
   "./app/ui/dom.js",
-  "./app/ui/explorer-view.js",
   "./app/kernel/index.js",
   "./app/kernel/trace.js",
   "./app/modules/shell/index.js",
@@ -63,6 +60,19 @@ const APP_SHELL = [
   "./app/modules/identity/service/account.js",
   "./app/modules/identity/adapters/api.js",
   "./app/modules/editor/index.js",
+  "./app/modules/explorer/index.js",
+  "./app/modules/explorer/model/names.js",
+  "./app/modules/explorer/adapters/surface.js",
+  "./app/modules/explorer/adapters/tree.js",
+  "./app/modules/explorer/adapters/moves.js",
+  "./app/modules/explorer/adapters/adding.js",
+  "./app/modules/explorer/adapters/naming.js",
+  "./app/modules/explorer/adapters/exporting.js",
+  "./app/modules/explorer/adapters/actions.js",
+  "./app/modules/explorer/adapters/events.js",
+  "./app/modules/workspace/adapters/file-content.js",
+  "./app/modules/workspace/adapters/zip.js",
+  "./app/features/diagram-export.js",
   "./app/modules/editor/model/markdown.js",
   "./app/modules/editor/model/html.js",
   "./app/modules/editor/model/paths.js",
@@ -117,7 +127,6 @@ const APP_SHELL = [
   "./app/features/snapshots-dialog.js",
   "./app/features/chat-panel.js",
   "./app/features/cloud-browser.js",
-  "./app/features/file-actions.js",
   "./app/features/previews.js",
   "./app/modules/editor/adapters/tabs.js",
   "./app/modules/editor/adapters/preview.js",
