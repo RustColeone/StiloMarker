@@ -68,8 +68,7 @@ export function createActions(app) {
       return;
     }
     if (action === "replace-file") {
-      replaceFileTargetId = nodeId;
-      app.elements.replaceFileInput.click();
+      app.chooseReplacementFor(nodeId);
       return;
     }
     if (action === "rename") {

@@ -35,10 +35,12 @@ test("backend: agentic tool loop + proposal symbols present", async () => {
 });
 
 test("client: agent decoration, checkpoint, and proposal symbols present", async () => {
-  // Editor-side decorations and checkpoints stay in main.js; the chat panel
-  // (proposal cards, applying edits) is its own module.
-  const mainSource = await readFile(resolveFromRoot("app/main.js"), "utf8")
-    + await readFile(resolveFromRoot("app/features/chat-panel.js"), "utf8");
+  // Editor-side decorations and checkpoints stay in main.js; the Agent page
+  // (proposal cards, applying edits) is the Assistant module's.
+  let mainSource = await readFile(resolveFromRoot("app/main.js"), "utf8");
+  for (const part of ["panel", "render", "proposals", "turns"]) {
+    mainSource += await readFile(resolveFromRoot(`app/modules/assistant/adapters/${part}.js`), "utf8");
+  }
   assert.match(mainSource, /agentPendingDecorations/);
   assert.match(mainSource, /computeChangedLineRange/);
   assert.match(mainSource, /registerAgentDecorations/);
@@ -52,7 +54,7 @@ test("client: agent decoration, checkpoint, and proposal symbols present", async
 });
 
 test("chat-storage: preserves proposal fields through normalization", async () => {
-  const chatStorageSource = await readFile(resolveFromRoot("app/services/chat-storage-service.js"), "utf8");
+  const chatStorageSource = await readFile(resolveFromRoot("app/modules/assistant/adapters/store.js"), "utf8");
   assert.match(chatStorageSource, /proposedOperations/);
   assert.match(chatStorageSource, /batchId/);
   assert.match(chatStorageSource, /proposalState/);

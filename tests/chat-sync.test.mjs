@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createChatSynchronizer, mergeChatWorkspace, sharedChat } from '../app/services/chat-sync-service.js';
+import { createChatSynchronizer, mergeChatWorkspace, sharedChat } from '../app/modules/assistant/adapters/workspace-sync.js';
 import { installMobileViewport } from '../app/services/chat-ui-service.js';
 import { shouldSubmitChat, isChatNearBottom } from '../app/modules/shell/index.js';
-import { saveChatWorkspace, loadChatWorkspace } from '../app/services/chat-storage-service.js';
+import { saveChatWorkspace, loadChatWorkspace } from '../app/modules/assistant/adapters/store.js';
 const copy = value => structuredClone(value);
 const message = (id, content = id) => ({ id, role: 'user', content, createdAt: 1 });
 const workspace = (...messages) => ({ revision: 0, activeThreadId: 't', threads: [{ id: 't', title: 'Chat', createdAt: 1, updatedAt: 1, messages, contextPaths: [], draft: '' }] });
@@ -114,7 +114,7 @@ test('mobile viewport follows keyboard height and resets on desktop or pinch zoo
 });
 
 test('chat transport sends both the compatibility version and chat base revision', async t => {
-  const { pushServerChatWorkspace } = await import('../app/services/chat-api-service.js');
+  const { pushServerChatWorkspace } = await import('../app/modules/assistant/adapters/api.js');
   const { syncVersion } = await import('../app/modules/sync/index.js');
   const old = globalThis.fetch; t.after(() => globalThis.fetch = old);
   let body;

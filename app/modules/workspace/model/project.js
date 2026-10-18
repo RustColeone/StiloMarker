@@ -5,6 +5,9 @@ import { builtinTypes } from "../../file-types/index.js";
 import { applyTextPatch } from "./text-patch.js";
 
 const ROOT_ID = "root";
+// The operations that change a project, by name (the server spells them in its Workspace too).
+const UPDATE_FILE = "update-file";
+const PATCH_FILE = "patch-file";
 
 // File types belong to the File types module (protocol/file-types.json);
 // these helpers only ask it.
@@ -446,7 +449,7 @@ function applySyncOperation(project, operation) {
     return moveNode(project, nodeId, parentId, operation.index ?? null);
   }
 
-  if (operation.type === "update-file") {
+  if (operation.type === UPDATE_FILE) {
     const nodeId = getNodeIdByPath(project, operation.path);
     if (!nodeId) {
       throw new Error(`File path not found: ${operation.path}`);
@@ -455,7 +458,7 @@ function applySyncOperation(project, operation) {
     return applyHostCounters(markFileSaved(next, nodeId, false), nodeId, operation.counters);
   }
 
-  if (operation.type === "patch-file") {
+  if (operation.type === PATCH_FILE) {
     const nodeId = getNodeIdByPath(project, operation.path);
     if (!nodeId) {
       throw new Error(`File path not found: ${operation.path}`);
@@ -475,6 +478,8 @@ function applySyncOperation(project, operation) {
 }
 
 export {
+  UPDATE_FILE,
+  PATCH_FILE,
   cloneModelData,
   describeFileTypes,
   fileBaseName,

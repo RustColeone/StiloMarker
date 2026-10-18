@@ -5,7 +5,7 @@ import { diffHunks, placeHunks, applyHunks } from "../app/modules/workspace/mode
 import workspaceModule from "../app/modules/workspace/index.js";
 import fileTypesModule from "../app/modules/file-types/index.js";
 import { startModules } from "../app/kernel/index.js";
-import { undoSteps } from "../app/features/agent-undo.js";
+import { undoSteps } from "../app/modules/assistant/model/undo.js";
 import { ROOT_ID, addFile, createProject, getNodeByPath, getNodeIdByPath } from "../app/modules/workspace/index.js";
 
 const ORIGINAL = "one\ntwo\nthree\nfour\nfive\n";

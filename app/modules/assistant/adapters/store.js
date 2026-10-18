@@ -1,3 +1,5 @@
+// The agent's conversations kept in this browser (localStorage), per workspace.
+// Moved from the legacy chat storage service.
 const CHAT_STORAGE_KEY = "mdnotes.chat.v1";
 const MAX_GROUP_MEMBERS = 8;
 

@@ -69,6 +69,32 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.64: the Agent page is the Assistant module's
+
+Step S3d-4a. One fix for users:
+
+- **Replace File did nothing (since v0.1.60):** when the explorer moved into
+  its module, the "Replace File" menu item on an image was left setting a name
+  that lives in another part of the explorer, so it failed before the file
+  picker opened. It works again; `shell-browser.py` now replaces an image.
+
+- The Agent page moved from `app/features/chat-panel.js` (1,280 lines) into
+  the Assistant module, which loads it the first time the side panel opens.
+  It is split by job into six pieces that share one context: conversations,
+  the conversation list's actions, drawing, a turn of the agent, the edits it
+  proposes (Keep/Drop), and the page's controls.
+- Its services moved with it: talking to the server about conversations,
+  keeping them in this browser, syncing them, the MCP controls and undoing
+  the agent's edits.
+- Operation names such as `update-file` are constants exported by Workspace,
+  so only Workspace spells them.
+- Two slips in the move, found by the browser tests before release: sending a
+  message failed on a name the turn's piece no longer had (`mcpControls`), and
+  applying an edit failed on one the drawing piece had not taken
+  (`agentPendingDecorations`). `chat-turn.test.mjs` now gives a piece only the
+  names it takes from its context, imports or defines, so such a slip fails
+  there too.
+
 ### v0.1.63: the Chats page is the Chats module's
 
 Step S3d-3. Nothing changes for users.

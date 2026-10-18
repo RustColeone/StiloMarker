@@ -1,10 +1,9 @@
-// Legacy (before the module restructure; moves into the Assistant module):
-// what undoes one of the agent's structural changes. Text edits are undone
+// The Assistant's rule for what undoes one of the agent's structural changes. Text edits are undone
 // through the Workspace write path instead. Pure, so it is tested alone.
 //
 // `checkpoint` is the project as it was before the agent's batch: undoing a
 // delete brings back what was there.
-import { getNodeIdByPath, getPath } from "../domain/project-model.js";
+import { getNodeIdByPath, getPath } from "../../workspace/index.js";
 
 const join = (...parts) => parts.filter(Boolean).join("/");
 const parentOf = (path) => path.split("/").slice(0, -1).join("/");

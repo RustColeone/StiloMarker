@@ -223,6 +223,10 @@ export function createAdding(app) {
 
   // The image a "Replace File" action is choosing a new file for.
   let replaceFileTargetId = null;
+  function chooseReplacementFor(nodeId) {
+    replaceFileTargetId = nodeId;
+    app.elements.replaceFileInput.click();
+  }
   async function replaceWithChosenFile(event) {
     const [file, target] = [event.target.files?.[0], replaceFileTargetId];
     replaceFileTargetId = null;
@@ -330,5 +334,5 @@ export function createAdding(app) {
     }
   }
 
-  return { setAddFileStatus, resetAddFileState, stageAddFileContent, stageAddFileFromLocalFile, stageAddFileFromUrl, handleAddFileTransfer, addDroppedImageAndInsert, moveOrInsertDraggedSelection, insertEditorTextAtDrop, handleEditorDrop, replaceWithChosenFile, replaceImageFile, openAddFileDialog, addPart, submitAddFile };
+  return { setAddFileStatus, resetAddFileState, stageAddFileContent, stageAddFileFromLocalFile, stageAddFileFromUrl, handleAddFileTransfer, addDroppedImageAndInsert, moveOrInsertDraggedSelection, insertEditorTextAtDrop, handleEditorDrop, chooseReplacementFor, replaceWithChosenFile, replaceImageFile, openAddFileDialog, addPart, submitAddFile };
 }

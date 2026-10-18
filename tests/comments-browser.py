@@ -67,7 +67,7 @@ async def browser_for(b, user):
             await rt.fulfill(status=200, content_type="application/json", body=json.dumps(reply)); return
         if path == "/api/operations" and rt.request.method == "POST":
             sent.append(json.loads(rt.request.post_data)["operation"])
-        if path in ("/app/main.js", "/app/features/chat-panel.js"):
+        if path in ("/app/main.js", "/app/modules/assistant/adapters/panel.js"):
             response = await rt.fetch()
             body = inject_chat_internals(path, await response.body()) + (HOOK if path == "/app/main.js" else b"")
             await rt.fulfill(response=response, body=body); return

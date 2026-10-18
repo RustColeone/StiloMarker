@@ -12,7 +12,6 @@ import { APP_VERSION } from "./version.js";
 import { ROOT_ID, seedDefaultProject, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isImageFileName, isTextFileName } from "./domain/project-model.js";
 import { getOpfsDirectoryHandle, importDirectory, importOsFolderIntoOpfs, importSingleFile, importZipArchive, loadProject, saveProject, supportsDirectoryAccess, supportsOpfs } from "./modules/workspace/index.js";
 import syncModule from "./modules/sync/index.js";
-import { sendGenerationRequest } from "./services/chat-api-service.js";
 import { parsePersona, personaTemplate } from "./services/persona-service.js";
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
 import { applyEditorFont, applyTheme, clampSourceFontSize, signInSettings } from "./services/settings-service.js";
@@ -20,6 +19,7 @@ import cloudModule, { saveUserState, uploadAsset } from "./modules/cloud/index.j
 import modelsModule from "./modules/models/index.js";
 import chatsModule from "./modules/chats/index.js";
 import charactersModule from "./modules/characters/index.js";
+import assistantModule, { sendGenerationRequest } from "./modules/assistant/index.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { query } from "./ui/dom.js";
 import { createDefaultBmap } from "./services/bmap-service.js";
@@ -264,7 +264,7 @@ const elements = {
 // ---- Modules (docs/ARCHITECTURE.md) ----
 // The app is moving into modules one step at a time. Code still in this file
 // reaches a module only through the public API the kernel hands back.
-const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, syncModule, historyModule, explorerModule, cloudModule, modelsModule, charactersModule, chatsModule, ...extensionModules], {
+const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, syncModule, historyModule, explorerModule, cloudModule, modelsModule, charactersModule, chatsModule, assistantModule, ...extensionModules], {
   log: (owner, ...args) => { try { logDebug("action", `${owner}: ${args.join(" ")}`); } catch (error) { ignore(error, "the log panel is not ready yet"); } }
 });
 const { shell, workspace, identity } = modules;
@@ -571,9 +571,9 @@ function buildTextDiffHunks(oldText, newText) {
 }
 
 // ---- Chat panel ------------------------------------------------------------
-// The Agent / Chats panel lives in app/features/chat-panel.js. It loads the
-// first time it is needed — the panel shown, Settings open (Agent status), or a
-// character file renamed — so sessions that never open it don't download it.
+// The Agent page is the Assistant module's. It loads the first time it is
+// needed — the panel shown or Settings open (Agent status) — so sessions that
+// never open it don't download it.
 let chat = null;
 let chatLoading = null;
 
@@ -582,17 +582,12 @@ function chatNeeded() {
 }
 
 function loadChat() {
-  chatLoading ??= import("./features/chat-panel.js").then(({ createChatPanel }) => {
-    chat = createChatPanel({
-      cloudWorkspaceTarget,
-      agentCheckpoints, agentPendingDecorations, buildTextDiffHunks, captureAgentCheckpoint, chatConnectionInfo,
-      chatWorkspaceKey, clearAgentDecorations, collaboration, controller, createFileInFolder, elements,
-      escapeHtmlAttribute, getSelectedParent, isMobileLayout, jumpToAgentChange, logDebug, notify,
-      openFileFromExplorer, openSettingsDialog, personaAvatarSrc, promptForName, workspace,
-      registerAgentDecorations, settings, showConfirmDialog, showToast, storedProject, pages: shell.pages, models: modules.models, chatsPage,
-      updateEditorAgentBar, identity,
-      get workspaceMode() { return syncMode.get().workspaceMode; }
-    });
+  chatLoading ??= modules.assistant.load({
+    cloudWorkspaceTarget, agentCheckpoints, agentPendingDecorations, buildTextDiffHunks, captureAgentCheckpoint, chatConnectionInfo,
+    chatWorkspaceKey, clearAgentDecorations, elements, isMobileLayout, jumpToAgentChange, logDebug, openSettingsDialog,
+    personaAvatarSrc, registerAgentDecorations, storedProject, updateEditorAgentBar, chatsPage
+  }).then((loaded) => {
+    chat = loaded;
     chat.chatState.shouldScrollToBottom = true;
     chat.renderChatPanel(controller.getProject());
     void chat.refreshChatStatus({ silent: true });

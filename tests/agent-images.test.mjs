@@ -1,13 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { createProposals } from '../app/modules/assistant/adapters/proposals.js';
 
 // Applying an agent's generated image: the bytes come from /api/generated, then
 // the file is created like any image (data: URL locally; uploaded bytes plus an
 // empty-content create-file in a directory-backed cloud workspace).
-const source = await readFile(new URL('../app/features/chat-panel.js', import.meta.url), 'utf8');
-const slice = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
-const applySource = slice('function generatedImageUrl(', '\n  document.addEventListener("click"');
+// Tested through the Assistant's proposals piece, given a fake Agent page context (`app`).
+globalThis.document ??= { addEventListener: () => {} };
 
 const PNG = Uint8Array.from([137, 80, 78, 71, 1, 2, 3]);
 const dataUrl = `data:image/png;base64,${Buffer.from(PNG).toString('base64')}`;
@@ -24,20 +23,16 @@ class FakeFileReader {
 function harness({ synced = false, directory = false, account = { token: 'acct' }, status = 200 } = {}) {
   const project = { nodes: { root: { id: 'root', kind: 'folder', name: 'W', children: [] } } };
   const fetches = [], applied = [], published = [], uploads = [], toasts = [];
-  const deps = {
+  globalThis.fetch = async (url) => {
+    fetches.push(url);
+    return { ok: status === 200, status, blob: async () => new Blob([PNG], { type: 'image/png' }) };
+  };
+  globalThis.FileReader = FakeFileReader;
+  const app = {
     identity: { account: () => account, token: () => account?.token ?? null },
     settings: { serverUrl: 'https://notes.example/' },
-    normalizeServerUrl: (url) => url.replace(/\/+$/, ''),
-    fetch: async (url) => {
-      fetches.push(url);
-      return { ok: status === 200, status, blob: async () => new Blob([PNG], { type: 'image/png' }) };
-    },
-    FileReader: FakeFileReader,
     captureAgentCheckpoint: () => {},
-    agentDocumentSignature: () => 'sig',
     controller: { getProject: () => project, applySyncOperation: (op) => applied.push(op) },
-    isImageFileName: (name) => /\.(png|jpe?g|webp|gif)$/i.test(name),
-    getNodeIdByPath: () => null,
     collaboration: {
       isConnected: () => synced,
       isDirectoryBacked: () => directory,
@@ -45,11 +40,11 @@ function harness({ synced = false, directory = false, account = { token: 'acct' 
       getRevision: () => 7,
       publishOperation: async (op) => { published.push(op); return { revision: op.baseRevision + 1 }; }
     },
-    deps: { workspaceMode: synced ? 'synced' : 'private' },
+    workspaceMode: () => (synced ? 'synced' : 'private'),
     showToast: (message) => toasts.push(message),
     registerAgentDecorations: () => {}
   };
-  const api = new Function(...Object.keys(deps), `${applySource}\nreturn { acceptAgentOperations, generatedImageUrl };`)(...Object.values(deps));
+  const api = createProposals(app);
   const guard = { current: () => true, signature: 'sig', baseRevision: 7 };
   return { api, guard, fetches, applied, published, uploads, toasts };
 }

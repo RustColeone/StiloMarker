@@ -1,0 +1,143 @@
+// The side panel's Agent page (the Assistant module's, loaded the first time
+// the panel or Settings is shown): the agent's conversations and their sync,
+// its turns and the edits it proposes (Keep / Drop), and the Agent status in
+// Settings. It also draws the Chats page (the Chats module's) while that is
+// open, until Shell's areas draw pages (docs/ARCHITECTURE.md, step 5).
+//
+// Its parts share one context, `app` (as the Editor's and the Explorer's do):
+// the page's state, every part's functions, what the modules below offer, and
+// PORT, what main.js still provides.
+import { escapeHtmlAttribute } from "../../editor/index.js";
+import { UPDATE_FILE } from "../../workspace/index.js";
+import { normalizeServerUrl } from "../../shell/index.js";
+import { createConversations } from "./conversations.js";
+import { installEvents } from "./events.js";
+import { createMcpControls } from "./mcp.js";
+import { createProposals } from "./proposals.js";
+import { createRender } from "./render.js";
+import { createThreads } from "./threads.js";
+import { createTurns } from "./turns.js";
+
+// What main.js attaches (assistant.load(port)); each entry should move to an
+// owner, or become an extension point, and leave this list.
+export const PORT = [
+  "cloudWorkspaceTarget", "agentCheckpoints", "agentPendingDecorations", "buildTextDiffHunks", "captureAgentCheckpoint",
+  "chatConnectionInfo", "chatWorkspaceKey", "clearAgentDecorations", "elements", "isMobileLayout", "jumpToAgentChange",
+  "logDebug", "openSettingsDialog", "personaAvatarSrc", "registerAgentDecorations", "storedProject",
+  "updateEditorAgentBar", "chatsPage"
+];
+
+export function createAgentPanel({ port, shell, workspace, identity, sync, editor, explorer, models }) {
+  const missing = PORT.filter((name) => !(name in port));
+  if (missing.length) throw new Error(`assistant.load: the port lacks ${missing.join(", ")}`);
+  const { settings, pages } = shell;
+  const app = {
+    ...Object.fromEntries(PORT.map((name) => [name, port[name]])),
+    settings, pages, identity, models, workspace, escapeHtmlAttribute,
+    controller: workspace.project(),
+    collaboration: sync.session(),
+    workspaceMode: () => sync.mode.get().workspaceMode,
+    notify: (message) => shell.notify(message),
+    showToast: (message, options) => shell.toast(message, options),
+    showConfirmDialog: (options) => shell.confirm(options),
+    promptForName: (message, value = "", options = {}) => shell.input({ title: message, message, value, submitLabel: "Save", ...options }),
+    openFileFromExplorer: (fileId) => editor.parts().openFileFromExplorer(fileId),
+    createFileInFolder: (...args) => explorer.parts().createFileInFolder(...args),
+    getSelectedParent: (...args) => explorer.parts().getSelectedParent(...args),
+    // Who asked for an agent batch: this tab while it is open (not the sync client id,
+    // which changes on every reconnect and locked the asker out of Keep and Drop).
+    TAB_ID: globalThis.crypto?.randomUUID?.() ?? `tab-${Math.random().toString(36).slice(2)}`,
+    // The agent's connection is the Models module's: whether it is set up, the models, the one chosen.
+    agent: models.agent,
+    agentStatus: () => models.agent.status(),
+    signedIn: () => Boolean(identity.account()),
+    legacyChatProjectId: port.storedProject?.id ?? "server-project",
+    legacyChatScope: settings.syncedProjectId
+      ? `cloud:${normalizeServerUrl(settings.serverUrl)}/${settings.syncedProjectId}` : null,
+    // Changed by more than one part: always read and written as app.x.
+    mcpControls: null,
+    chatSynchronizer: null,
+    chatConnectionToken: null,
+    chatState: {
+      projectId: null,
+      syncBase: null,
+      syncError: null,
+      turn: null,
+      renderedThreadId: null,
+      activeThreadId: null,
+      activeGroupThreadId: null,
+      threads: [],
+      sending: false,
+      activity: [],
+      activityExpanded: false,
+      streamingText: "",
+      reasoningText: "",
+      turnStartedAt: 0,
+      // Message ids whose persisted "Thought for…" section is expanded.
+      expandedReasoning: new Set(),
+      shouldScrollToBottom: false
+    }
+  };
+  app.isOwnBatch = (message) => !message.originatorId || message.originatorId === app.TAB_ID;
+  app.OP_ICONS = {
+  "create-file": "+",
+  [UPDATE_FILE]: "~",
+  "rename-node": "r",
+  "delete-node": "×",
+  "create-folder": "+",
+  "move-node": "→"
+};
+  app.STATUS_WORDS = { signin: "Sign in", offline: "Offline", unconfigured: "No key", restricted: "Not allowed", checking: "Checking…" };
+  app.chatMarkdownCache = new Map(); // message id -> { content, html }
+  app.pageOpen = (id) => pages.active("side") === id; // which side-panel page is open (Shell's pages)
+
+  const add = (part) => {
+    for (const [name, fn] of Object.entries(part)) {
+      if (name in app) throw new Error(`assistant: "${name}" is defined twice`);
+      app[name] = fn;
+    }
+  };
+  add(createConversations(app));
+  add(createThreads(app));
+  add(createRender(app));
+  add(createTurns(app));
+  add(createProposals(app));
+  installEvents(app);
+  const { chatState, chatsPage, identity: who, chatWorkspaceKey } = app;
+
+  // The Chats page (the Chats module's): drawn from here while it is open, and
+  // given the agent's old Roleplay threads to move in once.
+  chatsPage.giveAgentThreads({
+    // Old Roleplay group threads (kind "group") move into Chats once, then leave the agent's list.
+    oldGroupThreads: () => chatState.threads.filter((thread) => thread.kind === "group" && !thread.deleted && thread.messages?.length),
+    movedGroupThreads(threads) {
+      for (const thread of threads) { thread.deleted = true; thread.updatedAt = Date.now(); }
+      if (threads.length) app.persistChatWorkspaceState();
+    }
+  });
+
+  // MCP connections (Settings → Agent), for this account and workspace.
+  app.mcpControls = createMcpControls({
+    list: document.querySelector("#mcp-connections"), status: document.querySelector("#mcp-status"),
+    loadButton: document.querySelector("#mcp-load-button"), summary: document.querySelector("#chat-mcp-summary"),
+    getIdentity: () => who.account() ? {
+      serverUrl: settings.serverUrl, token: who.token(),
+      scope: JSON.stringify([normalizeServerUrl(settings.serverUrl), who.account().username, chatWorkspaceKey()])
+    } : null
+  });
+
+  /** A chat workspace pushed by the server (another participant changed it). */
+  function receiveChatWorkspace(project, workspace) {
+    app.ensureChatWorkspaceLoaded(project);
+    if (workspace && Number.isInteger(workspace.revision)) app.chatSynchronizer?.receive(workspace);
+  }
+
+  // Test access (tests/helpers/chat_hook.py adds a line here).
+  return {
+    receiveChatEvent: (event) => chatsPage.receive(event),
+    receiveChatWorkspace, renderChatPanel: app.renderChatPanel, refreshChatStatus: app.refreshChatStatus,
+    findBatchMessage: app.findBatchMessage, remapPersonaPaths: chatsPage.remapPersonaPaths,
+    applyAgentSettingsStatus: app.applyAgentSettingsStatus, ensureChatWorkspaceLoaded: app.ensureChatWorkspaceLoaded,
+    chatState, get mcpControls() { return app.mcpControls; }, isOwnBatch: app.isOwnBatch
+  };
+}

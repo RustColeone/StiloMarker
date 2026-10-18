@@ -1,5 +1,8 @@
-import { syncVersion } from "../modules/sync/index.js";
-import { normalizeServerUrl } from "../modules/shell/index.js";
+// The server's routes for the agent's conversations (the chat workspace, read
+// and pushed) and for generating a diagram's notes. Moved from the legacy chat
+// API service.
+import { syncVersion } from "../../sync/index.js";
+import { normalizeServerUrl } from "../../shell/index.js";
 
 async function parseResponse(response) {
   const contentType = response.headers.get("content-type") || "";

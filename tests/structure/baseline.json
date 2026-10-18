@@ -1,8 +1,7 @@
 {
   "about": "Structure violations that existed when the rules were introduced (2026-10-16). They may only shrink; see tools/structure-baseline.mjs.",
   "oversized": {
-    "app/features/chat-panel.js": 1280,
-    "app/main.js": 2919,
+    "app/main.js": 2914,
     "app/ui/bmap-view.js": 4025,
     "server/mdnotes_server.py": 2577
   },
@@ -24,7 +23,6 @@
     ],
     "operation replace-project": [],
     "operation update-file": [
-      "app/features/chat-panel.js",
       "app/features/workspace-history.js",
       "app/main.js",
       "server/mdnotes_server.py"
@@ -32,5 +30,5 @@
     "sync protocol number": []
   },
   "uncoveredTwins": 0,
-  "mainGetters": 62
+  "mainGetters": 61
 }

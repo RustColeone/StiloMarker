@@ -6,24 +6,28 @@ Checks: five menus in order with their items; a menu item runs its command;
 live titles ("Show Chat" / "Hide Chat"); Ctrl+S runs Save from anywhere;
 the rename dialog keeps the file extension out of the field; a module added
 after start-up appears in the menus; the phone's menu panel shows the same
-groups; the trace records errors nothing caught and its log tab shows them;
+groups; the trace records errors nothing caught and its log tab shows them; the
+explorer's Replace File replaces an image;
 no page errors. Static responses come from this checkout.
 """
-import asyncio, json, mimetypes, os
+import asyncio, base64, json, mimetypes, os
 from pathlib import Path
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get('STILO_TEST_URL', 'http://127.0.0.1:8765')
-HOOK = b'\nwindow.__shellTest = { shell, renameFileById, openFileFromExplorer, get log() { return debugState.entries.map((e) => e.message); } };\n'
+PNG = bytes.fromhex('89504e470d0a1a0a0000000d4948445200000001000000010806000000'
+                    '1f15c4890000000d49444154789c6360f8cf0000000301010018dd8db40000000049454e44ae426082')
+HOOK = b'\nwindow.__shellTest = { shell, controller, renameFileById, openFileFromExplorer, get log() { return debugState.entries.map((e) => e.message); } };\n'
 
 
 def project():
     return {'id': 'shell-test', 'name': 'Shell', 'sourceMode': 'memory', 'rootId': 'root', 'activeFileId': 'a', 'nodes': {
-        'root': {'id': 'root', 'kind': 'folder', 'name': 'Shell', 'children': ['a', 'd'], 'expanded': True},
+        'root': {'id': 'root', 'kind': 'folder', 'name': 'Shell', 'children': ['a', 'd', 'p'], 'expanded': True},
         'a': {'id': 'a', 'kind': 'file', 'parentId': 'root', 'name': 'notes.md', 'content': '# Notes', 'dirty': False},
-        'd': {'id': 'd', 'kind': 'file', 'parentId': 'root', 'name': 'welcome.bmap', 'content': (ROOT / 'Template/welcome.bmap').read_text(), 'dirty': False}}}
+        'd': {'id': 'd', 'kind': 'file', 'parentId': 'root', 'name': 'welcome.bmap', 'content': (ROOT / 'Template/welcome.bmap').read_text(), 'dirty': False},
+        'p': {'id': 'p', 'kind': 'file', 'parentId': 'root', 'name': 'dot.png', 'content': 'data:image/png;base64,' + base64.b64encode(PNG).decode(), 'dirty': False}}}
 
 
 async def open_page(browser, viewport, **options):
@@ -122,6 +126,15 @@ async def main():
         await page.wait_for_selector('.app-toast:has-text("hello")')
         assert not errors, errors
 
+        # The explorer's Replace File (an image) picks a file and replaces the image's bytes.
+        await page.locator('.tree-row[title="dot.png"]').click(button='right')
+        async with page.expect_file_chooser() as chooser:
+            await page.locator('#explorer-context-menu').get_by_text('Replace File', exact=True).click()
+        await (await chooser.value).set_files({'name': 'new.png', 'mimeType': 'image/png', 'buffer': PNG + b'\0'})
+        replaced = 'data:image/png;base64,' + base64.b64encode(PNG + b'\0').decode()
+        await page.wait_for_function('(replaced) => window.__shellTest.controller.getProject().nodes.p.content === replaced', arg=replaced)
+        assert not errors, errors
+
         # The trace: module logs and errors nothing caught are recorded with
         # where they came from; the log panel's Trace tab and stiloTrace() show them.
         await page.evaluate('''() => {
@@ -161,7 +174,7 @@ async def main():
         await browser.close()
         print(json.dumps({'checks': ['file-type lists from File types', 'five menus with their items', 'one menu open at a time', 'live titles',
                                      'menu item runs its command', 'Ctrl+S runs Save', 'rename keeps the extension',
-                                     'late menus and commands appear', 'the trace and its tab', 'a diagram previews as a diagram', 'phone menu panel'], 'runtimeErrors': 0}))
+                                     'late menus and commands appear', 'Replace File replaces an image', 'the trace and its tab', 'a diagram previews as a diagram', 'phone menu panel'], 'runtimeErrors': 0}))
 
 
 asyncio.run(main())
