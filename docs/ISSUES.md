@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-18 · release `v0.1.60` (not deployed; v0.1.53 is live)
+Last updated: 2026-10-18 · release `v0.1.60` (deployed with v0.1.54–v0.1.59; public check passed, no console errors)
 
 ---
 
