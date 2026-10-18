@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from ..model.access import clean_access, from_legacy_members
+from stilo.kernel.log import ignore
 
 ACCESS_FILE = "access.json"
 
@@ -16,7 +17,8 @@ def read_access(project_dir: Path, legacy=lambda: None) -> dict:
     if path.exists():
         try:
             return clean_access(json.loads(path.read_text(encoding="utf-8")))
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as error:
+            ignore(error, f"{path} is unreadable; treating the project as open to its whole team")
             return clean_access(None)
     meta = legacy()
     if meta is None:
@@ -25,8 +27,8 @@ def read_access(project_dir: Path, legacy=lambda: None) -> dict:
     if Path(project_dir).is_dir():
         try:
             write_access(project_dir, data)
-        except OSError:
-            pass
+        except OSError as error:
+            ignore(error, "writing down the access list taken from the old member list failed; it is used anyway")
     return data
 
 

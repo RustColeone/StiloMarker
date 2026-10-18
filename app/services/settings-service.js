@@ -1,3 +1,4 @@
+import { ignore } from "../kernel/index.js";
 const SETTINGS_KEY = "mdnotes.settings.v1";
 
 function createDefaultSettings() {
@@ -109,7 +110,7 @@ function patchStoredSettings(patchFor) {
     const patch = patchFor(stored);
     if (!patch) return;
     globalThis.localStorage?.setItem(SETTINGS_KEY, JSON.stringify({ ...stored, ...patch }));
-  } catch { /* storage unavailable or corrupt — nothing safe to do */ }
+  } catch (error) { ignore(error, "saving settings failed: storage is unavailable or corrupt"); }
 }
 
 function resolveTheme(theme) {

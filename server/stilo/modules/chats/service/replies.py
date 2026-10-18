@@ -4,6 +4,7 @@ conversations at once; a conversation's queue can be stopped."""
 import threading
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from stilo.kernel.log import ignore
 
 
 class ReplyQueue:
@@ -60,8 +61,8 @@ class ReplyQueue:
                 job = queue.popleft()
             try:
                 self.run(job, lambda: conversation in self.cancelled)
-            except Exception:  # noqa: BLE001 — the runner reports its own failures
-                pass
+            except Exception as error:  # noqa: BLE001 — the runner reports its own failures, so this is a bug in it
+                ignore(error, "a character's reply escaped its runner")
 
     def shutdown(self) -> None:
         self.pool.shutdown(wait=False, cancel_futures=True)

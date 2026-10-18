@@ -9,8 +9,9 @@ This file is the short reference that the structure tests enforce.
 ## The shape
 
 - **A tiny kernel** starts the modules in dependency order and hands each one
-  only the public APIs it declared. It holds no state and knows no domain
-  (`app/kernel/`, `server/stilo/kernel/`).
+  only the public APIs it declared. It knows no domain (`app/kernel/`,
+  `server/stilo/kernel/`). Its one piece of state is the browser's **trace**
+  (see "Finding a bug" below).
 - **Modules in one-way levels** (`app/modules/`, `server/stilo/modules/`):
 
   | Level | Modules |
@@ -195,7 +196,7 @@ sequenceDiagram
   WS-->>S: event to every other tab
 ```
 
-## The eight rules
+## The nine rules
 
 `tests/structure/structure.test.mjs` checks each one.
 
@@ -211,6 +212,29 @@ sequenceDiagram
    `spec/` (listed in `spec/twins.json`).
 7. Each module owns its network messages and their version.
 8. Size budgets: the kernel about 300 lines and free of domain words; any file 800.
+9. No catch swallows an error without a word: no empty `catch {}`, no
+   `.catch(() => {})` (or `=> null`), no `except ...: pass`. Handle the error,
+   or carry on with `ignore(error, "why")` from the kernel so it still reaches
+   the trace (browser) or the server log.
+
+## Finding a bug: the trace
+
+The browser's kernel keeps a trace of what happened lately, in order, and
+who did it: every event a module emits, every listener that failed, every
+error code chose to `ignore` (with its reason and file:line) and every error
+nothing caught (Shell watches the page). A repeat is counted instead of pushing
+older entries out.
+
+- **See it:** the log panel's **Trace** tab (Settings, the log panel), or
+  `stiloTrace()` in the browser console, which prints it and returns the
+  entries. Copy and Clear work on the open tab.
+- **Report into it:** `ignore(error, "why")` in a catch, `.catch(ignored("why"))`
+  on a promise, `trace.record(kind, owner, message, detail)` for anything else
+  (all from `app/kernel/index.js`). A module's `ctx.log(...)` lands there too.
+- **The server:** `ignore(error, why)` from `stilo.kernel.log` writes an
+  `[ignored]` line with where it happened; `best_effort(callback, why)` wraps a
+  callback that must not stop its caller (progress down a stream), reporting
+  its first failure once.
 
 ## Extensions
 
@@ -261,6 +285,21 @@ refuses to record anything new.
 | 7g-1 | Editor (browser): the source editor, split by job into parts that share one editor object (text and DOM, rendering, edits and undo, others' cursors, the toolbar, keys), highlighting, find and replace, autocomplete, links, the formatting toolbar and table picker, and the Markdown renderer as its model. The gutter popover for comments moved into Comments. The URL album entry editing is a port the app provides (it becomes an extension in step 8) | done |
 | 7g-2 | The tab strips and panes (and resuming the last view, through a port) and the preview pane with a `previews` extension point: images, Markdown and mind-map trees are built in; URL albums, diagrams and character sheets add theirs from `app/features/previews.js` | done |
 | 8 | The URL album as an extension (v0.1.48): `extensions/url-album/` with its file type, model, preview, highlighting, Entry button and entry dialog. The core gained extension points instead of album code: file parts in Workspace (a file's named parts listed, opened, renamed, moved, copied and dropped on their own), highlighters and toolbars in Editor, `shell.form` for dialogs with several fields, and the Create menu drawn from File types. Nothing in the core names the album | done |
+
+### Next: one owner per piece of state (decided 2026-10-18)
+
+The module graph is clean, but `main.js` still holds the app's shared state
+and hands it to the modules and features: on 2026-10-18, 261 live getters and
+26 setters, and 149 functions that only forward a call. `selectionNodeId` was
+written in 23 places in 4 files, `sourcePart` (the open album entry) in 12.
+That is where bugs are hard to find. Steps, each its own release:
+
+| Step | What | State |
+| --- | --- | --- |
+| S1 | The trace (kernel) and rule 9: every silent catch (57: 36 browser, 21 server) reports why it carries on | done (v0.1.52) |
+| S2 | One owner per shared variable: the 26 that outside code sets move into their module (the open file, selection and album part to Editor, `workspaceMode` to Sync); others read through the owner's API and change them only through its named actions, each recorded in the trace | next |
+| S3 | The large legacy files into modules, one per release: file-actions, explorer, cloud-browser, chat-panel. What a module or feature is handed from outside is capped (about 8 names); the getters into `main.js` may only shrink, to 0 | |
+| S4 | `main.js` only starts the kernel; then the server's `WorkspaceRegistry` the same way | |
 
 ### Notes for module authors
 

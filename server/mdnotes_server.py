@@ -28,7 +28,7 @@ from stilo.kernel import start_modules
 from stilo.modules import (assistant as assistant_module, characters as characters_module, file_types as file_types_module,
                            identity as identity_module, models as models_module, sync as sync_module, history as history_module, comments as comments_module, chats as chats_module, transport as transport_module, workspace as workspace_module)
 from stilo.modules.file_types import BUILTIN as FILE_TYPES
-from stilo.kernel.log import log as _log
+from stilo.kernel.log import log as _log, ignore as _ignore, best_effort as _best_effort
 from stilo.modules.workspace import (append_node, atomic_write as _atomic_write, create_id, decode_data_url, default_project,
                                      find_child_by_name, fsync_directory as _fsync_directory, node_id_by_path, path_of,
                                      remove_node_recursive, subtree_paths, utf16_index as _utf16_index,
@@ -458,8 +458,8 @@ class ChatProxy:
             if "index" in args:
                 try:
                     op["index"] = int(args["index"])
-                except (TypeError, ValueError):
-                    pass
+                except (TypeError, ValueError) as error:
+                    _ignore(error, "the agent's move-node index is not a number; the node goes last")
             proposed_operations.append(op)
             return {"status": "proposed", "proposalId": proposal_id}
 
@@ -656,14 +656,7 @@ class ChatProxy:
         batch_id = f"batch-{uuid.uuid4().hex[:8]}"
         reply = ""
 
-        def emit(event: dict) -> None:
-            """Best-effort progress notification; never let UI streaming break the agent."""
-            if progress is None:
-                return
-            try:
-                progress(event)
-            except Exception:
-                pass
+        emit = _best_effort(progress, "the browser stopped receiving the agent's progress; the agent finishes without it")
 
         for iteration in range(self.max_tool_iterations + 1):
             if getattr(self._req, "cancelled", lambda: False)():
@@ -870,13 +863,7 @@ class ChatProxy:
         payload, used_paths = self.build_persona_payload(messages, context_files, project_name, project_snapshot,
                                                          persona, cast, active_model)
 
-        def emit(event: dict) -> None:
-            if progress is None:
-                return
-            try:
-                progress(event)
-            except Exception:
-                pass
+        emit = _best_effort(progress, "the browser stopped receiving the character's progress; the reply finishes without it")
 
         reply = ""
         for iteration in range(self.max_tool_iterations + 1):
@@ -1721,9 +1708,11 @@ class WorkspaceRegistry:
             return self._bind_session(workspace_id, broker.connect(pin, display_name, leased=leased))
         # No workspace given: try the legacy default session first.
         try:
-            return self._bind_session(DEFAULT_WORKSPACE_ID, self.default_broker.connect(pin, display_name, leased=leased))
+            session = self.default_broker.connect(pin, display_name, leased=leased)
         except PermissionError:
-            pass
+            session = None  # not the default session's PIN
+        if session is not None:
+            return self._bind_session(DEFAULT_WORKSPACE_ID, session)
         # Then any ephemeral host whose guest PIN matches.
         with self.lock:
             match = next((wid for wid, meta in self.ephemeral.items() if meta["guestPin"] == pin), None)
@@ -2288,8 +2277,8 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             with write_lock:
                 try:
                     self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
-                    pass
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as error:
+                    _ignore(error, "the browser went away before the stream ended")
 
     def _handle_persona_prompt(self):
         """A character's request, built but not sent: for a browser that runs
@@ -2579,7 +2568,7 @@ def main():
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        pass
+        _log("server", "stopping")
     finally:
         server.server_close()
 

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from stilo.modules.workspace import atomic_write
 from ..model.comments import empty
+from stilo.kernel.log import ignore
 
 COMMENTS_FILE = "comments.json"
 
@@ -16,8 +17,8 @@ def read_comments(project_dir: Path) -> dict:
             data = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, dict) and isinstance(data.get("files"), dict):
                 return data
-        except (OSError, json.JSONDecodeError):
-            pass
+        except (OSError, json.JSONDecodeError) as error:
+            ignore(error, f"{path} is unreadable; showing no comments (saving a comment would replace it)")
     return empty()
 
 

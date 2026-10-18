@@ -4,6 +4,7 @@ opened. Without a data folder nothing is kept."""
 import json
 import time
 from pathlib import Path
+from stilo.kernel.log import ignore
 
 PREFS_FILE = "user-prefs.json"
 
@@ -18,7 +19,8 @@ class UserPrefs:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
             return data if isinstance(data, dict) else {}
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as error:
+            ignore(error, f"{self.path} is unreadable; no account remembers its last workspace")
             return {}
 
     def get(self, username: str) -> dict:
@@ -33,5 +35,5 @@ class UserPrefs:
             data[username] = {"lastWorkspace": {"team": team, "path": path}, "updatedAt": time.time()}
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self.path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        except OSError:
-            pass
+        except OSError as error:
+            ignore(error, f"remembering {username}'s last workspace failed")

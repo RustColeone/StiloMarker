@@ -4,8 +4,24 @@
 // main.js creates this on first use and passes its shared values in `app`.
 
 
+import { ignore, trace } from "../kernel/index.js";
+
 export function createDialogs(app) {
+  // The Trace tab shows the kernel's trace; it redraws at most once a frame.
+  let traceFrame = 0;
+  trace.onRecord(() => {
+    if (traceFrame || app.debugState.activeTab !== "trace" || !app.settings.debugPanel) return;
+    traceFrame = requestAnimationFrame(() => { traceFrame = 0; renderDebugPanel(); });
+  });
+
+  function clearDebugLog() {
+    if (app.debugState.activeTab === "trace") trace.clear();
+    else app.debugState.entries = [];
+    renderDebugPanel();
+  }
+
   function buildDebugLogText() {
+    if (app.debugState.activeTab === "trace") return trace.text();
     return app.debugState.entries.map((entry) => {
       const detail = entry.detail ? ` :: ${entry.detail}` : "";
       return `[${entry.timestamp}] ${entry.kind.toUpperCase()} ${entry.message}${detail}`;
@@ -107,6 +123,15 @@ export function createDialogs(app) {
 
 
   function getVisibleDebugEntries() {
+    if (app.debugState.activeTab === "trace") {
+      return trace.entries().slice(-app.debugState.maxEntries).map((entry) => ({
+        kind: entry.kind,
+        message: `${entry.owner}: ${entry.message}${entry.count > 1 ? ` (x${entry.count})` : ""}`,
+        detail: entry.detail,
+        timestamp: new Date(entry.time).toLocaleTimeString()
+      }));
+    }
+
     if (app.debugState.activeTab === "actions") {
       return app.debugState.entries.filter((entry) => entry.kind === "action");
     }
@@ -181,19 +206,19 @@ export function createDialogs(app) {
       app.shell.notify(`${message} Please fully close this tab and reopen it to finish updating.`);
       return;
     }
-    try { sessionStorage.setItem("mdnotes.upgradeReloaded", "1"); } catch { /* ignore */ }
-    try { app.shell.toast("Updating to the latest version…", { duration: 1500 }); } catch { /* ignore */ }
+    try { sessionStorage.setItem("mdnotes.upgradeReloaded", "1"); } catch (error) { ignore(error, "session storage is blocked"); }
+    try { app.shell.toast("Updating to the latest version…", { duration: 1500 }); } catch (error) { ignore(error, "showing the update toast failed"); }
     try {
       const regs = (await navigator.serviceWorker?.getRegistrations?.()) ?? [];
       await Promise.all(regs.map((r) => r.unregister()));
-    } catch { /* ignore */ }
+    } catch (error) { ignore(error, "unregistering the service worker failed; reloading anyway"); }
     setTimeout(() => globalThis.location.reload(), 1200);
   }
 
 
 
   return {
-    copyDebugLogToClipboard, flashStatusPanel, forceAppUpgrade, formatEditorDebugValue, logDebug,
+    clearDebugLog, copyDebugLogToClipboard, flashStatusPanel, forceAppUpgrade, formatEditorDebugValue, logDebug,
     renderDebugPanel, showAcceptConnectionDialog, traceEditorEvent
   };
 }

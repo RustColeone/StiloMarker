@@ -18,6 +18,7 @@ import { chosenModel, groupByProvider, runDirectReply } from "../modules/models/
 import { saveSettings } from "../services/settings-service.js";
 import { normalizeServerUrl } from "../services/sync-service.js";
 import { query } from "../ui/dom.js";
+import { ignored } from "../kernel/index.js";
 
 export function createChatPanel(deps) {
   // Who asked for an agent batch: this tab while it is open (not the sync client id,
@@ -836,9 +837,9 @@ export function createChatPanel(deps) {
           const now = Date.now();
           if (state === "writing" && now - sent < 250) { pending ??= setTimeout(() => { pending = null; report(); }, 250); return; }
           sent = now;
-          void store.typing(conversationId, claim.character, claim.trigger, text, state).catch(() => {});
+          void store.typing(conversationId, claim.character, claim.trigger, text, state).catch(ignored("sending a character's typing state failed"));
         };
-        if (run.signal.aborted) { await store.reply(conversationId, claim.character, claim.trigger, "", "interrupted").catch(() => {}); continue; }
+        if (run.signal.aborted) { await store.reply(conversationId, claim.character, claim.trigger, "", "interrupted").catch(ignored("saving an interrupted reply failed")); continue; }
         try {
           const { payload } = await store.prompt(conversationId, claim.character, claim.trigger);
           const reply = await runDirect(payload, run.signal, (next) => { text = next; report(); }, () => report("reading"));
@@ -848,7 +849,7 @@ export function createChatPanel(deps) {
           clearTimeout(pending);
           const stopped = run.signal.aborted || error?.name === "AbortError";
           await store.reply(conversationId, claim.character, claim.trigger,
-            stopped ? text : `${claim.name || "The character"} could not reply: ${error.message || error}`, stopped ? "interrupted" : "error").catch(() => {});
+            stopped ? text : `${claim.name || "The character"} could not reply: ${error.message || error}`, stopped ? "interrupted" : "error").catch(ignored("saving a stopped or failed reply failed"));
           if (!stopped) run.abort(); // the rest would fail the same way
         }
       }
@@ -1186,9 +1187,7 @@ export function createChatPanel(deps) {
   function stopAgentTurn() {
     if (!chatState.sending || !chatState.abortController) return;
     chatState.stopped = true;
-    try {
-      chatState.abortController.abort();
-    } catch { /* already settled */ }
+    chatState.abortController.abort(); // aborting a settled request does nothing
     logDebug("action", "Agent turn stopped by user");
   }
 

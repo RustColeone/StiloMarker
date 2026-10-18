@@ -4,6 +4,7 @@
 // Installed on the editor object `ed` that the other parts share (see
 // editor-core.js); calls into another part go through `ed`.
 import { isTextFileName } from "../../workspace/index.js";
+import { ignore } from "../../../kernel/index.js";
 
 export function installDom(ed, app) {
   // What has changed in the editor DOM since the last render (see
@@ -270,8 +271,8 @@ export function installDom(ed, app) {
         sel.removeAllRanges();
         sel.addRange(range);
       }
-    } catch {
-      // Ignore rare out-of-bound errors (e.g. during rapid file switches).
+    } catch (error) {
+      ignore(error, "restoring the editor selection failed (out of range during a file switch?)");
     }
   }
 

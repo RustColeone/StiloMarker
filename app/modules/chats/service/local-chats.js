@@ -5,6 +5,7 @@
 // progress is reported through `onEvent` exactly like the server's live events.
 // `records` keeps the data (adapters/local-records.js).
 import { findMentions } from "../../characters/index.js";
+import { ignore } from "../../../kernel/index.js";
 
 const MAX_MESSAGE = 16000;
 
@@ -24,7 +25,7 @@ export function createLocalChats({ workspaceKey, listCharacters, runReply, onEve
     return conversation;
   };
   const characterKeys = () => new Set(listCharacters().map((c) => c.key));
-  const emit = (event) => { try { onEvent?.(event); } catch { /* a listener must not break storage */ } };
+  const emit = (event) => { try { onEvent?.(event); } catch (error) { ignore(error, "a chat listener failed; the chat was stored"); } };
 
   function view(c) {
     const messages = state.messages[c.id] ?? [];

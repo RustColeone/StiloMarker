@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { defineModule, startModules, createRegistry, createEmitter } from "../app/kernel/index.js";
+import { defineModule, startModules, createRegistry, createEmitter, createTrace, trace, ignore, ignored, describe } from "../app/kernel/index.js";
+import { callerOf } from "../app/kernel/trace.js";
 
 const mod = (name, level, uses, start = () => ({})) => defineModule({ name, level, uses, owns: {}, start });
 
@@ -63,4 +64,38 @@ test("emitters: a failing listener is logged and the others still run", () => {
   assert.deepEqual(seen, [1]);
   assert.equal(logged.length, 2);
   assert.match(logged[0], /boom/);
+});
+
+test("the trace records events, failed listeners and ignored errors, counting repeats", () => {
+  const trace = createTrace({ limit: 3, now: () => 0 });
+  const events = createEmitter("t", () => {}, trace);
+  events.on("x", () => { throw new Error("boom"); });
+  events.emit("x", { type: "patch-file", path: "a.md", content: "long text" });
+  assert.deepEqual(trace.entries().map((e) => [e.kind, e.owner, e.message, e.detail]), [
+    ["event", "t", "x", "type=patch-file path=a.md"],
+    ["failed", "t", "a listener for x", "Error: boom"]
+  ]);
+  trace.record("log", "t", "same");
+  trace.record("log", "t", "same");
+  assert.equal(trace.entries().at(-1).count, 2, "a repeat is counted, not pushed");
+  trace.record("log", "t", "newer");
+  assert.equal(trace.entries().length, 3, "the oldest entries fall off past the limit");
+  assert.match(trace.text(), /log t: same \(x2\)/);
+  trace.clear();
+  assert.deepEqual(trace.entries(), []);
+});
+
+test("ignore() and ignored() put the error, the reason and the caller in the page's trace", async () => {
+  trace.clear();
+  try { JSON.parse("{"); } catch (error) { ignore(error, "a broken payload"); }
+  await Promise.reject(new Error("offline")).catch(ignored("a background call"));
+  const [first, second] = trace.entries();
+  assert.equal(first.kind, "ignored");
+  assert.equal(first.message, "a broken payload");
+  assert.match(first.detail, /^SyntaxError: /);
+  assert.match(first.owner, /tests\/kernel\.test\.mjs:\d+$/);
+  assert.equal(second.message, "a background call");
+  assert.equal(second.detail, "Error: offline");
+  assert.equal(callerOf("Error\n    at f (https://host/app/x/y.js?v=2:12:5)"), "app/x/y.js:12");
+  assert.equal(describe({ a: 1, b: 2 }), "{a, b}");
 });

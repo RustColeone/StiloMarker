@@ -6,6 +6,7 @@ import { ROOT_ID, describeFileTypes, fileBaseName, fileTypeExtension, findChildB
 import { normalizeBmapAst, parseBmap } from "../services/bmap-service.js";
 import { dataUrlToBlob, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent } from "../services/file-content-service.js";
 import { createZip, downloadBlob } from "../services/zip-service.js";
+import { ignore } from "../kernel/index.js";
 
 export function createFileActions(app) {
   function clearExplorerDropState() {
@@ -597,9 +598,7 @@ export function createFileActions(app) {
     if (draggedSelection) {
       try {
         moveOrInsertDraggedSelection(JSON.parse(draggedSelection), app.editorDragState.dropOffset ?? app.getEditorTextOffsetFromPoint(event.clientX, event.clientY));
-      } catch {
-        // Ignore malformed editor drag payloads.
-      }
+      } catch (error) { ignore(error, "dropping dragged editor text failed"); }
       return;
     }
 
@@ -614,9 +613,7 @@ export function createFileActions(app) {
           insertEditorTextAtDrop(text, event);
           app.logDebug("action", "Part inserted", `${part.name} :: ${text}`);
         }
-      } catch {
-        // Ignore malformed part payloads.
-      }
+      } catch (error) { ignore(error, "dropping a dragged part failed"); }
       return;
     }
 

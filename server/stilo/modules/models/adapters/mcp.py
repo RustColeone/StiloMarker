@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, build_opener, HTTPRedirectHandler
+from stilo.kernel.log import ignore
 
 MODERN = '2026-07-28'
 LEGACY = ('2025-11-25', '2025-06-18', '2025-03-26')
@@ -202,7 +203,8 @@ class MCPClient:
         self.session = None
         try:
             with self.opener.open(Request(self.config['url'],headers=headers,method='DELETE'),timeout=2): pass
-        except (OSError, URLError): pass
+        except (OSError, URLError) as error:
+            ignore(error, "ending the MCP session failed; the server drops it on its own")
 
 class MCPTurn:
     def __init__(self, configs, *, progress=None, cancelled=lambda: False, factory=MCPClient):

@@ -5,6 +5,7 @@
 import { getPath, isTextFileName } from "../domain/project-model.js";
 import { createFileSnapshot, createServerSnapshot, deleteServerSnapshot, deleteVersion, diffLines, getServerSnapshotContent, getVersionContent,
   listFileVersions, listServerSnapshotPaths, listServerSnapshotVersions, listSnapshotPaths } from "../modules/history/index.js";
+import { ignore } from "../kernel/index.js";
 
 export function createSnapshots(app) {
   // ---- Version label (S.E.N) --------------------------------------------------
@@ -30,8 +31,8 @@ export function createSnapshots(app) {
       try {
         const listing = await snapshotStore().paths();
         setSnapshotBaselines(listing?.baselines);
-      } catch {
-        /* history is unavailable — the label just falls back to "no snapshots". */
+      } catch (error) {
+        ignore(error, "snapshot counts are unavailable; the label says no snapshots");
       } finally {
         app.snapshotBaselinesInFlight = null;
       }
@@ -153,7 +154,7 @@ export function createSnapshots(app) {
     const flag = `mdnotes.snapshots.migrated.${workspaceId}`;
     try {
       if (localStorage.getItem(flag)) return 0;
-    } catch { /* storage blocked — just try */ }
+    } catch (error) { ignore(error, "local storage is blocked; migrating snapshots anyway"); }
 
     const project = app.controller.getProject();
     const workspaceFiles = new Set(Object.values(project?.nodes ?? {})
@@ -166,9 +167,9 @@ export function createSnapshots(app) {
       for (const file of files) {
         if (key !== workspaceId && !workspaceFiles.has(file)) continue; // shared key: this workspace's files only
         let versions = [];
-        try { versions = await listFileVersions(key, file); } catch { continue; }
+        try { versions = await listFileVersions(key, file); } catch (error) { ignore(error, "an old local snapshot list is unreadable; skipped"); continue; }
         for (const version of [...versions].reverse()) { // oldest first
-          const content = await getVersionContent(version.id).catch(() => null);
+          const content = await getVersionContent(version.id).catch((error) => { ignore(error, "an old local snapshot is unreadable; skipped"); return null; });
           if (content == null) continue;
           // A network failure throws out of here: the flag stays unset, so the next
           // open retries and the server de-duplicates whatever already arrived.
@@ -180,7 +181,7 @@ export function createSnapshots(app) {
         }
       }
     }
-    try { localStorage.setItem(flag, String(Date.now())); } catch { /* ignore */ }
+    try { localStorage.setItem(flag, String(Date.now())); } catch (error) { ignore(error, "remembering that snapshots were migrated failed"); }
     if (uploaded) app.logDebug("action", "Migrated local snapshots to server", `${uploaded} version(s) -> ${workspaceId}`);
     return uploaded;
   }
@@ -220,7 +221,7 @@ export function createSnapshots(app) {
       try {
         const result = await store.create(getPath(project, node.id), node.content ?? "", label);
         if (result?.created) saved += 1;
-      } catch { /* storage unavailable — never block the open */ }
+      } catch (error) { ignore(error, "saving a snapshot before opening failed; opening anyway"); }
     }
     if (saved) app.logDebug("action", "Snapshotted unsaved files", `${saved} file(s) — ${label}`);
     return saved;

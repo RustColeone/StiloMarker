@@ -1,12 +1,12 @@
 {
   "about": "Structure violations that existed when the rules were introduced (2026-10-16). They may only shrink; see tools/structure-baseline.mjs.",
   "oversized": {
-    "app/features/chat-panel.js": 1670,
+    "app/features/chat-panel.js": 1669,
     "app/features/cloud-browser.js": 988,
-    "app/features/file-actions.js": 1188,
-    "app/main.js": 4667,
+    "app/features/file-actions.js": 1185,
+    "app/main.js": 4658,
     "app/ui/bmap-view.js": 4025,
-    "server/mdnotes_server.py": 2588
+    "server/mdnotes_server.py": 2577
   },
   "spellings": {
     "access file": [],

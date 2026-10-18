@@ -106,6 +106,23 @@ export function spellings(files = codeFiles()) {
   return out;
 }
 
+// Catches that swallow an error without a word (rule 9): an empty catch
+// block (comments do not count), `.catch(() => {})` and its null/undefined/
+// false cousins, and Python's `except ...: pass`. Each "file:line".
+const SILENT_JS = /catch\s*(\(\s*\w*\s*\))?\s*\{\s*\}|\.catch\(\s*\(\s*\w*\s*\)\s*=>\s*(\{\s*\}|null|undefined|false)\s*\)/g;
+const SILENT_PY = /except\b[^:\n]*:[ \t]*\n?[ \t]*pass\b/g;
+
+export function silentCatches(files = codeFiles()) {
+  const out = [];
+  for (const file of files.filter((f) => /\.(m?js|py)$/.test(f))) {
+    const code = codeOf(file);
+    for (const m of code.matchAll(file.endsWith(".py") ? SILENT_PY : SILENT_JS)) {
+      out.push(`${file}:${code.slice(0, m.index).split("\n").length}`);
+    }
+  }
+  return out;
+}
+
 // Relative imports of a JavaScript file, resolved to repo paths.
 export function jsImports(file) {
   const text = read(file);

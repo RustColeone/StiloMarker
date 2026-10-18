@@ -3,6 +3,7 @@
 // settings while a session is open.
 import { normalizeServerUrl, throwForResponse, parseResponse } from "../../shell/index.js";
 import contract from "../model/contract.js";
+import { ignored } from "../../../kernel/index.js";
 
 // This page load, sent with every workspace open: many ids mean the page keeps
 // reloading, one id opening again and again means one tab keeps reconnecting.
@@ -70,7 +71,7 @@ export function leaveSession(serverUrl, token) {
   if (!token) return;
   const url = `${normalizeServerUrl(serverUrl)}/api/session/leave?token=${encodeURIComponent(token)}`;
   if (typeof navigator !== "undefined" && navigator.sendBeacon?.(url)) return;
-  void fetch(url, { method: "POST", keepalive: true }).catch(() => {});
+  void fetch(url, { method: "POST", keepalive: true }).catch(ignored("telling the server this tab left failed; its session times out"));
 }
 
 export function openEventStream(serverUrl, token, onEvent, onError) {

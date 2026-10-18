@@ -12,6 +12,7 @@ import { isAuthExpiredError, isFatalSyncError, isUpgradeError } from "../model/e
 import { fingerprintProject, flattenProjectPaths, sanitizeProjectForSync, unsyncedFiles } from "../model/paths.js";
 import { rebaseIncoming } from "../model/rebase.js";
 import { createPatchQueue } from "./patches.js";
+import { ignore, ignored } from "../../../kernel/index.js";
 
 const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 15000, 30000];
 const isImageName = (name) => builtinTypes.isImage(name);
@@ -172,7 +173,7 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
     clearLeaseTimer();
     clearScheduledSyncs();
     reconnecting = false;
-    try { connection?.eventSource?.close(); } catch { /* ignore */ }
+    connection?.eventSource?.close();
     emitStatus("upgrade-required", error?.message || "This app is out of date. Reload to update.");
   }
 
@@ -182,7 +183,7 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
     if (!connection || reconnecting) return;
     clearLeaseTimer();
     if (connection.eventSource) {
-      try { connection.eventSource.close(); } catch { /* ignore */ }
+      connection.eventSource.close();
       connection.eventSource = null;
     }
     if (!reconnectCtx) {
@@ -212,7 +213,8 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
     if (reconnectTask) return reconnectTask;
     const task = runReconnect();
     reconnectTask = task;
-    task.finally(() => { if (reconnectTask === task) reconnectTask = null; }).catch(() => {});
+    const done = () => { if (reconnectTask === task) reconnectTask = null; };
+    task.then(done, done);
     return task;
   }
 
@@ -427,7 +429,8 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
     })();
     reloadPromise = task;
     task.catch((error) => { if (epoch === generation) syncError(error); });
-    task.finally(() => { if (epoch === generation && reloadPromise === task) reloadPromise = null; }).catch(() => {});
+    const done = () => { if (epoch === generation && reloadPromise === task) reloadPromise = null; };
+    task.then(done, done);
     return task;
   }
 
@@ -437,7 +440,7 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
     if (awarenessTimer) clock.clearTimeout(awarenessTimer);
     awarenessTimer = clock.setTimeout(() => {
       awarenessTimer = null;
-      if (connection) api.pushCursor(connection.serverUrl, connection.token, { fileId, selStart, selEnd }).catch(() => {});
+      if (connection) api.pushCursor(connection.serverUrl, connection.token, { fileId, selStart, selEnd }).catch(ignored("sending the cursor failed"));
     }, 100);
   }
 
@@ -586,9 +589,10 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
     try {
       applyOperation(event.clientId, opToApply);
       markUnsyncedDirty();
-    } catch {
+    } catch (error) {
       isApplyingRemote = false;
-      reloadFromServer(`Sync conflict at revision ${event.revision} — reloading.`).catch(() => {});
+      ignore(error, `applying the change at revision ${event.revision} failed; reloading`);
+      reloadFromServer(`Sync conflict at revision ${event.revision} — reloading.`).catch(ignored("reloading after a failed change failed"));
       return;
     } finally {
       isApplyingRemote = false;

@@ -1,4 +1,4 @@
-// The eight structure rules (docs/ARCHITECTURE.md). Each failure says which
+// The nine structure rules (docs/ARCHITECTURE.md). Each failure says which
 // rule broke and how to fix it. Today's violations are recorded in
 // baseline.json and may only shrink: `node tools/structure-baseline.mjs`
 // lowers it after a cleanup and refuses to raise it.
@@ -9,7 +9,7 @@ import { join } from "node:path";
 
 import {
   ROOT, GENERATED, codeFiles, codeOf, read, lineCount, oversized, spellings, jsImports, pyImports,
-  loadModules, moduleOf, KERNEL_MAX_LINES, DOMAIN_WORDS, MAX_LINES
+  loadModules, moduleOf, silentCatches, KERNEL_MAX_LINES, DOMAIN_WORDS, MAX_LINES
 } from "./scan.mjs";
 
 const json = (path) => JSON.parse(readFileSync(join(ROOT, path), "utf8"));
@@ -264,6 +264,12 @@ test("files stay within the size budget, and the kernel stays small and domain-f
     if (word) problems.push(`${file} mentions "${word[0]}": the kernel knows no domain; move that into a module`);
   }
   assert.deepEqual(problems, []);
+});
+
+test("no catch swallows an error without a word (rule 9)", () => {
+  const found = silentCatches(files).map((where) => `${where}: an empty catch hides the error. ` +
+    "Handle it, or carry on with ignore(error, \"why\") (kernel) so it still reaches the trace or the server log");
+  assert.deepEqual(found, []);
 });
 
 test("the baseline lists nothing that has already been fixed", () => {

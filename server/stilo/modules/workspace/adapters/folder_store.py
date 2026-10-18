@@ -15,6 +15,7 @@ from pathlib import Path
 from stilo.modules.file_types import BUILTIN as FILE_TYPES
 from ..model.tree import default_project, path_of
 from .files import atomic_write, decode_data_url, fsync_directory
+from stilo.kernel.log import ignore
 
 JOURNAL = ".pending-state.json"
 MANIFEST = "manifest.json"
@@ -53,8 +54,8 @@ class FolderStore:
                 shutil.rmtree(path)
             elif path.exists():
                 path.unlink()
-        except OSError:
-            pass
+        except OSError as error:
+            ignore(error, f"removing {path} failed; it stays on disk")
 
     def externalize_images(self, project: dict) -> None:
         """Every image's data URL out to a real file (when a whole project is adopted)."""

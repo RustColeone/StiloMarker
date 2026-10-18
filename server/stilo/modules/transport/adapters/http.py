@@ -117,7 +117,7 @@ def run_stream_route(handler, parsed, route, log):
             elif not stream.should_close():
                 handler.wfile.write(f"data: {json.dumps(event)}\n\n".encode("utf-8"))
             handler.wfile.flush()
-    except OSError:  # the client went away (BrokenPipe, ConnectionReset, ...)
-        pass
+    except OSError:  # the client went away (BrokenPipe, ConnectionReset, ...): the normal end of a stream
+        return
     finally:
         stream.close()

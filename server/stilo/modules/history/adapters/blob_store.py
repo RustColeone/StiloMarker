@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 from stilo.modules.workspace import atomic_write
+from stilo.kernel.log import ignore
 
 
 class BlobStore:
@@ -27,8 +28,8 @@ class BlobStore:
                     data.setdefault("refs", {})
                     data.setdefault("bytes", 0)
                     return data
-            except (OSError, json.JSONDecodeError):
-                pass
+            except (OSError, json.JSONDecodeError) as error:
+                ignore(error, f"{path} is unreadable; starting an empty index")
         return {**{key: type(value)() for key, value in self._empty.items()}, "refs": {}, "bytes": 0}
 
     def save(self, index: dict) -> None:
@@ -59,8 +60,8 @@ class BlobStore:
         try:
             index["bytes"] = max(0, index["bytes"] - self._path(blob).stat().st_size)
             self._path(blob).unlink()
-        except OSError:
-            pass
+        except OSError as error:
+            ignore(error, f"removing the unused blob {blob} failed")
 
     def read(self, blob: str) -> bytes:
         return gzip.decompress(self._path(blob).read_bytes())

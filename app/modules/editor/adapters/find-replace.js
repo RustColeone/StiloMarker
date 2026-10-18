@@ -2,6 +2,7 @@
 // stepping through matches, and replacing one or all.
 // main.js creates this on first use and passes its shared values in `app`.
 import { isTextFileName } from "../../workspace/index.js";
+import { ignore } from "../../../kernel/index.js";
 
 export function createFindReplace(app) {
   // Build the RegExp for the current query + toggles, or null on empty/invalid.
@@ -94,7 +95,7 @@ export function createFindReplace(app) {
           box.style.height = `${rect.height}px`;
           layer.append(box);
         }
-      } catch { /* offset transiently out of range during a re-render */ }
+      } catch (error) { ignore(error, "drawing a search match failed (out of range during a re-render?)"); }
     });
     app.scheduleOverviewRuler(); // search hits are ruler markers too
   }

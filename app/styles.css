@@ -3438,6 +3438,15 @@ menu {
   min-width: 0;
 }
 
+.debug-log-entry.is-ignored .debug-log-kind {
+  color: var(--warning);
+}
+
+.debug-log-entry.is-failed .debug-log-kind,
+.debug-log-entry.is-uncaught .debug-log-kind {
+  color: var(--danger);
+}
+
 .debug-log-detail {
   grid-column: 3;
   color: var(--text-muted);

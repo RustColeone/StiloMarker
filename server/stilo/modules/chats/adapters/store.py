@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 
 from ..model.members import char_key, clean_member as _clean_member, user_key  # noqa: F401
+from stilo.kernel.log import ignore
 
 DB_NAME = "conversations.sqlite"
 # SQLite's write-ahead log lives next to the database; all three must survive
@@ -339,8 +340,8 @@ class ProjectChats:
                         "JOIN messages m ON m.id=messages_fts.rowid WHERE messages_fts MATCH ? AND m.conversation_id=? "
                         "ORDER BY m.id DESC LIMIT ?", (expression, row["id"], int(limit))).fetchall()
                     return [{**self._message(r), "snippet": r["snip"]} for r in rows]
-                except sqlite3.OperationalError:
-                    pass  # an unusual query: fall back to a plain substring search
+                except sqlite3.OperationalError as error:
+                    ignore(error, "an unusual search query; falling back to a plain substring search")
             clauses = " AND ".join("content LIKE ? ESCAPE '\\'" for _ in words)
             params = ["%" + w.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%" for w in words]
             rows = self.db.execute(f"SELECT * FROM messages WHERE conversation_id=? AND {clauses} ORDER BY id DESC LIMIT ?",

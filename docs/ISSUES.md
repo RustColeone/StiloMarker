@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-17 · release `v0.1.51` (deployed; public verification passed)
+Last updated: 2026-10-18 · release `v0.1.52` (not deployed yet)
 
 ---
 
@@ -47,9 +47,50 @@ Next step: trace the editor's own input path (re-highlighting after a
 keystroke and restoring the caret), with `STILO_CPU_SLOWDOWN=6` set for
 `url-album-browser.py`.
 
+### 4. An unreadable comments file is replaced by the next comment
+**Confidence:** read in the code, not seen happen · **Severity:** medium (comments can be lost)
+
+If a project's `comments.json` cannot be read (cut short by a full disk, edited
+by hand), the server shows no comments, and the next comment anyone adds writes
+a new file over it. Since v0.1.52 the server log says so (`[ignored] ...
+comments.json is unreadable`). Possible fix: keep the unreadable file aside
+before writing a new one. History's index (`index.json` of snapshots and
+backups) has the same pattern.
+
+### 5. An unreadable access file opens the project to its whole team
+**Confidence:** read in the code, not seen happen · **Severity:** medium (access)
+
+If a project's `access.json` cannot be read, the project is treated as having
+no whitelist or blacklist, so everyone in the team may open it. Since v0.1.52
+the server log says so. Possible fix: refuse to open it (fail closed) until the
+file is fixed. Needs a decision: failing closed locks out its owner too.
+
 ---
 
 ## Fixed
+
+### v0.1.52: the trace, and no error swallowed in silence
+
+Step S1 of the follow-up to the restructure (docs/ARCHITECTURE.md, "Next: one
+owner per piece of state"). Nothing changes for users except the log panel's
+new Trace tab.
+
+- **The trace:** the browser's kernel records what happened lately and who did
+  it: every module event, every failed listener, every error code chose to
+  ignore (with its reason and file:line), every error nothing caught. The log
+  panel's Trace tab shows it; `stiloTrace()` in the console prints it.
+- **No silent catches (rule 9):** 57 catches (36 in the browser, 21 on the
+  server) dropped their error without a word. Each now handles it, or says why
+  it carries on with `ignore(error, why)`, so it reaches the trace or the
+  server log. A structure test fails on a new one.
+- Among them: a failure to apply a collaborator's change (two places) was
+  dropped before reloading; a bug in dropping dragged text or a part into the
+  editor vanished (the catch covered the whole drop, not only the parsing);
+  failed writes of account preferences and access lists were silent. Found
+  while doing this: items 4 and 5 above.
+- **Server:** a browser that stops receiving an agent's or character's
+  progress is now reported once (`best_effort` in the kernel), not once per
+  streamed token. The legacy server's two copies of that code became one.
 
 ### v0.1.51: the Trash button waits for its folder
 

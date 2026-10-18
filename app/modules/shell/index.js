@@ -20,12 +20,15 @@
 //   server.request(path, { method, query, body, failure, timeout })
 // Static, for code from before the restructure: normalizeServerUrl,
 // parseResponse, throwForResponse.
+// Errors nothing caught go into the kernel's trace; `stiloTrace()` in the
+// console prints it.
 import { defineModule } from "../../kernel/index.js";
 import { createCommands } from "./service/commands.js";
 import { createDialogs } from "./adapters/dialogs.js";
 import { createKeyboard } from "./adapters/keyboard.js";
 import { createMenuBar } from "./adapters/menu-bar.js";
 import { createServer } from "./adapters/server.js";
+import { watchPageErrors } from "./adapters/page-errors.js";
 
 export { normalizeServerUrl, parseResponse, throwForResponse } from "./adapters/server.js";
 
@@ -36,9 +39,11 @@ export default defineModule({
   owns: {
     registries: ["commands", "menus"],
     elements: ["menu bar", "notice dialog", "confirm dialog", "input dialog", "form dialog", "toasts"],
-    connection: ["the server address"]
+    connection: ["the server address"],
+    diagnostics: ["uncaught errors", "stiloTrace()"]
   },
   start(ctx) {
+    watchPageErrors();
     const { commands, menus, run } = createCommands(ctx);
     const dialogs = createDialogs();
 

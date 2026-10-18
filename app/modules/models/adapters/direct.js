@@ -4,6 +4,7 @@
 // Ollama or LM Studio. Tool calls are answered by the `tools` the caller
 // passes (a character's list_files / read_file on this browser's copy).
 import { createChatStream, wholeReply } from "../model/stream.js";
+import { ignore } from "../../../kernel/index.js";
 
 const MAX_STEPS = 6;
 
@@ -54,7 +55,7 @@ export async function runDirectReply({ payload, apiUrl, apiKey, model, signal, o
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
       let message = detail;
-      try { message = JSON.parse(detail)?.error?.message ?? detail; } catch { /* plain text */ }
+      try { message = JSON.parse(detail)?.error?.message ?? detail; } catch { message = detail; /* plain text */ }
       throw new Error(`The model endpoint answered ${response.status}${message ? `: ${String(message).slice(0, 200)}` : ""}`);
     }
     const { content, toolCalls } = await readStream(response, onText);
@@ -62,7 +63,7 @@ export async function runDirectReply({ payload, apiUrl, apiKey, model, signal, o
     messages.push({ role: "assistant", content, tool_calls: toolCalls });
     for (const call of toolCalls) {
       let args = {};
-      try { args = JSON.parse(call.function.arguments || "{}"); } catch { /* keep {} */ }
+      try { args = JSON.parse(call.function.arguments || "{}"); } catch (error) { ignore(error, `the model sent unreadable arguments for ${call.function.name}`); }
       onTool?.(call.function.name, args);
       const run = tools[call.function.name];
       const result = run ? await run(args) : { error: refusal };

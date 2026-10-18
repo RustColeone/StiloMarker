@@ -1,6 +1,7 @@
 // The kernel: starts modules in dependency order and hands each one only the
-// public APIs it declared it uses. It holds no state of its own and knows no
-// domain (docs/ARCHITECTURE.md, rule 8); a structure test keeps it that way.
+// public APIs it declared it uses. It knows no domain (docs/ARCHITECTURE.md,
+// rule 8; a structure test keeps it that way). Its one piece of state is the
+// page's trace (trace.js), which every emitter and ignore() reports into.
 //
 // A module is defined once, in its index.js:
 //
@@ -11,6 +12,10 @@
 //
 // ctx.use(name) returns a declared dependency's api; ctx.registry() and
 // ctx.emitter() make the module's own extension points and events.
+
+import { trace, describe } from "./trace.js";
+
+export { trace, ignore, ignored, describe, createTrace, formatEntry } from "./trace.js";
 
 const MODULE_KEYS = ["name", "level", "uses", "owns", "start"];
 
@@ -57,10 +62,11 @@ export async function startModules(definitions, { log = () => {} } = {}) {
       },
       registry: (options) => createRegistry({ ...options, owner: definition.name }),
       emitter: () => createEmitter(definition.name, log),
-      log: (...args) => log(definition.name, ...args)
+      log: (...args) => { trace.record("log", definition.name, args.join(" ")); log(definition.name, ...args); }
     });
     const api = await definition.start(ctx);
     apis.set(definition.name, Object.freeze(api ?? {}));
+    trace.record("log", "kernel", `started ${definition.name}`);
     log("kernel", `started ${definition.name}`);
   }
   return Object.freeze(Object.fromEntries(apis));
@@ -93,8 +99,9 @@ export function createRegistry({ key = "id", validate = () => {}, owner = "" } =
 }
 
 // Named events a module emits for the modules above it. A listener that
-// throws is logged and does not stop the others.
-export function createEmitter(owner = "", log = () => {}) {
+// throws is logged and does not stop the others. Every emit and every failed
+// listener is recorded in the trace.
+export function createEmitter(owner = "", log = () => {}, into = trace) {
   const listeners = new Map();
   return Object.freeze({
     on(event, listener) {
@@ -103,10 +110,12 @@ export function createEmitter(owner = "", log = () => {}) {
       return () => listeners.get(event)?.delete(listener);
     },
     emit(event, payload) {
+      into.record("event", owner, event, describe(payload));
       for (const listener of [...(listeners.get(event) ?? [])]) {
         try {
           listener(payload);
         } catch (error) {
+          into.record("failed", owner, `a listener for ${event}`, describe(error));
           log(owner, `a listener for ${event} failed: ${error?.message ?? error}`);
         }
       }

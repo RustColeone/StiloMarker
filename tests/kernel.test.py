@@ -1,12 +1,14 @@
 """The server's kernel (server/stilo/kernel) and the Transport module. The
 browser's kernel has the same rules (tests/kernel.test.mjs)."""
 import io, json, sys, types, unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
 from stilo.kernel import Emitter, Module, Registry, start_modules  # noqa: E402
+from stilo.kernel.log import best_effort, ignore  # noqa: E402
 from stilo.modules import transport  # noqa: E402
 from stilo.modules.transport.model.routes import match  # noqa: E402
 
@@ -61,6 +63,34 @@ class KernelTests(unittest.TestCase):
         events.emit("x", 1); off(); events.emit("x", 2)
         self.assertEqual(seen, [1])
         self.assertTrue(any("ZeroDivisionError" in line or "division" in line for line in logged))
+
+
+class IgnoreTests(unittest.TestCase):
+    def test_ignore_logs_the_reason_the_error_and_where(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            try:
+                int("x")
+            except ValueError as error:
+                ignore(error, "a broken number")
+        line = out.getvalue()
+        self.assertIn("[ignored] a broken number", line)
+        self.assertIn("ValueError", line)
+        self.assertRegex(line, r"at='tests/kernel\.test\.py:\d+'")
+
+    def test_best_effort_reports_once_then_stops(self):
+        calls = []
+
+        def gone(event):
+            calls.append(event)
+            raise BrokenPipeError("the stream is gone")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            emit = best_effort(gone, "the stream went away")
+            emit(1); emit(2); emit(3)
+            best_effort(None, "nothing to call")(4)
+        self.assertEqual(calls, [1])
+        self.assertEqual(out.getvalue().count("[ignored] the stream went away"), 1)
 
 
 class FakeHandler:

@@ -11,6 +11,7 @@
 // while none of those changed.
 import { getNodeIdByPath, getPath, isImageFileName, isMarkdownFileName, isMtreeFileName } from "../../workspace/index.js";
 import { renderMarkdown } from "../model/markdown.js";
+import { ignore } from "../../../kernel/index.js";
 
 export function createPreview(app, previews) {
   function hasMathMarkup(value) {
@@ -42,8 +43,8 @@ export function createPreview(app, previews) {
       const mathJax = await ensureMathJax();
       mathJax?.typesetClear?.([target]);
       if (mathJax?.typesetPromise) await mathJax.typesetPromise([target]);
-    } catch {
-      // The preview still works without MathJax when offline or blocked.
+    } catch (error) {
+      ignore(error, "MathJax is unavailable; the preview shows the formulas as text");
     }
   }
 

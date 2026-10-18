@@ -19,7 +19,7 @@ runner (set once the agent exists): build_persona_payload(...) and
 import threading
 import time
 
-from stilo.kernel.log import log as _log
+from stilo.kernel.log import log as _log, ignore
 from stilo.modules.characters import persona_handle, persona_header, persona_summary, split_author_notes
 from stilo.modules.file_types import BUILTIN as FILE_TYPES
 from stilo.modules.workspace import node_id_by_path, path_of
@@ -61,8 +61,8 @@ class ChatsDesk:
             for wid in [w for w in self._stores if workspace_id is None or w == workspace_id or w.startswith(workspace_id + "/")]:
                 try:
                     self._stores.pop(wid).close()
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as error:  # noqa: BLE001
+                    ignore(error, f"closing the chat database of {wid} failed")
 
     def paths_moved(self, workspace, old_path: str, new_path: str) -> None:
         """A renamed or moved character file: its chats follow it."""
@@ -139,8 +139,8 @@ class ChatsDesk:
         users = [key[5:] for key in store.members(conversation_id) if key.startswith("user:")]
         try:
             workspace.broadcast_to_users(users, {**event, "conversationId": int(conversation_id), "serverTime": time.time()})
-        except Exception:  # noqa: BLE001 - telling others never fails the change itself
-            pass
+        except Exception as error:  # noqa: BLE001 - telling others never fails the change itself
+            ignore(error, "telling the members about a chat change failed")
 
     # ---- conversations ------------------------------------------------------------
 

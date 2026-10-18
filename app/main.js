@@ -1,4 +1,4 @@
-import { startModules } from "./kernel/index.js";
+import { startModules, ignore, ignored } from "./kernel/index.js";
 import shellModule from "./modules/shell/index.js";
 import fileTypesModule, { builtinTypes } from "./modules/file-types/index.js";
 import workspaceModule from "./modules/workspace/index.js";
@@ -243,9 +243,6 @@ const elements = {
   chatToggleActivityButton: query("#chat-toggle-activity-button"),
   debugPanel: query("#debug-panel"),
   debugTabStrip: query("#debug-tab-strip"),
-  debugTabAll: query("#debug-tab-all"),
-  debugTabActions: query("#debug-tab-actions"),
-  debugTabResponses: query("#debug-tab-responses"),
   debugCopyButton: query("#debug-copy-button"),
   debugClearButton: query("#debug-clear-button"),
   logCollapseButton: query("#log-collapse-button"),
@@ -272,7 +269,7 @@ const elements = {
 // The app is moving into modules one step at a time. Code still in this file
 // reaches a module only through the public API the kernel hands back.
 const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, historyModule, ...extensionModules], {
-  log: (owner, ...args) => { try { logDebug("action", `${owner}: ${args.join(" ")}`); } catch { /* log not ready yet */ } }
+  log: (owner, ...args) => { try { logDebug("action", `${owner}: ${args.join(" ")}`); } catch (error) { ignore(error, "the log panel is not ready yet"); } }
 });
 const { shell, workspace, identity } = modules;
 
@@ -574,11 +571,7 @@ const explorerClipboard = {
   payload: null
 };
 
-const debugTabs = [
-  { id: "all", element: elements.debugTabAll, label: "All" },
-  { id: "actions", element: elements.debugTabActions, label: "Actions" },
-  { id: "responses", element: elements.debugTabResponses, label: "Responses" }
-];
+const debugTabs = [...elements.debugTabStrip.querySelectorAll(".debug-tab")].map((element) => ({ id: element.dataset.tab, element }));
 
 let draggingTabState = null;
 
@@ -1439,8 +1432,9 @@ const collaboration = createCollaborationRuntime({
           remoteCursorsByClient.set(clientId, { ...cached, selStart: newPos, selEnd: newPos });
         }
       }
-    } catch (err) {
-      collaboration?.reloadFromServer("Sync conflict — reloading from server.").catch(() => {});
+    } catch (error) {
+      ignore(error, "applying a remote change failed; reloading from the server");
+      collaboration?.reloadFromServer("Sync conflict — reloading from server.").catch(ignored("reloading after a failed remote change failed"));
     }
   },
   onStatusChange(nextState) {
@@ -1465,7 +1459,7 @@ const collaboration = createCollaborationRuntime({
     if (nextState.status === "connected") {
       // A clean connect means we're on a good version — reset the one-shot upgrade
       // guard so a future min-version bump can auto-refresh again.
-      try { sessionStorage.removeItem("mdnotes.upgradeReloaded"); } catch { /* ignore */ }
+      try { sessionStorage.removeItem("mdnotes.upgradeReloaded"); } catch (error) { ignore(error, "session storage is blocked"); }
     }
     syncState.status = nextState.status;
     syncState.detail = nextState.detail;
@@ -1603,7 +1597,7 @@ switchWorkspaceMode = function (nextMode) {
     privateProjectSnapshot = controller.getProject();
     workspaceMode = nextMode;
     // reloadFromServer replaces the project internally, triggering render.
-    collaboration.reloadFromServer("Switched to synced workspace.").catch(() => {});
+    collaboration.reloadFromServer("Switched to synced workspace.").catch(ignored("loading the synced workspace failed"));
   } else {
     sessionRestorer?.cancel();
     workspaceMode = nextMode;
@@ -2949,7 +2943,7 @@ async function publishOperation(operation) {
       // overwrite it, and say so — silently dropping the write would leave the
       // two sides diverged with no sign anything happened.
       notify("That file changed on the server — loading the newer version instead of overwriting it.");
-      collaboration.reloadFromServer?.("Stale write refused — pulled the newer copy.").catch(() => {});
+      collaboration.reloadFromServer?.("Stale write refused — pulled the newer copy.").catch(ignored("pulling the newer copy after a refused write failed"));
       return;
     }
     notify(error.message);
@@ -4031,10 +4025,7 @@ elements.debugCopyButton.addEventListener("click", () => {
   void copyDebugLogToClipboard().catch((error) => notify(error.message));
 });
 
-elements.debugClearButton.addEventListener("click", () => {
-  debugState.entries = [];
-  renderDebugPanel();
-});
+elements.debugClearButton.addEventListener("click", () => dialogs().clearDebugLog());
 
 elements.themeSelect.addEventListener("change", (event) => {
   settings.theme = event.target.value;

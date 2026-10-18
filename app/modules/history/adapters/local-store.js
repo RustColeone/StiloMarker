@@ -5,6 +5,7 @@
 // ~5 MB localStorage ceiling). Retention: last N versions per file + a total-
 // bytes backstop. Entirely client-side — the server stores nothing.
 import { builtinTypes } from "../../file-types/index.js";
+import { ignore } from "../../../kernel/index.js";
 
 const DB_NAME = "mdnotes-snapshots";
 const DB_VERSION = 1;
@@ -15,7 +16,7 @@ const TOTAL_BYTES_KEY = "totalBytes";
 // Reclaim the old project-level, full-content localStorage snapshots (unused
 // for a long time). Called once the module starts, never on import.
 export function forgetOldSnapshots() {
-  try { globalThis.localStorage?.removeItem("mdnotes.snapshots.v1"); } catch { /* ignore */ }
+  try { globalThis.localStorage?.removeItem("mdnotes.snapshots.v1"); } catch (error) { ignore(error, "local storage is blocked; old snapshots stay"); }
 }
 
 const isImageName = (name) => builtinTypes.isImage(name);

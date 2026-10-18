@@ -26,7 +26,8 @@ export function createProjectSaveQueue(write) {
       state = { tail: Promise.resolve(), index: snapshot.sourceIndex ?? {} };
       roots.set(root, state);
     }
-    const job = state.tail.catch(() => {}).then(async () => {
+    // Runs after the previous save, whether it worked or not (its caller was told).
+    const run = async () => {
       snapshot.sourceIndex = state.index;
       try {
         await write(snapshot);
@@ -41,7 +42,8 @@ export function createProjectSaveQueue(write) {
           .map((entry) => [entry.path, entry]));
         throw error;
       }
-    });
+    };
+    const job = state.tail.then(run, run);
     state.tail = job;
     return job;
   };

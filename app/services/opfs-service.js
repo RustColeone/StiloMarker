@@ -11,6 +11,7 @@
 
 import { ROOT_ID } from "../domain/project-model.js";
 import { buildProjectFromDirectoryHandle, saveProjectToHandles } from "./fs-access-service.js";
+import { ignore } from "../kernel/index.js";
 
 const MANIFEST_NAME = "manifest.json";
 
@@ -83,14 +84,14 @@ async function listOpfsDir(path = "") {
         try {
           const manifest = await (await entry.getFileHandle(MANIFEST_NAME)).getFile();
           modified = Math.floor(manifest.lastModified / 1000);
-        } catch { /* leave unset */ }
+        } catch (error) { ignore(error, "a folder's change time is unreadable"); }
       }
       entries.push({ name: entry.name, kind: project ? "project" : "folder", path: childPath, modified });
     } else if (entry.name !== MANIFEST_NAME) {
       let modified = 0;
       try {
         modified = Math.floor((await entry.getFile()).lastModified / 1000);
-      } catch { /* leave unset */ }
+      } catch (error) { ignore(error, "a file's change time is unreadable"); }
       entries.push({ name: entry.name, kind: "file", path: childPath, modified });
     }
   }

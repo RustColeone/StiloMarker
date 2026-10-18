@@ -6,7 +6,8 @@ Checks: five menus in order with their items; a menu item runs its command;
 live titles ("Show Chat" / "Hide Chat"); Ctrl+S runs Save from anywhere;
 the rename dialog keeps the file extension out of the field; a module added
 after start-up appears in the menus; the phone's menu panel shows the same
-groups; no page errors. Static responses come from this checkout.
+groups; the trace records errors nothing caught and its log tab shows them;
+no page errors. Static responses come from this checkout.
 """
 import asyncio, json, mimetypes, os
 from pathlib import Path
@@ -119,6 +120,25 @@ async def main():
         await page.click('[data-command="extra.hello"]')
         await page.wait_for_selector('.app-toast:has-text("hello")')
         assert not errors, errors
+
+        # The trace: module logs and errors nothing caught are recorded with
+        # where they came from; the log panel's Trace tab and stiloTrace() show them.
+        await page.evaluate('''() => {
+            setTimeout(() => { throw new Error("trace check: thrown"); });
+            Promise.reject(new Error("trace check: rejected"));
+        }''')
+        await page.wait_for_function('stiloTrace().filter((e) => e.kind === "uncaught").length >= 2')
+        uncaught = await page.evaluate('stiloTrace().filter((e) => e.kind === "uncaught").map((e) => [e.owner, e.message])')
+        assert ['promise', 'Error: trace check: rejected'] in uncaught, uncaught
+        assert any(message == 'Error: trace check: thrown' for owner, message in uncaught), uncaught
+        assert await page.evaluate('stiloTrace().some((e) => e.kind === "log" && e.message === "started shell")')
+        await page.evaluate('window.__shellTest.shell.run("shell.toggle-log")')
+        await page.click('#debug-tab-trace')
+        await page.wait_for_selector('#debug-log-list .debug-log-entry.is-uncaught:has-text("trace check: rejected")')
+        await page.click('#debug-clear-button')
+        await page.wait_for_function('stiloTrace().length === 0')
+        errors[:] = [e for e in errors if 'trace check' not in e]
+        assert not errors, errors
         await context.close()
 
         # Phone: the ⋮ panel shows the same groups.
@@ -135,7 +155,7 @@ async def main():
         await browser.close()
         print(json.dumps({'checks': ['file-type lists from File types', 'five menus with their items', 'one menu open at a time', 'live titles',
                                      'menu item runs its command', 'Ctrl+S runs Save', 'rename keeps the extension',
-                                     'late menus and commands appear', 'phone menu panel'], 'runtimeErrors': 0}))
+                                     'late menus and commands appear', 'the trace and its tab', 'phone menu panel'], 'runtimeErrors': 0}))
 
 
 asyncio.run(main())
