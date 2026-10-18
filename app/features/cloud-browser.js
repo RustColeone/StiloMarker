@@ -207,6 +207,7 @@ export function createCloudBrowser(app) {
       app.elements.browserNewProject.classList.toggle("is-suggested", intent === "create");
     }
     if (app.elements.serverBrowser) app.elements.serverBrowser.hidden = false;
+    if (app.elements.browserTrash) app.elements.browserTrash.hidden = true; // until the folder it belongs to is shown
     if (!app.elements.openServerDialog.open) app.elements.openServerDialog.showModal();
     void browseTo(defaultPathForProvider(app.browserState.provider));
   }
@@ -467,10 +468,7 @@ export function createCloudBrowser(app) {
     for (const button of [app.elements.browserMoveBtn, app.elements.browserCopyBtn]) {
       if (button) Object.assign(button, { hidden: !manageMulti, disabled: !canTransfer });
     }
-    if (app.elements.browserDeleteBtn) {
-      app.elements.browserDeleteBtn.hidden = !manageMulti;
-      app.elements.browserDeleteBtn.disabled = count === 0;
-    }
+    if (app.elements.browserDeleteBtn) Object.assign(app.elements.browserDeleteBtn, { hidden: !manageMulti, disabled: count === 0 });
     // Destination picker: primary "Select this folder" + Cancel. The current
     // browsed folder is the drop target, so it's enabled only where projects can
     // be created (a team subfolder, or any local folder).
@@ -622,7 +620,8 @@ export function createCloudBrowser(app) {
   }
 
   // The team's trash (History): deleted projects, restorable for a while.
-  const handleOpenTrash = () => app.history.trash.open(app.browserState.path.split("/")[0], { onChange: () => void browseTo(app.browserState.path) });
+  const trashTeam = () => (app.browserState.provider?.id === "server" ? app.browserState.path.split("/")[0] : "");
+  const handleOpenTrash = () => trashTeam() && app.history.trash.open(trashTeam(), { onChange: () => void browseTo(app.browserState.path) });
 
   // Restore the File Manager title/subtitle after a destination-pick detour.
   function setManageChrome() {

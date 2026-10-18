@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-17 · release `v0.1.50`
+Last updated: 2026-10-17 · release `v0.1.51`
 
 ---
 
@@ -27,9 +27,37 @@ Migration only adopts files whose paths exist in the workspace being opened, so 
 two workspaces contain a **same-named file**, a snapshot could migrate to the wrong
 one. Affects only pre-existing local history.
 
+### 3. Typing in a URL album entry can jump the caret under heavy load
+**Confidence:** reproduced, cause not found · **Severity:** medium (an entry's link can be lost)
+
+When a single album entry is open in the source editor and the machine is
+very slow, the caret can jump to the start of the entry mid-typing. What is
+typed next then lands in front of `url =`, the line no longer reads as the
+link, and the entry is saved with an empty URL. Seen in `url-album-browser.py`
+about once in five runs while the server was busy, and about every other run
+with Chrome's CPU slowed sixfold; never in twelve runs on an idle machine.
+Whole files are not affected.
+
+Found on 2026-10-17 while releasing v0.1.51. Tracing ruled out a repaint by
+the app's render and a focus loss on the editor. Two things were seen at the
+moment of the jump: the editor's caret restore was skipped because the page
+reported focus on the body, and saving an entry trims a trailing space in its
+description. It predates the extension move (the same code path as before).
+Next step: trace the editor's own input path (re-highlighting after a
+keystroke and restoring the caret), with `STILO_CPU_SLOWDOWN=6` set for
+`url-album-browser.py`.
+
 ---
 
 ## Fixed
+
+### v0.1.51: the Trash button waits for its folder
+
+The file manager shows its dialog before the folder list arrives. For that
+moment the toolbar showed the state from the last time it was open, so the
+Trash button could appear at the team list, where it has no team. Found by
+the live check of v0.1.50. The button now stays hidden until the folder
+loads, and opening the trash without a team does nothing.
 
 ### v0.1.50: deleted cloud projects go to the team's Trash for 30 days
 

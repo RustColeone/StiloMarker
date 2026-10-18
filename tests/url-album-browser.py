@@ -32,6 +32,8 @@ async def main():
         context = await browser.new_context(viewport={'width': 1400, 'height': 900}, service_workers='block')
         page = await context.new_page(); errors = []; checks = []
         page.on('pageerror', lambda e: errors.append(str(e)))
+        if os.environ.get('STILO_CPU_SLOWDOWN'):  # e.g. 6: reproduces docs/ISSUES.md open item 3
+            await (await context.new_cdp_session(page)).send('Emulation.setCPUThrottlingRate', {'rate': float(os.environ['STILO_CPU_SLOWDOWN'])})
         await page.add_init_script('if (!sessionStorage.getItem("seeded")) { sessionStorage.setItem("seeded", "1");'
                                    ' localStorage.setItem("mdnotes.project.v1", ' + json.dumps(json.dumps(project())) + ');'
                                    ' localStorage.setItem("mdnotes.settings.v1", JSON.stringify({chatPanel: "hidden", showFormatToolbar: true})); }')

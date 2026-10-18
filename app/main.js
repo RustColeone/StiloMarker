@@ -1670,9 +1670,7 @@ const explorer = createExplorerView({
   onDragNodeStart(nodeId, event) {
     const project = controller.getProject();
     const node = project.nodes[nodeId];
-    if (!node) {
-      return;
-    }
+    if (!node) return;
     event.dataTransfer?.setData("text/mdnotes-node-id", nodeId);
     if (node.kind === "file") {
       event.dataTransfer?.setData("text/mdnotes-file-id", nodeId);
@@ -3459,9 +3457,7 @@ shell.commands.add({ id: "workspace.import-file", title: "Import File or Zip", m
 
 elements.importFileInput.addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
-  if (!file) {
-    return;
-  }
+  if (!file) return;
   try {
     logDebug("action", "Import requested", file.name);
     const project = file.name.toLowerCase().endsWith(".zip") ? await importZipArchive(file) : await importSingleFile(file);
