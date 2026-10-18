@@ -136,6 +136,18 @@ async def main():
         await page.wait_for_function('(replaced) => window.__shellTest.controller.getProject().nodes.p.content === replaced', arg=replaced)
         assert not errors, errors
 
+        # The status bar: each item added by its owner, in order; the count
+        # follows the selection; the server item opens Settings → Collaboration.
+        items = await page.evaluate('[...document.querySelectorAll(".status-bar > *")].map((e) => e.id)')
+        assert items == ['status-source-item', 'status-browser-item', 'status-server-item', 'status-presence-item',
+                         'status-version-item', 'status-charcount-item'], items
+        await page.click('#editor-content')
+        await page.keyboard.press('Control+a')
+        await page.wait_for_function('/ \\/ .* chars$/.test(document.querySelector("#status-charcount-text").textContent)')
+        await page.click('#status-server-item')
+        assert await page.evaluate('[document.querySelector("#settings-dialog").open, window.__shellTest.shell.pages.active("settings")]') == [True, 'collaboration']
+        await page.keyboard.press('Escape')
+
         # Settings: sections added by their owners, in order; Appearance's fields
         # declared by Shell, the Editor, Workspace and the diagram, each showing
         # its setting; a change takes effect whoever owns it.
@@ -211,7 +223,7 @@ async def main():
         await browser.close()
         print(json.dumps({'checks': ['file-type lists from File types', 'five menus with their items', 'one menu open at a time', 'live titles',
                                      'menu item runs its command', 'Ctrl+S runs Save', 'rename keeps the extension',
-                                     'late menus and commands appear', 'Replace File replaces an image', 'Settings sections and fields', 'the trace and its tab', 'a diagram previews as a diagram', 'phone menu panel'], 'runtimeErrors': 0}))
+                                     'late menus and commands appear', 'Replace File replaces an image', 'status bar items from their owners', 'Settings sections and fields', 'the trace and its tab', 'a diagram previews as a diagram', 'phone menu panel'], 'runtimeErrors': 0}))
 
 
 asyncio.run(main())

@@ -3,19 +3,12 @@
 // Installed on the editor object `ed` that the other parts share (see
 // editor-core.js); calls into another part go through `ed`.
 import { getPath, isTextFileName } from "../../workspace/index.js";
+import { participantColor } from "../../identity/index.js";
 
 export function installCursors(ed, app) {
 
-  // Stable palette for coloring remote cursor lines + labels by client index.
-  const CURSOR_COLORS = ["#e06c75", "#61afef", "#98c379", "#e5c07b", "#c678dd", "#56b6c2", "#d19a66"];
-
-  function clientColor(clientId) {
-    let hash = 0;
-    for (let i = 0; i < clientId.length; i++) {
-      hash = (hash * 31 + clientId.charCodeAt(i)) >>> 0;
-    }
-    return CURSOR_COLORS[hash % CURSOR_COLORS.length];
-  }
+  // A person's cursor has their colour (Identity's, the same as their dot and chip).
+  const clientColor = participantColor;
 
   /** Render remote peer cursor overlays inside #editor-cursors.
    *  `cursors` is an array of { clientId, displayName, fileId, selStart, selEnd }.

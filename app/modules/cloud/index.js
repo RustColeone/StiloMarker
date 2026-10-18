@@ -13,6 +13,7 @@
 import { defineModule } from "../../kernel/index.js";
 import { createSurface } from "./adapters/surface.js";
 import { addCollaborationSettings } from "./adapters/settings-section.js";
+import { addServerItem } from "./adapters/server-item.js";
 
 export { pingServer, saveUserState, uploadAsset } from "./adapters/api.js";
 
@@ -21,13 +22,14 @@ export default defineModule({
   level: 5,
   uses: ["shell", "workspace", "identity", "sync", "editor", "history"],
   owns: {
-    elements: ["the file browser", "the account controls", "the access dialog", "hosting", "Settings → Collaboration"],
+    elements: ["the file browser", "the account controls", "the access dialog", "hosting", "Settings → Collaboration", "the server in the status bar"],
     state: ["the file browser's place and selection"]
   },
   start(ctx) {
     const shell = ctx.use("shell");
     addCollaborationSettings({ dialog: shell.settingsDialog, settings: shell.settings });
     let parts = null;
+    addServerItem({ shell, sync: ctx.use("sync"), identity: ctx.use("identity"), ping: () => parts?.pingCurrentServer() });
     function attach(port) {
       if (parts) throw new Error("cloud: already attached");
       parts = createSurface({ port, shell: ctx.use("shell"), workspace: ctx.use("workspace"), identity: ctx.use("identity"),

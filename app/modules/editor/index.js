@@ -40,7 +40,7 @@ const FONT_KEYS = ["sourceFontSize", "sourceFontFamily"];
 export default defineModule({
   name: "editor",
   level: 3,
-  uses: ["shell", "file-types", "workspace"],
+  uses: ["shell", "file-types", "workspace", "identity"],
   owns: { elements: ["the source editor", "the formatting toolbar", "the find bar", "the tab strips", "the preview pane"],
     state: ["the open tabs", "what each pane shows", "the explorer selection"],
     registries: ["previews", "highlighters", "toolbars", "marks"], rules: ["Markdown rendering"] },

@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v0.1.67";
+const CACHE_NAME = "mdnotes-shell-v0.1.68";
 // The extensions' files (EXTENSION_FILES), written by tools/protocol-sync.mjs.
 importScripts("./extensions/offline.js");
 const APP_SHELL = [
@@ -60,12 +60,14 @@ const APP_SHELL = [
   "./app/modules/shell/adapters/page-errors.js",
   "./app/modules/shell/adapters/pages.js",
   "./app/modules/shell/adapters/settings-dialog.js",
+  "./app/modules/shell/adapters/status-bar.js",
   "./app/modules/shell/adapters/theme.js",
   "./app/modules/shell/adapters/conversation.js",
   "./app/modules/shell/adapters/settings-store.js",
   "./app/modules/shell/service/settings.js",
   "./app/modules/shell/adapters/server.js",
   "./app/modules/identity/index.js",
+  "./app/modules/identity/model/colors.js",
   "./app/modules/identity/model/credentials.js",
   "./app/modules/identity/service/account.js",
   "./app/modules/identity/adapters/api.js",
@@ -75,6 +77,7 @@ const APP_SHELL = [
   "./app/modules/cloud/adapters/api.js",
   "./app/modules/cloud/adapters/accounts.js",
   "./app/modules/cloud/adapters/settings-section.js",
+  "./app/modules/cloud/adapters/server-item.js",
   "./app/modules/cloud/adapters/browser.js",
   "./app/modules/cloud/adapters/manage.js",
   "./app/modules/cloud/adapters/access.js",
@@ -98,6 +101,7 @@ const APP_SHELL = [
   "./app/modules/workspace/adapters/device-folders.js",
   "./app/modules/workspace/adapters/save-queue.js",
   "./app/modules/workspace/adapters/saving.js",
+  "./app/modules/workspace/adapters/status-items.js",
   "./app/features/diagram-export.js",
   "./app/modules/editor/model/markdown.js",
   "./app/modules/editor/model/html.js",
@@ -106,6 +110,7 @@ const APP_SHELL = [
   "./app/modules/editor/service/marks.js",
   "./app/modules/editor/model/font.js",
   "./app/modules/editor/adapters/settings-fields.js",
+  "./app/modules/editor/adapters/char-count.js",
   "./app/modules/editor/adapters/editor-core.js",
   "./app/modules/editor/adapters/surface.js",
   "./app/modules/editor/adapters/editor-events.js",
@@ -139,6 +144,7 @@ const APP_SHELL = [
   "./app/modules/history/adapters/trash.js",
   "./app/modules/history/adapters/local-store.js",
   "./app/modules/sync/index.js",
+  "./app/modules/sync/adapters/session-view.js",
   "./app/modules/sync/model/contract.js",
   "./app/modules/sync/model/rebase.js",
   "./app/modules/sync/model/paths.js",

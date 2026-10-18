@@ -71,6 +71,7 @@ export { buildProjectFromDirectoryHandle, buildSourceIndex, importDirectory, imp
 export { createProjectOpfs, deleteOpfsEntry, exportProjectModelOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs, importProjectModelOpfs, listOpfsDir, mkdirOpfs, openProjectOpfs, saveProjectOpfs, supportsOpfs } from "./adapters/device-folders.js";
 export { createProjectSaveQueue, savedFileIds, snapshotProject } from "./adapters/save-queue.js";
 import { createSaving } from "./adapters/saving.js";
+import { addStatusItems } from "./adapters/status-items.js";
 
 export default defineModule({
   name: "workspace",
@@ -94,9 +95,13 @@ export default defineModule({
     shell.settingsDialog.fields.add({ page: "appearance", id: "auto-save-input", order: 100, key: "autoSave", control: "checkbox",
       label: "Auto-save (cloud, local workspace & browser cache; real folders still use Ctrl+S)", read: (s) => s.autoSave !== false });
     shell.settings.on((view, changed) => { if (changed.includes("autoSave") && view.autoSave && store) saving.scheduleAutoSave(); });
+    // Where the project lives, in the status bar: drawn as the project changes.
+    const drawStatus = addStatusItems({ shell, log: (message) => ctx.log(message) });
     function openProject(project) {
       if (store) throw new Error("The workspace already has a project open; use project().replaceProject()");
       store = createProjectController(project);
+      store.subscribe(drawStatus);
+      drawStatus(store.getProject());
       return store;
     }
     return {

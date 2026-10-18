@@ -32,6 +32,8 @@
 //   settingsDialog           the Settings dialog: addPage({ id, label, order, body }), fields.add({ page, id,
 //                            order, label, key, control: select|checkbox, options } | { page, id, order,
 //                            render(box) }), open(page?), onOpen(listener) (adapters/settings-dialog.js)
+//   statusBar                the status bar: add({ id, order, title?, action?, dot?, grow?, hidden? })
+//                            -> { set({ text, tone, title, hidden }), element, extra } (adapters/status-bar.js)
 //   settings                 the app's settings, read-only (settings.theme);
 //                            settings.change({ key: value }, why?) saves a change,
 //                            settings.on(listener) hears them (service/settings.js)
@@ -46,6 +48,7 @@ import { createServer } from "./adapters/server.js";
 import { watchPageErrors } from "./adapters/page-errors.js";
 import { createPages } from "./adapters/pages.js";
 import { createSettingsDialog } from "./adapters/settings-dialog.js";
+import { createStatusBar } from "./adapters/status-bar.js";
 import { applyTheme } from "./adapters/theme.js";
 import { loadSettings, patchStoredSettings } from "./adapters/settings-store.js";
 import { SECRET_SETTINGS, keysToSave } from "./service/settings.js";
@@ -59,8 +62,8 @@ export default defineModule({
   level: 1,
   uses: [],
   owns: {
-    registries: ["commands", "menus", "pages", "settings fields"],
-    elements: ["menu bar", "the Settings dialog", "notice dialog", "confirm dialog", "input dialog", "form dialog", "toasts"],
+    registries: ["commands", "menus", "pages", "settings fields", "status bar items"],
+    elements: ["menu bar", "the Settings dialog", "the status bar", "notice dialog", "confirm dialog", "input dialog", "form dialog", "toasts"],
     connection: ["the server address"],
     events: ["render"],
     diagnostics: ["uncaught errors", "stiloTrace()"],
@@ -143,6 +146,7 @@ export default defineModule({
       settings,
       pages,
       settingsDialog,
+      statusBar: createStatusBar({ registry: ctx.registry() }),
       render: (project, { only } = {}) => events.emit("render", { project, only }),
       events: { on: events.on }
     };

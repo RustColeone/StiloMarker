@@ -22,6 +22,7 @@ import { createPreview } from "./preview.js";
 import { createResume } from "./resume.js";
 import { createShowFile } from "./show-file.js";
 import { createTabs } from "./tabs.js";
+import { createCharCount } from "./char-count.js";
 
 // What main.js attaches (editor.attach(port)); each entry should move to an
 // owner, or become an extension point, and leave this list.
@@ -127,6 +128,7 @@ export function createSurface({ port, view, marks, previews, highlighters, toolb
   add({ ...createTabs(app), ...createPreview(app, previews) });
   add(createResume(app));
   add(createShowFile(app, composing));
+  add(createCharCount(app, shell.statusBar));
   installEditorEvents(app, composing);
   // The editor's settings, whoever changed them: new glyph metrics mean every
   // measured overlay (caret, cursors, search highlights) and the gutter's

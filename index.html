@@ -290,32 +290,7 @@
       </div>
 
       <footer class="status-bar" aria-label="Status bar">
-        <button id="status-source-item" class="status-item status-item-action" type="button"
-          title="Open a local directory">
-          <span id="source-indicator" class="status-dot"></span>
-          <span id="source-status-text">In Browser</span>
-        </button>
-        <button id="status-browser-item" class="status-item status-item-action" type="button"
-          title="Browser capability details">
-          <span id="browser-indicator" class="status-dot"></span>
-          <span id="browser-status-text">Checking browser support</span>
-        </button>
-        <button id="status-server-item" class="status-item status-item-action" type="button"
-          title="Open collaboration settings">
-          <span id="server-indicator" class="status-dot"></span>
-          <span id="server-status-bar-text">Server offline</span>
-        </button>
-        <button id="status-presence-item" class="status-item status-item-action status-item-grow" type="button"
-          title="Show the session panel">
-          <span id="presence-dots" class="peer-badge-dots" aria-hidden="true"></span>
-          <span id="presence-summary-text">0 collaborators</span>
-        </button>
-        <div id="status-version-item" class="status-item status-item-version" hidden>
-          <span id="status-version-text"></span>
-        </div>
-        <div id="status-charcount-item" class="status-item status-item-charcount" hidden>
-          <span id="status-charcount-text"></span>
-        </div>
+        <!-- Items are added by the modules they belong to (Shell's statusBar). -->
       </footer>
     </div>
 

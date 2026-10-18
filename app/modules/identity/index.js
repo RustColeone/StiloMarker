@@ -10,7 +10,10 @@
 //   signOut()      drop()
 //   getAccess(team, path)   setAccess(team, path, whitelist, blacklist)
 //   events: "account" { account }   signed in, out, or dropped
+// Static: participantColor(clientId), a person's colour in a session (model/colors.js).
 import { defineModule } from "../../kernel/index.js";
+
+export { participantColor } from "./model/colors.js";
 import { createIdentityApi } from "./adapters/api.js";
 import { createAccount } from "./service/account.js";
 

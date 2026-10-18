@@ -160,20 +160,13 @@ const elements = {
   hostTeamSelect: query("#host-team-select"),
   hostButton: query("#host-button"),
   hostPinText: query("#host-pin-text"),
-  serverStatusText: query("#server-status-text"),
   serverStatusPanel: query("#server-status-text")?.closest(".settings-status-panel"),
   accountSection: query("#account-login-row")?.closest(".settings-section"),
   sharedSessionSection: query("#connect-server-button")?.closest(".settings-section"),
   acceptConnectionDialog: query("#accept-connection-dialog"),
   acceptConnectionMessage: query("#accept-connection-message"),
   acceptConnectionAcceptButton: query("#accept-connection-accept-button"),
-  sessionDetailText: query("#session-detail-text"),
-  presenceList: query("#presence-list"),
-  presenceStrip: query("#presence-strip"),
-  presenceDots: query("#presence-dots"),
-  workspaceModeRow: query("#workspace-mode-row"),
   workspaceModeToggle: query("#workspace-mode-toggle"),
-  sessionIdLabel: query("#session-id-label"),
   explorerToggleButton: query("#explorer-toggle-button"),
   mobileExplorerButton: query("#mobile-explorer-button"),
   mobileSourceToggle: query("#mobile-source-toggle"),
@@ -195,21 +188,6 @@ const elements = {
   previewCollapseButton: query("#preview-collapse-button"),
   sourceCollapseButton: query("#source-collapse-button"),
   sourceToggleActivityButton: query("#source-toggle-activity-button"),
-  sourceIndicator: query("#source-indicator"),
-  sourceStatusText: query("#source-status-text"),
-  browserIndicator: query("#browser-indicator"),
-  browserStatusText: query("#browser-status-text"),
-  serverIndicator: query("#server-indicator"),
-  serverStatusBarText: query("#server-status-bar-text"),
-  presenceSummaryText: query("#presence-summary-text"),
-  statusSourceItem: query("#status-source-item"),
-  statusBrowserItem: query("#status-browser-item"),
-  statusServerItem: query("#status-server-item"),
-  statusPresenceItem: query("#status-presence-item"),
-  statusCharCountItem: query("#status-charcount-item"),
-  statusCharCountText: query("#status-charcount-text"),
-  statusVersionItem: query("#status-version-item"),
-  statusVersionText: query("#status-version-text"),
   previewToggleActivityButton: query("#preview-toggle-activity-button"),
   chatToggleActivityButton: query("#chat-toggle-activity-button"),
   debugPanel: query("#debug-panel"),
@@ -307,7 +285,6 @@ registerPreviews(modules.editor.previews, {
 // Total source characters of the active file, cached for the footer counter by
 // updateStatus. null → no text file open (the counter hides). Declared up here so
 // the hoisted updateStatus can never touch it inside its temporal dead zone.
-let statusCharTotal = null;
 // Typing fast path + deferred/debounced work (see render()); whether a keystroke
 // is being applied is the Editor's (editorParts?.isTyping()).
 const DEFERRED_RENDER_IDLE_MS = 250;
@@ -326,7 +303,6 @@ function showActiveFile(...args) { return editorParts.showActiveFile(...args); }
 function attachSelectionChangeListener(...args) { return editorParts.attachSelectionChangeListener(...args); }
 function clamp(...args) { return editorParts.clamp(...args); }
 function clearEditorDropCaret(...args) { return editorParts.clearEditorDropCaret(...args); }
-function clientColor(...args) { return editorParts.clientColor(...args); }
 function getEditorSelection(...args) { return editorParts.getEditorSelection(...args); }
 function getEditorText(...args) { return editorParts.getEditorText(...args); }
 function handleIndentKeydown(...args) { return editorParts.handleIndentKeydown(...args); }
@@ -492,7 +468,6 @@ async function promptForName(message, value = "", options = {}) { return shell.i
 function renderDebugPanel(...args) { return dialogs().renderDebugPanel(...args); }
 function showAcceptConnectionDialog(...args) { return dialogs().showAcceptConnectionDialog(...args); }
 function showConfirmDialog(options) { return shell.confirm(options); }
-function showNoticeDialog(message, title) { return shell.notice(message, title); }
 function showToast(message, options) { return shell.toast(message, options); }
 function traceEditorEvent(...args) { return dialogs().traceEditorEvent(...args); }
 
@@ -629,7 +604,8 @@ function snapshots() {
     get showToast() { return showToast; },
     get snapshotProjectKey() { return snapshotProjectKey; },
     get togglePreview() { return togglePreview; },
-    get updateStatus() { return updateStatus; }
+    get updateStatus() { return updateStatus; },
+    versionItem: shell.statusBar.add({ id: "version", order: 50, className: "status-item-version", hidden: true })
   }));
 }
 async function applyHistoryOperations(...args) { return snapshots().applyHistoryOperations(...args); }
@@ -1223,217 +1199,27 @@ document.addEventListener("click", async (event) => {
   }
 });
 
-function setStatusDot(node, kind) {
-  node.classList.remove("is-success", "is-warning", "is-danger");
-  if (kind) {
-    node.classList.add(kind);
-  }
-}
-
 function persistSettings() { applyWorkspaceSettings(); } // the settings save themselves (Shell); this applies them
 
 applyWorkspaceSettings();
 
-function createPresenceChip(entry) {
-  const chip = document.createElement("div");
-  chip.className = "presence-chip";
-  const avatar = document.createElement("span");
-  avatar.className = "presence-avatar";
-  // Color the avatar by the same palette as the peer's cursor, so the person and
-  // their caret are visually linked.
-  if (entry.clientId) avatar.style.background = clientColor(entry.clientId);
-  const label = document.createElement("span");
-  label.textContent = entry.displayName || entry.clientId;
-  chip.append(avatar, label);
-  return chip;
-}
-
-// Colored dots (one per connected session, matching cursor colors) shown next to
-// the status-bar collaborator count, so collaboration state — and who is who — is
-// visible at a glance.
-function renderPeerBadge(presence) {
-  const dotsEl = elements.presenceDots;
-  if (!dotsEl) return;
-  dotsEl.replaceChildren();
-  for (const entry of presence.slice(0, 6)) {
-    const dot = document.createElement("span");
-    dot.className = "peer-badge-dot";
-    if (entry.clientId) dot.style.background = clientColor(entry.clientId);
-    dotsEl.append(dot);
-  }
-}
-
-function renderPresence(presence) {
-  elements.presenceStrip.replaceChildren();
-  elements.presenceList.replaceChildren();
-  renderPeerBadge(presence);
-
-  if (presence.length === 0) {
-    const connected = syncState.status === "connected";
-    const emptyStrip = document.createElement("span");
-    emptyStrip.className = "subtle-label";
-    emptyStrip.textContent = connected
-      ? "Connected — no one else here yet."
-      : "No collaborators connected.";
-    elements.presenceStrip.append(emptyStrip);
-
-    const emptyList = document.createElement("span");
-    emptyList.className = "subtle-label";
-    emptyList.textContent = "No active session members.";
-    elements.presenceList.append(emptyList);
-    return;
-  }
-
-  presence.forEach((entry) => {
-    elements.presenceStrip.append(createPresenceChip(entry));
-    elements.presenceList.append(createPresenceChip(entry));
-  });
-}
-
-// ---- Footer character count ----------------------------------------------
-// The active file's source length, switching to "selected / total" while text is
-// highlighted in the editor. It counts SOURCE characters (what the editor holds),
-// so highlighting rendered text in the preview doesn't apply. updateStatus caches
-// the total so a drag-select only recomputes the cheap selection part.
-// (`statusCharTotal` is declared with the other module state near the top, so the
-// hoisted updateStatus can never read it inside its temporal dead zone.)
-function renderCharCount() {
-  const item = elements.statusCharCountItem;
-  const label = elements.statusCharCountText;
-  if (!item || !label) return;
-  if (statusCharTotal == null) {
-    item.hidden = true;
-    return;
-  }
-  const { start, end } = getEditorSelection(); // {0,0} unless the editor holds the selection
-  const selected = Math.max(0, end - start);
-  const total = statusCharTotal.toLocaleString();
-  label.textContent = selected > 0 ? `${selected.toLocaleString()} / ${total} chars` : `${total} chars`;
-  item.title = selected > 0
-    ? `${selected.toLocaleString()} characters selected of ${total}`
-    : `${total} characters in this file`;
-  item.hidden = false;
-}
-
-// selectionchange fires continuously while dragging; coalesce to one update per
-// frame so the count stays cheap on large files.
-let _charCountFrame = 0;
-function scheduleCharCount() {
-  if (_charCountFrame) return;
-  _charCountFrame = requestAnimationFrame(() => {
-    _charCountFrame = 0;
-    renderCharCount();
-    scheduleOverviewRuler(); // the caret marker follows the selection
-  });
-}
-document.addEventListener("selectionchange", scheduleCharCount);
-
+// The editor's side of a redraw: the tabs, the shown file, the preview, links,
+// chat, the snapshot version. (The status bar's items draw themselves.)
 function updateStatus(project) {
-  const liveDirectory = project.sourceMode === "filesystem";
-  const localWorkspace = project.sourceMode === "opfs";
-  const browserSupported = supportsDirectoryAccess();
-  const collaboratorCount = syncState.presence.length;
   ensureOpenTabs(project);
   renderTabs(project);
-
   elements.projectNameLabel.textContent = project.name;
-  elements.sourceStatusText.textContent = liveDirectory
-    ? "Live directory"
-    : localWorkspace
-      ? "Local workspace"
-      : "In-browser workspace";
-  elements.browserStatusText.textContent = browserSupported ? "Chromium directory access available" : "Fallback import/export mode";
-  elements.serverStatusBarText.textContent = syncState.status === "sync-error" ? "Sync paused" : identity.account()
-    ? (syncState.status === "connected"
-        ? identity.account().username
-        : `Logged in as ${identity.account().username}`)
-    : syncState.status === "connected"
-      ? "Connected"
-      : syncState.status === "reachable"
-        ? "Server reachable"
-        : "Server offline";
-  elements.serverStatusText.textContent = syncState.detail;
-  // Session panel (also the sole connection readout on mobile, where the status
-  // bar is hidden): derive everything from the live connection status, not just
-  // a shared-session PIN — a cloud workspace is a "connected" session too.
-  const sessionConnected = syncState.status === "connected";
-  const sessionReachable = syncState.status === "reachable";
-  const sessionName = syncState.sessionId
-    ? (syncState.sessionId === "default"
-        ? "Shared session"
-        : syncState.sessionId.split("/").filter(Boolean).pop() || syncState.sessionId)
-    : null;
-  if (sessionConnected) {
-    elements.sessionIdLabel.textContent = sessionName ?? "Connected";
-    elements.sessionIdLabel.title = `${syncState.sessionId ?? "Connected"} (internal revision ${syncState.revision})`;
-    elements.sessionDetailText.textContent = sessionName
-      ? `${sessionName}${syncState.displayName ? ` as ${syncState.displayName}` : ""}${syncState.role ? ` (${syncState.role})` : ""}.`
-      : (syncState.detail || "Connected to the server.");
-  } else if (syncState.status === "sync-error") {
-    elements.sessionIdLabel.textContent = "Sync paused";
-    elements.sessionIdLabel.title = "";
-    elements.sessionDetailText.textContent = syncState.detail;
-  } else if (sessionReachable) {
-    elements.sessionIdLabel.textContent = "Reachable";
-    elements.sessionIdLabel.title = "";
-    elements.sessionDetailText.textContent = syncState.detail || "Server reachable — not in a shared session.";
-  } else {
-    elements.sessionIdLabel.textContent = "Offline";
-    elements.sessionIdLabel.title = "";
-    elements.sessionDetailText.textContent = "Not connected to a shared session.";
-  }
-  elements.presenceSummaryText.textContent = collaboratorCount === 1 ? "1 collaborator online" : `${collaboratorCount} collaborators online`;
-
-  if (elements.workspaceModeRow) {
-    // Only clients get the private/synced toggle — the master IS the workspace.
-    const showToggle = syncState.status === "connected" && syncState.role === "client";
-    if (showToggle) {
-      elements.workspaceModeRow.removeAttribute("hidden");
-      if (elements.workspaceModeToggle) {
-        elements.workspaceModeToggle.textContent = syncMode.get().workspaceMode === "synced" ? "⟳ Synced" : "◑ Private";
-        elements.workspaceModeToggle.title = syncMode.get().workspaceMode === "synced"
-          ? "Click to switch to your private local workspace"
-          : "Click to switch back to the shared synced workspace";
-      }
-    } else {
-      elements.workspaceModeRow.setAttribute("hidden", "");
-    }
-  }
-
-  setStatusDot(elements.sourceIndicator, liveDirectory ? "is-success" : "is-warning");
-  setStatusDot(elements.browserIndicator, browserSupported ? "is-success" : "is-warning");
-  setStatusDot(elements.serverIndicator, syncState.status === "connected" ? "is-success" : (syncState.status === "reachable" || syncState.status === "reconnecting") ? "is-warning" : "is-danger");
-
-  renderPresence(syncState.presence);
   renderMobilePaneCaption(); // tracks the active/preview file, not just the view
 
   const activeFile = project.activeFileId ? project.nodes[project.activeFileId] : null;
   const previewFile = editorView.get().previewFileId ? project.nodes[editorView.get().previewFileId] : null;
-  // The source editor shows the active file (the Editor); the total feeds the footer counter.
-  const shownTotal = showActiveFile(project);
-  if (!activeFile) {
-    renderPreviewOrDiff(project, previewFile); // diff tab still shows if it's the active preview tab
-    renderLinksPanel(project, null);
-    renderChatPanel(project);
-    statusCharTotal = null; // nothing open → hide the character count
-    renderCharCount();
-    renderVersionLabel();
-    return;
-  }
-  statusCharTotal = shownTotal;
-  // Skip the redundant preview rebuild when the change came from the preview
-  // itself — re-rendering would reset the diagram's scroll position/selection.
-  // Also skip while the user is actively editing INSIDE the preview (e.g. a bmap
-  // node's Name/Text inspector field): renderPreviewContent() does a full
-  // replaceChildren(), so rebuilding here would yank focus out of the field. This
-  // fires on routine async renders too (a status/patch-confirm callback lands a
-  // beat after you moved to the next field), which is exactly the "kicked out of
-  // the text field" case. The preview refreshes on the next render once focus
-  // leaves it.
-  renderPreviewOrDiff(project, previewFile);
+  showActiveFile(project); // the source editor shows the active file (the Editor)
+  // The preview is not rebuilt when the change came from the preview itself,
+  // nor while the user edits inside it (renderPreviewOrDiff): a rebuild would
+  // reset a diagram's scroll and selection, or pull focus out of the field.
+  renderPreviewOrDiff(project, previewFile); // the diff tab still shows if it's the active preview tab
   renderLinksPanel(project, activeFile);
   renderChatPanel(project);
-  renderCharCount(); // after the editor DOM/selection settled above
   renderVersionLabel();
 }
 
@@ -2086,19 +1872,6 @@ shell.commands.add({ id: "shell.open-settings", title: "Open Settings", menu: { 
 } });
 
 // Status-bar footer items double as shortcuts to their related menus/panels.
-elements.statusSourceItem.addEventListener("click", () => {
-  logDebug("action", "Status bar: open directory");
-  void shell.run("workspace.import-folder");
-});
-elements.statusBrowserItem.addEventListener("click", () => {
-  const supported = supportsDirectoryAccess();
-  showNoticeDialog(
-    supported
-      ? "This browser supports the File System Access API, so you can open and edit a local directory directly."
-      : "This browser falls back to import/export mode. Use a Chromium-based browser (Chrome, Edge) to edit a local directory in place.",
-    "Browser Support"
-  );
-});
 // ── Settings (Shell's dialog; its sections and fields are their owners') ──
 function openSettingsDialog(tab = "appearance") { shell.settingsDialog.open(tab); }
 // The Agent page draws Settings → Agent's connected tools: load it with Settings.
@@ -2114,13 +1887,8 @@ settings.on((view, changed) => {
   if (changed.some((key) => ["explorer", "explorerAnchor", "preview"].includes(key))) persistSettings();
 });
 
-elements.statusServerItem.addEventListener("click", () => {
-  logDebug("action", "Status bar: open collaboration settings");
-  openSettingsDialog("collaboration");
-  // Clicking the server footer immediately checks the configured server.
-  void pingCurrentServer();
-});
-elements.statusPresenceItem.addEventListener("click", () => {
+// The status bar's collaborators (Sync's) reveal the Session panel in the explorer sidebar.
+shell.commands.add({ id: "layout.show-session", title: "Show the Session Panel", run() {
   // The session/presence panel lives in the explorer sidebar — reveal it.
   if (settings.explorer !== "expanded") {
     settings.change({ explorer: "expanded" });
@@ -2130,7 +1898,7 @@ elements.statusPresenceItem.addEventListener("click", () => {
   if (sidebarPanelCollapsed("session")) toggleSidebarPanel("session");
   document.querySelector(".collaboration-sidebar-panel")?.scrollIntoView({ block: "nearest" });
   logDebug("action", "Status bar: reveal session panel");
-});
+} });
 
 shell.commands.add({ id: "shell.log-panel", title: () => (settings.debugPanel ? "Hide Log Panel" : "Show Log Panel"), menu: { id: "settings", group: 0, order: 2 }, run: toggleLogPanel });
 shell.commands.add({ id: "workspace.reset", title: "Reset to Default Workspace", menu: { id: "settings", group: 0, order: 3 }, run: () => {

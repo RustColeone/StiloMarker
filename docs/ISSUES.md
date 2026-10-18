@@ -69,6 +69,18 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.68: the status bar is Shell's, its items their owners'
+
+Step S4b. Nothing changes for users.
+
+- Shell draws the status bar; each item is added and kept current by the
+  module it describes (Workspace, Cloud, Sync, the Editor), from that
+  module's own state, instead of `main.js` rewriting all of them on every
+  redraw. The Session panel is Sync's.
+- `shell-browser.py` checks the items and their order, the character count
+  following a selection, and the server item opening Settings →
+  Collaboration.
+
 ### v0.1.67: Settings' sections belong to their modules
 
 Step S4a-2. Nothing changes for users.

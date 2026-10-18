@@ -33,6 +33,7 @@ import contract from "./model/contract.js";
 import { createRuntime } from "./service/runtime.js";
 import { LOCAL_MODE, createMode } from "./service/mode.js";
 import { SESSION_STATUS, statusFromSession } from "./service/status.js";
+import { addSessionView } from "./adapters/session-view.js";
 
 export { transformTextPatch } from "./model/rebase.js";
 export { sanitizeProjectForSync } from "./model/paths.js";
@@ -45,9 +46,10 @@ export function createCollaborationRuntime(options) {
 export default defineModule({
   name: "sync",
   level: 3,
-  uses: ["shell", "file-types", "workspace"],
+  uses: ["shell", "file-types", "workspace", "identity"],
   owns: {
     names: ["sync protocol number"],
+    elements: ["the Session panel", "the collaborators in the status bar"],
     state: ["the live session", "the session's status", "unconfirmed typing", "shared or local work, and the local project kept aside"],
     rules: ["rebasing a text patch"]
   },
@@ -84,6 +86,8 @@ export default defineModule({
       });
       return session;
     }
+    // The session on the page: the status bar's collaborators and the Session panel.
+    addSessionView({ shell: ctx.use("shell"), status, mode });
     return { createCollaborationRuntime, syncVersion, mode, status, attach, session: () => session, events: { on: events.on } };
   }
 });

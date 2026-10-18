@@ -21,8 +21,15 @@ export function createShowFile(app, composing) {
     return selected ? selected.parts.withBody(file.content, selected.part.id, text) : text;
   }
 
-  // Returns the length of the text shown, or null when no text is (the footer's counter).
+  // Returns the length of the text shown, or null when no text is; the status
+  // bar's count is told the same (char-count.js).
   function showActiveFile(project) {
+    const length = showFile(project);
+    app.showCharCount(length);
+    return length;
+  }
+
+  function showFile(project) {
     const activeFile = project.activeFileId ? project.nodes[project.activeFileId] : null;
     const elements = app.elements;
     if (!activeFile) {

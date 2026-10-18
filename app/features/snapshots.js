@@ -72,28 +72,24 @@ export function createSnapshots(app) {
   }
 
   function renderVersionLabel() {
-    const item = app.elements.statusVersionItem;
-    const label = app.elements.statusVersionText;
-    if (!item || !label) return;
+    const item = app.versionItem; // the status bar's version item
     const project = app.controller.getProject();
     const file = app.controller.getActiveFile();
     if (!file || file.kind !== "file" || !isTextFileName(file.name)) {
-      item.hidden = true;
+      item.set({ hidden: true });
       return;
     }
     const path = getPath(project, file.id);
     const text = fileVersionLabel(file, path);
     if (!text) {
-      item.hidden = true;
+      item.set({ hidden: true });
       return;
     }
     const [s, e, n] = text.split(".");
     const total = Number(file.sourceVersion) || 0;
-    item.hidden = false;
-    label.textContent = `v${text}`;
-    item.title = `${file.name}\n`
+    item.set({ hidden: false, text: `v${text}`, title: `${file.name}\n`
       + `${s} snapshot${s === "1" ? "" : "s"} · ${e} sitting${e === "1" ? "" : "s"} since the last one · ${n} edit${n === "1" ? "" : "s"} this sitting\n`
-      + `${total} edit${total === 1 ? "" : "s"} in total`;
+      + `${total} edit${total === 1 ? "" : "s"} in total` });
   }
 
   function snapshotStore() {

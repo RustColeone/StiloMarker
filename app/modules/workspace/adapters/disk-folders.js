@@ -33,7 +33,7 @@ function ensureFolderPath(project, folderNames) {
 }
 
 function supportsDirectoryAccess() {
-  return typeof window.showDirectoryPicker === "function";
+  return typeof globalThis.showDirectoryPicker === "function";
 }
 
 function listStoredNodes(project) {
