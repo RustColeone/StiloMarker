@@ -147,6 +147,11 @@ export function createSurface({ port, view, marks, previews, highlighters, toolb
     }
     if (changed.includes("showFormatToolbar")) app.refreshFormatToolbar();
   });
+  // Where the reader was, kept when the page hides or goes (resume.js, tabs.js).
+  const keepView = () => { app.captureViewState(); app.cacheWorkspaceView(); };
+  window.addEventListener("pagehide", keepView);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") keepView(); });
+  window.addEventListener("beforeunload", () => app.captureViewState());
   // A mark put or taken off shows at once: the shown file's lines and bar, the tabs' badges.
   marks.on(() => {
     const file = app.controller.getActiveFile();

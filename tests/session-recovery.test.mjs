@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { rememberedWorkspace, createSessionRecovery } from '../app/services/session-recovery-service.js';
+import { rememberedWorkspace, createSessionRecovery } from '../app/modules/cloud/service/recovery.js';
 test('root workspaces and legacy paths are valid resume targets', () => {
   assert.deepEqual(rememberedWorkspace({team:'friends',path:''}),{team:'friends',path:''});
   assert.deepEqual(rememberedWorkspace({team:'friends',name:'Campaign'}),{team:'friends',path:'workspaces/Campaign'});

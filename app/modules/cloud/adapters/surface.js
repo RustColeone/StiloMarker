@@ -10,13 +10,14 @@ import { createBrowser } from "./browser.js";
 import { installCloudEvents } from "./events.js";
 import { createManage } from "./manage.js";
 import { createOpening } from "./opening.js";
+import { createResume } from "./resume.js";
 import { createProviders } from "./providers.js";
 
 // What main.js attaches (cloud.attach(port)); each entry should move to an
 // owner, or become an extension point, and leave this list.
 export const PORT = [
   "elements", "logDebug", "flashStatusPanel", "openSettingsDialog", "refreshChatStatus", "loadLineComments",
-  "ensureSnapshotsMigrated", "refreshSnapshotBaselines", "snapshotDirtyFiles", "sessionRestorer",
+  "ensureSnapshotsMigrated", "refreshSnapshotBaselines", "snapshotDirtyFiles",
   "setMobileExplorerOpen"
 ];
 
@@ -54,6 +55,7 @@ export function createSurface({ port, shell, workspace, identity, sync, editor, 
   add(createManage(app));
   add(createAccess(app));
   add(createOpening(app));
+  add(createResume(app, { sync }));
   const { serverProvider, opfsProvider } = createProviders(app);
   app.serverProvider = serverProvider;
   app.opfsProvider = opfsProvider;

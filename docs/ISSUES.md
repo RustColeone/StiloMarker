@@ -69,6 +69,16 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.70: resuming and leaving belong to their modules
+
+Step S4c-2. Nothing changes for users.
+
+- Resuming the last session (at start, on returning to the page, when the
+  network returns, and from the welcome page) is the Cloud module's.
+- When the page hides or closes, the Editor, Workspace and Sync each keep
+  their own part, instead of `main.js` doing all three; Workspace reattaches
+  an on-device folder by itself.
+
 ### v0.1.69: Sync owns the connection
 
 Step S4c-1. One fix for users:

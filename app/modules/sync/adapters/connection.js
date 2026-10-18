@@ -4,6 +4,7 @@
 // tab's own, and sending a change.
 import { UPDATE_FILE, isImageFileName } from "../../workspace/index.js";
 import { ignore, ignored } from "../../../kernel/index.js";
+import { patchStoredSettings } from "../../shell/index.js";
 
 const RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 20000, 30000];
 const MAX_RECONNECT_ATTEMPTS = 10;
@@ -187,6 +188,22 @@ export function createConnection({ session, status, mode, events, workspace, she
   function publishSnapshot() {
     if (session.isConnected() && mode.get().workspaceMode === "synced") session.scheduleSnapshot(controller().getProject());
   }
+
+  // As the page hides or goes: the revision this browser's copy matches is
+  // stored, merged into what is stored now and only for the same workspace
+  // (writing the whole settings clobbered what another tab saved since, and
+  // another workspace's id with this revision would fool the push-or-pull
+  // check); a page really going away leaves the session.
+  const keepRevision = () => {
+    if (!settings.syncedProjectId) return;
+    patchStoredSettings((stored) => (stored.syncedProjectId === settings.syncedProjectId ? { syncedRevision: settings.syncedRevision } : null));
+  };
+  globalThis.window?.addEventListener("pagehide", (event) => {
+    keepRevision();
+    if (!event.persisted) session.leaveOnPageHide();
+  });
+  doc?.addEventListener("visibilitychange", () => { if (doc.visibilityState === "hidden") keepRevision(); });
+  globalThis.window?.addEventListener("beforeunload", keepRevision);
 
   // Its controls: Join, the shared / own switch, auto-reconnect turned off.
   doc?.getElementById("connect-server-button")?.addEventListener("click", () => void join());

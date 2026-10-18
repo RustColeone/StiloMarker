@@ -72,6 +72,7 @@ export { createProjectOpfs, deleteOpfsEntry, exportProjectModelOpfs, getOpfsDire
 export { createProjectSaveQueue, savedFileIds, snapshotProject } from "./adapters/save-queue.js";
 import { createSaving } from "./adapters/saving.js";
 import { addStatusItems } from "./adapters/status-items.js";
+import { reattachDeviceFolder, watchPage } from "./adapters/page-life.js";
 
 export default defineModule({
   name: "workspace",
@@ -97,11 +98,15 @@ export default defineModule({
     shell.settings.on((view, changed) => { if (changed.includes("autoSave") && view.autoSave && store) saving.scheduleAutoSave(); });
     // Where the project lives, in the status bar: drawn as the project changes.
     const drawStatus = addStatusItems({ shell, log: (message) => ctx.log(message) });
+    // This browser's copy when the page hides, and a warning before leaving unsaved changes.
+    watchPage({ store: () => store, log: (...parts) => ctx.log(parts.join(" ")) });
     function openProject(project) {
       if (store) throw new Error("The workspace already has a project open; use project().replaceProject()");
       store = createProjectController(project);
       store.subscribe(drawStatus);
       drawStatus(store.getProject());
+      // A project opened from a folder on this device keeps saving to it after a reload.
+      void reattachDeviceFolder({ store, settings: shell.settings, log: (...parts) => ctx.log(parts.join(" ")) });
       return store;
     }
     return {

@@ -1,8 +1,10 @@
-// An empty path is a valid workspace at the team root.
+// Resuming the last session, as rules: which workspace was open last (an empty
+// path is a workspace at the team root), and one attempt at a time, retried
+// with backoff after a network failure but not after a refusal.
 export function rememberedWorkspace(last) {
   if (!last?.team) return null;
   const path = last.path ?? (last.name ? `workspaces/${last.name}` : null);
-  return typeof path === 'string' ? { team: last.team, path } : null;
+  return typeof path === "string" ? { team: last.team, path } : null;
 }
 
 // One recovery attempt at a time. A failed boot remains eligible for retries;

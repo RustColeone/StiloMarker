@@ -1,16 +1,15 @@
 import { startModules, ignore, ignored } from "./kernel/index.js";
-import shellModule, { normalizeServerUrl, patchStoredSettings } from "./modules/shell/index.js";
+import shellModule, { normalizeServerUrl } from "./modules/shell/index.js";
 import fileTypesModule from "./modules/file-types/index.js";
 import workspaceModule from "./modules/workspace/index.js";
 import identityModule from "./modules/identity/index.js";
 import historyModule from "./modules/history/index.js";
 import extensionModules from "./extensions.js";
 import { createWorkspacePorts } from "./features/workspace-ports.js";
-import { rememberedWorkspace, createSessionRecovery } from "./services/session-recovery-service.js";
 import { installMobileViewport } from "./services/chat-ui-service.js";
 import { APP_VERSION } from "./version.js";
-import { ROOT_ID, seedDefaultProject, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isImageFileName, isTextFileName } from "./domain/project-model.js";
-import { getOpfsDirectoryHandle, importDirectory, importOsFolderIntoOpfs, importSingleFile, importZipArchive, loadProject, saveProject, supportsDirectoryAccess, supportsOpfs } from "./modules/workspace/index.js";
+import { seedDefaultProject, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isImageFileName, isTextFileName } from "./domain/project-model.js";
+import { importDirectory, importOsFolderIntoOpfs, importSingleFile, importZipArchive, loadProject, saveProject, supportsDirectoryAccess, supportsOpfs } from "./modules/workspace/index.js";
 import syncModule from "./modules/sync/index.js";
 import { parsePersona, personaTemplate } from "./services/persona-service.js";
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
@@ -270,8 +269,7 @@ var explorerParts = modules.explorer.attach({
 // The cloud file browser, accounts and hosting (modules/cloud/adapters/surface.js).
 var cloudParts = modules.cloud.attach({
   elements, logDebug, flashStatusPanel, openSettingsDialog, refreshChatStatus, loadLineComments,
-  ensureSnapshotsMigrated, refreshSnapshotBaselines, snapshotDirtyFiles, setMobileExplorerOpen,
-  get sessionRestorer() { return sessionRestorer; }
+  ensureSnapshotsMigrated, refreshSnapshotBaselines, snapshotDirtyFiles, setMobileExplorerOpen
 });
 var chatsPage = modules.chats.attach({ cloudWorkspaceTarget, chatWorkspaceKey, personaAvatarSrc, isMobileLayout, logDebug }); // the side panel's Chats page
 // Diagrams and character sheets add their previews to the Editor's extension point.
@@ -293,7 +291,6 @@ let deferredRenderDeadline = 0;
 // ---- The Editor's parts (the Editor module: adapters/surface.js) ----
 // Forwarders: code here still calls the editor's functions by name.
 function applyEditorEdit(...args) { return editorParts.applyEditorEdit(...args); }
-function captureViewState(...args) { return editorParts.captureViewState(...args); }
 function getViewState(...args) { return editorParts.getViewState(...args); }
 function isPreviewableFileName(...args) { return editorParts.isPreviewableFileName(...args); }
 function redrawRemoteCursors(...args) { return editorParts.redrawRemoteCursors(...args); }
@@ -334,7 +331,6 @@ function loadBmapView() {
 
 
 // "private" = user's local workspace; "synced" = connected server workspace.
-let sessionRestorer = null;
 
 // Forward declaration — assigned after `collaboration` is created.
 
@@ -750,8 +746,6 @@ const collaboration = modules.sync.attach({
 // What happens as the session changes is Sync's (adapters/connection.js); the
 // editor drops the carets of people who left.
 modules.sync.events.on("status", () => pruneRemoteCursors(syncState.presence));
-// Switched back to this tab's own workspace: an automatic resume no longer applies.
-modules.sync.events.on("switched", ({ mode }) => { if (mode === "private") sessionRestorer?.cancel(); });
 modules.sync.events.on("remote-cursor", (event) => {
   onRemoteCursor(event);
 });
@@ -835,7 +829,6 @@ function renderLinksPanel(...args) { return editorParts.renderLinksPanel(...args
 // ---- Tabs, panes and preview (the Editor module) ----
 function bindPaneDropTarget(...args) { return editorParts.bindPaneDropTarget(...args); }
 function bindTabStripReorderTarget(...args) { return editorParts.bindTabStripReorderTarget(...args); }
-function cacheWorkspaceView(...args) { return editorParts.cacheWorkspaceView(...args); }
 function cachedWorkspaceView(...args) { return editorParts.cachedWorkspaceView(...args); }
 function clearPaneDropState(...args) { return editorParts.clearPaneDropState(...args); }
 function closeTabOverflowMenu(...args) { return editorParts.closeTabOverflowMenu(...args); }
@@ -1660,18 +1653,10 @@ elements.mobileRenameButton?.addEventListener("click", () => {
 // Update the welcome (no-file) page's contextual actions: a Resume button for
 // the last cloud workspace, and Open-a-workspace only when signed in.
 function renderWelcomeState() {
-  const last = settings.lastWorkspace;
-  const target = rememberedWorkspace(last);
-  const alreadyOpen = target && settings.syncedProjectId === `${target.team}/${target.path}`
-    && syncMode.get().workspaceMode === "synced"
-    && (["connected", "reconnecting"].includes(syncState.status) || sessionRestorer?.isPending());
-  const canResume = Boolean(target) && !alreadyOpen;
+  const resume = cloudParts?.resumeTarget() ?? null; // the last cloud workspace, unless it is open (Cloud's)
   if (elements.welcomeResume) {
-    elements.welcomeResume.hidden = !canResume;
-    if (canResume) {
-      const label = rememberedWorkspace(last).path.split("/").pop() || last.team;
-      elements.welcomeResume.textContent = `Resume ${label}`;
-    }
+    elements.welcomeResume.hidden = !resume;
+    if (resume) elements.welcomeResume.textContent = `Resume ${resume}`;
   }
   if (elements.welcomeOpenServer) {
     elements.welcomeOpenServer.hidden = !identity.account();
@@ -1681,9 +1666,6 @@ function renderWelcomeState() {
 elements.welcomeNewFile?.addEventListener("click", openNewFileDialog);
 elements.welcomeOpenLocal?.addEventListener("click", () => void shell.run("workspace.import-folder"));
 elements.welcomeOpenServer?.addEventListener("click", () => elements.openServerDirectoryButton?.click());
-elements.welcomeResume?.addEventListener("click", () => {
-  void sessionRestorer.run({ manual: true });
-});
 elements.mobileMenuButton?.addEventListener("click", (event) => {
   event.stopPropagation();
   toggleMobileMenu();
@@ -1812,127 +1794,11 @@ function renderHostTargets(...args) { return cloudParts.renderHostTargets(...arg
 
 renderHostTargets(); // needs the live session, which exists from here on
 
-function persistBeforeSuspension() {
-  captureViewState();
-  cacheWorkspaceView();
-  try { saveProject(controller.getProject()); }
-  catch (error) { logDebug("response", "Browser recovery save failed", error.message); }
-  if (settings.syncedProjectId) patchStoredSettings(stored => stored.syncedProjectId === settings.syncedProjectId
-    ? { syncedRevision: settings.syncedRevision } : null);
-}
-window.addEventListener("pagehide", event => {
-  persistBeforeSuspension();
-  if (!event.persisted) collaboration.leaveOnPageHide();
-});
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") persistBeforeSuspension();
-});
-
-window.addEventListener("beforeunload", (event) => {
-  captureViewState(); // remember where the user was before they leave
-  // Persist ONLY the in-sync revision, merged into what's stored now — and only
-  // for the same workspace. Writing this tab's whole settings object on unload
-  // clobbered anything another tab had saved since (font, login, workspace); and
-  // pairing our revision with another tab's workspace id would fool the
-  // push-vs-pull revision gate into overwriting newer work.
-  if (settings.syncedProjectId) {
-    patchStoredSettings((stored) => (stored.syncedProjectId === settings.syncedProjectId
-      ? { syncedRevision: settings.syncedRevision }
-      : null));
-  }
-  const activeFile = controller.getActiveFile();
-  if (activeFile?.dirty) {
-    event.preventDefault();
-    event.returnValue = "";
-  }
-});
-
 registerOfflineShell();
 void refreshChatStatus({ silent: true });
 
-// Re-attach the persistent local (OPFS) workspace opened last time, so a reload
-// keeps saving straight back to the same directory (no permission prompt needed).
-async function reopenLocalProjectOnBoot() {
-  const path = controller.getProject()?.localPath ?? settings.lastLocalProject?.path;
-  if (controller.getProject()?.sourceMode !== "opfs" || !path || !supportsOpfs()) {
-    return;
-  }
-  try {
-    // Resolve the handle first (async), then attach to whatever the live project
-    // is at that moment — an edit racing boot can't strand the handle on a clone.
-    const dir = await getOpfsDirectoryHandle(path);
-    const project = controller.getProject();
-    project.sourceMode = "opfs";
-    project.localPath = path;
-    project.handles = { [ROOT_ID]: dir };
-    logDebug("action", "Reattached local workspace", path);
-  } catch (error) {
-    // The directory is gone (or OPFS unavailable) — keep the in-browser copy.
-    controller.getProject().sourceMode = "memory";
-    logDebug("response", "Local workspace reattach failed", error.message);
-  }
-}
-
-void reopenLocalProjectOnBoot();
-
-// Restore the previous session on boot so a refresh isn't a fresh start:
-//   1. Ping the stored server (or same-origin) to learn its capabilities.
-//   2. Auto-login the account — but only to a server+username that has
-//      succeeded before — then reopen the last cloud workspace.
-//   3. Auto-reconnect a PIN session if one was active last time.
-async function restoreSessionOnBoot({ manual = false, isCurrent = () => true } = {}) {
-  const last = rememberedWorkspace(settings.lastWorkspace);
-  if (syncMode.get().workspaceMode === "synced" && collaboration.getConnectionInfo()) {
-    const resumed = await collaboration.resumeConnection();
-    if (!resumed && settings.autoReconnect && settings.wasConnected && settings.serverPin) await modules.sync.connectSaved({ auto: true });
-    if (manual || !controller.getActiveFile()) showResumedFile(cachedWorkspaceView(settings.syncedProjectId));
-    return;
-  }
-  const ping = await pingCurrentServer({ silent: true });
-  if (!isCurrent()) return;
-  if (!ping) throw new Error("Waiting for the server — your workspace will resume automatically.");
-  if (syncState.accountsAvailable && identity.canRestore()) {
-    await performLogin(settings.accountUsername, settings.accountPassword, { silent: true, isCurrent });
-  }
-  const target = rememberedWorkspace(settings.lastWorkspace) ?? last;
-  if (target && identity.account()) {
-    await handleOpenWorkspace(target.team, target.path, { reason: manual ? "welcome-resume" : "automatic-restore", automatic: true, isCurrent });
-    return;
-  }
-  if (manual && target) {
-    openSettingsDialog("collaboration");
-    showToast("Sign in to resume this workspace.");
-    return;
-  }
-  if (settings.autoReconnect && settings.wasConnected && settings.serverPin) await modules.sync.connectSaved({ auto: true });
-}
-
-sessionRestorer = createSessionRecovery({
-  restore: restoreSessionOnBoot,
-  onError(error) {
-    logDebug("response", "Workspace recovery waiting", error.message);
-    syncState.change({ detail: error.message });
-    if ([401, 403].includes(error.status)) showToast("Sign in again to resume your workspace. Your local edits are kept.");
-  }
-});
-let suspendedCloudWorkspace = false;
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") {
-    suspendedCloudWorkspace = syncMode.get().workspaceMode === "synced" || !controller.getActiveFile() || sessionRestorer.isPending();
-  } else if (suspendedCloudWorkspace) {
-    suspendedCloudWorkspace = false;
-    void sessionRestorer.run();
-  }
-});
-window.addEventListener("online", () => {
-  if (document.visibilityState === "hidden") return;
-  if (syncMode.get().workspaceMode === "synced" || !controller.getActiveFile() || sessionRestorer.isPending()) void sessionRestorer.run();
-});
-window.addEventListener("pageshow", event => {
-  if (event.persisted && (syncMode.get().workspaceMode === "synced" || !controller.getActiveFile() || sessionRestorer.isPending())) void sessionRestorer.run();
-});
-
-void sessionRestorer.run();
+// Resume the last session (Cloud's), so a reload is not a fresh start.
+void cloudParts.resumeSession();
 // Local/no-server workspaces never fire the cloud open path, so seed the S.E.N
 // baselines here too. Harmless for cloud: the open path refreshes them again.
 void refreshSnapshotBaselines();
