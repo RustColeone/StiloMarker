@@ -74,3 +74,24 @@ test("a refusal or an unreachable endpoint says what happened", async () => {
     globalThis.fetch = realFetch;
   }
 });
+
+test("the agent's connection: the server's answer, the user's own key, sign-in and no answer", async () => {
+  const { AGENT_STATUS, ownKeyOverride, settingsLine, statusFromServer, statusWithoutServer } = await import("../app/modules/models/model/agent-status.js");
+  const server = { agentSource: "server", chatModel: "b" };
+  const answer = { configured: true, model: "a", models: ["a", "b"], modelInfo: [{ id: "a", provider: "DeepSeek" }], provider: "DeepSeek" };
+  const ready = statusFromServer(answer, { settings: server, signedIn: true });
+  assert.equal(ready.status, "ready");
+  assert.equal(ready.selectedModel, "b", "the saved choice is kept when offered");
+  assert.deepEqual(ready.modelProviders, { a: "DeepSeek" });
+  assert.equal(settingsLine({ ...AGENT_STATUS, ...ready }, server).ok, true);
+  const signin = statusFromServer({ ...answer, requiresAccount: true }, { settings: server, signedIn: false });
+  assert.deepEqual([signin.status, signin.configured], ["signin", false]);
+  assert.equal(statusFromServer({ configured: false }, { settings: server, signedIn: true }).status, "unconfigured");
+  const own = { agentSource: "own", agentApiKey: " sk-1 ", agentApiUrl: "", agentModel: "m" };
+  assert.deepEqual(ownKeyOverride(own), { apiKey: "sk-1", apiModel: "m" });
+  assert.deepEqual(ownKeyOverride(server), {});
+  assert.equal(statusFromServer(answer, { settings: own, signedIn: false }).provider, "Your key");
+  assert.equal(statusWithoutServer(new Error("down"), { settings: server }).status, "offline");
+  assert.equal(statusWithoutServer(Object.assign(new Error("no"), { status: 403 }), { settings: server }).status, "restricted");
+  assert.equal(statusWithoutServer(new Error("down"), { settings: own }).status, "ready", "own key: usable without the server");
+});

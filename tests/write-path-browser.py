@@ -130,7 +130,7 @@ async def main():
         ctx_a, a, errors_a, sent_a = await browser_for(b, "anna")
         ctx_b, bb, errors_b, sent_b = await browser_for(b, "bob")
         await a.wait_for_function(WAIT_LOADED)
-        await a.wait_for_function('window.__chatInternals.chatState.status === "ready"', timeout=15000)
+        await a.wait_for_function('window.__chatInternals.agentStatus.status === "ready"', timeout=15000)
 
         # Bob types on the last line; Anna's agent, which read the file before
         # that, edits the second line. Both edits end up everywhere.

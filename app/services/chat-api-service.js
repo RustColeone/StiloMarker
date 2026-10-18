@@ -18,22 +18,6 @@ async function throwForResponse(prefix, response) {
   throw error;
 }
 
-async function fetchChatStatus(serverUrl) {
-  const baseUrl = normalizeServerUrl(serverUrl);
-  const response = await fetch(`${baseUrl}/api/chat/status`, {
-    method: "GET",
-    headers: {
-      accept: "application/json"
-    }
-  });
-
-  if (!response.ok) {
-    await throwForResponse("Chat status failed.", response);
-  }
-
-  return parseResponse(response);
-}
-
 
 async function fetchServerChatWorkspace(serverUrl, token) {
   const baseUrl = normalizeServerUrl(serverUrl);
@@ -154,4 +138,4 @@ async function sendGenerationRequest(serverUrl, payload) {
   return parseResponse(response);
 }
 
-export { fetchChatStatus, fetchServerChatWorkspace, pushServerChatWorkspace, sendChatRequest, sendGenerationRequest };
+export { fetchServerChatWorkspace, pushServerChatWorkspace, sendChatRequest, sendGenerationRequest };

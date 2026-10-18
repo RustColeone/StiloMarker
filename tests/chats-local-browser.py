@@ -107,6 +107,19 @@ async def main():
             const r = tab.getBoundingClientRect(); return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) !== tab; }).length''')
         assert covered == 0
 
+        # "+" belongs to the open page: on Chats it starts no agent thread; on
+        # the Agent page exactly one (v0.1.61 ran both).
+        agent_threads = 'window.__t.chatState.threads.filter(t => !t.deleted && t.kind !== "group").length'
+        before = await page.evaluate(agent_threads)
+        await page.click('#chat-new-thread-button')
+        await page.click('[data-chats-back]') if await page.locator('[data-chats-back]').count() else None
+        assert await page.evaluate(agent_threads) == before, 'Chats "+" made an agent thread'
+        await page.click('[data-page="agent"]')
+        await page.click('#chat-new-thread-button')
+        assert await page.evaluate(agent_threads) == before + 1, 'Agent "+" made more than one thread'
+        await page.click('[data-page="chats"]')
+        await page.wait_for_selector('[data-chats-start]')
+
         # The old Roleplay group thread moved into Chats, once.
         await page.wait_for_selector('[data-chats-open]:has-text("The storm")', timeout=10000)
         assert await page.evaluate('window.__t.chatState.threads.find(t => t.id === "old").deleted') is True
@@ -181,7 +194,7 @@ async def main():
         assert not errors, errors
         await context.close()
         await browser.close()
-        print(json.dumps({'checks': ['tabs uncovered', 'old Roleplay chat moved into Chats', 'characters only, with a note',
+        print(json.dumps({'checks': ['tabs uncovered', 'plus belongs to the open page', 'old Roleplay chat moved into Chats', 'characters only, with a note',
                                      'private character chat answers', 'group: mentions, @all order, narration',
                                      'stop', 'renamed character followed', 'kept after reload', 'phone width'], 'runtimeErrors': 0}))
 

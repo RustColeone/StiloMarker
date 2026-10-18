@@ -8,10 +8,14 @@
 //   splitAuthorNotes(body)  withoutAuthorNotes(content)  notesMode(header)
 //   hiddenFromCharacters(path)  personaSummary(body)  findMentions(text, members)
 //   personaHandle(path)  personaTemplate(name)  personaFileName(name) …
+//   projectSnapshot(project)  contextFiles(project, { contextPaths }): what a
+//   request to a model carries from the project (model/request.js)
 import { defineModule } from "../../kernel/index.js";
 import * as persona from "./model/persona.js";
+import { contextFiles, projectSnapshot } from "./model/request.js";
 
 export * from "./model/persona.js";
+export { contextFiles, projectSnapshot } from "./model/request.js";
 
 export default defineModule({
   name: "characters",
@@ -19,6 +23,6 @@ export default defineModule({
   uses: ["file-types", "workspace"],
   owns: { rules: ["character sheet", "author's notes", "hidden from characters"] },
   start() {
-    return { ...persona };
+    return { ...persona, projectSnapshot, contextFiles };
   }
 });

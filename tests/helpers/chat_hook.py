@@ -11,10 +11,11 @@ is the matching set of getters to splice into a test's `window.__…Test` object
 _MARKER = b"\n  return {\n    receiveChatEvent"
 _EXPOSE = (b"\n  window.__chatInternals = { chatState, setActiveChatThread, createNewChatConversation,"
            b" getActiveChatThread, setChatTab: (tab) => pages.show(\"side\", tab === \"chats\" ? \"chats\" : \"agent\"),"
-           b" get chats() { return chatsPage.view(); }, get mcpControls() { return mcpControls; },"
+           b" get chats() { return chatsPage.view(); }, get mcpControls() { return mcpControls; }, get agentStatus() { return agent.status(); },"
            b" receiveSync: (workspace) => chatSynchronizer?.receive(workspace) };")
 
 CHAT_HOOK = ("get chatState() { return window.__chatInternals?.chatState; },"
+             " get agentStatus() { return window.__chatInternals?.agentStatus; },"
              " setActiveChatThread: (...a) => window.__chatInternals.setActiveChatThread(...a),"
              " createNewChatConversation: (...a) => window.__chatInternals.createNewChatConversation(...a),"
              " getActiveChatThread: (...a) => window.__chatInternals?.getActiveChatThread(...a),"

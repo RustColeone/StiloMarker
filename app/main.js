@@ -1,6 +1,6 @@
 import { startModules, ignore, ignored } from "./kernel/index.js";
 import shellModule, { normalizeServerUrl, patchStoredSettings } from "./modules/shell/index.js";
-import fileTypesModule, { builtinTypes } from "./modules/file-types/index.js";
+import fileTypesModule from "./modules/file-types/index.js";
 import workspaceModule from "./modules/workspace/index.js";
 import identityModule from "./modules/identity/index.js";
 import historyModule from "./modules/history/index.js";
@@ -9,14 +9,15 @@ import { createWorkspacePorts } from "./features/workspace-ports.js";
 import { rememberedWorkspace, createSessionRecovery } from "./services/session-recovery-service.js";
 import { installMobileViewport } from "./services/chat-ui-service.js";
 import { APP_VERSION } from "./version.js";
-import { ROOT_ID, seedDefaultProject, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isBmapFileName, isImageFileName, isMarkdownFileName, isPersonaFileName, isTextFileName } from "./domain/project-model.js";
-import { createProjectOpfs, deleteOpfsEntry, exportProjectModelOpfs, getOpfsDirectoryHandle, importDirectory, importOsFolderIntoOpfs, importProjectModelOpfs, importSingleFile, importZipArchive, listOpfsDir, loadProject, mkdirOpfs, saveProject, supportsDirectoryAccess, supportsOpfs } from "./modules/workspace/index.js";
+import { ROOT_ID, seedDefaultProject, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isImageFileName, isPersonaFileName, isTextFileName } from "./domain/project-model.js";
+import { getOpfsDirectoryHandle, importDirectory, importOsFolderIntoOpfs, importSingleFile, importZipArchive, loadProject, saveProject, supportsDirectoryAccess, supportsOpfs } from "./modules/workspace/index.js";
 import syncModule from "./modules/sync/index.js";
 import { sendGenerationRequest } from "./services/chat-api-service.js";
-import { PERSONA_SUFFIX, parsePersona, personaTemplate } from "./services/persona-service.js";
+import { parsePersona, personaTemplate } from "./services/persona-service.js";
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
 import { applyEditorFont, applyTheme, clampSourceFontSize, signInSettings } from "./services/settings-service.js";
 import cloudModule, { saveUserState, uploadAsset } from "./modules/cloud/index.js";
+import modelsModule from "./modules/models/index.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { query } from "./ui/dom.js";
 import { createDefaultBmap } from "./services/bmap-service.js";
@@ -24,7 +25,7 @@ import explorerModule from "./modules/explorer/index.js";
 import { createDiagramExport } from "./features/diagram-export.js";
 import { registerPreviews } from "./features/previews.js";
 import { createLayout } from "./ui/layout.js";
-import editorModule, { DIFF_TAB_ID, escapeHtmlAttribute, forgetViewStates, getRelativePath, getRelativeProjectPath, normalizePath, renderMarkdown } from "./modules/editor/index.js";
+import editorModule, { DIFF_TAB_ID, escapeHtmlAttribute, forgetViewStates, getRelativeProjectPath, normalizePath, renderMarkdown } from "./modules/editor/index.js";
 import { createDialogs } from "./ui/dialogs.js";
 import { createLineComments } from "./modules/comments/index.js";
 import { createSnapshots } from "./features/snapshots.js";
@@ -261,7 +262,7 @@ const elements = {
 // ---- Modules (docs/ARCHITECTURE.md) ----
 // The app is moving into modules one step at a time. Code still in this file
 // reaches a module only through the public API the kernel hands back.
-const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, syncModule, historyModule, explorerModule, cloudModule, ...extensionModules], {
+const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, syncModule, historyModule, explorerModule, cloudModule, modelsModule, ...extensionModules], {
   log: (owner, ...args) => { try { logDebug("action", `${owner}: ${args.join(" ")}`); } catch (error) { ignore(error, "the log panel is not ready yet"); } }
 });
 const { shell, workspace, identity } = modules;
@@ -347,38 +348,23 @@ function isPreviewableFileName(...args) { return editorParts.isPreviewableFileNa
 function redrawRemoteCursors(...args) { return editorParts.redrawRemoteCursors(...args); }
 function resolveProjectAssetUrl(...args) { return editorParts.resolveProjectAssetUrl(...args); }
 function showActiveFile(...args) { return editorParts.showActiveFile(...args); }
-function applyEditorRender(...args) { return editorParts.applyEditorRender(...args); }
 function attachSelectionChangeListener(...args) { return editorParts.attachSelectionChangeListener(...args); }
-function caretIntoView(...args) { return editorParts.caretIntoView(...args); }
 function clamp(...args) { return editorParts.clamp(...args); }
-function clampEditorSelection(...args) { return editorParts.clampEditorSelection(...args); }
 function clearEditorDropCaret(...args) { return editorParts.clearEditorDropCaret(...args); }
 function clientColor(...args) { return editorParts.clientColor(...args); }
-function consumeExternalEditorSelection(...args) { return editorParts.consumeExternalEditorSelection(...args); }
-function forwardEditorWheel(...args) { return editorParts.forwardEditorWheel(...args); }
-function getEditorLineHeight(...args) { return editorParts.getEditorLineHeight(...args); }
 function getEditorSelection(...args) { return editorParts.getEditorSelection(...args); }
 function getEditorText(...args) { return editorParts.getEditorText(...args); }
-function getEditorTextOffsetFromPoint(...args) { return editorParts.getEditorTextOffsetFromPoint(...args); }
-function handleEditorKeydown(...args) { return editorParts.handleEditorKeydown(...args); }
 function handleIndentKeydown(...args) { return editorParts.handleIndentKeydown(...args); }
-function loadEditorContent(...args) { return editorParts.loadEditorContent(...args); }
 function notifyEditorChanged(...args) { return editorParts.notifyEditorChanged(...args); }
 function onRemoteCursor(...args) { return editorParts.onRemoteCursor(...args); }
 function pruneRemoteCursors(...args) { return editorParts.pruneRemoteCursors(...args); }
-function pushEditorHistoryState(...args) { return editorParts.pushEditorHistoryState(...args); }
 function queueExternalEditorSelection(...args) { return editorParts.queueExternalEditorSelection(...args); }
 function refreshFormatToolbar(...args) { return editorParts.refreshFormatToolbar(...args); }
 function renderEditorContent(...args) { return editorParts.renderEditorContent(...args); }
 function renderRemoteCursors(...args) { return editorParts.renderRemoteCursors(...args); }
-function replaceEditorRange(...args) { return editorParts.replaceEditorRange(...args); }
-function resetEditorHistory(...args) { return editorParts.resetEditorHistory(...args); }
 function scheduleOverviewRuler(...args) { return editorParts.scheduleOverviewRuler(...args); }
-function scheduleRemoteCursorRender(...args) { return editorParts.scheduleRemoteCursorRender(...args); }
 function setEditorSelection(...args) { return editorParts.setEditorSelection(...args); }
-function showEditorDropCaret(...args) { return editorParts.showEditorDropCaret(...args); }
 function syncEditorScroll(...args) { return editorParts.syncEditorScroll(...args); }
-function textOffsetToDomPosition(...args) { return editorParts.textOffsetToDomPosition(...args); }
 function transformEditorSelection(...args) { return editorParts.transformEditorSelection(...args); }
 
 // Declared up here because the hoisted mobile render helpers reach it during
@@ -600,7 +586,7 @@ function loadChat() {
       chatWorkspaceKey, clearAgentDecorations, collaboration, controller, createFileInFolder, elements,
       escapeHtmlAttribute, getSelectedParent, isMobileLayout, jumpToAgentChange, logDebug, notify,
       openFileFromExplorer, openSettingsDialog, personaAvatarSrc, promptForName, workspace,
-      registerAgentDecorations, settings, showConfirmDialog, showToast, storedProject, pages: shell.pages,
+      registerAgentDecorations, settings, showConfirmDialog, showToast, storedProject, pages: shell.pages, models: modules.models,
       updateEditorAgentBar, identity,
       get workspaceMode() { return syncMode.get().workspaceMode; }
     });
@@ -768,21 +754,12 @@ function getEditorLineIndexAtOffset(textOffset) {
   return Math.max(0, lineEls.length - 1);
 }
 
-function acceptEditorAutocomplete(...args) { return editorParts.acceptEditorAutocomplete(...args); }
-function hideEditorAutocomplete(...args) { return editorParts.hideEditorAutocomplete(...args); }
-function renderEditorAutocomplete(...args) { return editorParts.renderEditorAutocomplete(...args); }
 function showEditorAutocomplete(...args) { return editorParts.showEditorAutocomplete(...args); }
 
-function closeFindBar(...args) { return editorParts.closeFindBar(...args); }
 function computeSearchMatches(...args) { return editorParts.computeSearchMatches(...args); }
 function findNext(...args) { return editorParts.findNext(...args); }
 function findPrev(...args) { return editorParts.findPrev(...args); }
-function gotoMatch(...args) { return editorParts.gotoMatch(...args); }
 function openFindBar(...args) { return editorParts.openFindBar(...args); }
-function renderSearchHighlights(...args) { return editorParts.renderSearchHighlights(...args); }
-function replaceAllMatches(...args) { return editorParts.replaceAllMatches(...args); }
-function replaceCurrent(...args) { return editorParts.replaceCurrent(...args); }
-function toggleFindOption(...args) { return editorParts.toggleFindOption(...args); }
 
 // ============================ Snapshots + Diff ==============================
 // Per-file, content-addressed history (the History module). Diff state caches
@@ -1232,15 +1209,9 @@ async function openMtreeToolsDialog(fileId) {
     notify(`Module map tools could not load: ${error.message}`);
   }
 }
-function editorHighlightKind(...args) { return editorParts.editorHighlightKind(...args); }
 function escapeEditorHtml(...args) { return editorParts.escapeEditorHtml(...args); }
-function highlightEditorLinesMemo(...args) { return editorParts.highlightEditorLinesMemo(...args); }
 function highlightMarkdownSource(...args) { return editorParts.highlightMarkdownSource(...args); }
 
-function handleEditorLinkHover(...args) { return editorParts.handleEditorLinkHover(...args); }
-function handleEditorMouseLeave(...args) { return editorParts.handleEditorMouseLeave(...args); }
-function hideLinkTooltip(...args) { return editorParts.hideLinkTooltip(...args); }
-function openLinkFromEditor(...args) { return editorParts.openLinkFromEditor(...args); }
 function renderLinksPanel(...args) { return editorParts.renderLinksPanel(...args); }
 
 
@@ -1253,9 +1224,7 @@ function clearPaneDropState(...args) { return editorParts.clearPaneDropState(...
 function closeTabOverflowMenu(...args) { return editorParts.closeTabOverflowMenu(...args); }
 function currentWorkspaceView(...args) { return editorParts.currentWorkspaceView(...args); }
 function ensureOpenTabs(...args) { return editorParts.ensureOpenTabs(...args); }
-function openDroppedFileInPane(...args) { return editorParts.openDroppedFileInPane(...args); }
 function openFileFromExplorer(...args) { return editorParts.openFileFromExplorer(...args); }
-function openPreviewTab(...args) { return editorParts.openPreviewTab(...args); }
 function openSourceTab(...args) { return editorParts.openSourceTab(...args); }
 function openTabOverflowMenu(...args) { return editorParts.openTabOverflowMenu(...args); }
 function printPreviewAsPdf(...args) { return editorParts.printPreviewAsPdf(...args); }
@@ -1263,39 +1232,22 @@ function renderPreviewContent(...args) { return editorParts.renderPreviewContent
 function renderTabs(...args) { return editorParts.renderTabs(...args); }
 function restoreResumeState(...args) { return editorParts.restoreResumeState(...args); }
 function setActiveSourceFile(...args) { return editorParts.setActiveSourceFile(...args); }
-function setActiveSourcePart(...args) { return editorParts.setActiveSourcePart(...args); }
 function setPreviewFile(...args) { return editorParts.setPreviewFile(...args); }
 function showResumedFile(...args) { return editorParts.showResumedFile(...args); }
 function tabOverflowButton(...args) { return editorParts.tabOverflowButton(...args); }
 async function typesetPreview(...args) { return editorParts.typesetPreview(...args); }
 
 // ---- The explorer and file actions (the Explorer module) ----
-function canPasteIntoExplorerTarget(...args) { return explorerParts.canPasteIntoExplorerTarget(...args); }
 function suggestUniqueFileName(...args) { return explorerParts.suggestUniqueFileName(...args); }
 function clearExplorerDropState(...args) { return explorerParts.clearExplorerDropState(...args); }
 function createFileInFolder(...args) { return explorerParts.createFileInFolder(...args); }
-function createItem(...args) { return explorerParts.createItem(...args); }
-async function deleteSelected(...args) { return explorerParts.deleteSelected(...args); }
 function exportNode(...args) { return explorerParts.exportNode(...args); }
-function getExplorerDropPayloadKind(...args) { return explorerParts.getExplorerDropPayloadKind(...args); }
-function getExplorerDropPlacement(...args) { return explorerParts.getExplorerDropPlacement(...args); }
 function getSelectedNode(...args) { return explorerParts.getSelectedNode(...args); }
 function getSelectedParent(...args) { return explorerParts.getSelectedParent(...args); }
-function getSelectedPart(...args) { return explorerParts.getSelectedPart(...args); }
-async function handleAddFileTransfer(...args) { return explorerParts.handleAddFileTransfer(...args); }
 async function handleEditorDrop(...args) { return explorerParts.handleEditorDrop(...args); }
-async function handleExplorerAction(...args) { return explorerParts.handleExplorerAction(...args); }
-function handleNewFileSubmit(...args) { return explorerParts.handleNewFileSubmit(...args); }
 function moveExplorerNode(...args) { return explorerParts.moveExplorerNode(...args); }
-function moveExplorerPart(...args) { return explorerParts.moveExplorerPart(...args); }
 function openNewFileDialog(...args) { return explorerParts.openNewFileDialog(...args); }
 async function renameFileById(...args) { return explorerParts.renameFileById(...args); }
-async function renameSelected(...args) { return explorerParts.renameSelected(...args); }
-function resetAddFileState(...args) { return explorerParts.resetAddFileState(...args); }
-function setAddFileStatus(...args) { return explorerParts.setAddFileStatus(...args); }
-function setExplorerDropState(...args) { return explorerParts.setExplorerDropState(...args); }
-async function stageAddFileFromLocalFile(...args) { return explorerParts.stageAddFileFromLocalFile(...args); }
-async function submitAddFile(...args) { return explorerParts.submitAddFile(...args); }
 
 
 async function handleSaveCommand() {

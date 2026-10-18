@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-18 · release `v0.1.61` (not deployed; v0.1.60 is live)
+Last updated: 2026-10-18 · release `v0.1.62` (not deployed; v0.1.60 is live)
 
 ---
 
@@ -68,6 +68,23 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.62: the agent's connection belongs to Models
+
+Step S3d-2. One fix for users:
+
+- **The "+" button (a bug in v0.1.61, never deployed):** after the split it
+  still had its old handler as well as the page's, so on the Agent page it
+  started two conversations and on the Chats page it also started an agent
+  conversation. Only the open page's action runs now;
+  `chats-local-browser.py` checks it.
+- Whether the server's agent is set up (and why not), the models it offers,
+  the chosen model and what a request carries with the user's own key are
+  the Models module's (`models.agent`), with their rules as pure functions
+  and tests. What a request carries from the project is Characters'.
+- The Chats page no longer borrows any of this from the Agent page.
+- 49 forwarding functions in `main.js` that nothing called any more (left by
+  the earlier moves) were removed: 2,971 → 2,921 lines.
 
 ### v0.1.61: the side panel's Agent and Chats are separate pages
 

@@ -91,7 +91,7 @@ async def main():
         await page.wait_for_function(WAIT_LOADED)  # the chat panel loads on demand
 
         # Signed out: the server's agent asks for a sign-in and sends nothing.
-        await page.wait_for_function('window.__imgTest.chatState.status === "signin"')
+        await page.wait_for_function('window.__imgTest.agentStatus.status === "signin"')
         badge = page.locator('#chat-status-text')
         # The compose footer's status: a word when something needs attention,
         # the full detail in its tooltip.
@@ -107,7 +107,7 @@ async def main():
 
         # Signed in: ready, and the picker groups models by provider.
         await page.evaluate('window.__imgTest.performLogin("leo", "pw", { silent: true })')
-        await page.wait_for_function('window.__imgTest.chatState.status === "ready"')
+        await page.wait_for_function('window.__imgTest.agentStatus.status === "ready"')
         groups = await page.evaluate('[...document.querySelectorAll("#chat-model-select optgroup")].map(g => [g.label, [...g.children].map(o => o.value)])')
         assert groups == [['DeepSeek', ['deepseek-flash', 'deepseek-v4-pro']], ['OpenAI', ['gpt-5.1', 'gpt-5.1-mini']]], groups
         assert await page.locator('#chat-model-select').input_value() == 'deepseek-flash'

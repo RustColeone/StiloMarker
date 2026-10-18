@@ -6,14 +6,15 @@
 import { undoSteps } from "./agent-undo.js";
 import { createChatsPage } from "./chats-page.js";
 import { editsHtml, editsLabel } from "../modules/assistant/index.js";
-import { getNodeIdByPath, getPath, isImageFileName } from "../domain/project-model.js";
-import { fetchChatStatus, fetchServerChatWorkspace, pushServerChatWorkspace, sendChatRequest } from "../services/chat-api-service.js";
+import { getPath, isImageFileName } from "../modules/workspace/index.js";
+import { fetchServerChatWorkspace, pushServerChatWorkspace, sendChatRequest } from "../services/chat-api-service.js";
 import { createChatMessage, createChatThread, deriveChatTitle, loadChatWorkspace, saveChatWorkspace } from "../services/chat-storage-service.js";
 import { createChatSynchronizer } from "../services/chat-sync-service.js";
 import { contextChipsHtml, paintConversation, shouldSubmitChat } from "../services/chat-ui-service.js";
 import { renderMarkdown } from "../modules/editor/index.js";
 import { createMcpControls } from "../services/mcp-ui-service.js";
-import { chosenModel, groupByProvider } from "../modules/models/index.js";
+import { groupByProvider } from "../modules/models/index.js";
+import { contextFiles, projectSnapshot } from "../modules/characters/index.js";
 import { normalizeServerUrl } from "../modules/shell/index.js";
 import { query } from "../ui/dom.js";
 
@@ -29,8 +30,12 @@ export function createChatPanel(deps) {
     createFileInFolder, elements, escapeHtmlAttribute, getSelectedParent, isMobileLayout,
     jumpToAgentChange, logDebug, notify, openFileFromExplorer, openSettingsDialog,
     personaAvatarSrc, promptForName, registerAgentDecorations, settings, workspace,
-    showConfirmDialog, showToast, storedProject, updateEditorAgentBar, identity, pages
+    showConfirmDialog, showToast, storedProject, updateEditorAgentBar, identity, pages, models
   } = deps;
+  // The agent's connection is the Models module's: whether it is set up, the models, the one chosen.
+  const agent = models.agent;
+  const agentStatus = () => agent.status();
+  const signedIn = () => Boolean(identity.account());
   let mcpControls = null;
 
   const legacyChatProjectId = storedProject?.id ?? "server-project";
@@ -334,28 +339,6 @@ export function createChatPanel(deps) {
     return thread;
   }
 
-  function resolveChatContextFiles(project, thread) {
-    return (thread?.contextPaths ?? []).map((path) => {
-      const nodeId = getNodeIdByPath(project, path);
-      const node = nodeId ? project.nodes[nodeId] : null;
-      if (!node || node.kind !== "file") {
-        return null;
-      }
-      if (isImageFileName(node.name)) {
-        return {
-          path,
-          kind: "image",
-          content: ""
-        };
-      }
-      return {
-        path,
-        kind: "text",
-        content: typeof node.content === "string" ? node.content : ""
-      };
-    }).filter(Boolean);
-  }
-
   /** Human-readable line for one agent progress step. */
   function describeAgentActivity(event) {
     if (event.type === "mcp-status") return `${event.server}: ${event.message}`;
@@ -464,20 +447,11 @@ export function createChatPanel(deps) {
     else renderAgentPage(project);
   }
 
-  // ---- The Chats page (features/chats-page.js), given the agent's connection ----
+  // ---- The Chats page (features/chats-page.js), given the agent's old Roleplay threads ----
   const chatsPage = createChatsPage({
     ...deps,
     rerender: () => renderChatPanel(controller.getProject()),
-    agent: {
-      selectedModel: () => chatState.selectedModel ?? undefined,
-      // The server's agent writes a character's reply: say why when it cannot.
-      async ensureServerAgent() {
-        if (!chatState.configured) await refreshChatStatus({ silent: true });
-        if (!chatState.configured) throw new Error(chatState.detail);
-      },
-      projectSnapshot: (project) => buildAgentProjectSnapshot(project),
-      contextFiles: (project, options) => resolveChatContextFiles(project, options),
-      requestOverride: () => agentRequestOverride(),
+    agentThreads: {
       // Old Roleplay group threads (kind "group") move into Chats once, then leave the agent's list.
       oldGroupThreads: () => chatState.threads.filter((thread) => thread.kind === "group" && !thread.deleted && thread.messages?.length),
       movedGroupThreads(threads) {
@@ -504,18 +478,18 @@ export function createChatPanel(deps) {
     if (threadChanged) elements.chatInput.value = activeThread?.draft ?? "";
     chatState.renderedThreadId = renderedKey;
     // Model picker — only meaningful when the server offers more than one model.
-    const showPicker = chatState.configured && chatState.models.length > 1;
+    const showPicker = agentStatus().configured && agentStatus().models.length > 1;
     renderChatStatus(showPicker);
     if (elements.chatModelSelect) {
       elements.chatModelSelect.hidden = !showPicker;
       if (showPicker) {
-        const desired = chatState.selectedModel ?? chatState.models[0];
+        const desired = agentStatus().selectedModel ?? agentStatus().models[0];
         const option = (name) => `<option value="${escapeHtmlAttribute(name)}"${name === desired ? " selected" : ""}>${escapeHtmlAttribute(name)}</option>`;
         // Grouped by provider when the server offers more than one (DeepSeek, OpenAI).
-        const groups = groupByProvider(chatState.models, (name) => chatState.modelProviders?.get(name));
+        const groups = groupByProvider(agentStatus().models, (name) => agentStatus().modelProviders?.[name]);
         const optionsHtml = groups.length > 1
           ? groups.map(([group, names]) => `<optgroup label="${escapeHtmlAttribute(group || "Other")}">${names.map(option).join("")}</optgroup>`).join("")
-          : chatState.models.map(option).join("");
+          : agentStatus().models.map(option).join("");
         if (elements.chatModelSelect.innerHTML !== optionsHtml) {
           elements.chatModelSelect.innerHTML = optionsHtml;
         }
@@ -646,19 +620,19 @@ export function createChatPanel(deps) {
 
   function renderChatStatus(showPicker) {
     const el = elements.chatStatusText;
-    const provider = chatState.modelProviders?.get(chatState.selectedModel) ?? chatState.provider;
-    const ready = chatState.status === "ready" && chatState.configured;
+    const provider = agentStatus().modelProviders?.[agentStatus().selectedModel] ?? agentStatus().provider;
+    const ready = agentStatus().status === "ready" && agentStatus().configured;
     const tone = chatState.syncError ? "warn"
       : ready ? "ok"
-      : chatState.status === "checking" ? "busy"
-      : chatState.status === "signin" ? "warn"
+      : agentStatus().status === "checking" ? "busy"
+      : agentStatus().status === "signin" ? "warn"
       : "error";
     const word = chatState.syncError ? "Sync paused"
-      : ready ? (showPicker ? "" : (chatState.model ?? ""))
-      : (STATUS_WORDS[chatState.status] ?? "Unavailable");
-    const where = chatState.configured && provider
-      ? `${provider}${chatState.selectedModel ?? chatState.model ? ` · ${chatState.selectedModel ?? chatState.model}` : ""}` : "";
-    const detail = [chatState.syncError || chatState.detail, where].filter(Boolean).join(" — ");
+      : ready ? (showPicker ? "" : (agentStatus().model ?? ""))
+      : (STATUS_WORDS[agentStatus().status] ?? "Unavailable");
+    const where = agentStatus().configured && provider
+      ? `${provider}${agentStatus().selectedModel ?? agentStatus().model ? ` · ${agentStatus().selectedModel ?? agentStatus().model}` : ""}` : "";
+    const detail = [chatState.syncError || agentStatus().detail, where].filter(Boolean).join(" — ");
     const title = `${detail}${ready ? " (click to re-check)" : " (click to fix)"}`;
     el.dataset.tone = tone;
     el.classList.toggle("is-error", tone === "error" || tone === "warn");
@@ -672,7 +646,7 @@ export function createChatPanel(deps) {
     const examples = [
       "Summarize the open file and suggest a better title",
       "Make a character file for the main character of my current chapter",
-      ...(chatState.imageGeneration && identity.account() ? ["Draw the opening scene of my current chapter"] : []),
+      ...(agentStatus().imageGeneration && identity.account() ? ["Draw the opening scene of my current chapter"] : []),
       "Find every note that mentions this file and link them together"
     ];
     return `<div class="chat-empty-state chat-empty-agent">
@@ -770,123 +744,21 @@ export function createChatPanel(deps) {
     } : null
   });
 
-  // Own-key mode: the request override sent to the proxy (empty in server mode or
-  // when no key is entered, so the server's own key is used instead).
-  function agentRequestOverride() {
-    if (settings.agentSource !== "own") return {};
-    const apiKey = (settings.agentApiKey || "").trim();
-    if (!apiKey) return {};
-    const override = { apiKey };
-    const url = (settings.agentApiUrl || "").trim();
-    const model = (settings.agentModel || "").trim();
-    if (url) override.apiUrl = url;
-    if (model) override.apiModel = model;
-    return override;
-  }
-
-  // True when own-key mode is selected and a key is entered — the agent is usable
-  // through the proxy regardless of whether the server itself has a key.
-  function agentOwnKeyReady() {
-    return settings.agentSource === "own" && Boolean((settings.agentApiKey || "").trim());
-  }
-
-  // Reflect the live agent availability into the Agent tab's status line.
+  // Reflect the live agent availability into Settings → Agent's status line.
   function applyAgentSettingsStatus() {
     if (!elements.agentStatusLine) return;
-    const el = elements.agentStatusLine;
-    let text;
-    let ok = false;
-    if (agentOwnKeyReady()) {
-      text = "Ready — using your own API key.";
-      ok = true;
-    } else if (settings.agentSource === "own") {
-      text = "Enter your API key below to enable the agent.";
-    } else if (chatState.configured) {
-      text = `Ready — ${chatState.provider ?? "server"}${chatState.model ? " · " + chatState.model : ""}.`;
-      ok = true;
-    } else if (chatState.status === "signin") {
-      text = "Sign in with your account (Settings → Collaboration) to use this server's agent, or switch to “My own API key”.";
-    } else if (chatState.status === "offline") {
-      text = "Server unreachable — can't check the agent.";
-    } else {
-      text = chatState.detail || "This server has no agent key. Switch to “My own API key”, or set one on the server.";
-    }
-    el.textContent = text;
-    el.classList.toggle("is-success", ok);
-    el.classList.toggle("is-error", !ok);
+    const { text, ok } = agent.settingsLine();
+    elements.agentStatusLine.textContent = text;
+    elements.agentStatusLine.classList.toggle("is-success", ok);
+    elements.agentStatusLine.classList.toggle("is-error", !ok);
   }
 
   async function refreshChatStatus({ silent = false } = {}) {
-    chatState.status = "checking";
-    if (!silent) {
-      chatState.detail = "Checking chat backend...";
-      renderChatPanel(controller.getProject());
-    }
-
-    const ownReady = agentOwnKeyReady();
-    try {
-      const status = await fetchChatStatus(settings.serverUrl);
-      // Own-key mode is "configured" whenever a key is entered (the proxy will use
-      // it and bypass the server's localhost gate), independent of the server key.
-      chatState.configured = ownReady || Boolean(status.configured);
-      chatState.localOnly = ownReady ? false : status.localOnly !== false;
-      if (ownReady) {
-        chatState.provider = "Your key";
-        chatState.model = (settings.agentModel || "").trim() || "custom";
-        chatState.models = [chatState.model];
-        chatState.selectedModel = chatState.model;
-        chatState.status = "ready";
-        chatState.detail = "Using your own API key.";
-      } else {
-        // A server with accounts only lets signed-in users spend its keys.
-        const needsSignIn = Boolean(status.requiresAccount) && !identity.account();
-        chatState.configured = Boolean(status.configured) && !needsSignIn;
-        chatState.provider = status.provider ?? null;
-        chatState.model = status.model ?? null;
-        chatState.models = Array.isArray(status.models) && status.models.length
-          ? status.models
-          : (status.model ? [status.model] : []);
-        chatState.modelProviders = new Map((Array.isArray(status.modelInfo) ? status.modelInfo : [])
-          .map((row) => [row.id, row.provider]));
-        chatState.imageGeneration = Boolean(status.imageGeneration);
-        // Keep the user's saved choice if the server still offers it, else default.
-        chatState.selectedModel = chosenModel(chatState.models, settings.chatModel, status.model);
-        chatState.status = chatState.configured ? "ready" : (needsSignIn && status.configured ? "signin" : "unconfigured");
-        chatState.detail = chatState.configured
-          ? "Ready"
-          : chatState.status === "signin"
-            ? "Sign in to use the agent"
-            : "Agent needs a key — click to open Settings → Agent and use your own, or set one on the server.";
-      }
-    } catch (error) {
-      // The status check failed (server unreachable, etc). Own-key mode is still
-      // "usable" optimistically — the actual send surfaces any real failure.
-      chatState.configured = ownReady;
-      chatState.provider = ownReady ? "Your key" : null;
-      chatState.model = ownReady ? ((settings.agentModel || "").trim() || "custom") : null;
-      chatState.models = ownReady ? [chatState.model] : [];
-      chatState.selectedModel = ownReady ? chatState.model : null;
-      chatState.status = ownReady ? "ready" : (error?.status === 403 ? "restricted" : "offline");
-      chatState.detail = ownReady ? "Using your own API key." : (error instanceof Error ? error.message : String(error));
-    }
-
+    const refreshing = agent.refresh({ signedIn: signedIn(), silent });
+    if (!silent) renderChatPanel(controller.getProject());
+    await refreshing;
     applyAgentSettingsStatus();
     renderChatPanel(controller.getProject());
-  }
-
-  /** Build a lean project snapshot for the agent: full tree + text content,
-   *  but image file contents stripped (data-URLs are large and the agent can't
-   *  edit images anyway). Lets the agent see the user's real files in local mode. */
-  function buildAgentProjectSnapshot(project) {
-    const nodes = {};
-    for (const [id, node] of Object.entries(project.nodes ?? {})) {
-      if (node.kind === "file" && isImageFileName(node.name)) {
-        nodes[id] = { ...node, content: "" };
-      } else {
-        nodes[id] = { ...node };
-      }
-    }
-    return { rootId: project.rootId, nodes };
   }
 
   async function handleChatSubmit() {
@@ -933,7 +805,7 @@ export function createChatPanel(deps) {
   }
 
   async function runAgentTurn(thread, project) {
-    const contextFiles = resolveChatContextFiles(project, {
+    const attached = contextFiles(project, {
       contextPaths: [...thread.messages].reverse().find(message => message.role === "user")?.contextPaths ?? thread.contextPaths
     });
     chatState.sending = true;
@@ -955,26 +827,26 @@ export function createChatPanel(deps) {
     renderChatPanel(controller.getProject());
 
     try {
-      if (!chatState.configured) {
+      if (!agentStatus().configured) {
         await refreshChatStatus({ silent: true });
       }
       if (!current()) return;
-      if (!chatState.configured) {
-        throw new Error(chatState.detail);
+      if (!agentStatus().configured) {
+        throw new Error(agentStatus().detail);
       }
 
       const response = await sendChatRequest(settings.serverUrl, {
         projectName: project.name,
-        model: chatState.selectedModel ?? undefined,
+        model: agentStatus().selectedModel ?? undefined,
         messages: thread.messages
           .filter((message) => message.role === "user" || message.role === "assistant")
           .map((message) => ({ role: message.role, content: message.content })),
-        contextFiles,
-        project: buildAgentProjectSnapshot(project),
+        contextFiles: attached,
+        project: projectSnapshot(project),
         ...mcpControls.getRequest(),
         accountToken: identity.token(),
         // Own-key mode: pass the user's key/url/model so the proxy uses them.
-        ...agentRequestOverride()
+        ...agent.requestOverride()
       }, (event) => {
         if (!current() || turn.controller.signal.aborted) return;
         if (event.type === "delta") {
@@ -1014,8 +886,7 @@ export function createChatPanel(deps) {
       if (turn.controller.signal.aborted) throw new DOMException("Stopped", "AbortError");
       thread = chatState.threads.find(candidate => candidate.id === turn.threadId) ?? thread;
 
-      chatState.provider = response.provider ?? chatState.provider;
-      chatState.model = response.model ?? chatState.model;
+      agent.served({ provider: response.provider, model: response.model });
       const proposals = Array.isArray(response.proposedOperations) ? response.proposedOperations : [];
       const msgExtra = {};
       // Persist the reasoning stream so the answer keeps a collapsible "Thought
@@ -1286,12 +1157,10 @@ export function createChatPanel(deps) {
     elements.chatHistoryPane.hidden = !willShow;
     elements.chatHistoryToggleButton?.setAttribute("aria-pressed", String(willShow));
   }
-  elements.chatNewThreadButton.addEventListener("click", createNewChatConversation);
   elements.chatHistoryToggleButton?.addEventListener("click", toggleChatHistoryPane);
 
   elements.chatModelSelect?.addEventListener("change", (event) => {
-    chatState.selectedModel = event.target.value;
-    settings.change({ chatModel: event.target.value });
+    agent.choose(event.target.value);
     logDebug("action", "Agent model changed", settings.chatModel);
     renderChatPanel(controller.getProject()); // the badge names the model's provider
   });
@@ -1299,11 +1168,11 @@ export function createChatPanel(deps) {
   // The status badge doubles as a shortcut: open settings when the agent isn't
   // usable, otherwise just re-check the backend.
   elements.chatStatusText.addEventListener("click", () => {
-    if (chatState.status === "signin") {
+    if (agentStatus().status === "signin") {
       openSettingsDialog("collaboration"); // the Account sign-in lives there
       return;
     }
-    if (chatState.status !== "ready") {
+    if (agentStatus().status !== "ready") {
       // The agent is separate from login — send them straight to the Agent tab.
       openSettingsDialog("agent");
       return;

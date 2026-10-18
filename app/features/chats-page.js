@@ -1,16 +1,16 @@
 // The Chats page of the side panel: a small chat app for a project's people
 // and its characters (the Chats module's view, loaded the first time the page
 // opens), with its own conversation, input, attachments and drops. It shares
-// nothing with the Agent page but the agent's server connection, which it is
-// given (`agent`: the chosen model, whether the server's agent is ready, what a
-// request carries, the old Roleplay threads to move in once). Split out of
-// chat-panel.js; it becomes the Chats module's when the agent's connection has
-// an owner (docs/ARCHITECTURE.md, S3d).
+// nothing with the Agent page: the agent's server connection is the Models
+// module's, what a request carries from the project is Characters', and the
+// Agent page gives it only its old Roleplay threads to move in once
+// (`agentThreads`). Split out of chat-panel.js; it becomes the Chats module's
+// next (docs/ARCHITECTURE.md, S3d).
 import { getNodeIdByPath, getPath, isImageFileName, isPersonaFileName } from "../modules/workspace/index.js";
 import { sendChatRequest } from "../services/chat-api-service.js";
 import { contextChipsHtml, isChatNearBottom, paintConversation, shouldSubmitChat } from "../services/chat-ui-service.js";
 import { renderMarkdown } from "../modules/editor/index.js";
-import { charactersView, parsePersona, personaSummary } from "../modules/characters/index.js";
+import { charactersView, contextFiles, parsePersona, personaSummary, projectSnapshot } from "../modules/characters/index.js";
 import { createCloudChats, createLocalChats, loadChatsView } from "../modules/chats/index.js";
 import { runDirectReply } from "../modules/models/index.js";
 import { normalizeServerUrl } from "../modules/shell/index.js";
@@ -19,7 +19,7 @@ import { ignored } from "../kernel/index.js";
 
 export function createChatsPage(deps) {
   const {
-    agent, rerender, cloudWorkspaceTarget, chatWorkspaceKey, controller, collaboration, escapeHtmlAttribute, identity,
+    agentThreads, models, rerender, cloudWorkspaceTarget, chatWorkspaceKey, controller, collaboration, escapeHtmlAttribute, identity,
     isMobileLayout, logDebug, notify, openFileFromExplorer, pages, personaAvatarSrc, settings, showConfirmDialog, showToast
   } = deps;
   // The Chats page's own elements (its body in the side panel).
@@ -119,8 +119,8 @@ export function createChatsPage(deps) {
     if (directRunner()) {
       const response = await fetch(`${normalizeServerUrl(settings.serverUrl)}/api/chat/prompt`, {
         method: "POST", headers: { "content-type": "application/json" }, signal,
-        body: JSON.stringify({ projectName: project.name, project: agent.projectSnapshot(project), messages: transcript,
-          contextFiles: agent.contextFiles(project, { contextPaths: trigger?.contextPaths ?? [] }),
+        body: JSON.stringify({ projectName: project.name, project: projectSnapshot(project), messages: transcript,
+          contextFiles: contextFiles(project, { contextPaths: trigger?.contextPaths ?? [] }),
           persona: { path: character.path, name: character.name, content: character.content, temperature: character.temperature },
           cast: cast.map((member) => ({ name: member.name, summary: personaSummary(member.sheet ?? member.body) })) })
       });
@@ -128,15 +128,15 @@ export function createChatsPage(deps) {
       if (!response.ok) throw new Error(data.message || `Preparing the reply failed (${response.status}).`);
       return runDirect(data.payload, signal, onText);
     }
-    await agent.ensureServerAgent();
+    await models.agent.ensureReady({ signedIn: Boolean(identity.account()) });
     let text = "";
     const response = await sendChatRequest(settings.serverUrl, {
       projectName: project.name,
-      model: agent.selectedModel(),
-      contextFiles: agent.contextFiles(project, { contextPaths: trigger?.contextPaths ?? [] }),
-      project: agent.projectSnapshot(project),
+      model: models.agent.status().selectedModel ?? undefined,
+      contextFiles: contextFiles(project, { contextPaths: trigger?.contextPaths ?? [] }),
+      project: projectSnapshot(project),
       accountToken: identity.token(),
-      ...agent.requestOverride(),
+      ...models.agent.requestOverride(),
       mode: "persona",
       persona: { path: character.path, name: character.name, content: character.content, temperature: character.temperature },
       cast: cast.map((member) => ({ name: member.name, summary: personaSummary(member.sheet ?? member.body) })),
@@ -164,7 +164,7 @@ export function createChatsPage(deps) {
 
   /** Old Roleplay group threads move into Chats once, then leave the agent's list. */
   async function importRoleplayThreads(store) {
-    const old = agent.oldGroupThreads();
+    const old = agentThreads.oldGroupThreads();
     const moved = [];
     for (const thread of old) {
       try {
@@ -175,7 +175,7 @@ export function createChatsPage(deps) {
         break;
       }
     }
-    agent.movedGroupThreads(moved);
+    agentThreads.movedGroupThreads(moved);
     if (moved.length === old.length && old.length) {
       showToast(`Moved ${old.length} Roleplay chat${old.length === 1 ? "" : "s"} into Chats`);
       await chats?.refresh();
@@ -193,7 +193,7 @@ export function createChatsPage(deps) {
           renderMarkdown: (text) => renderMarkdown(text),
           rerender: () => rerender(),
           setDraft: (text) => { chatsEl.input.value = text; },
-          sendOptions: () => ({ model: agent.selectedModel(), ...(directRunner() ? { runner: "client" } : {}) }),
+          sendOptions: () => ({ model: models.agent.status().selectedModel ?? undefined, ...(directRunner() ? { runner: "client" } : {}) }),
           afterSend: async (result, conversation) => {
             if (result.claims?.length && chats?.store()?.kind === "cloud") {
               await writeClaimedReplies(chats.store(), conversation.id, result.claims);
