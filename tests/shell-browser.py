@@ -7,7 +7,8 @@ live titles ("Show Chat" / "Hide Chat"); Ctrl+S runs Save from anywhere;
 the rename dialog keeps the file extension out of the field; a module added
 after start-up appears in the menus; the phone's menu panel shows the same
 groups; the trace records errors nothing caught and its log tab shows them; the
-explorer's Replace File replaces an image;
+explorer's Replace File replaces an image; Settings' sections and fields come
+from their owners and take effect;
 no page errors. Static responses come from this checkout.
 """
 import asyncio, base64, json, mimetypes, os
@@ -135,6 +136,30 @@ async def main():
         await page.wait_for_function('(replaced) => window.__shellTest.controller.getProject().nodes.p.content === replaced', arg=replaced)
         assert not errors, errors
 
+        # Settings: sections added by their owners, in order; Appearance's fields
+        # declared by Shell, the Editor, Workspace and the diagram, each showing
+        # its setting; a change takes effect whoever owns it.
+        await page.evaluate('window.__shellTest.shell.settingsDialog.open("appearance")')
+        tabs = await page.evaluate('[...document.querySelectorAll("#settings-tab-strip [data-page]")].map((b) => [b.dataset.page, b.getAttribute("aria-selected")])')
+        assert tabs == [['appearance', 'true'], ['agent', 'false'], ['collaboration', 'false']], tabs
+        fields = await page.evaluate('[...document.querySelectorAll("#settings-panel-appearance [data-settings-fields] select, #settings-panel-appearance [data-settings-fields] input")].map((c) => c.id)')
+        assert fields == ['theme-select', 'explorer-select', 'explorer-anchor-select', 'preview-select', 'source-font-size-select',
+                          'source-font-family-select', 'source-font-custom-input', 'word-wrap-select', 'indent-style-select',
+                          'format-toolbar-input', 'auto-save-input', 'bmap-generate-scope-select', 'bmap-auto-pan-input'], fields
+        await page.select_option('#theme-select', 'dark')
+        assert await page.evaluate('document.documentElement.dataset.theme') == 'dark'
+        await page.select_option('#source-font-size-select', '18')
+        assert await page.evaluate('document.documentElement.style.getPropertyValue("--editor-font-size")') == '18px'
+        await page.select_option('#word-wrap-select', 'off')
+        assert await page.evaluate('document.querySelector(".app-shell").dataset.wordWrap') == 'off'
+        # A change made elsewhere shows in its field.
+        await page.evaluate('window.__shellTest.shell.settings.change({ preview: "hidden" }, "test")')
+        assert await page.input_value('#preview-select') == 'hidden'
+        await page.click('#settings-tab-strip [data-page="collaboration"]')
+        assert await page.is_hidden('#settings-panel-appearance') and await page.is_visible('#settings-panel-collaboration')
+        await page.keyboard.press('Escape')
+        assert not errors, errors
+
         # The trace: module logs and errors nothing caught are recorded with
         # where they came from; the log panel's Trace tab and stiloTrace() show them.
         await page.evaluate('''() => {
@@ -174,7 +199,7 @@ async def main():
         await browser.close()
         print(json.dumps({'checks': ['file-type lists from File types', 'five menus with their items', 'one menu open at a time', 'live titles',
                                      'menu item runs its command', 'Ctrl+S runs Save', 'rename keeps the extension',
-                                     'late menus and commands appear', 'Replace File replaces an image', 'the trace and its tab', 'a diagram previews as a diagram', 'phone menu panel'], 'runtimeErrors': 0}))
+                                     'late menus and commands appear', 'Replace File replaces an image', 'Settings sections and fields', 'the trace and its tab', 'a diagram previews as a diagram', 'phone menu panel'], 'runtimeErrors': 0}))
 
 
 asyncio.run(main())

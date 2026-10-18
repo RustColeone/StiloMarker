@@ -2,7 +2,7 @@
 // with a tab strip (`[data-tab-host="side"]`), and any module adds its feature
 // there as a page with its own body. Shell draws the strip, shows one page at
 // a time and remembers which (settings.openPages[host]); a page never knows
-// what other pages share its host.
+// what other pages share its host. A strip's `data-tab-class` names its tabs' look.
 //
 //   pages.add({ host, id, label, title?, order?, body, newItem?(), shown?(visible) })
 //     body       the element holding the page (shown only while it is open)
@@ -38,7 +38,7 @@ export function createPages({ registry, settings, doc = globalThis.document }) {
         strip.replaceChildren(...pages.map((page) => {
           const button = doc.createElement("button");
           button.type = "button";
-          button.className = "chat-tab";
+          button.className = strip.dataset.tabClass ?? "chat-tab"; // the host's look
           button.setAttribute("role", "tab");
           button.dataset.page = page.id;
           button.textContent = page.label;

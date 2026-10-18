@@ -348,132 +348,14 @@
         </header>
 
         <div class="settings-body">
-        <nav id="settings-tab-strip" class="settings-tab-strip" role="tablist" aria-orientation="vertical" aria-label="Settings sections">
-          <button id="settings-tab-appearance" class="settings-tab is-active" type="button" role="tab" aria-selected="true" data-tab="appearance">Appearance</button>
-          <button id="settings-tab-agent" class="settings-tab" type="button" role="tab" aria-selected="false" data-tab="agent">Agent</button>
-          <button id="settings-tab-collaboration" class="settings-tab" type="button" role="tab" aria-selected="false" data-tab="collaboration">Collaboration</button>
-        </nav>
+        <nav id="settings-tab-strip" class="settings-tab-strip" role="tablist" aria-orientation="vertical" aria-label="Settings sections" data-tab-host="settings" data-tab-class="settings-tab"></nav>
         <div class="settings-tab-panels">
-          <section id="settings-panel-appearance" class="settings-section settings-tab-panel is-active" data-tab-panel="appearance">
+          <section id="settings-panel-appearance" class="settings-section settings-tab-panel">
             <h3>Appearance</h3>
-
-            <label>
-              Theme
-              <select id="theme-select">
-                <option value="system">System</option>
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
-              </select>
-            </label>
-
-            <label>
-              Explorer
-              <select id="explorer-select">
-                <option value="expanded">Expanded</option>
-                <option value="collapsed">Collapsed</option>
-              </select>
-            </label>
-
-            <label>
-              Explorer anchor
-              <select id="explorer-anchor-select">
-                <option value="docked">Docked (resizes content)</option>
-                <option value="floating">Floating (overlay)</option>
-              </select>
-            </label>
-
-            <label>
-              Preview
-              <select id="preview-select">
-                <option value="shown">Shown</option>
-                <option value="hidden">Hidden</option>
-              </select>
-            </label>
-
-            <label>
-              Source Font Size
-              <select id="source-font-size-select">
-                <option value="10">10 px</option>
-                <option value="11">11 px</option>
-                <option value="12">12 px</option>
-                <option value="13">13 px (default)</option>
-                <option value="14">14 px</option>
-                <option value="15">15 px</option>
-                <option value="16">16 px</option>
-                <option value="18">18 px</option>
-                <option value="20">20 px</option>
-                <option value="24">24 px</option>
-                <option value="28">28 px</option>
-              </select>
-            </label>
-
-            <label>
-              Source Font
-              <select id="source-font-family-select">
-                <option value="">Default (system monospace)</option>
-                <option value="Cascadia Code">Cascadia Code</option>
-                <option value="JetBrains Mono">JetBrains Mono</option>
-                <option value="Fira Code">Fira Code</option>
-                <option value="Source Code Pro">Source Code Pro</option>
-                <option value="IBM Plex Mono">IBM Plex Mono</option>
-                <option value="Roboto Mono">Roboto Mono</option>
-                <option value="Consolas">Consolas</option>
-                <option value="Menlo">Menlo</option>
-                <option value="Monaco">Monaco</option>
-                <option value="SF Mono">SF Mono</option>
-                <option value="Ubuntu Mono">Ubuntu Mono</option>
-                <option value="Courier New">Courier New</option>
-                <option value="__custom__">Custom&hellip;</option>
-              </select>
-            </label>
-
-            <label id="source-font-custom-row" hidden>
-              Custom Font Name
-              <input id="source-font-custom-input" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. Operator Mono">
-            </label>
-            <p id="source-font-status" class="subtle-label source-font-status" aria-live="polite">Uses fonts installed on this device.</p>
-
-            <label>
-              Word Wrap
-              <select id="word-wrap-select">
-                <option value="on">On</option>
-                <option value="off">Off</option>
-              </select>
-            </label>
-
-            <label>
-              Tab Key Inserts
-              <select id="indent-style-select">
-                <option value="tab">Tab</option>
-                <option value="spaces">4 Spaces</option>
-              </select>
-            </label>
-
-            <label class="checkbox-row">
-              <input id="format-toolbar-input" type="checkbox">
-              <span>Show markdown formatting toolbar</span>
-            </label>
-
-            <label class="checkbox-row">
-              <input id="auto-save-input" type="checkbox" checked>
-              <span>Auto-save (cloud, local workspace &amp; browser cache; real folders still use Ctrl+S)</span>
-            </label>
-
-            <label>
-              Bmap Generate Context
-              <select id="bmap-generate-scope-select">
-                <option value="connected">Connected nodes only</option>
-                <option value="all">All linked files</option>
-              </select>
-            </label>
-
-            <label class="checkbox-row">
-              <input id="bmap-auto-pan-input" type="checkbox" checked>
-              <span>Auto-pan diagrams to content on open</span>
-            </label>
+            <div class="settings-fields" data-settings-fields></div>
           </section>
 
-          <div id="settings-panel-collaboration" class="settings-tab-panel" data-tab-panel="collaboration" hidden>
+          <div id="settings-panel-collaboration" class="settings-tab-panel" hidden>
             <div class="settings-grid collab-grid">
               <!-- LEFT column: connect to a server, then join / host a shared session. -->
               <div class="collab-column">
@@ -563,7 +445,7 @@
             </div>
           </div>
 
-          <div id="settings-panel-agent" class="settings-tab-panel" data-tab-panel="agent" hidden>
+          <div id="settings-panel-agent" class="settings-tab-panel" hidden>
             <section class="settings-section">
               <h3>Agent</h3>
               <p class="subtle-label">The AI agent is separate from your account login — signing in enables collaboration and cloud workspaces, not the agent.</p>

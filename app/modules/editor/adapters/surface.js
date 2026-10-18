@@ -128,6 +128,23 @@ export function createSurface({ port, view, marks, previews, highlighters, toolb
   add(createResume(app));
   add(createShowFile(app, composing));
   installEditorEvents(app, composing);
+  // The editor's settings, whoever changed them: new glyph metrics mean every
+  // measured overlay (caret, cursors, search highlights) and the gutter's
+  // scroll are worked out again; wrapping redraws the lines.
+  shell.settings.on((settings, changed) => {
+    const fontChanged = changed.includes("sourceFontSize") || changed.includes("sourceFontFamily");
+    if (fontChanged) app.editorRenderCache.metricsKey = "";
+    if (changed.includes("wordWrap")) app.elements.app.dataset.wordWrap = settings.wordWrap ? "on" : "off";
+    if (fontChanged || changed.includes("wordWrap")) {
+      app.render(app.controller.getProject());
+      if (fontChanged) {
+        app.redrawRemoteCursors();
+        if (app.searchState.open) app.computeSearchMatches({ keepCaret: true });
+        app.syncEditorScroll();
+      }
+    }
+    if (changed.includes("showFormatToolbar")) app.refreshFormatToolbar();
+  });
   // A mark put or taken off shows at once: the shown file's lines and bar, the tabs' badges.
   marks.on(() => {
     const file = app.controller.getActiveFile();

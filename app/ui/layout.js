@@ -22,7 +22,6 @@ export function createLayout(app) {
   function toggleExplorer() {
     if (app.isMobileLayout()) { toggleMobileExplorer(); return; }
     app.settings.change({ explorer: app.settings.explorer === "collapsed" ? "expanded" : "collapsed" });
-    app.elements.explorerSelect.value = app.settings.explorer;
     app.persistSettings();
     app.logDebug("action", "Explorer toggled", app.settings.explorer);
   }
@@ -31,7 +30,6 @@ export function createLayout(app) {
     const next = mode === "floating" ? "floating" : "docked";
     if (app.settings.explorerAnchor === next) return;
     app.settings.change({ explorerAnchor: next });
-    if (app.elements.explorerAnchorSelect) app.elements.explorerAnchorSelect.value = next;
     app.persistSettings();
     app.logDebug("action", "Explorer anchor changed", next);
   }
@@ -49,7 +47,6 @@ export function createLayout(app) {
     if (app.elements.explorerToggleButton?.contains(target)) return;
     if (app.elements.explorerContextMenu?.contains(target)) return;
     app.settings.change({ explorer: "collapsed" });
-    if (app.elements.explorerSelect) app.elements.explorerSelect.value = app.settings.explorer;
     app.persistSettings();
   }
 
@@ -60,7 +57,6 @@ export function createLayout(app) {
     if (app.settings.preview === "hidden" && app.settings.source === "hidden") {
       app.settings.change({ source: "shown" });
     }
-    app.elements.previewSelect.value = app.settings.preview;
     app.persistSettings();
     app.logDebug("action", "Preview toggled", app.settings.preview);
   }
@@ -71,7 +67,6 @@ export function createLayout(app) {
     // Collapsing the source is a reading-focused mode — keep the preview visible.
     if (app.settings.source === "hidden" && app.settings.preview === "hidden") {
       app.settings.change({ preview: "shown" });
-      app.elements.previewSelect.value = "shown";
     }
     app.persistSettings();
     app.logDebug("action", "Source toggled", app.settings.source);

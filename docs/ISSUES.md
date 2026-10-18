@@ -69,6 +69,19 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.66: Shell owns the Settings dialog
+
+Step S4a-1. One small change for users:
+
+- The theme now follows the device when it is set to "System" and the device
+  switches between light and dark; before, it changed only on a reload.
+- Settings' sections are pages in a tab host (like the side panel's), and
+  each field is declared by the module whose setting it changes. Shell draws
+  and saves it; the owner reacts to the setting, whoever changed it. The
+  dialog looks exactly as before, on the desktop and on the phone.
+- `shell-browser.py` now checks the sections, the fields and their order,
+  and that a change takes effect.
+
 ### v0.1.65: the agent's edit review is the Assistant's
 
 Step S3d-4b. Nothing changes for users.

@@ -29,6 +29,9 @@
 //   pages                    features as pages in tab hosts, like a browser's tabs:
 //                            pages.add({ host, id, label, body, newItem?, shown? }),
 //                            show(host, id), active(host), badge(host, id, n) (adapters/pages.js)
+//   settingsDialog           the Settings dialog: addPage({ id, label, order, body }), fields.add({ page, id,
+//                            order, label, key, control: select|checkbox, options } | { page, id, order,
+//                            render(box) }), open(page?), onOpen(listener) (adapters/settings-dialog.js)
 //   settings                 the app's settings, read-only (settings.theme);
 //                            settings.change({ key: value }, why?) saves a change,
 //                            settings.on(listener) hears them (service/settings.js)
@@ -42,6 +45,8 @@ import { createMenuBar } from "./adapters/menu-bar.js";
 import { createServer } from "./adapters/server.js";
 import { watchPageErrors } from "./adapters/page-errors.js";
 import { createPages } from "./adapters/pages.js";
+import { createSettingsDialog } from "./adapters/settings-dialog.js";
+import { applyTheme } from "./adapters/theme.js";
 import { loadSettings, patchStoredSettings } from "./adapters/settings-store.js";
 import { SECRET_SETTINGS, keysToSave } from "./service/settings.js";
 
@@ -54,8 +59,8 @@ export default defineModule({
   level: 1,
   uses: [],
   owns: {
-    registries: ["commands", "menus", "pages"],
-    elements: ["menu bar", "notice dialog", "confirm dialog", "input dialog", "form dialog", "toasts"],
+    registries: ["commands", "menus", "pages", "settings fields"],
+    elements: ["menu bar", "the Settings dialog", "notice dialog", "confirm dialog", "input dialog", "form dialog", "toasts"],
     connection: ["the server address"],
     events: ["render"],
     diagnostics: ["uncaught errors", "stiloTrace()"],
@@ -74,6 +79,22 @@ export default defineModule({
     const events = ctx.emitter();
     const { commands, menus, run } = createCommands(ctx);
     const dialogs = createDialogs();
+    const pages = createPages({ registry: ctx.registry({ key: "key" }), settings });
+    const settingsDialog = createSettingsDialog({ pages, settings, registry: ctx.registry() });
+    // The theme follows its setting, and the system's when it is "system".
+    applyTheme(settings.theme);
+    settings.on((view, changed) => { if (changed.includes("theme")) applyTheme(view.theme); });
+    globalThis.matchMedia?.("(prefers-color-scheme: dark)")?.addEventListener?.("change", () => applyTheme(settings.theme));
+    settingsDialog.addPage({ id: "appearance", label: "Appearance", order: 10, body: globalThis.document?.querySelector("#settings-panel-appearance") });
+    settingsDialog.fields.add({ page: "appearance", id: "theme-select", order: 10, label: "Theme", key: "theme", control: "select",
+      options: [["system", "System"], ["light", "Light"], ["dark", "Dark"]] });
+    // The frame's layout (main.js applies it until the areas are Shell's).
+    settingsDialog.fields.add({ page: "appearance", id: "explorer-select", order: 20, label: "Explorer", key: "explorer", control: "select",
+      options: [["expanded", "Expanded"], ["collapsed", "Collapsed"]] });
+    settingsDialog.fields.add({ page: "appearance", id: "explorer-anchor-select", order: 30, label: "Explorer anchor", key: "explorerAnchor", control: "select",
+      options: [["docked", "Docked (resizes content)"], ["floating", "Floating (overlay)"]] });
+    settingsDialog.fields.add({ page: "appearance", id: "preview-select", order: 40, label: "Preview", key: "preview", control: "select",
+      options: [["shown", "Shown"], ["hidden", "Hidden"]] });
 
     function notice(message, title = "Message") {
       ctx.log(`notice: ${message}`);
@@ -120,7 +141,8 @@ export default defineModule({
       copyText: dialogs.copyText,
       server: createServer(),
       settings,
-      pages: createPages({ registry: ctx.registry({ key: "key" }), settings }),
+      pages,
+      settingsDialog,
       render: (project, { only } = {}) => events.emit("render", { project, only }),
       events: { on: events.on }
     };

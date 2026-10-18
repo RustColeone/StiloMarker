@@ -103,7 +103,7 @@ test("main.js wires core feature symbols", async () => {
     /switchWorkspaceMode/,
     /quickGenerateBmapFile/,
     /sendGenerationRequest/,
-    /bmapGenerateScopeSelect/
+    /bmap-generate-scope-select/
   ];
   symbols.forEach((pattern) => assert.match(mainSource, pattern));
 });

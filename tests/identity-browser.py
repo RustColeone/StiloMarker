@@ -72,7 +72,7 @@ async def open_page(b, settings=None):
 
 async def collaboration_settings(page):
     await page.click("#settings-button")
-    await page.click("#settings-tab-collaboration")
+    await page.click('#settings-tab-strip [data-page="collaboration"]')
     await page.wait_for_selector("#account-login-row:not([hidden])", timeout=15000)
 
 

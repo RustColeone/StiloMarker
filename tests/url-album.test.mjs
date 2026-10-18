@@ -43,7 +43,7 @@ test("the album's parts list, edit, move and refuse clashes", () => {
 });
 
 test("the extension registers into the core's extension points only", async () => {
-  const shell = { name: "shell", level: 1, uses: [], owns: {}, start: () => ({ form: async () => null, notify() {} }) };
+  const shell = { name: "shell", level: 1, uses: [], owns: {}, start: () => ({ form: async () => null, notify() {}, settings: { on() {} }, settingsDialog: { fields: { add() {} }, onOpen() {} } }) };
   const modules = await startModules([shell, fileTypes, workspace, editor, album]);
   const parts = modules.workspace.parts.of("refs.urldb");
   assert.ok(parts && parts.add.label);

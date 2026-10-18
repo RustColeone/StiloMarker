@@ -2608,7 +2608,7 @@ p {
   background: var(--surface-1);
 }
 
-.settings-tab.is-active {
+.settings-tab[aria-selected="true"] {
   color: var(--text);
   background: var(--accent-soft);
   border-left-color: var(--accent);
@@ -2637,6 +2637,16 @@ p {
 
 .settings-form label,
 .settings-section {
+  display: grid;
+  gap: 6px;
+}
+
+/* Fields the modules declare (Shell's Settings dialog) sit in the section's grid. */
+.settings-fields {
+  display: contents;
+}
+
+.settings-field {
   display: grid;
   gap: 6px;
 }

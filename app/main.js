@@ -14,7 +14,7 @@ import { getOpfsDirectoryHandle, importDirectory, importOsFolderIntoOpfs, import
 import syncModule from "./modules/sync/index.js";
 import { parsePersona, personaTemplate } from "./services/persona-service.js";
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
-import { applyEditorFont, applyTheme, clampSourceFontSize, signInSettings } from "./services/settings-service.js";
+import { signInSettings } from "./services/settings-service.js";
 import cloudModule, { saveUserState, uploadAsset } from "./modules/cloud/index.js";
 import modelsModule from "./modules/models/index.js";
 import chatsModule from "./modules/chats/index.js";
@@ -87,8 +87,6 @@ const elements = {
   replaceAll: query("#replace-all"),
   editorAutocomplete: query("#editor-autocomplete"),
   editorFormatToolbar: query("#editor-format-toolbar"),
-  formatToolbarInput: query("#format-toolbar-input"),
-  autoSaveInput: query("#auto-save-input"),
   editorAutocompleteLabel: query("#editor-autocomplete-label"),
   editorAutocompleteList: query("#editor-autocomplete-list"),
   preview: query("#preview-output"),
@@ -117,8 +115,6 @@ const elements = {
   newFileSubmitButton: query("#new-file-submit-button"),
   settingsButton: query("#settings-button"),
   settingsDialog: query("#settings-dialog"),
-  settingsTabStrip: query("#settings-tab-strip"),
-  settingsTabsButton: query("#settings-tabs-button"),
   agentSourceSelect: query("#agent-source-select"),
   agentSourceNote: query("#agent-source-note"),
   agentOwnFields: query("#agent-own-fields"),
@@ -129,19 +125,6 @@ const elements = {
   agentRunnerNote: query("#agent-runner-note"),
   agentStatusLine: query("#agent-status-line"),
   accountLockedNote: query("#account-locked-note"),
-  themeSelect: query("#theme-select"),
-  explorerSelect: query("#explorer-select"),
-  explorerAnchorSelect: query("#explorer-anchor-select"),
-  previewSelect: query("#preview-select"),
-  wordWrapSelect: query("#word-wrap-select"),
-  indentStyleSelect: query("#indent-style-select"),
-  sourceFontSizeSelect: query("#source-font-size-select"),
-  sourceFontFamilySelect: query("#source-font-family-select"),
-  sourceFontCustomRow: query("#source-font-custom-row"),
-  sourceFontCustomInput: query("#source-font-custom-input"),
-  sourceFontStatus: query("#source-font-status"),
-  bmapGenerateScopeSelect: query("#bmap-generate-scope-select"),
-  bmapAutoPanInput: query("#bmap-auto-pan-input"),
   serverUrlInput: query("#server-url-input"),
   autoReconnectInput: query("#auto-reconnect-input"),
   serverPinInput: query("#server-pin-input"),
@@ -372,10 +355,6 @@ function transformEditorSelection(...args) { return editorParts.transformEditorS
 // Declared up here because the hoisted mobile render helpers reach it during
 // the first render, which would otherwise be inside its temporal dead zone.
 const MOBILE_MAX_WIDTH = 900;    // must match the CSS breakpoint
-// Installed-font detection state for the source-font picker (see isFontInstalled).
-const fontInstalledCache = new Map();
-let fontProbeContext = null;
-const fontProbeBase = {};
 // The diagram editor is the largest module (~150KB) and most sessions never
 // open a diagram, so it loads the first time one is previewed or exported.
 let bmapViewModule = null;
@@ -759,23 +738,11 @@ async function openSnapshotsDialog() {
 }
 
 
-applyTheme(settings);
-applyEditorFont(settings);
-syncSourceFontControls();
-elements.themeSelect.value = settings.theme;
 elements.serverUrlInput.value = settings.serverUrl;
 elements.serverPinInput.value = settings.serverPin;
 elements.displayNameInput.value = settings.displayName;
 if (elements.accountUsernameInput) elements.accountUsernameInput.value = settings.accountUsername ?? "";
-elements.explorerSelect.value = settings.explorer;
-elements.previewSelect.value = settings.preview;
-elements.wordWrapSelect.value = settings.wordWrap ? "on" : "off";
-elements.indentStyleSelect.value = settings.indentStyle;
-elements.bmapGenerateScopeSelect.value = settings.bmapGenerateScope === "all" ? "all" : "connected";
-if (elements.bmapAutoPanInput) elements.bmapAutoPanInput.checked = settings.bmapAutoPan !== false;
 if (elements.autoReconnectInput) elements.autoReconnectInput.checked = settings.autoReconnect !== false;
-if (elements.formatToolbarInput) elements.formatToolbarInput.checked = Boolean(settings.showFormatToolbar);
-if (elements.autoSaveInput) elements.autoSaveInput.checked = settings.autoSave !== false;
 
 // The live session is Sync's; it is given what only the app can do, and
 // tells its news through events (modules/sync/index.js).
@@ -1177,7 +1144,6 @@ function applyWorkspaceSettings() {
   elements.chatPanel.hidden = settings.chatPanel === "hidden";
   elements.chatToggleActivityButton.classList.toggle("is-active", settings.chatPanel === "shown");
   elements.explorerFilterButton.classList.toggle("is-active", settings.explorerFilter !== "all");
-  if (elements.explorerAnchorSelect) elements.explorerAnchorSelect.value = settings.explorerAnchor;
   if (elements.explorerAnchorButton) {
     const floating = settings.explorerAnchor === "floating";
     elements.explorerAnchorButton.classList.toggle("is-active", floating);
@@ -2072,7 +2038,6 @@ document.addEventListener("click", (event) => {
 });
 
 elements.explorerAnchorButton?.addEventListener("click", toggleExplorerAnchor);
-elements.explorerAnchorSelect?.addEventListener("change", (event) => { setExplorerAnchor(event.target.value); });
 // Capture phase so the outside-press check runs before in-tree click handlers.
 document.addEventListener("pointerdown", handleFloatingExplorerOutsidePress, true);
 elements.previewToggleActivityButton.addEventListener("click", togglePreview);
@@ -2176,33 +2141,27 @@ elements.statusBrowserItem.addEventListener("click", () => {
     "Browser Support"
   );
 });
-// ── Settings dialog tabs ────────────────────────────────────────────────────
-function switchSettingsTab(tab) {
-  const strip = elements.settingsTabStrip;
-  if (!strip) return;
-  strip.querySelectorAll(".settings-tab").forEach((button) => {
-    const active = button.dataset.tab === tab;
-    button.classList.toggle("is-active", active);
-    button.setAttribute("aria-selected", active ? "true" : "false");
-  });
-  elements.settingsDialog.querySelectorAll(".settings-tab-panel").forEach((panel) => {
-    panel.hidden = panel.dataset.tabPanel !== tab;
-  });
-  // On mobile the rail is a ≡ flyout — collapse it once a section is chosen.
-  elements.settingsDialog.dataset.tabs = "closed";
-  elements.settingsTabsButton?.setAttribute("aria-expanded", "false");
-}
-
-function openSettingsDialog(tab = "appearance") {
-  if (!elements.settingsDialog.open) {
-    elements.settingsDialog.showModal();
-  }
+// ── Settings (Shell's dialog; its sections and fields are their owners') ──
+function openSettingsDialog(tab = "appearance") { shell.settingsDialog.open(tab); }
+// The Agent and Collaboration sections, until their owners add them (S4a-2).
+shell.settingsDialog.addPage({ id: "agent", label: "Agent", order: 20, body: document.querySelector("#settings-panel-agent") });
+shell.settingsDialog.addPage({ id: "collaboration", label: "Collaboration", order: 30, body: document.querySelector("#settings-panel-collaboration") });
+shell.settingsDialog.onOpen(() => {
   applyAgentSettingsControls();
   chat?.mcpControls.render();
-  // Re-check the agent backend so the Agent tab shows fresh status.
+  // Re-check the agent backend so the Agent section shows fresh status.
   void refreshChatStatus({ silent: true });
-  switchSettingsTab(tab);
-}
+});
+// The diagram's settings (until diagrams are a module).
+shell.settingsDialog.fields.add({ page: "appearance", id: "bmap-generate-scope-select", order: 110, label: "Bmap Generate Context",
+  key: "bmapGenerateScope", control: "select", options: [["connected", "Connected nodes only"], ["all", "All linked files"]],
+  read: (s) => (s.bmapGenerateScope === "all" ? "all" : "connected") });
+shell.settingsDialog.fields.add({ page: "appearance", id: "bmap-auto-pan-input", order: 120, label: "Auto-pan diagrams to content on open",
+  key: "bmapAutoPan", control: "checkbox", read: (s) => s.bmapAutoPan !== false });
+// The frame's layout follows its settings, whoever changed them.
+settings.on((view, changed) => {
+  if (changed.some((key) => ["explorer", "explorerAnchor", "preview"].includes(key))) persistSettings();
+});
 
 // ── Agent settings ──────────────────────────────────────────────────────────
 elements.agentRunnerSelect?.addEventListener("change", (event) => {
@@ -2233,29 +2192,6 @@ bindAgentField(elements.agentApiKeyInput, "agentApiKey");
 bindAgentField(elements.agentApiUrlInput, "agentApiUrl");
 bindAgentField(elements.agentModelInput, "agentModel");
 
-elements.settingsTabsButton?.addEventListener("click", () => {
-  const open = elements.settingsDialog.dataset.tabs !== "open";
-  elements.settingsDialog.dataset.tabs = open ? "open" : "closed";
-  elements.settingsTabsButton.setAttribute("aria-expanded", String(open));
-});
-
-// While the section rail is open (mobile flyout), a tap anywhere outside it
-// should just dismiss the rail — not activate the half-covered control behind
-// it. Capture the click first so it never reaches that control.
-elements.settingsDialog?.addEventListener("click", (event) => {
-  if (elements.settingsDialog.dataset.tabs !== "open") return;
-  if (elements.settingsTabStrip?.contains(event.target)) return;
-  if (elements.settingsTabsButton?.contains(event.target)) return;
-  event.preventDefault();
-  event.stopPropagation();
-  elements.settingsDialog.dataset.tabs = "closed";
-  elements.settingsTabsButton?.setAttribute("aria-expanded", "false");
-}, true);
-
-elements.settingsTabStrip?.querySelectorAll(".settings-tab").forEach((button) => {
-  button.addEventListener("click", () => switchSettingsTab(button.dataset.tab));
-});
-
 elements.statusServerItem.addEventListener("click", () => {
   logDebug("action", "Status bar: open collaboration settings");
   openSettingsDialog("collaboration");
@@ -2266,7 +2202,6 @@ elements.statusPresenceItem.addEventListener("click", () => {
   // The session/presence panel lives in the explorer sidebar — reveal it.
   if (settings.explorer !== "expanded") {
     settings.change({ explorer: "expanded" });
-    if (elements.explorerSelect) elements.explorerSelect.value = settings.explorer;
     persistSettings();
   }
   // Revealing a collapsed section would show only its header, so open it.
@@ -2298,181 +2233,6 @@ elements.debugCopyButton.addEventListener("click", () => {
 });
 
 elements.debugClearButton.addEventListener("click", () => dialogs().clearDebugLog());
-
-elements.themeSelect.addEventListener("change", (event) => {
-  settings.change({ theme: event.target.value });
-  applyTheme(settings);
-  logDebug("action", "Theme changed", settings.theme);
-});
-
-elements.explorerSelect.addEventListener("change", (event) => {
-  settings.change({ explorer: event.target.value });
-  persistSettings();
-  logDebug("action", "Explorer setting changed", settings.explorer);
-});
-
-elements.previewSelect.addEventListener("change", (event) => {
-  settings.change({ preview: event.target.value });
-  persistSettings();
-  logDebug("action", "Preview setting changed", settings.preview);
-});
-
-elements.wordWrapSelect.addEventListener("change", (event) => {
-  settings.change({ wordWrap: event.target.value === "on" });
-  persistSettings();
-  render(controller.getProject());
-  logDebug("action", "Word wrap changed", settings.wordWrap ? "on" : "off");
-});
-
-// ---- Source typography (Appearance) --------------------------------------
-// A font the browser can't find is silently replaced by the fallback, so choosing
-// it looked like "the setting does nothing". Detect availability the way font
-// detection libraries do: draw a sample with the candidate falling back to each
-// generic family; if its width never differs from the bare generic, the browser
-// substituted it — it isn't installed on this device. Results are cached.
-// (fontInstalledCache / fontProbeContext / fontProbeBase live with the other
-// module state near the top: syncSourceFontControls() runs at boot, long before
-// this line, and would otherwise hit them inside their temporal dead zone.)
-function isFontInstalled(name) {
-  const clean = String(name ?? "").replace(/["'\\]/g, "").trim();
-  if (!clean) return true;
-  if (fontInstalledCache.has(clean)) return fontInstalledCache.get(clean);
-  if (!fontProbeContext) fontProbeContext = document.createElement("canvas").getContext("2d");
-  const ctx = fontProbeContext;
-  if (!ctx) return true; // no canvas — don't claim it's missing
-  const sample = "mmmmmmmmmmlli10OoWW@#";
-  const measure = (font) => {
-    ctx.font = `72px ${font}`;
-    return ctx.measureText(sample).width;
-  };
-  const installed = ["monospace", "serif", "sans-serif"].some((generic) => {
-    if (fontProbeBase[generic] == null) fontProbeBase[generic] = measure(generic);
-    return measure(`"${clean}", ${generic}`) !== fontProbeBase[generic];
-  });
-  fontInstalledCache.set(clean, installed);
-  return installed;
-}
-
-// Mark curated fonts that aren't on this device, so the list reflects what will
-// actually render. A missing font stays selectable only if it's the saved choice.
-function annotateSourceFontOptions() {
-  const select = elements.sourceFontFamilySelect;
-  if (!select) return;
-  for (const option of select.options) {
-    if (!option.value || option.value === "__custom__") continue;
-    if (!option.dataset.label) option.dataset.label = option.textContent;
-    const installed = isFontInstalled(option.value);
-    option.textContent = installed ? option.dataset.label : `${option.dataset.label} (not installed)`;
-    option.disabled = !installed && select.value !== option.value;
-  }
-}
-
-// Tell the user which font is really on screen, and warn plainly when the chosen
-// one is missing instead of letting it silently fall back.
-function renderSourceFontStatus() {
-  const el = elements.sourceFontStatus;
-  if (!el) return;
-  const family = String(settings.sourceFontFamily ?? "").trim();
-  const missing = family && !isFontInstalled(family);
-  el.classList.toggle("is-warning", Boolean(missing));
-  el.textContent = !family
-    ? "Using the default monospace font."
-    : missing
-      ? `\u201c${family}\u201d isn\u2019t installed on this device, so the default monospace font is shown instead.`
-      : `Using ${family}.`;
-}
-// Reflect the stored settings into the controls. A family that isn't one of the
-// curated options is shown as "Custom…" with the name in the text field.
-function syncSourceFontControls() {
-  if (elements.sourceFontSizeSelect) {
-    const size = clampSourceFontSize(settings.sourceFontSize);
-    const listed = [...elements.sourceFontSizeSelect.options].some((o) => Number(o.value) === size);
-    elements.sourceFontSizeSelect.value = String(listed ? size : 13);
-  }
-  const select = elements.sourceFontFamilySelect;
-  if (!select) return;
-  const family = String(settings.sourceFontFamily ?? "").trim();
-  const isCurated = [...select.options].some((o) => o.value === family && o.value !== "__custom__");
-  if (family && !isCurated) {
-    select.value = "__custom__";
-    if (elements.sourceFontCustomInput) elements.sourceFontCustomInput.value = family;
-  } else {
-    select.value = family;
-    if (elements.sourceFontCustomInput) elements.sourceFontCustomInput.value = "";
-  }
-  if (elements.sourceFontCustomRow) elements.sourceFontCustomRow.hidden = select.value !== "__custom__";
-  annotateSourceFontOptions();
-  renderSourceFontStatus();
-}
-
-// Persist + repaint after a typography change. Glyph metrics just changed, so
-// every measured overlay (caret, remote cursors, search highlights) and the
-// gutter's scroll sync must be recomputed.
-function applySourceFontChange(label) {
-  persistSettings();
-  applyEditorFont(settings);
-  render(controller.getProject());
-  redrawRemoteCursors();
-  if (editorParts.isFindOpen()) computeSearchMatches({ keepCaret: true });
-  syncEditorScroll();
-  syncSourceFontControls(); // refresh availability labels + the status line
-  logDebug("action", "Source typography changed", label);
-}
-
-elements.sourceFontSizeSelect?.addEventListener("change", (event) => {
-  settings.change({ sourceFontSize: clampSourceFontSize(event.target.value) });
-  applySourceFontChange(`${settings.sourceFontSize}px`);
-});
-
-elements.sourceFontFamilySelect?.addEventListener("change", (event) => {
-  if (event.target.value === "__custom__") {
-    // Reveal the field and wait for a name — don't clear the current font yet.
-    if (elements.sourceFontCustomRow) elements.sourceFontCustomRow.hidden = false;
-    elements.sourceFontCustomInput?.focus();
-    return;
-  }
-  if (elements.sourceFontCustomRow) elements.sourceFontCustomRow.hidden = true;
-  if (elements.sourceFontCustomInput) elements.sourceFontCustomInput.value = "";
-  settings.change({ sourceFontFamily: event.target.value });
-  applySourceFontChange(settings.sourceFontFamily || "default");
-});
-
-// Commit on blur/Enter rather than each keystroke, so a half-typed name doesn't
-// repaint the editor on every character.
-elements.sourceFontCustomInput?.addEventListener("change", (event) => {
-  settings.change({ sourceFontFamily: String(event.target.value ?? "").trim() });
-  applySourceFontChange(settings.sourceFontFamily || "default");
-});
-
-elements.indentStyleSelect.addEventListener("change", (event) => {
-  settings.change({ indentStyle: event.target.value });
-  persistSettings();
-  logDebug("action", "Indent style changed", settings.indentStyle);
-});
-
-elements.bmapGenerateScopeSelect.addEventListener("change", (event) => {
-  settings.change({ bmapGenerateScope: event.target.value === "all" ? "all" : "connected" });
-  persistSettings();
-  logDebug("action", "Bmap generate scope changed", settings.bmapGenerateScope);
-});
-
-elements.autoSaveInput?.addEventListener("change", (event) => {
-  settings.change({ autoSave: event.target.checked });
-  logDebug("action", "Auto-save setting changed", settings.autoSave ? "on" : "off");
-  if (settings.autoSave) workspace.saving.scheduleAutoSave();
-});
-elements.formatToolbarInput?.addEventListener("change", (event) => {
-  settings.change({ showFormatToolbar: event.target.checked });
-  persistSettings();
-  refreshFormatToolbar();
-  logDebug("action", "Format toolbar setting changed", settings.showFormatToolbar ? "on" : "off");
-});
-
-elements.bmapAutoPanInput?.addEventListener("change", (event) => {
-  settings.change({ bmapAutoPan: event.target.checked });
-  persistSettings();
-  logDebug("action", "Bmap auto-pan setting changed", settings.bmapAutoPan ? "on" : "off");
-});
 
 window.addEventListener("resize", () => {
   cancelMobileGesture();

@@ -25,6 +25,7 @@ import { defineModule } from "../../kernel/index.js";
 import { DIFF_TAB_ID, EMPTY_VIEW, createView } from "./service/view.js";
 import { EMPTY_MARKS, createMarks } from "./service/marks.js";
 import { createSurface } from "./adapters/surface.js";
+import { addEditorSettings, applyEditorFont } from "./adapters/settings-fields.js";
 
 export { TOOLBAR_SPECS, buildTableSnippet, getEditorToolbarFormat, renderEditorFormatToolbar } from "./adapters/format-toolbar.js";
 export { collectMarkdownReferences, extractMarkdownLinks, parseMarkdownInlineElements, renderMarkdown } from "./model/markdown.js";
@@ -32,6 +33,9 @@ export { escapeHtmlAttribute } from "./model/html.js";
 export { getRelativePath, getRelativeProjectPath, normalizePath } from "./model/paths.js";
 export { forgetViewStates } from "./adapters/resume.js";
 export { DIFF_TAB_ID };
+export { clampSourceFontSize, cssFontFamily } from "./model/font.js";
+
+const FONT_KEYS = ["sourceFontSize", "sourceFontFamily"];
 
 export default defineModule({
   name: "editor",
@@ -52,6 +56,11 @@ export default defineModule({
     const view = createView(ctx.state(EMPTY_VIEW));
     // Marks on files' lines, tabs and explorer rows, put by other modules (the agent's applied edits).
     const marks = createMarks(ctx.state(EMPTY_MARKS));
+    // Its settings in Settings → Appearance; the font follows them from the start.
+    const shell = ctx.use("shell");
+    addEditorSettings({ dialog: shell.settingsDialog, settings: shell.settings });
+    applyEditorFont(shell.settings);
+    shell.settings.on((view, changed) => { if (changed.some((key) => FONT_KEYS.includes(key))) applyEditorFont(view); });
     // The source editor, find, autocomplete, links, the tab strips and the preview:
     // created once main.js attaches what no module owns yet (surface.js, PORT).
     let parts = null;

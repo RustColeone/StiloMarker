@@ -89,6 +89,11 @@ export default defineModule({
     const parts = ctx.registry({ validate: checkParts });
     // Saving: this browser's copy, a local project's folder, auto-save, Save.
     const saving = createSaving({ store: () => store, settings: ctx.use("shell").settings, log: (...parts) => ctx.log(...parts) });
+    // Auto-save is a setting in Settings → Appearance; turned on, it saves what is waiting.
+    const shell = ctx.use("shell");
+    shell.settingsDialog.fields.add({ page: "appearance", id: "auto-save-input", order: 100, key: "autoSave", control: "checkbox",
+      label: "Auto-save (cloud, local workspace & browser cache; real folders still use Ctrl+S)", read: (s) => s.autoSave !== false });
+    shell.settings.on((view, changed) => { if (changed.includes("autoSave") && view.autoSave && store) saving.scheduleAutoSave(); });
     function openProject(project) {
       if (store) throw new Error("The workspace already has a project open; use project().replaceProject()");
       store = createProjectController(project);
