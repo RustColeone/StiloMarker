@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-18 · release `v0.1.55` (not deployed; v0.1.53 is live)
+Last updated: 2026-10-18 · release `v0.1.56` (not deployed; v0.1.53 is live)
 
 ---
 
@@ -68,6 +68,24 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.56: Shell owns the settings
+
+Step S3o-1. Nothing changes for users, except that changing one setting no
+longer writes back every other setting this tab holds.
+
+- The settings were one object that 64 places in 5 files changed directly
+  and then saved whole. Shell owns them now: code reads a read-only view and
+  changes them with `settings.change({ key: value })`. A plain assignment
+  throws, so a missed one fails loudly instead of changing settings unseen.
+- Each change saves only the keys it changed. Before, any save wrote this
+  tab's whole copy, so changing the theme in one tab could undo a font or
+  sign-in another tab had saved since. The revision a cloud copy was last in
+  sync with is still saved only with its workspace (or by the guarded merge
+  when the page goes away), as before.
+- Every change is in the Trace tab with the file and line that made it; the
+  PIN, the stored password and an API key show as "(hidden)".
+- `lastLocalProject` was written but had no default; it has one now.
 
 ### v0.1.55: the Explorer module
 

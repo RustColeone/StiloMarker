@@ -21,7 +21,7 @@ export function createLayout(app) {
 
   function toggleExplorer() {
     if (app.isMobileLayout()) { toggleMobileExplorer(); return; }
-    app.settings.explorer = app.settings.explorer === "collapsed" ? "expanded" : "collapsed";
+    app.settings.change({ explorer: app.settings.explorer === "collapsed" ? "expanded" : "collapsed" });
     app.elements.explorerSelect.value = app.settings.explorer;
     app.persistSettings();
     app.logDebug("action", "Explorer toggled", app.settings.explorer);
@@ -30,7 +30,7 @@ export function createLayout(app) {
   function setExplorerAnchor(mode) {
     const next = mode === "floating" ? "floating" : "docked";
     if (app.settings.explorerAnchor === next) return;
-    app.settings.explorerAnchor = next;
+    app.settings.change({ explorerAnchor: next });
     if (app.elements.explorerAnchorSelect) app.elements.explorerAnchorSelect.value = next;
     app.persistSettings();
     app.logDebug("action", "Explorer anchor changed", next);
@@ -48,17 +48,17 @@ export function createLayout(app) {
     if (app.elements.explorerPanel?.contains(target)) return;
     if (app.elements.explorerToggleButton?.contains(target)) return;
     if (app.elements.explorerContextMenu?.contains(target)) return;
-    app.settings.explorer = "collapsed";
+    app.settings.change({ explorer: "collapsed" });
     if (app.elements.explorerSelect) app.elements.explorerSelect.value = app.settings.explorer;
     app.persistSettings();
   }
 
   function togglePreview() {
     if (app.isMobileLayout()) { selectMobilePane(mobileView === "preview" ? "source" : "preview"); return; }
-    app.settings.preview = app.settings.preview === "hidden" ? "shown" : "hidden";
+    app.settings.change({ preview: app.settings.preview === "hidden" ? "shown" : "hidden" });
     // Never collapse both panes.
     if (app.settings.preview === "hidden" && app.settings.source === "hidden") {
-      app.settings.source = "shown";
+      app.settings.change({ source: "shown" });
     }
     app.elements.previewSelect.value = app.settings.preview;
     app.persistSettings();
@@ -67,10 +67,10 @@ export function createLayout(app) {
 
   function toggleSource() {
     if (app.isMobileLayout()) { selectMobilePane(mobileView === "source" ? "preview" : "source"); return; }
-    app.settings.source = app.settings.source === "hidden" ? "shown" : "hidden";
+    app.settings.change({ source: app.settings.source === "hidden" ? "shown" : "hidden" });
     // Collapsing the source is a reading-focused mode — keep the preview visible.
     if (app.settings.source === "hidden" && app.settings.preview === "hidden") {
-      app.settings.preview = "shown";
+      app.settings.change({ preview: "shown" });
       app.elements.previewSelect.value = "shown";
     }
     app.persistSettings();
@@ -82,7 +82,7 @@ export function createLayout(app) {
       selectMobilePane(mobileView === "chat" ? "source" : "chat");
       return;
     }
-    app.settings.chatPanel = app.settings.chatPanel === "hidden" ? "shown" : "hidden";
+    app.settings.change({ chatPanel: app.settings.chatPanel === "hidden" ? "shown" : "hidden" });
     app.persistSettings();
     if (app.settings.chatPanel === "shown") {
       void app.refreshChatStatus({ silent: true });

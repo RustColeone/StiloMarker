@@ -1,5 +1,5 @@
 import { startModules, ignore, ignored } from "./kernel/index.js";
-import shellModule from "./modules/shell/index.js";
+import shellModule, { patchStoredSettings } from "./modules/shell/index.js";
 import fileTypesModule, { builtinTypes } from "./modules/file-types/index.js";
 import workspaceModule from "./modules/workspace/index.js";
 import identityModule from "./modules/identity/index.js";
@@ -17,7 +17,7 @@ import syncModule, { createCollaborationRuntime } from "./modules/sync/index.js"
 import { sendGenerationRequest } from "./services/chat-api-service.js";
 import { PERSONA_SUFFIX, parsePersona, personaTemplate } from "./services/persona-service.js";
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
-import { applyEditorFont, applyTheme, clampSourceFontSize, loadSettings, patchStoredSettings, saveSettings, signInSettings } from "./services/settings-service.js";
+import { applyEditorFont, applyTheme, clampSourceFontSize, signInSettings } from "./services/settings-service.js";
 import { loadProject, saveProject } from "./services/storage-service.js";
 import { browseServer, createProjectServer, deleteServer, exportProjectServer, importProjectServer, mkdirServer, normalizeServerUrl, saveUserState, uploadAsset } from "./services/sync-service.js";
 import { loadTemplateProject } from "./services/template-service.js";
@@ -272,7 +272,8 @@ const modules = await startModules([shellModule, fileTypesModule, workspaceModul
 });
 const { shell, workspace, identity } = modules;
 
-const settings = loadSettings();
+// The app's settings: Shell's. Read them here; change them with settings.change({ key: value }).
+const settings = shell.settings;
 shell.server.configure({ address: () => settings.serverUrl });
 identity.attach(signInSettings(settings));
 const storedProject = loadProject();
@@ -1077,7 +1078,7 @@ const collaboration = createCollaborationRuntime({
     // device may push its copy over the server or must pull. Persisted on unload;
     // if it's ever missing we treat this device as stale and pull (fail-safe).
     if (nextState.status === "connected" && syncMode.get().workspaceMode === "synced" && settings.syncedProjectId) {
-      settings.syncedRevision = syncState.revision;
+      settings.change({ syncedRevision: syncState.revision });
     }
     syncState.displayName = nextState.displayName ?? null;
     syncState.clientId = nextState.clientId ?? null;
@@ -1204,8 +1205,7 @@ switchWorkspaceMode = function (nextMode) {
     const kept = syncMode.leave();
     if (kept) controller.replaceProject(kept);
     // The local project is no longer a cloud workspace's content.
-    settings.syncedProjectId = null;
-    saveSettings(settings);
+    settings.change({ syncedProjectId: null });
     render(controller.getProject());
   }
 };
@@ -1399,7 +1399,7 @@ function toggleSidebarPanel(id) {
     if (!(key in next)) next[key] = sidebarPanelCollapsed(key);
   }
   next[id] = !next[id];
-  settings.sidebarPanels = next;
+  settings.change({ sidebarPanels: next });
   persistSettings();  // -> applyWorkspaceSettings -> renderSidebarPanels
   logDebug("action", "Sidebar section toggled", `${id} ${next[id] ? "collapsed" : "expanded"}`);
 }
@@ -1486,7 +1486,7 @@ elements.workspaceSplitter.addEventListener("pointerdown", (event) => {
     const shellRect = elements.workspaceShell.getBoundingClientRect();
     const activityWidth = 48;
     const nextWidth = clamp(moveEvent.clientX - shellRect.left - activityWidth, 180, Math.max(240, shellRect.width - 320));
-    settings.sidebarWidth = Math.round(nextWidth);
+    settings.change({ sidebarWidth: Math.round(nextWidth) });
     persistSettings();
     renderEditorContent(getEditorText());
     syncEditorScroll();
@@ -1501,8 +1501,7 @@ elements.editorSplitter.addEventListener("pointerdown", (event) => {
   startPointerResize(event, (moveEvent) => {
     const gridRect = elements.editorGrid.getBoundingClientRect();
     const nextWidth = clamp(gridRect.right - moveEvent.clientX, 280, Math.max(320, gridRect.width - 280));
-    settings.previewWidthCustomized = true;
-    settings.previewWidth = Math.round(nextWidth);
+    settings.change({ previewWidthCustomized: true, previewWidth: Math.round(nextWidth) });
     persistSettings();
     renderEditorContent(getEditorText());
     syncEditorScroll();
@@ -1517,7 +1516,7 @@ elements.chatSplitter.addEventListener("pointerdown", (event) => {
   startPointerResize(event, (moveEvent) => {
     const shellRect = elements.workspaceShell.getBoundingClientRect();
     const nextWidth = clamp(shellRect.right - moveEvent.clientX, 300, Math.max(340, shellRect.width - 360));
-    settings.chatWidth = Math.round(nextWidth);
+    settings.change({ chatWidth: Math.round(nextWidth) });
     persistSettings();
     renderEditorContent(getEditorText());
     syncEditorScroll();
@@ -1534,7 +1533,7 @@ elements.debugSplitter.addEventListener("pointerdown", (event) => {
     const footerHeight = 24;
     const bottom = workspaceRect.bottom - footerHeight;
     const nextHeight = clamp(bottom - moveEvent.clientY, 120, Math.max(180, workspaceRect.height - 220));
-    settings.debugPanelHeight = Math.round(nextHeight);
+    settings.change({ debugPanelHeight: Math.round(nextHeight) });
     persistSettings();
     renderEditorContent(getEditorText());
     syncEditorScroll();
@@ -1576,7 +1575,6 @@ function setStatusDot(node, kind) {
 }
 
 function persistSettings() {
-  saveSettings(settings);
   applyWorkspaceSettings();
 }
 
@@ -2211,8 +2209,7 @@ shell.commands.add({ id: "workspace.import-folder", title: "Import Local Folder"
       : await importDirectory();
     controller.replaceProject(project);
     if (project.sourceMode === "opfs" && project.localPath) {
-      settings.lastLocalProject = { path: project.localPath };
-      saveSettings(settings);
+      settings.change({ lastLocalProject: { path: project.localPath } });
     }
     editorView.reset(project);
     publishSnapshot();
@@ -2366,7 +2363,7 @@ function toggleSource(...args) { return layout().toggleSource(...args); }
 function isMobileLayout() {
   return window.matchMedia(`(max-width: ${MOBILE_MAX_WIDTH}px)`).matches;
 }function toggleLogPanel() {
-  settings.debugPanel = !settings.debugPanel;
+  settings.change({ debugPanel: !settings.debugPanel });
   persistSettings();
   logDebug("action", settings.debugPanel ? "Log panel enabled" : "Log panel disabled");
 }
@@ -2607,28 +2604,25 @@ function openSettingsDialog(tab = "appearance") {
 
 // ── Agent settings ──────────────────────────────────────────────────────────
 elements.agentRunnerSelect?.addEventListener("change", (event) => {
-  settings.agentRunner = event.target.value === "browser" ? "browser" : "server";
-  saveSettings(settings);
+  settings.change({ agentRunner: event.target.value === "browser" ? "browser" : "server" });
   applyAgentSettingsControls();
   logDebug("action", "Character replies run", settings.agentRunner);
 });
 elements.agentSourceSelect?.addEventListener("change", (event) => {
-  settings.agentSource = event.target.value === "own" ? "own" : "server";
-  saveSettings(settings);
+  settings.change({ agentSource: event.target.value === "own" ? "own" : "server" });
   applyAgentSettingsControls();
   logDebug("action", "Agent source changed", settings.agentSource);
   void refreshChatStatus({ silent: true });
 });
 function bindAgentField(inputEl, key) {
   inputEl?.addEventListener("input", (event) => {
-    settings[key] = event.target.value;
+    settings.change({ [key]: event.target.value });
   });
   // Persist + re-evaluate availability only when the field loses focus, so we
   // don't thrash on every keystroke of a pasted key.
   inputEl?.addEventListener("change", () => {
-    settings[key] = settings[key]?.trim() ?? "";
+    settings.change({ [key]: settings[key]?.trim() ?? "" });
     inputEl.value = settings[key];
-    saveSettings(settings);
     applyAgentSettingsStatus();
     void refreshChatStatus({ silent: true });
   });
@@ -2669,7 +2663,7 @@ elements.statusServerItem.addEventListener("click", () => {
 elements.statusPresenceItem.addEventListener("click", () => {
   // The session/presence panel lives in the explorer sidebar — reveal it.
   if (settings.explorer !== "expanded") {
-    settings.explorer = "expanded";
+    settings.change({ explorer: "expanded" });
     if (elements.explorerSelect) elements.explorerSelect.value = settings.explorer;
     persistSettings();
   }
@@ -2704,26 +2698,25 @@ elements.debugCopyButton.addEventListener("click", () => {
 elements.debugClearButton.addEventListener("click", () => dialogs().clearDebugLog());
 
 elements.themeSelect.addEventListener("change", (event) => {
-  settings.theme = event.target.value;
-  saveSettings(settings);
+  settings.change({ theme: event.target.value });
   applyTheme(settings);
   logDebug("action", "Theme changed", settings.theme);
 });
 
 elements.explorerSelect.addEventListener("change", (event) => {
-  settings.explorer = event.target.value;
+  settings.change({ explorer: event.target.value });
   persistSettings();
   logDebug("action", "Explorer setting changed", settings.explorer);
 });
 
 elements.previewSelect.addEventListener("change", (event) => {
-  settings.preview = event.target.value;
+  settings.change({ preview: event.target.value });
   persistSettings();
   logDebug("action", "Preview setting changed", settings.preview);
 });
 
 elements.wordWrapSelect.addEventListener("change", (event) => {
-  settings.wordWrap = event.target.value === "on";
+  settings.change({ wordWrap: event.target.value === "on" });
   persistSettings();
   render(controller.getProject());
   logDebug("action", "Word wrap changed", settings.wordWrap ? "on" : "off");
@@ -2825,7 +2818,7 @@ function applySourceFontChange(label) {
 }
 
 elements.sourceFontSizeSelect?.addEventListener("change", (event) => {
-  settings.sourceFontSize = clampSourceFontSize(event.target.value);
+  settings.change({ sourceFontSize: clampSourceFontSize(event.target.value) });
   applySourceFontChange(`${settings.sourceFontSize}px`);
 });
 
@@ -2838,44 +2831,43 @@ elements.sourceFontFamilySelect?.addEventListener("change", (event) => {
   }
   if (elements.sourceFontCustomRow) elements.sourceFontCustomRow.hidden = true;
   if (elements.sourceFontCustomInput) elements.sourceFontCustomInput.value = "";
-  settings.sourceFontFamily = event.target.value;
+  settings.change({ sourceFontFamily: event.target.value });
   applySourceFontChange(settings.sourceFontFamily || "default");
 });
 
 // Commit on blur/Enter rather than each keystroke, so a half-typed name doesn't
 // repaint the editor on every character.
 elements.sourceFontCustomInput?.addEventListener("change", (event) => {
-  settings.sourceFontFamily = String(event.target.value ?? "").trim();
+  settings.change({ sourceFontFamily: String(event.target.value ?? "").trim() });
   applySourceFontChange(settings.sourceFontFamily || "default");
 });
 
 elements.indentStyleSelect.addEventListener("change", (event) => {
-  settings.indentStyle = event.target.value;
+  settings.change({ indentStyle: event.target.value });
   persistSettings();
   logDebug("action", "Indent style changed", settings.indentStyle);
 });
 
 elements.bmapGenerateScopeSelect.addEventListener("change", (event) => {
-  settings.bmapGenerateScope = event.target.value === "all" ? "all" : "connected";
+  settings.change({ bmapGenerateScope: event.target.value === "all" ? "all" : "connected" });
   persistSettings();
   logDebug("action", "Bmap generate scope changed", settings.bmapGenerateScope);
 });
 
 elements.autoSaveInput?.addEventListener("change", (event) => {
-  settings.autoSave = event.target.checked;
-  saveSettings(settings);
+  settings.change({ autoSave: event.target.checked });
   logDebug("action", "Auto-save setting changed", settings.autoSave ? "on" : "off");
   if (settings.autoSave) scheduleAutoSave();
 });
 elements.formatToolbarInput?.addEventListener("change", (event) => {
-  settings.showFormatToolbar = event.target.checked;
+  settings.change({ showFormatToolbar: event.target.checked });
   persistSettings();
   refreshFormatToolbar();
   logDebug("action", "Format toolbar setting changed", settings.showFormatToolbar ? "on" : "off");
 });
 
 elements.bmapAutoPanInput?.addEventListener("change", (event) => {
-  settings.bmapAutoPan = event.target.checked;
+  settings.change({ bmapAutoPan: event.target.checked });
   persistSettings();
   logDebug("action", "Bmap auto-pan setting changed", settings.bmapAutoPan ? "on" : "off");
 });
@@ -2899,29 +2891,25 @@ window.matchMedia(`(max-width: ${MOBILE_MAX_WIDTH}px)`)
   });
 
 elements.serverUrlInput.addEventListener("change", (event) => {
-  settings.serverUrl = event.target.value.trim();
-  saveSettings(settings);
+  settings.change({ serverUrl: event.target.value.trim() });
   void refreshChatStatus({ silent: true });
 });
 
 elements.serverPinInput.addEventListener("change", (event) => {
-  settings.serverPin = event.target.value;
-  saveSettings(settings);
+  settings.change({ serverPin: event.target.value });
 });
 
 elements.displayNameInput.addEventListener("change", (event) => {
-  settings.displayName = event.target.value.trim();
-  saveSettings(settings);
+  settings.change({ displayName: event.target.value.trim() });
 });
 
 elements.autoReconnectInput?.addEventListener("change", (event) => {
-  settings.autoReconnect = event.target.checked;
+  settings.change({ autoReconnect: event.target.checked });
   if (!settings.autoReconnect) {
     // Disabling auto-reconnect cancels any pending retry and forgets the session.
     clearReconnectTimer();
-    settings.wasConnected = false;
+    settings.change({ wasConnected: false });
   }
-  saveSettings(settings);
   logDebug("action", "Auto-reconnect setting changed", settings.autoReconnect ? "on" : "off");
 });
 // ---- Cloud file browser, accounts and hosting (./features/cloud-browser.js) ----
@@ -3144,8 +3132,7 @@ async function establishConnection({ auto = false } = {}) {
   reconnectState.connecting = true;
   try {
     await collaboration.connect(settings.serverUrl, settings.serverPin, settings.displayName);
-    settings.wasConnected = true;
-    saveSettings(settings);
+    settings.change({ wasConnected: true });
     reconnectState.attempts = 0;
     clearReconnectTimer();
     flashStatusPanel("success", elements.sharedSessionSection);
@@ -3181,10 +3168,7 @@ function scheduleReconnect() {
 
 elements.connectServerButton.addEventListener("click", async () => {
   // Persist the latest field values before connecting so reconnect uses them.
-  settings.serverUrl = elements.serverUrlInput.value.trim();
-  settings.serverPin = elements.serverPinInput.value;
-  settings.displayName = elements.displayNameInput.value.trim();
-  saveSettings(settings);
+  settings.change({ serverUrl: elements.serverUrlInput.value.trim(), serverPin: elements.serverPinInput.value, displayName: elements.displayNameInput.value.trim() });
   // Ask the user to confirm before making any network call or touching the workspace.
   const confirmed = await showAcceptConnectionDialog();
   if (!confirmed) return;

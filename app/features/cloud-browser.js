@@ -3,7 +3,6 @@
 // main.js creates this on first use and passes its shared values in `app`.
 import { seedDefaultProject } from "../modules/workspace/index.js";
 import { openProjectOpfs, supportsOpfs } from "../services/opfs-service.js";
-import { saveSettings } from "../services/settings-service.js";
 import { createProjectServer, pingServer } from "../services/sync-service.js";
 
 export function createCloudBrowser(app) {
@@ -11,8 +10,7 @@ export function createCloudBrowser(app) {
     try {
       app.logDebug("action", "Server ping requested", app.elements.serverUrlInput.value.trim());
       const result = await pingServer(app.elements.serverUrlInput.value);
-      app.settings.serverUrl = app.elements.serverUrlInput.value.trim();
-      saveSettings(app.settings);
+      app.settings.change({ serverUrl: app.elements.serverUrlInput.value.trim() });
       app.syncState.status = app.syncState.status === "connected" ? "connected" : "reachable";
       if (!silent) {
         app.syncState.detail = typeof result === "string" ? result : (result.message || "Server responded to ping.");
@@ -104,7 +102,7 @@ export function createCloudBrowser(app) {
         // Ephemeral guest session hosting the current local project.
         app.mode.share(app.controller.getProject());
         const { guestPin } = await app.collaboration.hostForGuests(app.settings.serverUrl, displayName);
-        app.settings.wasConnected = false;
+        app.settings.change({ wasConnected: false });
         app.elements.hostPinText.textContent = `Sharing! Guests join with PIN ${guestPin} (enter it under PIN above). Ends when you disconnect.`;
         app.logDebug("action", "Hosting ephemeral session", `pin=${guestPin}`);
       } else {
@@ -124,9 +122,7 @@ export function createCloudBrowser(app) {
         // The freshly-opened workspace is empty; push our local project into it.
         app.controller.replaceProject(localProject);
         await app.collaboration.publishSnapshot(localProject);
-        app.settings.wasConnected = false;
-        app.settings.lastWorkspace = { team, path: created.path };
-        saveSettings(app.settings);
+        app.settings.change({ wasConnected: false, lastWorkspace: { team, path: created.path } });
         app.elements.hostPinText.textContent = `Published to ${created.id}.`;
         app.logDebug("action", "Published local project to team workspace", created.id);
       }
@@ -230,9 +226,7 @@ export function createCloudBrowser(app) {
       app.collaboration.disconnect("Opened a local workspace.");
     }
     app.mode.leave(); // the kept project is not brought back: another one opens
-    app.settings.wasConnected = false;
-    app.settings.lastLocalProject = { path: entry.path };
-    saveSettings(app.settings);
+    app.settings.change({ wasConnected: false, lastLocalProject: { path: entry.path } });
     app.controller.replaceProject(project);
     app.view.reset(project);
     if (app.elements.openServerDialog?.open) app.elements.openServerDialog.close();
@@ -570,10 +564,7 @@ export function createCloudBrowser(app) {
       app.collaboration.disconnect("The open workspace was deleted.");
     }
     app.mode.leave(); // the kept project is not brought back: another one opens
-    app.settings.lastLocalProject = null;
-    app.settings.lastWorkspace = null;
-    app.settings.wasConnected = false;
-    saveSettings(app.settings);
+    app.settings.change({ lastLocalProject: null, lastWorkspace: null, wasConnected: false });
     const project = seedDefaultProject();
     app.controller.replaceProject(project);
     app.view.reset(project);
@@ -705,9 +696,7 @@ export function createCloudBrowser(app) {
       await app.collaboration.openWorkspace(app.settings.serverUrl, app.identity.token(), team, created.path, { reason: "create-project" });
       app.controller.replaceProject(localProject);
       await app.collaboration.publishSnapshot(localProject);
-      app.settings.wasConnected = false;
-      app.settings.lastWorkspace = { team, path: created.path };
-      saveSettings(app.settings);
+      app.settings.change({ wasConnected: false, lastWorkspace: { team, path: created.path } });
       app.logDebug("action", "Published local project to cloud", created.id);
       if (app.elements.openServerDialog?.open) app.elements.openServerDialog.close();
       app.render(app.controller.getProject());
@@ -855,11 +844,10 @@ export function createCloudBrowser(app) {
         }
       );
       if (options.isCurrent && !options.isCurrent()) throw Object.assign(new Error("Session restoration cancelled."), { status: 499 });
-      app.settings.wasConnected = false; // cloud opens are account-driven, not PIN auto-reconnect
-      app.settings.lastWorkspace = { team, path }; // reopened on next boot
-      app.settings.syncedProjectId = `${team}/${path}`; // the local project IS this cloud workspace now
-      app.settings.syncedRevision = app.collaboration.getRevision?.() ?? null; // base for the next open
-      saveSettings(app.settings);
+      app.settings.change({ wasConnected: false }); // cloud opens are account-driven, not PIN auto-reconnect
+      app.settings.change({ lastWorkspace: { team, path } }); // reopened on next boot
+      app.settings.change({ syncedProjectId: `${team}/${path}` }); // the local project IS this cloud workspace now
+      app.settings.change({ syncedRevision: app.collaboration.getRevision?.() ?? null }); // base for the next open
       app.logDebug("action", reconcileLocal ? "Reopened cloud workspace (restored local)" : "Opened cloud workspace", `${team}/${path}`);
       if (app.elements.openServerDialog?.open) app.elements.openServerDialog.close();
       app.render(app.controller.getProject());
@@ -900,14 +888,13 @@ export function createCloudBrowser(app) {
     // Cross-device resume: if THIS browser has no remembered workspace but the
     // account opened one elsewhere, adopt it so boot / the welcome page can resume.
     if (!app.settings.lastWorkspace?.team && result.lastWorkspace?.team) {
-      app.settings.lastWorkspace = { team: result.lastWorkspace.team, path: result.lastWorkspace.path };
+      app.settings.change({ lastWorkspace: { team: result.lastWorkspace.team, path: result.lastWorkspace.path } });
     }
     // The collaborator display name defaults to the username.
     if (!app.settings.displayName) {
-      app.settings.displayName = result.username;
+      app.settings.change({ displayName: result.username });
       if (app.elements.displayNameInput) app.elements.displayNameInput.value = result.username;
     }
-    saveSettings(app.settings);
     app.logDebug("response", "Account login succeeded", `${result.username} teams=${(result.teams ?? []).join(",")}`);
     if (!silent) app.flashStatusPanel("success", app.elements.accountSection);
     renderAccountControls();
@@ -947,9 +934,7 @@ export function createCloudBrowser(app) {
     // Identity forgets the stored password and that this server knew the
     // account, so it is not signed in again by itself (the username stays).
     app.identity.signOut();
-    app.settings.lastWorkspace = null;
-    app.settings.syncedProjectId = null;
-    saveSettings(app.settings);
+    app.settings.change({ lastWorkspace: null, syncedProjectId: null });
     app.elements.browserList?.replaceChildren();
     app.logDebug("action", "Account logged out");
     renderAccountControls();

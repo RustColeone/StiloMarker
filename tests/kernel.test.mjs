@@ -119,5 +119,8 @@ test("state: changes go through named actions, are traced, and cannot happen beh
   failing();
   const apis = await startModules([defineModule({ name: "m", level: 1, uses: [], owns: {}, start: (ctx) => ({ state: ctx.state({ n: 0 }) }) })]);
   apis.m.state.set("count", { n: 1 });
+  const keys = createState("shell", { pin: "", theme: "light" }, log, { secret: ["pin"] });
+  keys.set("sign in", { pin: "1234", theme: "dark" });
+  assert.equal(log.entries().at(-1).detail, "pin=(hidden) theme=dark", "a secret's value never reaches the trace");
   assert.ok(trace.entries().some((e) => e.kind === "state" && e.owner === "m" && e.message === "count"));
 });

@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { clampSourceFontSize, cssFontFamily, loadSettings, patchStoredSettings } from "../app/services/settings-service.js";
+import { clampSourceFontSize, cssFontFamily } from "../app/services/settings-service.js";
+import { loadSettings, patchStoredSettings } from "../app/modules/shell/adapters/settings-store.js";
 
 test("settings: source font size clamps to a sane range", () => {
   assert.equal(clampSourceFontSize(13), 13);

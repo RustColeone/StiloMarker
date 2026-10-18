@@ -19,7 +19,11 @@
 //   server.url()                                   its normalized address
 //   server.request(path, { method, query, body, failure, timeout })
 // Static, for code from before the restructure: normalizeServerUrl,
-// parseResponse, throwForResponse.
+// parseResponse, throwForResponse, patchStoredSettings (a guarded merge into
+// the stored settings, for the page going away).
+//   settings                 the app's settings, read-only (settings.theme);
+//                            settings.change({ key: value }, why?) saves a change,
+//                            settings.on(listener) hears them (service/settings.js)
 // Errors nothing caught go into the kernel's trace; `stiloTrace()` in the
 // console prints it.
 import { defineModule } from "../../kernel/index.js";
@@ -29,8 +33,11 @@ import { createKeyboard } from "./adapters/keyboard.js";
 import { createMenuBar } from "./adapters/menu-bar.js";
 import { createServer } from "./adapters/server.js";
 import { watchPageErrors } from "./adapters/page-errors.js";
+import { loadSettings, patchStoredSettings } from "./adapters/settings-store.js";
+import { SECRET_SETTINGS, createSettingsView, keysToSave } from "./service/settings.js";
 
 export { normalizeServerUrl, parseResponse, throwForResponse } from "./adapters/server.js";
+export { patchStoredSettings } from "./adapters/settings-store.js";
 
 export default defineModule({
   name: "shell",
@@ -40,10 +47,19 @@ export default defineModule({
     registries: ["commands", "menus"],
     elements: ["menu bar", "notice dialog", "confirm dialog", "input dialog", "form dialog", "toasts"],
     connection: ["the server address"],
-    diagnostics: ["uncaught errors", "stiloTrace()"]
+    diagnostics: ["uncaught errors", "stiloTrace()"],
+    state: ["the app's settings"]
   },
   start(ctx) {
     watchPageErrors();
+    // The settings: loaded once; each change saves just the keys it changed
+    // (keysToSave), so a tab never writes back what another tab changed since.
+    const settingsState = ctx.state(loadSettings(), { secret: SECRET_SETTINGS });
+    settingsState.on((current, changed) => {
+      const keys = keysToSave(changed);
+      if (keys.length) patchStoredSettings(() => Object.fromEntries(keys.map((key) => [key, current[key]])));
+    });
+    const settings = createSettingsView(settingsState);
     const { commands, menus, run } = createCommands(ctx);
     const dialogs = createDialogs();
 
@@ -90,7 +106,8 @@ export default defineModule({
       form,
       toast: dialogs.showToast,
       copyText: dialogs.copyText,
-      server: createServer()
+      server: createServer(),
+      settings
     };
   }
 });

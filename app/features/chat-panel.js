@@ -15,7 +15,6 @@ import { createMcpControls } from "../services/mcp-ui-service.js";
 import { charactersView, parsePersona, personaSummary } from "../modules/characters/index.js";
 import { createCloudChats, createLocalChats, loadChatsView } from "../modules/chats/index.js";
 import { chosenModel, groupByProvider, runDirectReply } from "../modules/models/index.js";
-import { saveSettings } from "../services/settings-service.js";
 import { normalizeServerUrl } from "../services/sync-service.js";
 import { query } from "../ui/dom.js";
 import { ignored } from "../kernel/index.js";
@@ -772,8 +771,7 @@ export function createChatPanel(deps) {
     const current = getActiveChatThread();
     if (current) current.draft = elements.chatInput.value;
     chatState.tab = next;
-    settings.chatTab = next;
-    saveSettings(settings);
+    settings.change({ chatTab: next });
     chatState.renderedThreadId = null; // reload the other tab's draft
     chatState.shouldScrollToBottom = true;
     cacheChatWorkspace();
@@ -1550,8 +1548,7 @@ export function createChatPanel(deps) {
 
   elements.chatModelSelect?.addEventListener("change", (event) => {
     chatState.selectedModel = event.target.value;
-    settings.chatModel = event.target.value;
-    saveSettings(settings);
+    settings.change({ chatModel: event.target.value });
     logDebug("action", "Agent model changed", settings.chatModel);
     renderChatPanel(controller.getProject()); // the badge names the model's provider
   });

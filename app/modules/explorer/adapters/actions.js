@@ -23,7 +23,7 @@ export function createActions(app) {
       return;
     }
     if (action.startsWith("filter-")) {
-      app.settings.explorerFilter = action.replace("filter-", "");
+      app.settings.change({ explorerFilter: action.replace("filter-", "") });
       app.persistSettings();
       app.render(app.controller.getProject());
       return;
