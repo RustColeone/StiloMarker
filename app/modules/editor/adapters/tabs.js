@@ -443,10 +443,11 @@ export function createTabs(app) {
       close.setAttribute("aria-hidden", "true");
 
       const filePath = getPath(project, fileId);
-      if (app.agentPendingDecorations.has(filePath)) {
+      const mark = app.marks.get(filePath);
+      if (mark) {
         const badge = document.createElement("span");
-        badge.className = "tab-agent-badge";
-        badge.title = "Pending agent edit — review in chat";
+        badge.className = `tab-mark-badge is-${mark.kind}`;
+        badge.title = mark.title ?? "";
         tab.append(icon, title, badge, dirty, close);
       } else {
         tab.append(icon, title, dirty, close);

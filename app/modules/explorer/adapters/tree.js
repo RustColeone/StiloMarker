@@ -14,7 +14,7 @@ function getFileIconClass(node) {
 
 const isExpandableFile = (node) => node.kind === "file" && builtinTypes.typeOf(node.name)?.expandable === true;
 
-function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenPart, onToggleFolder, onSelectNode, onAction, canPasteTarget, canPreviewFile, canManagePreview, onDragNodeStart, onDragPartStart, getFilterMode, getAssetPreviewSrc, listParts, getPartAdder, getSelectedTarget }) {
+function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenPart, onToggleFolder, onSelectNode, onAction, canPasteTarget, canPreviewFile, canManagePreview, onDragNodeStart, onDragPartStart, getFilterMode, getAssetPreviewSrc, listParts, getPartAdder, getSelectedTarget, markOf = () => null }) {
   let menuTarget = null;
   let currentProject = null;
   let activeMenuMode = null;
@@ -416,11 +416,11 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
   // sub-pixel correction, which read as the explorer creeping up on every key.
   let renderedSignature = null;
 
-  function treeSignature(project, rows, pendingPaths, filterMode) {
+  function treeSignature(project, rows, filterMode) {
     const selected = getSelectedTarget?.() ?? { nodeId: ROOT_ID, partId: null };
     const parts = [project?.name ?? "", filterMode, selected.nodeId ?? "", selected.partId ?? ""];
     for (const { node, depth, path } of rows) {
-      parts.push(node.id, node.kind, node.name, depth, path, node.expanded ? 1 : 0, pendingPaths.has(path) ? 1 : 0);
+      parts.push(node.id, node.kind, node.name, depth, path, node.expanded ? 1 : 0, markOf(path)?.kind ?? "");
       if (builtinTypes.isImage(node.name)) {
         // Data-URL sources can be huge; their length and ends identify them.
         const src = String(getAssetPreviewSrc?.(node.id) ?? "");
@@ -435,11 +435,11 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
     return parts.join("\u0001");
   }
 
-  function render(project, pendingPaths = new Set()) {
+  function render(project) {
     currentProject = project;
     const filterMode = getFilterMode?.() ?? "all";
     const rows = listVisibleNodes(project).filter(({ node }) => nodeMatchesFilter(node, filterMode));
-    const signature = treeSignature(project, rows, pendingPaths, filterMode);
+    const signature = treeSignature(project, rows, filterMode);
     if (signature === renderedSignature && container.childElementCount > 0) return;
     renderedSignature = signature;
     // A real rebuild still must not move the list: keep the reader's place.
@@ -460,8 +460,8 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       const row = document.createElement("div");
       const selectedTarget = getSelectedTarget?.() ?? { nodeId: ROOT_ID, partId: null };
       const isSelectedNode = selectedTarget.nodeId === node.id && !selectedTarget.partId;
-      const hasPendingEdit = pendingPaths.has(path);
-      row.className = `tree-row${isSelectedNode ? " is-active" : ""}${hasPendingEdit ? " is-agent-pending" : ""}`;
+      const mark = markOf(path); // another module's mark on the file (editor.marks)
+      row.className = `tree-row${isSelectedNode ? " is-active" : ""}${mark ? ` is-${mark.kind}` : ""}`;
       row.setAttribute("role", "treeitem");
       row.dataset.nodeId = node.id;
       row.title = path;

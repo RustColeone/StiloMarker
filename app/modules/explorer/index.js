@@ -8,7 +8,7 @@
 //
 // API: attach(port) -> parts: creates the explorer, given what main.js still
 // provides (adapters/surface.js lists it: PORT); parts() -> the same
-// functions (renderTree(project, decorated), getSelectedParent(project),
+// functions (renderTree(project), getSelectedParent(project),
 // createFileInFolder(kind, parentId, name), handleExplorerAction...).
 import { defineModule } from "../../kernel/index.js";
 import { createSurface } from "./adapters/surface.js";

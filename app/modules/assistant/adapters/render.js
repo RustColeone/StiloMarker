@@ -3,12 +3,13 @@
 // Part of the Assistant's Agent page: `app` is its shared context (panel.js).
 import { UPDATE_FILE } from "../../workspace/index.js";
 import { editsHtml, editsLabel } from "../model/edits.js";
+import { textDiffHunks } from "../model/review.js";
 import { renderMarkdown } from "../../editor/index.js";
 import { groupByProvider } from "../../models/index.js";
 import { contextChipsHtml, paintConversation } from "../../shell/index.js";
 
 export function createRender(app) {
-  const { agentPendingDecorations, buildTextDiffHunks, elements, escapeHtmlAttribute, isMobileLayout, workspace, updateEditorAgentBar, identity, chatsPage, chatState, isOwnBatch, agent, agentStatus, chatMarkdownCache, pageOpen, OP_ICONS, STATUS_WORDS } = app;
+  const { elements, escapeHtmlAttribute, isMobileLayout, workspace, identity, chatsPage, chatState, isOwnBatch, agent, agentStatus, chatMarkdownCache, pageOpen, OP_ICONS, STATUS_WORDS } = app;
   function renderProposalDiff(op) {
     if (op.type === "create-file" && op.generatedImage) {
       const src = app.generatedImageUrl(op.generatedImage);
@@ -31,7 +32,7 @@ export function createRender(app) {
       return `<div class="proposal-diff-rename"><span class="proposal-diff-del">${escapeHtmlAttribute(op.path ?? "")}</span> → <span class="proposal-diff-add">${escapeHtmlAttribute(op.parentPath ?? "(root)")}/${escapeHtmlAttribute(op.path?.split("/").pop() ?? "")}</span></div>`;
     }
     if (op.type === UPDATE_FILE && typeof op.preImage === "string") {
-      const hunks = buildTextDiffHunks(op.preImage, op.content ?? "");
+      const hunks = textDiffHunks(op.preImage, op.content ?? "");
       if (hunks.length === 0) {
         return `<div class="proposal-diff-warning">No content change detected.</div>`;
       }
@@ -97,7 +98,7 @@ export function createRender(app) {
 
     let batchButtons = "";
     {
-      const hasDecorations = [...agentPendingDecorations.values()].some((d) => d.batchId === (message.batchId ?? ""));
+      const hasDecorations = app.batchMarked(message.batchId ?? "");
       const jumpBtn = hasDecorations
         ? `<button class="proposal-btn proposal-btn-jump" type="button" data-batch-jump="${batchId}" title="Jump to change in editor">↕</button>`
         : "";
@@ -374,8 +375,8 @@ export function createRender(app) {
     elements.chatInput.disabled = false;
     chatState.shouldScrollToBottom = false;
 
-    // Refresh in-editor agent bar whenever proposal state changes.
-    updateEditorAgentBar();
+    // The Keep / Drop bar over a marked file follows the proposal's state.
+    app.editorParts()?.drawMarkBar();
   }
 
   // The compose footer's status: a coloured dot, a word only when something

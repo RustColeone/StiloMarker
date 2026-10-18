@@ -69,6 +69,20 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.65: the agent's edit review is the Assistant's
+
+Step S3d-4b. Nothing changes for users.
+
+- The marks an applied agent edit leaves until Keep or Drop (its lines tinted,
+  a badge on the tab and the explorer row, the Keep / Drop bar over the file)
+  are now an Editor extension point, `editor.marks`, which any module can
+  use; the Explorer reads it as well.
+- The rest of the review moved from `main.js` into the Assistant: which lines
+  an edit changed, the copies of the project Drop uses to bring back deleted
+  files, and jumping to a change. `main.js` is 180 lines shorter.
+- `write-path-browser.py` now checks the marks appear on the edited line, the
+  tab, the explorer row and the bar, and go after Drop.
+
 ### v0.1.64: the Agent page is the Assistant module's
 
 Step S3d-4a. One fix for users:

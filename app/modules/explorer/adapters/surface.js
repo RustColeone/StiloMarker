@@ -79,6 +79,7 @@ export function createSurface({ port, workspace, editor, shell, sync }) {
     container: app.elements.explorerTree,
     surface: app.elements.explorerPanel,
     contextMenu: app.elements.explorerContextMenu,
+    markOf: (path) => editor.marks.get(path),
     onOpenFile(fileId) {
       app.openFileFromExplorer(fileId);
     },
@@ -160,6 +161,8 @@ export function createSurface({ port, workspace, editor, shell, sync }) {
       return getSelectedTarget();
     }
   });
+  // A mark put on a file or taken off shows on its row at once.
+  editor.marks.on(() => app.tree.render(app.controller.getProject()));
   installExplorerEvents(app);
 
   // The explorer's target: the part open in the source editor, else the selected node.
@@ -173,7 +176,7 @@ export function createSurface({ port, workspace, editor, shell, sync }) {
       .filter(([name, d]) => typeof d.value === "function" && !EDITOR.includes(name)
         && !["notify", "showToast", "confirmAction", "promptForName", "render", "updateStatus"].includes(name))
       .map(([name, d]) => [name, d.value])),
-    // The tree, with the files that have an agent edit waiting marked.
-    renderTree: (project, decorated) => app.tree.render(project, decorated)
+    // The tree, with other modules' marks on files (editor.marks).
+    renderTree: (project) => app.tree.render(project)
   });
 }

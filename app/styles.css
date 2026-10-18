@@ -1171,7 +1171,7 @@ p {
   font-size: 12px;
 }
 
-.tab-agent-badge {
+.tab-mark-badge {
   display: inline-block;
   width: 6px;
   height: 6px;
@@ -1557,7 +1557,7 @@ p {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
-.editor-gutter-agent-mark {
+.editor-gutter-mark {
   font-size: 10px;
   line-height: 1;
   margin-right: 2px;
@@ -1574,7 +1574,7 @@ p {
 }
 
 /* Floating in-editor agent action bar (Keep/Drop or Accept/Dismiss) */
-.editor-agent-bar {
+.editor-mark-bar {
   position: absolute;
   top: 8px;
   right: 8px;

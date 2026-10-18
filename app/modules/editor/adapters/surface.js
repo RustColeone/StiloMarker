@@ -28,13 +28,13 @@ import { createTabs } from "./tabs.js";
 export const PORT = [
   "collaboration", "workspaceMode", "settings", "elements", "identity", "saveUserState",
   "logDebug", "traceEditorEvent", "formatEditorDebugValue",
-  "commentsForActiveFile", "scheduleCommentReanchor", "agentPendingDecorations", "updateEditorAgentBar",
+  "commentsForActiveFile", "scheduleCommentReanchor",
   "imageSrcFor", "closeDiff", "diffState", "formatSnapshotTime",
   "renderWelcomeState", "setMobileExplorerOpen", "togglePreview",
   "scope", "isReadOnly", "onDrop"
 ];
 
-export function createSurface({ port, view, previews, highlighters, toolbars, workspace, shell }) {
+export function createSurface({ port, view, marks, previews, highlighters, toolbars, workspace, shell }) {
   const missing = PORT.filter((name) => !(name in port));
   if (missing.length) throw new Error(`editor.attach: the port lacks ${missing.join(", ")}`);
   const composing = { now: false }; // an IME composition is under way
@@ -88,7 +88,7 @@ export function createSurface({ port, view, previews, highlighters, toolbars, wo
     // The file the editor's text is (what its DOM shows), or null.
     shown: { fileId: null },
 
-    view, previews, highlighters, toolbars, parts: workspace.parts, DIFF_TAB_ID,
+    view, marks, previews, highlighters, toolbars, parts: workspace.parts, DIFF_TAB_ID,
     escapeHtmlAttribute, normalizePath, getRelativePath, getRelativeProjectPath,
     notify: (message) => shell.notify(message),
     showToast: (message, options) => shell.toast(message, options),
@@ -128,6 +128,12 @@ export function createSurface({ port, view, previews, highlighters, toolbars, wo
   add(createResume(app));
   add(createShowFile(app, composing));
   installEditorEvents(app, composing);
+  // A mark put or taken off shows at once: the shown file's lines and bar, the tabs' badges.
+  marks.on(() => {
+    const file = app.controller.getActiveFile();
+    if (file) app.renderEditorContent(file.content);
+    app.renderTabs(app.controller.getProject());
+  });
   app.editorLinkTooltip.el.addEventListener("mouseleave", () => app.hideLinkTooltip(true));
 
   function isPreviewableFileName(name) {
@@ -163,7 +169,19 @@ export function createSurface({ port, view, previews, highlighters, toolbars, wo
       if (cached) app.remoteCursorsByClient.set(clientId, { ...cached, selStart: position, selEnd: position });
     },
     // Settings changed the glyph metrics: measure again on the next render.
-    forgetMeasurements() { app.editorRenderCache.metricsKey = ""; }
+    forgetMeasurements() { app.editorRenderCache.metricsKey = ""; },
+    // Show a marked file (editor.marks) in the source editor, scrolled to its first marked line.
+    revealMark(path) {
+      const mark = marks.get(path);
+      const nodeId = mark ? getNodeIdByPath(app.controller.getProject(), path) : null;
+      if (!nodeId) return false;
+      app.openSourceTab(nodeId);
+      app.controller.setActiveFile(nodeId);
+      // After the re-render settles (one paint).
+      requestAnimationFrame(() => app.elements.editorContent.querySelector(`.editor-line.is-${mark.kind}`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" }));
+      return true;
+    }
   });
 }
 

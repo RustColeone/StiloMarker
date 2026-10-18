@@ -15,16 +15,15 @@ import { installEvents } from "./events.js";
 import { createMcpControls } from "./mcp.js";
 import { createProposals } from "./proposals.js";
 import { createRender } from "./render.js";
+import { createReview } from "./review.js";
 import { createThreads } from "./threads.js";
 import { createTurns } from "./turns.js";
 
 // What main.js attaches (assistant.load(port)); each entry should move to an
 // owner, or become an extension point, and leave this list.
 export const PORT = [
-  "cloudWorkspaceTarget", "agentCheckpoints", "agentPendingDecorations", "buildTextDiffHunks", "captureAgentCheckpoint",
-  "chatConnectionInfo", "chatWorkspaceKey", "clearAgentDecorations", "elements", "isMobileLayout", "jumpToAgentChange",
-  "logDebug", "openSettingsDialog", "personaAvatarSrc", "registerAgentDecorations", "storedProject",
-  "updateEditorAgentBar", "chatsPage"
+  "cloudWorkspaceTarget", "chatConnectionInfo", "chatWorkspaceKey", "elements", "isMobileLayout",
+  "logDebug", "openSettingsDialog", "personaAvatarSrc", "storedProject", "chatsPage"
 ];
 
 export function createAgentPanel({ port, shell, workspace, identity, sync, editor, explorer, models }) {
@@ -42,6 +41,7 @@ export function createAgentPanel({ port, shell, workspace, identity, sync, edito
     showConfirmDialog: (options) => shell.confirm(options),
     promptForName: (message, value = "", options = {}) => shell.input({ title: message, message, value, submitLabel: "Save", ...options }),
     openFileFromExplorer: (fileId) => editor.parts().openFileFromExplorer(fileId),
+    editorParts: () => editor.parts(),
     createFileInFolder: (...args) => explorer.parts().createFileInFolder(...args),
     getSelectedParent: (...args) => explorer.parts().getSelectedParent(...args),
     // Who asked for an agent batch: this tab while it is open (not the sync client id,
@@ -97,6 +97,7 @@ export function createAgentPanel({ port, shell, workspace, identity, sync, edito
       app[name] = fn;
     }
   };
+  add(createReview(app, editor));
   add(createConversations(app));
   add(createThreads(app));
   add(createRender(app));

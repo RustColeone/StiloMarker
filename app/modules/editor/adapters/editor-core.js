@@ -23,7 +23,7 @@ const API = [
     "forwardEditorWheel", "getEditorLineHeight", "getEditorSelection", "getEditorText",
     "getEditorTextOffsetFromPoint", "handleEditorKeydown", "handleIndentKeydown", "loadEditorContent",
     "notifyEditorChanged", "onRemoteCursor", "pruneRemoteCursors", "pushEditorHistoryState",
-    "queueExternalEditorSelection", "refreshFormatToolbar", "renderEditorContent", "renderRemoteCursors",
+    "queueExternalEditorSelection", "refreshFormatToolbar", "renderEditorContent", "drawMarkBar", "renderRemoteCursors",
     "replaceEditorRange", "resetEditorHistory", "scheduleOverviewRuler", "scheduleRemoteCursorRender",
     "setEditorSelection", "showEditorDropCaret", "syncEditorScroll", "textOffsetToDomPosition",
     "transformEditorSelection"

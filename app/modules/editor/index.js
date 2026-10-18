@@ -8,7 +8,8 @@
 // API: attach(port) -> parts: creates the source editor, find, autocomplete,
 // links, the tab strips and the preview, given what main.js still provides
 // (adapters/surface.js lists it: PORT); parts() -> the same functions.
-// previews, highlighters, toolbars (extension points) and view: what the
+// previews, highlighters, toolbars and marks (extension points; marks are
+// what other modules put on files' lines, service/marks.js) and view: what the
 // editor shows, read with view.get() and changed only through its actions
 // (service/view.js): reset(project), pick(nodeId, partId?), select(nodeId),
 // openTab/closeTab(pane, fileId), moveTab(pane, id, targetId, after?),
@@ -22,6 +23,7 @@
 // DIFF_TAB_ID (the preview's diff tab).
 import { defineModule } from "../../kernel/index.js";
 import { DIFF_TAB_ID, EMPTY_VIEW, createView } from "./service/view.js";
+import { EMPTY_MARKS, createMarks } from "./service/marks.js";
 import { createSurface } from "./adapters/surface.js";
 
 export { TOOLBAR_SPECS, buildTableSnippet, getEditorToolbarFormat, renderEditorFormatToolbar } from "./adapters/format-toolbar.js";
@@ -37,7 +39,7 @@ export default defineModule({
   uses: ["shell", "file-types", "workspace"],
   owns: { elements: ["the source editor", "the formatting toolbar", "the find bar", "the tab strips", "the preview pane"],
     state: ["the open tabs", "what each pane shows", "the explorer selection"],
-    registries: ["previews", "highlighters", "toolbars"], rules: ["Markdown rendering"] },
+    registries: ["previews", "highlighters", "toolbars", "marks"], rules: ["Markdown rendering"] },
   start(ctx) {
     // Previews of other kinds of file: { id, matches(file), render(target, project, file, tools), cacheable?, printHtml? }
     const previews = ctx.registry();
@@ -48,15 +50,17 @@ export default defineModule({
     const open = (registry) => ({ add: registry.add, get: registry.get, all: registry.all });
     // What the editor shows (tabs, the preview's file and part, the selection): read view.get(), change it through its actions.
     const view = createView(ctx.state(EMPTY_VIEW));
+    // Marks on files' lines, tabs and explorer rows, put by other modules (the agent's applied edits).
+    const marks = createMarks(ctx.state(EMPTY_MARKS));
     // The source editor, find, autocomplete, links, the tab strips and the preview:
     // created once main.js attaches what no module owns yet (surface.js, PORT).
     let parts = null;
     function attach(port) {
       if (parts) throw new Error("editor: already attached");
-      parts = createSurface({ port, view, previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars),
+      parts = createSurface({ port, view, marks, previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars),
         workspace: ctx.use("workspace"), shell: ctx.use("shell") });
       return parts;
     }
-    return { previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars), view, attach, parts: () => parts };
+    return { previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars), marks, view, attach, parts: () => parts };
   }
 });

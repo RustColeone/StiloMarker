@@ -3,8 +3,9 @@ backend, two signed-in browsers in one cloud workspace, the agent's reply
 mocked in Anna's browser.
 
 Checks: Bob types while Anna's agent edits the same file elsewhere, and both
-changes end up everywhere (browsers and the file on disk); Drop undoes only
-the agent's line and keeps Bob's; an agent edit to a line Bob changed is
+changes end up everywhere (browsers and the file on disk); the applied edit
+is marked (its line, tab, explorer row and Keep/Drop bar) until Drop; Drop
+undoes only the agent's line and keeps Bob's; an agent edit to a line Bob changed is
 refused (stale) instead of overwriting him; a Snapshots restore goes out as a
 patch; no browser sends a whole-file update-file for a text file.
 """
@@ -144,10 +145,18 @@ async def main():
 
         # Drop undoes only the agent's line. Both Drop buttons (the chat card's
         # and the editor bar's) belong to the asker; the editor bar's is used.
+        # The applied edit is marked (the Editor's marks): its line, the tab, the explorer row, the bar.
+        marked = await a.evaluate('''() => ({
+            lines: [...document.querySelectorAll("#editor-content .editor-line")].flatMap((l, i) => l.classList.contains("is-agent-pending") ? [i] : []),
+            tab: document.querySelectorAll(".tab-mark-badge.is-agent-pending").length > 0,
+            row: document.querySelectorAll('.tree-row.is-agent-pending[title="notes.md"]').length,
+            bar: !document.querySelector("#editor-mark-bar").hidden })''')
+        assert marked == {"lines": [1], "tab": True, "row": 1, "bar": True}, marked
         disabled = await a.evaluate('[...document.querySelectorAll(\'[data-batch-drop-final="b1"]\')].map((b) => b.disabled)')
         assert disabled and not any(disabled), disabled
         await a.click('.agent-bar-drop[data-batch-drop-final="b1"]')
         await converge([a, bb], ORIGINAL.replace("five", "five (bob)"))
+        await a.wait_for_function('!document.querySelector("#editor-content .is-agent-pending, .tab-mark-badge, .tree-row.is-agent-pending") && document.querySelector("#editor-mark-bar").hidden')
         ok("Drop undoes only the agent's change and keeps Bob's")
 
         # Bob changes line three; the agent's edit of that same line is refused.

@@ -68,7 +68,7 @@ const elements = {
   editorScroll: query("#editor-scroll"),
   editorContent: query("#editor-content"),
   editorDropCaret: query("#editor-drop-caret"),
-  editorAgentBar: query("#editor-agent-bar"),
+  editorMarkBar: query("#editor-mark-bar"),
   editorCursors: query("#editor-cursors"),
   editorSearchHighlights: query("#editor-search-highlights"),
   editorFindBar: query("#editor-find-bar"),
@@ -302,8 +302,7 @@ var editorParts = modules.editor.attach({
   settings, elements, identity,
   saveUserState: (ws, openFiles, activeFile) => saveUserState(settings.serverUrl, identity.token(), ws.team, ws.path, openFiles, activeFile),
   logDebug, traceEditorEvent, formatEditorDebugValue,
-  commentsForActiveFile, scheduleCommentReanchor, updateEditorAgentBar,
-  get agentPendingDecorations() { return agentPendingDecorations; },
+  commentsForActiveFile, scheduleCommentReanchor,
   imageSrcFor, closeDiff, formatSnapshotTime,
   get diffState() { return diffState; },
   renderWelcomeState, setMobileExplorerOpen, togglePreview,
@@ -415,161 +414,6 @@ const debugTabs = [...elements.debugTabStrip.querySelectorAll(".debug-tab")].map
 
 
 
-// ---------------------------------------------------------------------------
-// Phase 5 — In-editor decoration state (applied agent ranges only)
-// ---------------------------------------------------------------------------
-
-// path → { lineStart: number, lineEnd: number, batchId: string }
-// Keyed by file path (not node id) for easy lookup inside renderEditorContent.
-const agentPendingDecorations = new Map();
-
-/**
- * Compute the inclusive line range [start, end] in newContent that differs
- * from preImage. Returns null when the content is identical.
- */
-function computeChangedLineRange(preImage, newContent) {
-  const oldLines = preImage.split("\n");
-  const newLines = newContent.split("\n");
-  let start = 0;
-  while (start < oldLines.length && start < newLines.length && oldLines[start] === newLines[start]) {
-    start++;
-  }
-  // If everything up to the shorter length matched and lengths are equal → no change.
-  if (oldLines.length === newLines.length && start === oldLines.length) return null;
-  let oldEnd = oldLines.length;
-  let newEnd = newLines.length;
-  while (oldEnd > start && newEnd > start && oldLines[oldEnd - 1] === newLines[newEnd - 1]) {
-    oldEnd--;
-    newEnd--;
-  }
-  return { lineStart: start, lineEnd: Math.max(start, newEnd - 1) };
-}
-
-/** Record decoration ranges for accepted ops and trigger a re-render. */
-function registerAgentDecorations(ops, batchId) {
-  const project = controller.getProject();
-  for (const op of ops) {
-    if (op.proposalState !== "accepted") continue;
-    if (op.type === "update-file" && typeof op.preImage === "string") {
-      const range = computeChangedLineRange(op.preImage, op.content ?? "");
-      if (range) {
-        agentPendingDecorations.set(op.path, { ...range, batchId });
-      }
-    } else if (op.type === "create-file") {
-      const lineCount = (op.content ?? "").split("\n").length;
-      const path = op.parentPath ? `${op.parentPath}/${op.name}` : op.name;
-      agentPendingDecorations.set(path, { lineStart: 0, lineEnd: Math.max(0, lineCount - 1), batchId });
-    }
-  }
-  // Re-render the editor so decorations are visible immediately.
-  const activeFile = controller.getActiveFile();
-  if (activeFile) {
-    renderEditorContent(activeFile.content);
-  }
-  // Refresh explorer and tabs so pending-edit indicators appear.
-  explorerParts.renderTree(project, new Set(agentPendingDecorations.keys()));
-  renderTabs(project);
-}
-
-/** Remove all decorations for a given batchId and re-render. */
-function clearAgentDecorations(batchId) {
-  let removed = false;
-  for (const [path, entry] of agentPendingDecorations) {
-    if (entry.batchId === batchId) {
-      agentPendingDecorations.delete(path);
-      removed = true;
-    }
-  }
-  if (removed) {
-    const activeFile = controller.getActiveFile();
-    if (activeFile) renderEditorContent(activeFile.content);
-    // Refresh explorer and tabs so pending-edit indicators are cleared.
-    const project = controller.getProject();
-    explorerParts.renderTree(project, new Set(agentPendingDecorations.keys()));
-    renderTabs(project);
-  }
-}
-
-/** Update (or hide) the floating in-editor agent action bar. */
-function updateEditorAgentBar() {
-  if (!elements.editorAgentBar) return;
-  const project = controller.getProject();
-  const activeFile = controller.getActiveFile();
-  if (!activeFile) { elements.editorAgentBar.hidden = true; return; }
-  const activeFilePath = getPath(project, activeFile.id);
-  const activeDecoration = agentPendingDecorations.get(activeFilePath);
-
-  if (activeDecoration) {
-    // Agent edits applied to this file — offer Keep / Drop review.
-    const { batchId } = activeDecoration;
-    const found = findBatchMessage(batchId);
-    if (!found) { elements.editorAgentBar.hidden = true; return; }
-    const isOriginator = chat?.isOwnBatch?.(found.msg) ?? true;
-    const attr = isOriginator ? "" : " disabled";
-    const bid = escapeHtmlAttribute(batchId);
-    elements.editorAgentBar.innerHTML =
-      `<span class="agent-bar-label">Agent edits applied</span>` +
-      `<button class="agent-bar-btn agent-bar-keep" type="button" data-batch-keep="${bid}"${attr} title="Finalise \u2014 keep agent changes">\u2713 Keep</button>` +
-      `<button class="agent-bar-btn agent-bar-drop" type="button" data-batch-drop-final="${bid}"${attr} title="Revert agent changes">\u2717 Drop</button>`;
-    elements.editorAgentBar.hidden = false;
-  } else {
-    elements.editorAgentBar.hidden = true;
-  }
-}
-
-/** Open the source tab for the first decorated file in a batch and scroll to the first tinted line. */
-function jumpToAgentChange(batchId) {
-  const project = controller.getProject();
-  for (const [path, entry] of agentPendingDecorations) {
-    if (entry.batchId !== batchId) continue;
-    const nodeId = getNodeIdByPath(project, path);
-    if (!nodeId) continue;
-    openSourceTab(nodeId);
-    controller.setActiveFile(nodeId);
-    // Scroll after the re-render settles (rAF gives the DOM one paint cycle).
-    requestAnimationFrame(() => {
-      const lines = elements.editorContent.querySelectorAll(".editor-line.is-agent-pending");
-      if (lines.length > 0) {
-        lines[0].scrollIntoView({ block: "center", behavior: "smooth" });
-      }
-    });
-    return;
-  }
-}
-
-/** Build a simple unified diff hunks array from two text strings. */
-function buildTextDiffHunks(oldText, newText) {
-  const oldLines = oldText.split("\n");
-  const newLines = newText.split("\n");
-  let start = 0;
-  while (start < oldLines.length && start < newLines.length && oldLines[start] === newLines[start]) {
-    start++;
-  }
-  let oldEnd = oldLines.length;
-  let newEnd = newLines.length;
-  while (oldEnd > start && newEnd > start && oldLines[oldEnd - 1] === newLines[newEnd - 1]) {
-    oldEnd--;
-    newEnd--;
-  }
-  const hunks = [];
-  const ctxCount = 2;
-  const ctxStart = Math.max(0, start - ctxCount);
-  for (let i = ctxStart; i < start; i++) {
-    hunks.push({ op: " ", text: oldLines[i] });
-  }
-  for (let i = start; i < oldEnd; i++) {
-    hunks.push({ op: "-", text: oldLines[i] });
-  }
-  for (let i = start; i < newEnd; i++) {
-    hunks.push({ op: "+", text: newLines[i] });
-  }
-  const ctxEnd = Math.min(oldLines.length, oldEnd + ctxCount);
-  for (let i = oldEnd; i < ctxEnd; i++) {
-    hunks.push({ op: " ", text: oldLines[i] });
-  }
-  return hunks;
-}
-
 // ---- Chat panel ------------------------------------------------------------
 // The Agent page is the Assistant module's. It loads the first time it is
 // needed — the panel shown or Settings open (Agent status) — so sessions that
@@ -583,9 +427,8 @@ function chatNeeded() {
 
 function loadChat() {
   chatLoading ??= modules.assistant.load({
-    cloudWorkspaceTarget, agentCheckpoints, agentPendingDecorations, buildTextDiffHunks, captureAgentCheckpoint, chatConnectionInfo,
-    chatWorkspaceKey, clearAgentDecorations, elements, isMobileLayout, jumpToAgentChange, logDebug, openSettingsDialog,
-    personaAvatarSrc, registerAgentDecorations, storedProject, updateEditorAgentBar, chatsPage
+    cloudWorkspaceTarget, chatConnectionInfo, chatWorkspaceKey, elements, isMobileLayout, logDebug, openSettingsDialog,
+    personaAvatarSrc, storedProject, chatsPage
   }).then((loaded) => {
     chat = loaded;
     chat.chatState.shouldScrollToBottom = true;
@@ -613,10 +456,6 @@ async function refreshChatStatus(options) {
 
 function applyAgentSettingsStatus() {
   chat?.applyAgentSettingsStatus();
-}
-
-function findBatchMessage(batchId) {
-  return chat?.findBatchMessage(batchId) ?? null;
 }
 
 /** Group chats name their characters by path; follow a rename or move of a
@@ -938,24 +777,6 @@ if (elements.autoReconnectInput) elements.autoReconnectInput.checked = settings.
 if (elements.formatToolbarInput) elements.formatToolbarInput.checked = Boolean(settings.showFormatToolbar);
 if (elements.autoSaveInput) elements.autoSaveInput.checked = settings.autoSave !== false;
 
-// Per-turn agent checkpoints (Phase 6 / subtask 6.1).
-// batchId → { project: deepClone, baseRevision: number }: what undoing a delete brings back
-// Capped at last 10 turns (subtask 6.5).
-const agentCheckpoints = new Map();
-const CHECKPOINT_MAX = 10;
-
-function captureAgentCheckpoint(batchId, baseRevision) {
-  agentCheckpoints.set(batchId, {
-    project: structuredClone(controller.getProject()),
-    baseRevision
-  });
-  // Trim to last CHECKPOINT_MAX entries.
-  if (agentCheckpoints.size > CHECKPOINT_MAX) {
-    const oldest = agentCheckpoints.keys().next().value;
-    agentCheckpoints.delete(oldest);
-  }
-}
-
 // The live session is Sync's; it is given what only the app can do, and
 // tells its news through events (modules/sync/index.js).
 const collaboration = modules.sync.attach({
@@ -1217,7 +1038,6 @@ function closeTabOverflowMenu(...args) { return editorParts.closeTabOverflowMenu
 function currentWorkspaceView(...args) { return editorParts.currentWorkspaceView(...args); }
 function ensureOpenTabs(...args) { return editorParts.ensureOpenTabs(...args); }
 function openFileFromExplorer(...args) { return editorParts.openFileFromExplorer(...args); }
-function openSourceTab(...args) { return editorParts.openSourceTab(...args); }
 function openTabOverflowMenu(...args) { return editorParts.openTabOverflowMenu(...args); }
 function printPreviewAsPdf(...args) { return editorParts.printPreviewAsPdf(...args); }
 function renderPreviewContent(...args) { return editorParts.renderPreviewContent(...args); }
@@ -1735,7 +1555,7 @@ function render(project) {
     return;
   }
   cancelDeferredRender(); // this full render covers whatever was pending
-  explorerParts.renderTree(project, new Set(agentPendingDecorations.keys()));
+  explorerParts.renderTree(project);
   updateStatus(project);
   workspace.saving.schedule(project); // this browser's copy, a local project's folder, auto-save (Workspace)
 }

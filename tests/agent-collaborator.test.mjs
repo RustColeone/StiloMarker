@@ -35,14 +35,15 @@ test("backend: agentic tool loop + proposal symbols present", async () => {
 });
 
 test("client: agent decoration, checkpoint, and proposal symbols present", async () => {
-  // Editor-side decorations and checkpoints stay in main.js; the Agent page
-  // (proposal cards, applying edits) is the Assistant module's.
-  let mainSource = await readFile(resolveFromRoot("app/main.js"), "utf8");
-  for (const part of ["panel", "render", "proposals", "turns"]) {
-    mainSource += await readFile(resolveFromRoot(`app/modules/assistant/adapters/${part}.js`), "utf8");
+  // The Agent page (proposal cards, applying edits) and its review (marks on
+  // the changed lines, checkpoints) are the Assistant module's; the marks are
+  // the Editor's extension point.
+  let mainSource = "";
+  for (const file of ["adapters/panel", "adapters/render", "adapters/proposals", "adapters/turns", "adapters/review", "model/review"]) {
+    mainSource += await readFile(resolveFromRoot(`app/modules/assistant/${file}.js`), "utf8");
   }
-  assert.match(mainSource, /agentPendingDecorations/);
-  assert.match(mainSource, /computeChangedLineRange/);
+  assert.match(mainSource, /editor\.marks/);
+  assert.match(mainSource, /changedLineRange/);
   assert.match(mainSource, /registerAgentDecorations/);
   assert.match(mainSource, /clearAgentDecorations/);
   assert.match(mainSource, /agentCheckpoints/);

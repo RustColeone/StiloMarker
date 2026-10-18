@@ -100,12 +100,12 @@ export function installRender(ed, app) {
     return columns;
   }
 
-  // Fold the per-line wrap indent and agent decoration into the line's own HTML,
+  // Fold the per-line wrap indent and a mark (its kind) into the line's own HTML,
   // so a line's HTML is a pure function of its content and can be compared.
-  function decorateEditorLineHtml(html, rawLine, decorated) {
+  function decorateEditorLineHtml(html, rawLine, markKind) {
     const indentCols = getLeadingIndentColumns(rawLine ?? "");
-    if (!indentCols && !decorated) return html;
-    const classes = `editor-line${indentCols > 0 ? " has-wrapped-indent" : ""}${decorated ? " is-agent-pending" : ""}`;
+    if (!indentCols && !markKind) return html;
+    const classes = `editor-line${indentCols > 0 ? " has-wrapped-indent" : ""}${markKind ? ` is-${markKind}` : ""}`;
     const style = indentCols > 0 ? ` style="--wrapped-indent-columns:${indentCols}"` : "";
     return html.replace('<div class="editor-line"', `<div class="${classes}"${style}`);
   }
@@ -158,12 +158,13 @@ export function installRender(ed, app) {
     const kind = app.editorHighlightKind(activeFile?.name);
 
     const activeFilePath = activeFile ? getPath(app.controller.getProject(), activeFile.id) : null;
-    const activeDecoration = activeFilePath ? app.agentPendingDecorations.get(activeFilePath) : null;
+    // Another module's mark on this file (editor.marks): its lines are tinted.
+    const activeDecoration = activeFilePath ? app.marks.get(activeFilePath) : null;
     const isDecorated = (index) => Boolean(activeDecoration)
       && index >= activeDecoration.lineStart && index <= activeDecoration.lineEnd;
     const lineHtml = app.highlightEditorLinesMemo(kind, lines).map((hit, index) => {
-      if (isDecorated(index)) return decorateEditorLineHtml(hit.html, lines[index], true);
-      if (hit.plain === null) hit.plain = decorateEditorLineHtml(hit.html, lines[index], false);
+      if (isDecorated(index)) return decorateEditorLineHtml(hit.html, lines[index], activeDecoration.kind);
+      if (hit.plain === null) hit.plain = decorateEditorLineHtml(hit.html, lines[index], null);
       return hit.plain;
     });
 
@@ -268,15 +269,15 @@ export function installRender(ed, app) {
     // Row strings depend on the row index, its height, comments and the agent
     // range. A changed line count renumbers every following row, so rebuild all;
     // otherwise only rows that were just (re)measured can differ.
-    const gutterEpoch = `${cache.els.length}|${activeDecoration ? `${activeDecoration.lineStart}-${activeDecoration.lineEnd}` : ""}|${comments.map((c) => `${c.line}:${c.author ?? ""}:${c.text}`).join("\u0001")}`;
+    const gutterEpoch = `${cache.els.length}|${activeDecoration ? `${activeDecoration.kind}:${activeDecoration.lineStart}-${activeDecoration.lineEnd}` : ""}|${comments.map((c) => `${c.line}:${c.author ?? ""}:${c.text}`).join("\u0001")}`;
     const gutterRow = (index) => {
       const decorated = isDecorated(index);
-      const marker = decorated ? `<span class="editor-gutter-agent-mark" aria-hidden="true">◦</span>` : "";
+      const marker = decorated ? `<span class="editor-gutter-mark" aria-hidden="true">◦</span>` : "";
       const comment = commentByLine.get(index);
       const commentMark = comment
         ? `<span class="editor-gutter-comment-mark" title="${app.escapeHtmlAttribute(`${comment.author ?? ""}: ${comment.text}`.trim())}" aria-hidden="true">●</span>`
         : "";
-      return `<div class="editor-gutter-line${decorated ? " is-agent-pending" : ""}${comment ? " has-comment" : ""}" data-line="${index}" style="height:${heights[index].toFixed(3)}px">${marker}${commentMark}${index + 1}</div>`;
+      return `<div class="editor-gutter-line${decorated ? ` is-${activeDecoration.kind}` : ""}${comment ? " has-comment" : ""}" data-line="${index}" style="height:${heights[index].toFixed(3)}px">${marker}${commentMark}${index + 1}</div>`;
     };
     let gutterHtml;
     if (gutterEpoch !== cache.gutterEpoch || cache.gutter.length !== cache.els.length) {
@@ -318,8 +319,18 @@ export function installRender(ed, app) {
     // The DOM now matches the cache; reads can use it until the next mutation.
     ed.markEditorDomSynced(cache.textExact ? normalized : null);
 
-    // Update the floating in-editor agent action bar.
-    app.updateEditorAgentBar();
+    // The bar a mark on this file offers (the agent's Keep / Drop), or none.
+    drawMarkBar(activeDecoration);
+  }
+
+  // The bar a mark on the shown file offers; drawn with the file, and again
+  // when its owner's state changes (drawMarkBar()).
+  function drawMarkBar(mark = shownMark()) {
+    const bar = app.elements.editorMarkBar;
+    if (!bar) return;
+    const html = mark?.bar?.() ?? "";
+    if (html) bar.innerHTML = html;
+    bar.hidden = !html;
   }
 
   function syncEditorScroll() {
@@ -383,5 +394,10 @@ export function installRender(ed, app) {
     return Math.min(Math.max(value, min), max);
   }
 
-  Object.assign(ed, { applyEditorRender, getEditorLineHeight, getEditorSpaceWidth, getLeadingIndentColumns, decorateEditorLineHtml, normalizeEditorLineElement, parseEditorLines, spliceEditorLines, renderEditorContent, syncEditorScroll, caretIntoView, forwardEditorWheel, clamp });
+  function shownMark() {
+    const file = app.controller.getActiveFile();
+    return file ? app.marks.get(getPath(app.controller.getProject(), file.id)) : null;
+  }
+
+  Object.assign(ed, { drawMarkBar, applyEditorRender, getEditorLineHeight, getEditorSpaceWidth, getLeadingIndentColumns, decorateEditorLineHtml, normalizeEditorLineElement, parseEditorLines, spliceEditorLines, renderEditorContent, syncEditorScroll, caretIntoView, forwardEditorWheel, clamp });
 }
