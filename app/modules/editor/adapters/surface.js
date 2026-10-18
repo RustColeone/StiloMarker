@@ -30,7 +30,7 @@ export const PORT = [
   "logDebug", "traceEditorEvent", "formatEditorDebugValue",
   "commentsForActiveFile", "scheduleCommentReanchor", "agentPendingDecorations", "updateEditorAgentBar",
   "imageSrcFor", "closeDiff", "diffState", "formatSnapshotTime",
-  "render", "updateStatus", "renderWelcomeState", "setMobileExplorerOpen", "togglePreview",
+  "renderWelcomeState", "setMobileExplorerOpen", "togglePreview",
   "scope", "isReadOnly", "onDrop"
 ];
 
@@ -92,6 +92,9 @@ export function createSurface({ port, view, previews, highlighters, toolbars, wo
     escapeHtmlAttribute, normalizePath, getRelativePath, getRelativeProjectPath,
     notify: (message) => shell.notify(message),
     showToast: (message, options) => shell.toast(message, options),
+    // Drawing the app again is asked of Shell; the app listens.
+    render: (project) => shell.render(project),
+    updateStatus: (project) => shell.render(project, { only: "status" }),
     scope: () => port.scope(),
     redrawRemoteCursors: () => app.renderRemoteCursors(Array.from(app.remoteCursorsByClient.values())),
     isPreviewableFileName,
@@ -148,7 +151,7 @@ export function createSurface({ port, view, previews, highlighters, toolbars, wo
   return Object.freeze({
     // Plain values only: reading a getter would call main.js's port during the attach.
     ...Object.fromEntries(Object.entries(Object.getOwnPropertyDescriptors(app))
-      .filter(([name, d]) => typeof d.value === "function" && !["notify", "showToast", "scope"].includes(name))
+      .filter(([name, d]) => typeof d.value === "function" && !["notify", "showToast", "scope", "render", "updateStatus"].includes(name))
       .map(([name, d]) => [name, d.value])),
     isComposing: () => composing.now,
     isFindOpen: () => app.searchState.open,

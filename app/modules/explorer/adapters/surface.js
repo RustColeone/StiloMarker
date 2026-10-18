@@ -21,7 +21,7 @@ import { createExplorerView } from "./tree.js";
 // What main.js attaches (explorer.attach(port)); each entry should move to an
 // owner, or become an extension point, and leave this list.
 export const PORT = [
-  "publishOperation", "publishSnapshot", "render", "updateStatus", "settings", "persistSettings",
+  "publishOperation", "publishSnapshot", "settings", "persistSettings",
   "elements", "logDebug", "imageSrcFor", "canManagePreview", "openAccessEditor", "openMtreeToolsDialog",
   "remapPersonaPaths", "initialContentForKind", "exportDiagram"
 ];
@@ -48,6 +48,9 @@ export function createSurface({ port, workspace, editor, shell, sync }) {
     notify: (message) => shell.notify(message),
     showToast: (message, options) => shell.toast(message, options),
     confirmAction: (message) => shell.confirm(String(message)),
+    // Drawing the app again is asked of Shell; the app listens.
+    render: (project) => shell.render(project),
+    updateStatus: (project) => shell.render(project, { only: "status" }),
     promptForName: (message, value = "", options = {}) => shell.input({ title: message, message, value, submitLabel: "Save", ...options }),
     shell,
     fileExtensionOf, getNextDefaultFileName, getNextDefaultFolderName, suggestUniqueFileName, suggestUniqueFolderName,
@@ -168,7 +171,7 @@ export function createSurface({ port, workspace, editor, shell, sync }) {
   return Object.freeze({
     ...Object.fromEntries(Object.entries(Object.getOwnPropertyDescriptors(app))
       .filter(([name, d]) => typeof d.value === "function" && !EDITOR.includes(name)
-        && !["notify", "showToast", "confirmAction", "promptForName"].includes(name))
+        && !["notify", "showToast", "confirmAction", "promptForName", "render", "updateStatus"].includes(name))
       .map(([name, d]) => [name, d.value])),
     // The tree, with the files that have an agent edit waiting marked.
     renderTree: (project, decorated) => app.tree.render(project, decorated)

@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-18 · release `v0.1.58` (not deployed; v0.1.53 is live)
+Last updated: 2026-10-18 · release `v0.1.59` (not deployed; v0.1.53 is live)
 
 ---
 
@@ -68,6 +68,19 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.59: redrawing is asked of Shell
+
+Step S3o-4. Nothing changes for users.
+
+- Modules ask Shell to draw the app again (`shell.render`); `main.js` answers
+  Shell's `render` event. The Editor and the Explorer no longer receive
+  `main.js`'s render functions through their ports.
+- A redraw that throws is now recorded in the Trace tab (a failed listener)
+  instead of breaking the action that asked for it.
+- With this, the four things every legacy feature needed have owners:
+  settings (Shell), the live session and its status (Sync), saving
+  (Workspace) and redrawing (Shell).
 
 ### v0.1.58: Workspace owns saving
 

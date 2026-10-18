@@ -306,12 +306,12 @@ var editorParts = modules.editor.attach({
   get agentPendingDecorations() { return agentPendingDecorations; },
   imageSrcFor, closeDiff, formatSnapshotTime,
   get diffState() { return diffState; },
-  render, updateStatus, renderWelcomeState, setMobileExplorerOpen, togglePreview,
+  renderWelcomeState, setMobileExplorerOpen, togglePreview,
   scope: () => chatWorkspaceKey(), isReadOnly: () => isReadOnlyWorkspace(), onDrop: (event) => handleEditorDrop(event)
 });
 // The explorer and file actions, given what no module owns yet (modules/explorer/adapters/surface.js).
 var explorerParts = modules.explorer.attach({
-  publishOperation, publishSnapshot, render, updateStatus, settings, persistSettings, elements, logDebug, imageSrcFor,
+  publishOperation, publishSnapshot, settings, persistSettings, elements, logDebug, imageSrcFor,
   canManagePreview: () => Boolean(identity.account()) && syncMode.get().workspaceMode === "synced"
     && collaboration.isConnected() && Boolean(settings.lastWorkspace?.team),
   openAccessEditor, openMtreeToolsDialog, remapPersonaPaths, initialContentForKind,
@@ -1538,9 +1538,7 @@ function setStatusDot(node, kind) {
   }
 }
 
-function persistSettings() {
-  applyWorkspaceSettings();
-}
+function persistSettings() { applyWorkspaceSettings(); } // the settings save themselves (Shell); this applies them
 
 applyWorkspaceSettings();
 
@@ -1813,6 +1811,8 @@ function cancelDeferredRender() {
 }
 
 controller.subscribe(render);
+// Modules ask Shell to draw the app again; this is where it happens.
+shell.events.on("render", ({ project, only }) => (only === "status" ? updateStatus(project) : render(project)));
 
 if (!storedProject) {
   const placeholder = controller.getProject();

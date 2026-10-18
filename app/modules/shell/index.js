@@ -21,6 +21,9 @@
 // Static, for code from before the restructure: normalizeServerUrl,
 // parseResponse, throwForResponse, patchStoredSettings (a guarded merge into
 // the stored settings, for the page going away).
+//   render(project, { only? })  ask for the app to be drawn again (only: "status"
+//                            for the panes and status without the tree); the
+//                            app listens: events.on("render", ({ project, only }) => …)
 //   settings                 the app's settings, read-only (settings.theme);
 //                            settings.change({ key: value }, why?) saves a change,
 //                            settings.on(listener) hears them (service/settings.js)
@@ -47,6 +50,7 @@ export default defineModule({
     registries: ["commands", "menus"],
     elements: ["menu bar", "notice dialog", "confirm dialog", "input dialog", "form dialog", "toasts"],
     connection: ["the server address"],
+    events: ["render"],
     diagnostics: ["uncaught errors", "stiloTrace()"],
     state: ["the app's settings"]
   },
@@ -60,6 +64,7 @@ export default defineModule({
       if (keys.length) patchStoredSettings(() => Object.fromEntries(keys.map((key) => [key, current[key]])));
     });
     const settings = createLiveView(settingsState);
+    const events = ctx.emitter();
     const { commands, menus, run } = createCommands(ctx);
     const dialogs = createDialogs();
 
@@ -107,7 +112,9 @@ export default defineModule({
       toast: dialogs.showToast,
       copyText: dialogs.copyText,
       server: createServer(),
-      settings
+      settings,
+      render: (project, { only } = {}) => events.emit("render", { project, only }),
+      events: { on: events.on }
     };
   }
 });
