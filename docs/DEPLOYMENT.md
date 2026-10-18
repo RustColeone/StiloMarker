@@ -823,3 +823,39 @@ browsers; it passed three runs in a row after a wait in the test was fixed).
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T211653Z-v0.1.49`.
 173/173 data files, every JSON file valid.
+
+## Verified release: v0.1.50
+
+Deployed on 2026-10-17 at 22:54 UTC. Deleted cloud projects and folders go
+to their team's Trash for 30 days, with their history, and their owner can
+restore them (decides ISSUES item 3). App version `0.1.50`; sync
+compatibility unchanged at `117`.
+
+Public checks: ping (`0.1.50`), no errors in the journal. As `test`, through
+the API, in team red: a throwaway project with a file was deleted, found in
+the trash (30 days, restorable), restored with its text, deleted again and
+removed for good. Nothing was left in the project list or the trash. The live
+Trash dialog opened, but a toolbar timing issue with its button was found:
+fixed in v0.1.51. Validation: 225 Node tests, all Python suites, the backend
+self-test, nineteen browser suites (`trash-browser.py` new).
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261017T225441Z-v0.1.50`.
+173/173 data files, every JSON file valid.
+
+## Verified release: v0.1.51
+
+Deployed on 2026-10-18 at 00:10 UTC. The Trash button stays hidden until its
+folder has loaded. App version `0.1.51`; sync compatibility unchanged at
+`117`.
+
+Public checks: ping (`0.1.51`), no errors in the journal. The sweep had moved
+the history of `EditorCheck1792241197` into red's trash: that project was a
+leftover from my own probe, deleted on 2026-10-17 before the trash existed.
+The live Trash dialog showed it as "History only · 30 days left", with no
+Restore. I then removed it, so red's trash is empty. Validation: 225 Node
+tests, all Python suites, the backend self-test, nineteen browser suites.
+The first gate run failed once in `url-album-browser.py`. Tracing that found
+a caret jump under heavy load, older than this work, now open ISSUES item 3.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261018T001038Z-v0.1.51`.
+174/174 data files, every JSON file valid.
