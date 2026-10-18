@@ -14,7 +14,7 @@
 // ctx.emitter() make the module's own extension points and events, and
 // ctx.state(initial) the state it owns (see createState).
 
-import { trace, describe, brief } from "./trace.js";
+import { trace, describe, brief, callerOf } from "./trace.js";
 
 export { trace, ignore, ignored, describe, brief, callerOf, createTrace, formatEntry } from "./trace.js";
 
@@ -138,6 +138,32 @@ export function createState(owner, initial, into = trace, { secret = [] } = {}) 
       return () => listeners.delete(listener);
     }
   });
+}
+
+// A read-only, always-current view of a state, for code that only reads it
+// (`view.theme`). `view.change(patch, why?)` changes it, recorded in the trace
+// with `why` or else the file and line that called; `view.on(listener)` hears
+// every change as (view, changedKeys). Assigning to the view throws, so a
+// change can never happen unseen. The owner decides who gets change().
+export function createLiveView(state) {
+  const change = (patch, why) => state.set(why ?? `changed at ${callerOf(new Error().stack)}`, patch);
+  const on = (listener) => state.on((current, changed) => listener(view, changed));
+  const refuse = (key) => {
+    throw new TypeError(`${String(key)} is read-only here: change it with .change({ ${String(key)}: … })`);
+  };
+  const view = new Proxy({}, {
+    get: (_, key) => (key === "change" ? change : key === "on" ? on : state.get()[key]),
+    has: (_, key) => key in state.get(),
+    ownKeys: () => Reflect.ownKeys(state.get()),
+    getOwnPropertyDescriptor(_, key) {
+      const current = state.get();
+      return key in current ? { value: current[key], enumerable: true, configurable: true, writable: false } : undefined;
+    },
+    set: (_, key) => refuse(key),
+    deleteProperty: (_, key) => refuse(key),
+    defineProperty: (_, key) => refuse(key)
+  });
+  return view;
 }
 
 // Named events a module emits for the modules above it. A listener that

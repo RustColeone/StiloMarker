@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-18 · release `v0.1.56` (not deployed; v0.1.53 is live)
+Last updated: 2026-10-18 · release `v0.1.57` (not deployed; v0.1.53 is live)
 
 ---
 
@@ -68,6 +68,22 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.57: Sync owns the live session and its status
+
+Step S3o-2. Nothing changes for users.
+
+- `main.js` created the live session with eleven callbacks. Sync creates it
+  now: `main.js` gives it what only the app can do (replace the project,
+  apply a collaborator's change, keep local edits before a reload, sign in
+  again, upload an image), and the session's news are Sync's events (its
+  status, others' cursors, the host's counters, a confirmed patch, other
+  modules' events on its stream).
+- The session's status (connected, who is here, the role, what the server
+  offers) was one object that 23 places in 2 files wrote. Sync owns it; code
+  reads a live view and says what happened with `status.change`, which shows
+  in the Trace tab.
+- The Explorer asks Sync for the session itself.
 
 ### v0.1.56: Shell owns the settings
 

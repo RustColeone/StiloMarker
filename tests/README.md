@@ -41,7 +41,7 @@ node --test tests/       # raw test runner
 | `text-patch.test.mjs` | Exhaustive short splice-pair convergence and overlap rejection. |
 | `editor-view.test.mjs` | The Editor's view (tabs, what each pane shows, the selection): changed only through named actions, each traced; reset, pick and select, tabs opened once, closed (the preview falls back), moved, the diff tab, keeping tabs after the project changed. |
 | `shell-settings.test.mjs` | Shell's settings: read-only to everyone (an assignment throws), changed through `settings.change`, each change traced with where it came from and secrets hidden, saved key by key without overwriting another tab's changes, the sync revision saved only with its workspace. |
-| `sync-mode.test.mjs` | Sync's mode: sharing keeps the local project aside once, leaving hands it back, forgetKept, restore after a failed open; only actions change it. |
+| `sync-mode.test.mjs` | Sync's mode (sharing keeps the local project aside once, leaving hands it back, forgetKept, restore after a failed open) and the session's status (the session's reports change it, an out-of-date tab only learns that, read-only to others). |
 | `project-save.test.mjs` | Queued writes, errors, typing during saves, collapsed folders, rename retries, UI save handlers. |
 | `server-reliability.test.py` | Production broker: UTF-16, disk-failure recovery, ordered events, and existing broker regressions. |
 | `sync-service.test.mjs` | Collaboration transport against a mock HTTP server. |

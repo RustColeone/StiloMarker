@@ -3,14 +3,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createState, createTrace } from "../app/kernel/index.js";
-import { SECRET_SETTINGS, createSettingsView, keysToSave } from "../app/modules/shell/service/settings.js";
+import { createLiveView, createState, createTrace } from "../app/kernel/index.js";
+import { SECRET_SETTINGS, keysToSave } from "../app/modules/shell/service/settings.js";
 import { createDefaultSettings, loadSettings, patchStoredSettings } from "../app/modules/shell/adapters/settings-store.js";
 
 function fresh(initial = { theme: "light", agentApiKey: "", sidebarWidth: 280, syncedProjectId: null, syncedRevision: null }) {
   const log = createTrace({ now: () => 0 });
   const state = createState("shell", initial, log, { secret: SECRET_SETTINGS });
-  return { settings: createSettingsView(state), state, log };
+  return { settings: createLiveView(state), state, log };
 }
 
 test("settings read the current value; a plain assignment throws", () => {
@@ -18,7 +18,7 @@ test("settings read the current value; a plain assignment throws", () => {
   assert.equal(settings.theme, "light");
   settings.change({ theme: "dark" });
   assert.equal(settings.theme, "dark");
-  assert.throws(() => { settings.theme = "light"; }, /read-only here: change it with settings.change/);
+  assert.throws(() => { settings.theme = "light"; }, /read-only here: change it with \.change/);
   assert.throws(() => { delete settings.theme; }, TypeError);
   assert.deepEqual({ ...settings }.theme, "dark", "spreading reads the current values");
   assert.equal(JSON.parse(JSON.stringify(settings)).theme, "dark");

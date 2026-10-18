@@ -13,7 +13,7 @@ import { APP_VERSION } from "./version.js";
 import { ROOT_ID, seedDefaultProject, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isBmapFileName, isImageFileName, isMarkdownFileName, isPersonaFileName, isTextFileName } from "./domain/project-model.js";
 import { importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./services/fs-access-service.js";
 import { supportsOpfs, listOpfsDir, mkdirOpfs, createProjectOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs, deleteOpfsEntry, exportProjectModelOpfs, importProjectModelOpfs } from "./services/opfs-service.js";
-import syncModule, { createCollaborationRuntime } from "./modules/sync/index.js";
+import syncModule from "./modules/sync/index.js";
 import { sendGenerationRequest } from "./services/chat-api-service.js";
 import { PERSONA_SUFFIX, parsePersona, personaTemplate } from "./services/persona-service.js";
 import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
@@ -283,6 +283,9 @@ const editorView = modules.editor.view;
 editorView.reset(controller.getProject());
 // Shared or local work, and the local project kept aside meanwhile: Sync's.
 const syncMode = modules.sync.mode;
+// The session as the app sees it (status, presence, role...): Sync's, read-only;
+// say what happened with syncState.change({ ... }).
+const syncState = modules.sync.status;
 // The Editor's parts (source editor, find, autocomplete, links, tabs, preview),
 // created now and given what no module owns yet: each entry of this port should
 // find an owner or become an extension point (modules/editor/adapters/surface.js).
@@ -301,7 +304,6 @@ var editorParts = modules.editor.attach({
 });
 // The explorer and file actions, given what no module owns yet (modules/explorer/adapters/surface.js).
 var explorerParts = modules.explorer.attach({
-  get collaboration() { return collaboration; },
   publishOperation, publishSnapshot, render, updateStatus, settings, persistSettings, elements, logDebug, imageSrcFor,
   canManagePreview: () => Boolean(identity.account()) && syncMode.get().workspaceMode === "synced"
     && collaboration.isConnected() && Boolean(settings.lastWorkspace?.team),
@@ -392,19 +394,6 @@ function loadBmapView() {
   return bmapViewLoading;
 }
 
-const syncState = {
-  status: "offline",
-  detail: "No server checked yet.",
-  presence: [],
-  sessionId: null,
-  revision: 0,
-  displayName: null,
-  clientId: null,
-  role: null,
-  // Whether the last-pinged server has accounts (the account itself: identity.account()).
-  accountsAvailable: false,
-  hostingAvailable: false
-};
 
 // "private" = user's local workspace; "synced" = connected server workspace.
 let sessionRestorer = null;
@@ -992,16 +981,15 @@ function captureAgentCheckpoint(batchId, baseRevision) {
   }
 }
 
-const collaboration = createCollaborationRuntime({
+// The live session is Sync's; it is given what only the app can do, and
+// tells its news through events (modules/sync/index.js).
+const collaboration = modules.sync.attach({
   async preserveLocalFiles(files) {
     const store = snapshotStore();
     for (const [path, content] of files) {
       await store.create(path, content, "Recovery: local edits before cloud reload");
     }
     showToast(`Local changes saved in Snapshots (${files.size} file(s)); loading the cloud version.`);
-  },
-  getProject() {
-    return controller.getProject();
   },
   replaceProject(project) {
     const view = collaboration.isReconnecting() ? currentWorkspaceView() : null;
@@ -1041,120 +1029,6 @@ const collaboration = createCollaborationRuntime({
       collaboration?.reloadFromServer("Sync conflict — reloading from server.").catch(ignored("reloading after a failed remote change failed"));
     }
   },
-  onStatusChange(nextState) {
-    const prevStatus = syncState.status;
-    const wasConnected = prevStatus === "connected";
-    // Server refused this client as too old (stale cached service worker). Stop
-    // syncing and force the app up to date rather than letting it clobber content.
-    if (nextState.status === "upgrade-required") {
-      syncState.status = nextState.status;
-      syncState.detail = nextState.detail;
-      forceAppUpgrade(nextState.detail);
-      return;
-    }
-    // Cloud sync now recovers dropped streams on its own (see collaboration-
-    // service). Surface it so the user knows their work is safe, not lost.
-    if (nextState.status === "reconnecting" && prevStatus !== "reconnecting") {
-      showToast("Connection lost — reconnecting… your changes are kept.");
-    }
-    if (nextState.status === "connected" && prevStatus === "reconnecting") {
-      showToast("Reconnected to the cloud workspace.");
-    }
-    if (nextState.status === "connected") {
-      // A clean connect means we're on a good version — reset the one-shot upgrade
-      // guard so a future min-version bump can auto-refresh again.
-      try { sessionStorage.removeItem("mdnotes.upgradeReloaded"); } catch (error) { ignore(error, "session storage is blocked"); }
-    }
-    syncState.status = nextState.status;
-    syncState.detail = nextState.detail;
-    syncState.presence = nextState.presence ?? [];
-    // Reconcile remote carets against who's actually present, so a departed
-    // peer's cursor/selection doesn't linger.
-    pruneRemoteCursors(syncState.presence);
-    syncState.sessionId = nextState.sessionId;
-    syncState.revision = nextState.revision ?? 0;
-    // Keep the "what revision is this browser's copy based on" marker current
-    // while we're genuinely in sync. It decides, on the next open, whether this
-    // device may push its copy over the server or must pull. Persisted on unload;
-    // if it's ever missing we treat this device as stale and pull (fail-safe).
-    if (nextState.status === "connected" && syncMode.get().workspaceMode === "synced" && settings.syncedProjectId) {
-      settings.change({ syncedRevision: syncState.revision });
-    }
-    syncState.displayName = nextState.displayName ?? null;
-    syncState.clientId = nextState.clientId ?? null;
-    syncState.role = nextState.role ?? null;
-    // Auto-switch workspace mode on connect/disconnect.
-    if (!wasConnected && nextState.status === "connected" && syncMode.get().workspaceMode === "private") {
-      if (syncState.role === "client") {
-        // User already confirmed before connect() was called; just sync.
-        switchWorkspaceMode?.("synced");
-        return;
-      }
-      if (syncState.role === "master") {
-        // Master just connected: enter synced mode without reloading from server.
-        // The master already pushed its own project as the authoritative state;
-        // calling reloadFromServer here would just fetch it back unnecessarily.
-        syncMode.share(controller.getProject());
-        render(controller.getProject());
-        return;
-      }
-    }
-    if (nextState.status === "offline") {
-      // Dropped while we had an intended session — try to re-establish it.
-      // (Guarded against firing during a deliberate reconnect handshake.)
-      scheduleReconnect?.();
-    }
-    if (nextState.status === "offline" && syncMode.get().workspaceMode === "synced") {
-      // A cloud workspace's content is what the user is actively editing; reverting
-      // to the pre-open private snapshot here is what made "everything suddenly go
-      // empty / back to a previous version". Keep the current project ON SCREEN and
-      // just drop to private mode (edits stay local, safe in localStorage); a
-      // reconnect or reload re-syncs. Only a PIN/guest session (no cloud workspace)
-      // should restore the user's own private project.
-      const wasCloud = Boolean(settings.syncedProjectId) || Boolean(settings.lastWorkspace?.team);
-      if (wasCloud) {
-        // STAY in synced mode. Flipping to "private" here is what silently killed
-        // syncing for good: notifyEditorChanged only schedules a patch while
-        // workspaceMode === "synced", so after one dropped stream every later
-        // keystroke lived only in this tab (server revision never moved) — and the
-        // next server pull replaced hours of work with the stale snapshot. Staying
-        // synced means patches resume as soon as the stream is back, and
-        // reconcileLocalIntoServer() pushes everything changed while offline.
-        syncMode.forgetKept(); // don't later clobber the on-screen content
-        syncState.detail = "Offline — edits are saved locally and will sync when the connection returns.";
-        render(controller.getProject());
-        return;
-      }
-      switchWorkspaceMode?.("private");
-      return;
-    }
-    render(controller.getProject());
-  },
-  onRemoteCursor(event) {
-    onRemoteCursor(event);
-  },
-  // The host stamped this file's S.E.N counters on the operation it just
-  // accepted. Adopt them verbatim — we never count locally while synced, so
-  // everyone in the room shows the same sitting number.
-  onHostCounters(path, counters) {
-    const project = controller.getProject();
-    const nodeId = getNodeIdByPath(project, path);
-    if (!nodeId) return;
-    applyHostCounters(project, nodeId, counters);
-    scheduleVersionLabel();
-  },
-  onPatchConfirmed() {
-    // Text confirmed by server — now safe to send the definitive cursor position.
-    const activeFile = controller.getActiveFile();
-    if (activeFile && collaboration.isConnected()) {
-      const sel = getEditorSelection();
-      // Path (not node id) so peers can match it — see renderRemoteCursors.
-      const path = getPath(controller.getProject(), activeFile.id);
-      collaboration.scheduleAwareness(path, sel.start, sel.end);
-    }
-  },
-  // A collaborator added/edited/moved a comment: adopt the server's list and
-  // repaint the gutter + overview ruler without waiting for a reopen.
   // The account token died (server restart). Sign in again with the stored,
   // previously-proven credentials so reconnect can continue; return null to let
   // the runtime stop retrying instead of looping on a dead token.
@@ -1173,19 +1047,124 @@ const collaboration = createCollaborationRuntime({
       return null;
     }
   },
-  // Other modules' events on Sync's stream: comments, Chats, the agent's threads.
-  onEvent(event, { ownClientId }) {
-    if (event.type === "comments") {
-      if (!commentsAvailable()) return;
-      lineComments.byFile = new Map(Object.entries(event.files ?? {}));
-      renderEditorFromModel();
-    } else if (event.type === "chat-message" || event.type === "chat-typing" || event.type === "chat-update") {
-      chat?.receiveChatEvent(event);
-    } else if (event.type === "chat-workspace-update" && event.clientId !== ownClientId) {
-      chat?.receiveChatWorkspace(controller.getProject(), event.workspace); // nothing listens until the panel loads
-    }
-  },
   uploadAsset
+});
+modules.sync.events.on("status", ({ next: nextState, previous }) => {
+  const prevStatus = previous.status;
+  const wasConnected = prevStatus === "connected";
+  // Server refused this client as too old (stale cached service worker). Stop
+  // syncing and force the app up to date rather than letting it clobber content.
+  if (nextState.status === "upgrade-required") {
+    forceAppUpgrade(nextState.detail);
+    return;
+  }
+  // Cloud sync now recovers dropped streams on its own (see collaboration-
+  // service). Surface it so the user knows their work is safe, not lost.
+  if (nextState.status === "reconnecting" && prevStatus !== "reconnecting") {
+    showToast("Connection lost — reconnecting… your changes are kept.");
+  }
+  if (nextState.status === "connected" && prevStatus === "reconnecting") {
+    showToast("Reconnected to the cloud workspace.");
+  }
+  if (nextState.status === "connected") {
+    // A clean connect means we're on a good version — reset the one-shot upgrade
+    // guard so a future min-version bump can auto-refresh again.
+    try { sessionStorage.removeItem("mdnotes.upgradeReloaded"); } catch (error) { ignore(error, "session storage is blocked"); }
+  }
+  // Reconcile remote carets against who's actually present, so a departed
+  // peer's cursor/selection doesn't linger.
+  pruneRemoteCursors(syncState.presence);
+  // Keep the "what revision is this browser's copy based on" marker current
+  // while we're genuinely in sync. It decides, on the next open, whether this
+  // device may push its copy over the server or must pull. Persisted on unload;
+  // if it's ever missing we treat this device as stale and pull (fail-safe).
+  if (nextState.status === "connected" && syncMode.get().workspaceMode === "synced" && settings.syncedProjectId) {
+    settings.change({ syncedRevision: syncState.revision });
+  }
+  // Auto-switch workspace mode on connect/disconnect.
+  if (!wasConnected && nextState.status === "connected" && syncMode.get().workspaceMode === "private") {
+    if (syncState.role === "client") {
+      // User already confirmed before connect() was called; just sync.
+      switchWorkspaceMode?.("synced");
+      return;
+    }
+    if (syncState.role === "master") {
+      // Master just connected: enter synced mode without reloading from server.
+      // The master already pushed its own project as the authoritative state;
+      // calling reloadFromServer here would just fetch it back unnecessarily.
+      syncMode.share(controller.getProject());
+      render(controller.getProject());
+      return;
+    }
+  }
+  if (nextState.status === "offline") {
+    // Dropped while we had an intended session — try to re-establish it.
+    // (Guarded against firing during a deliberate reconnect handshake.)
+    scheduleReconnect?.();
+  }
+  if (nextState.status === "offline" && syncMode.get().workspaceMode === "synced") {
+    // A cloud workspace's content is what the user is actively editing; reverting
+    // to the pre-open private snapshot here is what made "everything suddenly go
+    // empty / back to a previous version". Keep the current project ON SCREEN and
+    // just drop to private mode (edits stay local, safe in localStorage); a
+    // reconnect or reload re-syncs. Only a PIN/guest session (no cloud workspace)
+    // should restore the user's own private project.
+    const wasCloud = Boolean(settings.syncedProjectId) || Boolean(settings.lastWorkspace?.team);
+    if (wasCloud) {
+      // STAY in synced mode. Flipping to "private" here is what silently killed
+      // syncing for good: notifyEditorChanged only schedules a patch while
+      // workspaceMode === "synced", so after one dropped stream every later
+      // keystroke lived only in this tab (server revision never moved) — and the
+      // next server pull replaced hours of work with the stale snapshot. Staying
+      // synced means patches resume as soon as the stream is back, and
+      // reconcileLocalIntoServer() pushes everything changed while offline.
+      syncMode.forgetKept(); // don't later clobber the on-screen content
+      syncState.change({ detail: "Offline — edits are saved locally and will sync when the connection returns." });
+      render(controller.getProject());
+      return;
+    }
+    switchWorkspaceMode?.("private");
+    return;
+  }
+  render(controller.getProject());
+});
+modules.sync.events.on("remote-cursor", (event) => {
+  onRemoteCursor(event);
+});
+// The host stamped this file's S.E.N counters on the operation it just
+// accepted. Adopt them verbatim — we never count locally while synced, so
+// everyone in the room shows the same sitting number.
+modules.sync.events.on("host-counters", ({ path, counters }) => {
+  const project = controller.getProject();
+  const nodeId = getNodeIdByPath(project, path);
+  if (!nodeId) return;
+  applyHostCounters(project, nodeId, counters);
+  scheduleVersionLabel();
+});
+
+modules.sync.events.on("patch-confirmed", () => {
+  // Text confirmed by server — now safe to send the definitive cursor position.
+  const activeFile = controller.getActiveFile();
+  if (activeFile && collaboration.isConnected()) {
+    const sel = getEditorSelection();
+    // Path (not node id) so peers can match it — see renderRemoteCursors.
+    const path = getPath(controller.getProject(), activeFile.id);
+    collaboration.scheduleAwareness(path, sel.start, sel.end);
+  }
+});
+// Other modules' events on Sync's stream: comments, Chats, the agent's threads.
+modules.sync.events.on("event", ({ event, ownClientId }) => {
+  if (event.type === "comments") {
+    // A collaborator added/edited/moved a comment: adopt the server's list and
+    // repaint the gutter + overview ruler without waiting for a reopen.
+    if (!commentsAvailable()) return;
+    lineComments.byFile = new Map(Object.entries(event.files ?? {}));
+    renderEditorFromModel();
+  } else if (event.type === "chat-message" || event.type === "chat-typing" || event.type === "chat-update") {
+    chat?.receiveChatEvent(event);
+  } else if (event.type === "chat-workspace-update" && event.clientId !== ownClientId) {
+    chat?.receiveChatWorkspace(controller.getProject(), event.workspace); // nothing listens until the panel loads
+  }
 });
 workspace.attach(createWorkspacePorts({ controller, collaboration, publishOperation, getEditorSelection, applyEditorEdit,
   get workspaceMode() { return syncMode.get().workspaceMode; },
@@ -3148,14 +3127,14 @@ function scheduleReconnect() {
   if (!settings.autoReconnect || !settings.wasConnected || !settings.serverPin) return;
   if (reconnectState.connecting || reconnectState.timer) return;
   if (reconnectState.attempts >= MAX_RECONNECT_ATTEMPTS) {
-    syncState.detail = "Reconnect failed. Open collaboration settings to retry.";
+    syncState.change({ detail: "Reconnect failed. Open collaboration settings to retry." });
     render(controller.getProject());
     logDebug("response", "Auto-reconnect gave up", `after ${reconnectState.attempts} attempts`);
     return;
   }
   const delay = RECONNECT_DELAYS[Math.min(reconnectState.attempts, RECONNECT_DELAYS.length - 1)];
   reconnectState.attempts += 1;
-  syncState.detail = `Reconnecting in ${Math.round(delay / 1000)}s… (attempt ${reconnectState.attempts})`;
+  syncState.change({ detail: `Reconnecting in ${Math.round(delay / 1000)}s… (attempt ${reconnectState.attempts})` });
   render(controller.getProject());
   reconnectState.timer = window.setTimeout(() => {
     reconnectState.timer = null;
@@ -3178,8 +3157,7 @@ elements.connectServerButton.addEventListener("click", async () => {
     logDebug("action", "Server connect requested", settings.serverUrl);
     await establishConnection({ auto: false });
   } catch (error) {
-    syncState.status = "offline";
-    syncState.detail = error.message;
+    syncState.change({ status: "offline", detail: error.message });
     logDebug("response", "Server connect failed", error.message);
     flashStatusPanel("error", elements.sharedSessionSection);
     await refreshChatStatus({ silent: true });
@@ -3286,7 +3264,7 @@ sessionRestorer = createSessionRecovery({
   restore: restoreSessionOnBoot,
   onError(error) {
     logDebug("response", "Workspace recovery waiting", error.message);
-    syncState.detail = error.message;
+    syncState.change({ detail: error.message });
     if ([401, 403].includes(error.status)) showToast("Sign in again to resume your workspace. Your local edits are kept.");
   }
 });

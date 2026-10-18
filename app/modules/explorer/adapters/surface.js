@@ -21,7 +21,7 @@ import { createExplorerView } from "./tree.js";
 // What main.js attaches (explorer.attach(port)); each entry should move to an
 // owner, or become an extension point, and leave this list.
 export const PORT = [
-  "collaboration", "publishOperation", "publishSnapshot", "render", "updateStatus", "settings", "persistSettings",
+  "publishOperation", "publishSnapshot", "render", "updateStatus", "settings", "persistSettings",
   "elements", "logDebug", "imageSrcFor", "canManagePreview", "openAccessEditor", "openMtreeToolsDialog",
   "remapPersonaPaths", "initialContentForKind", "exportDiagram"
 ];
@@ -33,7 +33,7 @@ const EDITOR = [
   "setActiveSourceFile", "setActiveSourcePart", "setEditorSelection", "setPreviewFile"
 ];
 
-export function createSurface({ port, workspace, editor, shell }) {
+export function createSurface({ port, workspace, editor, shell, sync }) {
   const missing = PORT.filter((name) => !(name in port));
   if (missing.length) throw new Error(`explorer.attach: the port lacks ${missing.join(", ")}`);
   const editorParts = editor.parts();
@@ -57,6 +57,7 @@ export function createSurface({ port, workspace, editor, shell }) {
     getSelectedTarget
   };
   Object.defineProperty(app, "controller", { get: () => workspace.project(), enumerable: true });
+  Object.defineProperty(app, "collaboration", { get: () => sync.session(), enumerable: true });
   for (const name of PORT) Object.defineProperty(app, name, { get: () => port[name], enumerable: true });
   for (const name of EDITOR) app[name] = editorParts[name];
 

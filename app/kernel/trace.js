@@ -84,12 +84,12 @@ export function brief(value) {
   return value === undefined ? "undefined" : String(value).slice(0, 80);
 }
 
-// "app/x/y.js:12" for the first stack frame outside this file (and outside
-// the files `skip` names, e.g. the owner whose change() was called).
+// "app/x/y.js:12" for the first stack frame outside the kernel (and outside
+// the files `skip` names).
 export function callerOf(stack = "", skip = []) {
   for (const line of String(stack).split("\n").slice(1)) {
     const match = /([a-z][\w+.-]*:\/\/[^\s)]+?):(\d+):\d+/.exec(line);
-    if (!match || match[1].endsWith("/kernel/trace.js") || skip.some((end) => match[1].endsWith(end))) continue;
+    if (!match || /\/kernel\/[\w-]+\.js$/.test(match[1]) || skip.some((end) => match[1].endsWith(end))) continue;
     let path = match[1];
     try { path = new URL(path).pathname.replace(/^\//, ""); } catch (error) { console.error("trace: odd stack line", error); }
     return `${path}:${match[2]}`;

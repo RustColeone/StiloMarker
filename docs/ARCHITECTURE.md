@@ -310,8 +310,8 @@ That is where bugs are hard to find. Steps, each its own release:
 | S3a | The Editor owns all of itself (v0.1.54): it creates and wires its parts (source editor, highlighting, find, autocomplete, links, tabs and preview) instead of `main.js` creating six of them with their own lists of main's values; their state (undo history, search, autocomplete, render cache, dragged text, others' cursors, the file shown, resume positions), the editor's events, the resize observer and showing the active file moved in with them. `main.js` attaches one port (`editor.attach`, listed in `surface.js` as PORT) for what no module owns yet. Getters handed out by `main.js`: 227 → 133; `main.js` 4,539 → 3,731 lines | done (v0.1.54) |
 | S3b | The Explorer module (v0.1.55, level 4): the tree, moving and copying files, folders and parts, adding files (and dropping them into the editor), creating, renaming, deleting, exporting, the context menu and its Edit / Create menu items, split by job into files under the budget. It uses Workspace, the Editor's `parts()` and Shell's dialogs; `main.js` attaches a port (16 names). The file-content and ZIP helpers moved into Workspace (shared with legacy saving); diagram export is `app/features/diagram-export.js` until diagrams become an extension. Rule 1 now fails on a module importing legacy code. Getters handed out by `main.js`: 133 → 90; `main.js` 3,731 → 3,328 lines | done (v0.1.55) |
 | S3o-1 | Owners for what every legacy feature still needs, first: the settings (v0.1.56). Shell owns them; everyone holds a read-only view (`settings.theme`), changes go through `settings.change({ key: value }, why?)`, which saves only the changed keys (another tab's changes are never written back) and lands in the trace with the file and line that made it; secrets (the PIN, the stored password, an API key) are hidden there. A plain assignment throws. 64 writes in 5 files converted; `lastLocalProject` gained its missing default | done (v0.1.56) |
-| S3o-2 | The live sync session owned by Sync (`sync.session`); its notifications become Sync's events | next |
-| S3o-3 | Saving (this browser's copy, auto-save, folders on disk) owned by Workspace | |
+| S3o-2 | Sync owns the live session (v0.1.57): `sync.attach(port)` creates it, given what only the app can do (replace the project, apply a remote change, keep local edits before a reload, sign in again, upload an asset); its news are Sync's events (`status`, `remote-cursor`, `host-counters`, `patch-confirmed`, `event`). The session's status (connected, presence, role, what the server offers) is Sync's too: a live view everyone reads, changed by Sync from the session and by `status.change` where code pings or reconnects (23 direct writes in 2 files before). The Explorer asks Sync for the session instead of `main.js`. The settings' read-only view is now the kernel's `createLiveView`, used by both | done (v0.1.57) |
+| S3o-3 | Saving (this browser's copy, auto-save, folders on disk) owned by Workspace | next |
 | S3o-4 | The app's render as one event modules listen to | |
 | S3c | The cloud file browser, sign-in and hosting as a module | |
 | S3d | The chat panel into the Assistant module | |
@@ -330,6 +330,12 @@ That is where bugs are hard to find. Steps, each its own release:
   entry out of PORT (to an owner, or an extension point) is how the port shrinks.
 - The explorer's functions (the selected folder, creating a file in a folder,
   the context-menu actions): `explorer.parts()` after `explorer.attach(port)`.
+- The live session: `sync.session()` (connect, publish, `isConnected()`...);
+  its status `sync.status` (read-only; `status.change({...})` where you ping or
+  reconnect); its news `sync.events.on("status" | "remote-cursor" |
+  "host-counters" | "patch-confirmed" | "event", listener)`.
+- A state others read but only its owner changes: `createLiveView(state)`
+  (kernel) gives a read-only, always-current view with `change(patch, why?)`.
 - Settings: read `shell.settings.key`; change with `shell.settings.change({ key:
   value }, why?)` (a new key needs a default in Shell's `settings-store.js`);
   listen with `shell.settings.on((settings, changedKeys) => …)`.

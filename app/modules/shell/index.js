@@ -26,7 +26,7 @@
 //                            settings.on(listener) hears them (service/settings.js)
 // Errors nothing caught go into the kernel's trace; `stiloTrace()` in the
 // console prints it.
-import { defineModule } from "../../kernel/index.js";
+import { createLiveView, defineModule } from "../../kernel/index.js";
 import { createCommands } from "./service/commands.js";
 import { createDialogs } from "./adapters/dialogs.js";
 import { createKeyboard } from "./adapters/keyboard.js";
@@ -34,7 +34,7 @@ import { createMenuBar } from "./adapters/menu-bar.js";
 import { createServer } from "./adapters/server.js";
 import { watchPageErrors } from "./adapters/page-errors.js";
 import { loadSettings, patchStoredSettings } from "./adapters/settings-store.js";
-import { SECRET_SETTINGS, createSettingsView, keysToSave } from "./service/settings.js";
+import { SECRET_SETTINGS, keysToSave } from "./service/settings.js";
 
 export { normalizeServerUrl, parseResponse, throwForResponse } from "./adapters/server.js";
 export { patchStoredSettings } from "./adapters/settings-store.js";
@@ -59,7 +59,7 @@ export default defineModule({
       const keys = keysToSave(changed);
       if (keys.length) patchStoredSettings(() => Object.fromEntries(keys.map((key) => [key, current[key]])));
     });
-    const settings = createSettingsView(settingsState);
+    const settings = createLiveView(settingsState);
     const { commands, menus, run } = createCommands(ctx);
     const dialogs = createDialogs();
 

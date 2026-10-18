@@ -34,3 +34,19 @@ test("forgetKept stays shared; restore undoes a failed open", () => {
   assert.deepEqual(mode.get(), LOCAL_MODE);
   assert.throws(() => { mode.get().workspaceMode = "synced"; }, TypeError, "only actions change the mode");
 });
+
+test("the session's status: its reports change it; an out-of-date tab only learns that", async () => {
+  const { SESSION_STATUS, statusFromSession } = await import("../app/modules/sync/service/status.js");
+  const { createLiveView } = await import("../app/kernel/index.js");
+  const state = createState("sync", SESSION_STATUS, createTrace({ now: () => 0 }));
+  const status = createLiveView(state);
+  state.set("the session", statusFromSession({ status: "connected", detail: "ok", presence: [{ clientId: "a" }], sessionId: "t/p", revision: 7, role: "client" }));
+  assert.equal(status.status, "connected");
+  assert.equal(status.revision, 7);
+  assert.equal(status.displayName, null, "what the report leaves out is reset");
+  state.set("the session", statusFromSession({ status: "upgrade-required", detail: "Reload to update" }));
+  assert.deepEqual([status.status, status.detail, status.revision, status.role], ["upgrade-required", "Reload to update", 7, "client"]);
+  status.change({ detail: "Reconnecting in 2s" });
+  assert.equal(status.detail, "Reconnecting in 2s");
+  assert.throws(() => { status.status = "offline"; }, /read-only/);
+});

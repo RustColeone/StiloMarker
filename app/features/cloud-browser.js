@@ -11,14 +11,14 @@ export function createCloudBrowser(app) {
       app.logDebug("action", "Server ping requested", app.elements.serverUrlInput.value.trim());
       const result = await pingServer(app.elements.serverUrlInput.value);
       app.settings.change({ serverUrl: app.elements.serverUrlInput.value.trim() });
-      app.syncState.status = app.syncState.status === "connected" ? "connected" : "reachable";
-      if (!silent) {
-        app.syncState.detail = typeof result === "string" ? result : (result.message || "Server responded to ping.");
-      }
       // Capability discovery: reveal the account Login / Share controls only when
       // this server advertises them (state 3).
-      app.syncState.accountsAvailable = Boolean(result && typeof result === "object" && result.accounts);
-      app.syncState.hostingAvailable = Boolean(result && typeof result === "object" && result.hosting);
+      app.syncState.change({
+        status: app.syncState.status === "connected" ? "connected" : "reachable",
+        ...(silent ? {} : { detail: typeof result === "string" ? result : (result.message || "Server responded to ping.") }),
+        accountsAvailable: Boolean(result && typeof result === "object" && result.accounts),
+        hostingAvailable: Boolean(result && typeof result === "object" && result.hosting)
+      }, "the server answered a ping");
       app.logDebug("response", "Server ping succeeded", app.syncState.detail);
       if (!silent) app.flashStatusPanel("success");
       renderAccountControls();
@@ -26,12 +26,11 @@ export function createCloudBrowser(app) {
       app.render(app.controller.getProject());
       return result;
     } catch (error) {
-      if (app.syncState.status !== "connected") {
-        app.syncState.status = "offline";
-        app.syncState.detail = error.message;
-      }
-      app.syncState.accountsAvailable = false;
-      app.syncState.hostingAvailable = false;
+      app.syncState.change({
+        ...(app.syncState.status !== "connected" ? { status: "offline", detail: error.message } : {}),
+        accountsAvailable: false,
+        hostingAvailable: false
+      }, "the server did not answer a ping");
       app.logDebug("response", "Server ping failed", error.message);
       if (!silent) app.flashStatusPanel("error");
       renderAccountControls();
