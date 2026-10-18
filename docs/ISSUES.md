@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-18 · release `v0.1.62` (not deployed; v0.1.60 is live)
+Last updated: 2026-10-18 · release `v0.1.63` (not deployed; v0.1.60 is live)
 
 ---
 
@@ -68,6 +68,19 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.63: the Chats page is the Chats module's
+
+Step S3d-3. Nothing changes for users.
+
+- The Chats page moved from `app/features` into the Chats module, which
+  registers it in the side panel and draws it. It reaches everything through
+  modules (Shell, Workspace, Identity, Sync, the Editor, Characters, Models)
+  and a five-name port; the Agent page gives it the old Roleplay threads.
+- The request to the server's agent is Models' now, and the helpers both
+  pages use to show a conversation are Shell's.
+- `main.js` starts Models, Characters and Chats with the other modules, and
+  following a renamed character no longer loads the whole chat panel.
 
 ### v0.1.62: the agent's connection belongs to Models
 

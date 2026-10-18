@@ -20,7 +20,9 @@
 //   server.request(path, { method, query, body, failure, timeout })
 // Static, for code from before the restructure: normalizeServerUrl,
 // parseResponse, throwForResponse, patchStoredSettings (a guarded merge into
-// the stored settings, for the page going away).
+// the stored settings, for the page going away). Static, for any page with a
+// conversation: shouldSubmitChat, isChatNearBottom, paintConversation,
+// contextChipsHtml (adapters/conversation.js).
 //   render(project, { only? })  ask for the app to be drawn again (only: "status"
 //                            for the panes and status without the tree); the
 //                            app listens: events.on("render", ({ project, only }) => …)
@@ -45,6 +47,7 @@ import { SECRET_SETTINGS, keysToSave } from "./service/settings.js";
 
 export { normalizeServerUrl, parseResponse, throwForResponse } from "./adapters/server.js";
 export { patchStoredSettings } from "./adapters/settings-store.js";
+export { contextChipsHtml, isChatNearBottom, paintConversation, shouldSubmitChat } from "./adapters/conversation.js";
 
 export default defineModule({
   name: "shell",

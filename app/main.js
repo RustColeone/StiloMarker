@@ -9,7 +9,7 @@ import { createWorkspacePorts } from "./features/workspace-ports.js";
 import { rememberedWorkspace, createSessionRecovery } from "./services/session-recovery-service.js";
 import { installMobileViewport } from "./services/chat-ui-service.js";
 import { APP_VERSION } from "./version.js";
-import { ROOT_ID, seedDefaultProject, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isImageFileName, isPersonaFileName, isTextFileName } from "./domain/project-model.js";
+import { ROOT_ID, seedDefaultProject, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isImageFileName, isTextFileName } from "./domain/project-model.js";
 import { getOpfsDirectoryHandle, importDirectory, importOsFolderIntoOpfs, importSingleFile, importZipArchive, loadProject, saveProject, supportsDirectoryAccess, supportsOpfs } from "./modules/workspace/index.js";
 import syncModule from "./modules/sync/index.js";
 import { sendGenerationRequest } from "./services/chat-api-service.js";
@@ -18,6 +18,8 @@ import { clearOfflineShellData, registerOfflineShell } from "./services/offline-
 import { applyEditorFont, applyTheme, clampSourceFontSize, signInSettings } from "./services/settings-service.js";
 import cloudModule, { saveUserState, uploadAsset } from "./modules/cloud/index.js";
 import modelsModule from "./modules/models/index.js";
+import chatsModule from "./modules/chats/index.js";
+import charactersModule from "./modules/characters/index.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { query } from "./ui/dom.js";
 import { createDefaultBmap } from "./services/bmap-service.js";
@@ -262,7 +264,7 @@ const elements = {
 // ---- Modules (docs/ARCHITECTURE.md) ----
 // The app is moving into modules one step at a time. Code still in this file
 // reaches a module only through the public API the kernel hands back.
-const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, syncModule, historyModule, explorerModule, cloudModule, modelsModule, ...extensionModules], {
+const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, syncModule, historyModule, explorerModule, cloudModule, modelsModule, charactersModule, chatsModule, ...extensionModules], {
   log: (owner, ...args) => { try { logDebug("action", `${owner}: ${args.join(" ")}`); } catch (error) { ignore(error, "the log panel is not ready yet"); } }
 });
 const { shell, workspace, identity } = modules;
@@ -322,6 +324,7 @@ var cloudParts = modules.cloud.attach({
   get sessionRestorer() { return sessionRestorer; },
   get switchWorkspaceMode() { return switchWorkspaceMode; }
 });
+var chatsPage = modules.chats.attach({ cloudWorkspaceTarget, chatWorkspaceKey, personaAvatarSrc, isMobileLayout, logDebug }); // the side panel's Chats page
 // Diagrams and character sheets add their previews to the Editor's extension point.
 registerPreviews(modules.editor.previews, {
   view: editorView, settings, escapeHtmlAttribute, normalizePath, getRelativeProjectPath,
@@ -586,7 +589,7 @@ function loadChat() {
       chatWorkspaceKey, clearAgentDecorations, collaboration, controller, createFileInFolder, elements,
       escapeHtmlAttribute, getSelectedParent, isMobileLayout, jumpToAgentChange, logDebug, notify,
       openFileFromExplorer, openSettingsDialog, personaAvatarSrc, promptForName, workspace,
-      registerAgentDecorations, settings, showConfirmDialog, showToast, storedProject, pages: shell.pages, models: modules.models,
+      registerAgentDecorations, settings, showConfirmDialog, showToast, storedProject, pages: shell.pages, models: modules.models, chatsPage,
       updateEditorAgentBar, identity,
       get workspaceMode() { return syncMode.get().workspaceMode; }
     });
@@ -623,13 +626,7 @@ function findBatchMessage(batchId) {
 
 /** Group chats name their characters by path; follow a rename or move of a
  *  character file, or of a folder holding one. */
-function remapPersonaPaths(oldPath, newPath) {
-  if (chat) { chat.remapPersonaPaths(oldPath, newPath); return; }
-  const project = controller.getProject();
-  const holdsPersona = Object.values(project.nodes).some((node) => node.kind === "file" && isPersonaFileName(node.name)
-    && (getPath(project, node.id) === newPath || getPath(project, node.id).startsWith(`${newPath}/`)));
-  if (holdsPersona) void loadChat().then((loaded) => loaded?.remapPersonaPaths(oldPath, newPath));
-}
+function remapPersonaPaths(oldPath, newPath) { chatsPage.remapPersonaPaths(oldPath, newPath); } // Chats follows renamed characters
 
 function chatConnectionInfo() {
   return syncMode.get().workspaceMode === "synced" ? collaboration.getConnectionInfo?.() : null;

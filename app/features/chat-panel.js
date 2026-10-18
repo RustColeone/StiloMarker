@@ -1,21 +1,19 @@
 // The side panel's Agent page (one of Shell's pages): the agent's
 // conversations and their sync, its turns and the edits it proposes (Keep /
-// Drop), and the Agent status in Settings. It creates the Chats page
-// (chats-page.js), which shares only the agent's server connection. Loaded the first time the panel (or Settings) is shown; the
+// Drop), and the Agent status in Settings. It also draws the Chats page (the
+// Chats module's) while that is open, until Shell's areas draw pages (step 5). Loaded the first time the panel (or Settings) is shown; the
 // app passes in what it needs through deps.
 import { undoSteps } from "./agent-undo.js";
-import { createChatsPage } from "./chats-page.js";
 import { editsHtml, editsLabel } from "../modules/assistant/index.js";
 import { getPath, isImageFileName } from "../modules/workspace/index.js";
-import { fetchServerChatWorkspace, pushServerChatWorkspace, sendChatRequest } from "../services/chat-api-service.js";
+import { fetchServerChatWorkspace, pushServerChatWorkspace } from "../services/chat-api-service.js";
 import { createChatMessage, createChatThread, deriveChatTitle, loadChatWorkspace, saveChatWorkspace } from "../services/chat-storage-service.js";
 import { createChatSynchronizer } from "../services/chat-sync-service.js";
-import { contextChipsHtml, paintConversation, shouldSubmitChat } from "../services/chat-ui-service.js";
 import { renderMarkdown } from "../modules/editor/index.js";
 import { createMcpControls } from "../services/mcp-ui-service.js";
-import { groupByProvider } from "../modules/models/index.js";
+import { groupByProvider, sendChatRequest } from "../modules/models/index.js";
 import { contextFiles, projectSnapshot } from "../modules/characters/index.js";
-import { normalizeServerUrl } from "../modules/shell/index.js";
+import { contextChipsHtml, isChatNearBottom, normalizeServerUrl, paintConversation, shouldSubmitChat } from "../modules/shell/index.js";
 import { query } from "../ui/dom.js";
 
 export function createChatPanel(deps) {
@@ -447,17 +445,15 @@ export function createChatPanel(deps) {
     else renderAgentPage(project);
   }
 
-  // ---- The Chats page (features/chats-page.js), given the agent's old Roleplay threads ----
-  const chatsPage = createChatsPage({
-    ...deps,
-    rerender: () => renderChatPanel(controller.getProject()),
-    agentThreads: {
-      // Old Roleplay group threads (kind "group") move into Chats once, then leave the agent's list.
-      oldGroupThreads: () => chatState.threads.filter((thread) => thread.kind === "group" && !thread.deleted && thread.messages?.length),
-      movedGroupThreads(threads) {
-        for (const thread of threads) { thread.deleted = true; thread.updatedAt = Date.now(); }
-        if (threads.length) persistChatWorkspaceState();
-      }
+  // ---- The Chats page (the Chats module's): drawn from here while it is open,
+  // and given the agent's old Roleplay threads to move in once.
+  const chatsPage = deps.chatsPage;
+  chatsPage.giveAgentThreads({
+    // Old Roleplay group threads (kind "group") move into Chats once, then leave the agent's list.
+    oldGroupThreads: () => chatState.threads.filter((thread) => thread.kind === "group" && !thread.deleted && thread.messages?.length),
+    movedGroupThreads(threads) {
+      for (const thread of threads) { thread.deleted = true; thread.updatedAt = Date.now(); }
+      if (threads.length) persistChatWorkspaceState();
     }
   });
 

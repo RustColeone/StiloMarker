@@ -4,6 +4,7 @@
 // server/stilo/modules/models.
 //
 // API (also as static exports, for code from before the restructure):
+//   sendChatRequest(serverUrl, payload, onProgress, signal) -> the server agent's answer
 //   runDirectReply({ payload, apiUrl, apiKey, model, signal, onText, tools, onTool }) -> text
 //   groupByProvider(models, providerOf) -> [[provider, models], ...]
 //   chosenModel(models, saved, fallback) -> model
@@ -20,6 +21,7 @@ import { AGENT_STATUS, createAgentConnection } from "./adapters/agent.js";
 export { runDirectReply } from "./adapters/direct.js";
 export { chosenModel, groupByProvider } from "./model/catalog.js";
 export { createChatStream } from "./model/stream.js";
+export { sendChatRequest } from "./adapters/server-agent.js";
 
 export default defineModule({
   name: "models",

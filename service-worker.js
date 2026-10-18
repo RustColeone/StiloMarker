@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v0.1.62";
+const CACHE_NAME = "mdnotes-shell-v0.1.63";
 // The extensions' files (EXTENSION_FILES), written by tools/protocol-sync.mjs.
 importScripts("./extensions/offline.js");
 const APP_SHELL = [
@@ -50,6 +50,7 @@ const APP_SHELL = [
   "./app/modules/shell/adapters/menu-bar.js",
   "./app/modules/shell/adapters/page-errors.js",
   "./app/modules/shell/adapters/pages.js",
+  "./app/modules/shell/adapters/conversation.js",
   "./app/modules/shell/adapters/settings-store.js",
   "./app/modules/shell/service/settings.js",
   "./app/modules/shell/adapters/server.js",
@@ -108,6 +109,7 @@ const APP_SHELL = [
   "./app/modules/editor/adapters/format-toolbar.js",
   "./app/modules/editor/adapters/table-picker.js",
   "./app/modules/comments/adapters/popover.js",
+  "./app/modules/chats/adapters/page.js",
   "./app/modules/chats/index.js",
   "./app/modules/chats/adapters/api.js",
   "./app/modules/chats/adapters/local-records.js",
@@ -136,6 +138,7 @@ const APP_SHELL = [
   "./app/modules/models/model/stream.js",
   "./app/modules/models/model/agent-status.js",
   "./app/modules/models/adapters/agent.js",
+  "./app/modules/models/adapters/server-agent.js",
   "./app/modules/characters/model/request.js",
   "./app/modules/models/model/catalog.js",
   "./app/modules/models/adapters/direct.js",
@@ -143,7 +146,6 @@ const APP_SHELL = [
   "./app/features/workspace-history.js",
   "./app/features/snapshots-dialog.js",
   "./app/features/chat-panel.js",
-  "./app/features/chats-page.js",
   "./app/features/previews.js",
   "./app/modules/editor/adapters/tabs.js",
   "./app/modules/editor/adapters/preview.js",

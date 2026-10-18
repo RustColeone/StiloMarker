@@ -1,32 +1,42 @@
-// The Chats page of the side panel: a small chat app for a project's people
-// and its characters (the Chats module's view, loaded the first time the page
-// opens), with its own conversation, input, attachments and drops. It shares
-// nothing with the Agent page: the agent's server connection is the Models
-// module's, what a request carries from the project is Characters', and the
-// Agent page gives it only its old Roleplay threads to move in once
-// (`agentThreads`). Split out of chat-panel.js; it becomes the Chats module's
-// next (docs/ARCHITECTURE.md, S3d).
-import { getNodeIdByPath, getPath, isImageFileName, isPersonaFileName } from "../modules/workspace/index.js";
-import { sendChatRequest } from "../services/chat-api-service.js";
-import { contextChipsHtml, isChatNearBottom, paintConversation, shouldSubmitChat } from "../services/chat-ui-service.js";
-import { renderMarkdown } from "../modules/editor/index.js";
-import { charactersView, contextFiles, parsePersona, personaSummary, projectSnapshot } from "../modules/characters/index.js";
-import { createCloudChats, createLocalChats, loadChatsView } from "../modules/chats/index.js";
-import { runDirectReply } from "../modules/models/index.js";
-import { normalizeServerUrl } from "../modules/shell/index.js";
-import { query } from "../ui/dom.js";
-import { ignored } from "../kernel/index.js";
+// The Chats page of the side panel (one of Shell's pages): a small chat app
+// for a project's people and its characters (the view, adapters/view.js,
+// loaded the first time the page opens), with its own conversation, input,
+// attachments and drops. It shares nothing with the Agent page: the agent's
+// server connection is the Models module's, what a request carries from the
+// project is Characters'. The Agent page hands over its old Roleplay threads
+// once (giveAgentThreads), and they move into Chats.
+import { getNodeIdByPath, getPath, isImageFileName, isPersonaFileName } from "../../workspace/index.js";
+import { escapeHtmlAttribute, renderMarkdown } from "../../editor/index.js";
+import { charactersView, contextFiles, parsePersona, personaSummary, projectSnapshot } from "../../characters/index.js";
+import { createCloudChats } from "./api.js";
+import { createIdbRecordStore } from "./local-records.js";
+import { createLocalChats as createLocalStore } from "../service/local-chats.js";
+import { runDirectReply, sendChatRequest } from "../../models/index.js";
+import { contextChipsHtml, isChatNearBottom, normalizeServerUrl, paintConversation, shouldSubmitChat } from "../../shell/index.js";
+import { ignored } from "../../../kernel/index.js";
 
-export function createChatsPage(deps) {
+// `app`: what the Chats module gathered (surface in ../index.js).
+export function createChatsPage(app) {
   const {
-    agentThreads, models, rerender, cloudWorkspaceTarget, chatWorkspaceKey, controller, collaboration, escapeHtmlAttribute, identity,
-    isMobileLayout, logDebug, notify, openFileFromExplorer, pages, personaAvatarSrc, settings, showConfirmDialog, showToast
-  } = deps;
+    models, cloudWorkspaceTarget, chatWorkspaceKey, controller, identity, isMobileLayout, logDebug, notify,
+    openFileFromExplorer, pages, personaAvatarSrc, settings, showConfirmDialog, showToast
+  } = app;
+  // A cloud chat's presence: the live session's (Sync's).
+  const collaboration = { getPresence: () => app.collaboration()?.getPresence?.() ?? [] };
+  // The Agent page's old Roleplay threads, once it has loaded them (giveAgentThreads).
+  let agentThreads = null;
+  // Draw again: the unread count on the tab, and the page itself while it is open.
+  const rerender = () => {
+    pages.badge("side", "chats", chats?.unreadTotal() ?? 0);
+    if (pages.active("side") === "chats") render(controller.getProject());
+  };
+  const createLocalChats = (options) => createLocalStore({ ...options, records: createIdbRecordStore() });
+  const loadChatsView = () => import("./view.js");
   // The Chats page's own elements (its body in the side panel).
   const chatsEl = {
-    page: query("#chats-page"), castBar: query("#chats-cast-bar"), messageList: query("#chats-message-list"),
-    form: query("#chats-compose-form"), contextList: query("#chats-context-list"), input: query("#chats-input"),
-    addFile: query("#chats-add-file-button"), send: query("#chats-send-button")
+    page: document.querySelector("#chats-page"), castBar: document.querySelector("#chats-cast-bar"), messageList: document.querySelector("#chats-message-list"),
+    form: document.querySelector("#chats-compose-form"), contextList: document.querySelector("#chats-context-list"), input: document.querySelector("#chats-input"),
+    addFile: document.querySelector("#chats-add-file-button"), send: document.querySelector("#chats-send-button")
   };
 
   // The Chats tab's view, loaded the first time the tab is shown, and the store
@@ -164,7 +174,7 @@ export function createChatsPage(deps) {
 
   /** Old Roleplay group threads move into Chats once, then leave the agent's list. */
   async function importRoleplayThreads(store) {
-    const old = agentThreads.oldGroupThreads();
+    const old = agentThreads?.oldGroupThreads() ?? [];
     const moved = [];
     for (const thread of old) {
       try {
@@ -175,7 +185,7 @@ export function createChatsPage(deps) {
         break;
       }
     }
-    agentThreads.movedGroupThreads(moved);
+    agentThreads?.movedGroupThreads(moved);
     if (moved.length === old.length && old.length) {
       showToast(`Moved ${old.length} Roleplay chat${old.length === 1 ? "" : "s"} into Chats`);
       await chats?.refresh();
@@ -326,6 +336,12 @@ export function createChatsPage(deps) {
     render,
     badge: () => pages.badge("side", "chats", chats?.unreadTotal() ?? 0),
     receive: (event) => chats?.receive(event),
+    // The Agent page's old Roleplay threads: they move into Chats once the store is known.
+    giveAgentThreads(threads) {
+      agentThreads = threads;
+      const store = chats?.store();
+      if (store) void importRoleplayThreads(store);
+    },
     view: () => chats, // the Chats view once loaded (tests read it)
     remapPersonaPaths
   };
