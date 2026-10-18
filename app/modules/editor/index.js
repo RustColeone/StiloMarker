@@ -8,21 +8,21 @@
 // API: attach(port) -> parts: creates the source editor, find, autocomplete,
 // links, the tab strips and the preview, given what main.js still provides
 // (adapters/surface.js lists it: PORT); parts() -> the same functions.
-// previews, highlighters, toolbars and marks (extension points; marks are
+// previews, highlighters, toolbars, paneViews (tabs in the preview pane that
+// are not files, such as History's diff) and marks (extension points; marks are
 // what other modules put on files' lines, service/marks.js) and view: what the
 // editor shows, read with view.get() and changed only through its actions
 // (service/view.js): reset(project), pick(nodeId, partId?), select(nodeId),
 // openTab/closeTab(pane, fileId), moveTab(pane, id, targetId, after?),
-// showPreview(fileId, partId?), showDiff(id), clearParts(), dragTab(state),
-// keepTabs(project, { diffTabId, diffActive }).
+// showPreview(fileId, partId?), showView(id), clearParts(), dragTab(state),
+// keepTabs(project, { views, open }).
 //
 // Static, for code from before the restructure: renderMarkdown,
 // extractMarkdownLinks, collectMarkdownReferences, parseMarkdownInlineElements,
 // buildTableSnippet, getEditorToolbarFormat, TOOLBAR_SPECS, escapeHtmlAttribute,
-// the project path helpers, forgetViewStates (the saved resume positions) and
-// DIFF_TAB_ID (the preview's diff tab).
+// the project path helpers, forgetViewStates (the saved resume positions).
 import { defineModule } from "../../kernel/index.js";
-import { DIFF_TAB_ID, EMPTY_VIEW, createView } from "./service/view.js";
+import { EMPTY_VIEW, createView } from "./service/view.js";
 import { EMPTY_MARKS, createMarks } from "./service/marks.js";
 import { createSurface } from "./adapters/surface.js";
 import { addEditorSettings, applyEditorFont } from "./adapters/settings-fields.js";
@@ -32,7 +32,6 @@ export { collectMarkdownReferences, extractMarkdownLinks, parseMarkdownInlineEle
 export { escapeHtmlAttribute } from "./model/html.js";
 export { getRelativePath, getRelativeProjectPath, normalizePath } from "./model/paths.js";
 export { forgetViewStates } from "./adapters/resume.js";
-export { DIFF_TAB_ID };
 export { clampSourceFontSize, cssFontFamily } from "./model/font.js";
 
 const FONT_KEYS = ["sourceFontSize", "sourceFontFamily"];
@@ -43,7 +42,7 @@ export default defineModule({
   uses: ["shell", "file-types", "workspace", "identity"],
   owns: { elements: ["the source editor", "the formatting toolbar", "the find bar", "the tab strips", "the preview pane"],
     state: ["the open tabs", "what each pane shows", "the explorer selection"],
-    registries: ["previews", "highlighters", "toolbars", "marks"], rules: ["Markdown rendering"] },
+    registries: ["previews", "highlighters", "toolbars", "marks", "pane views"], rules: ["Markdown rendering"] },
   start(ctx) {
     // Previews of other kinds of file: { id, matches(file), render(target, project, file, tools), cacheable?, printHtml? }
     const previews = ctx.registry();
@@ -51,6 +50,9 @@ export default defineModule({
     const highlighters = ctx.registry({ validate: (entry) => { if (typeof entry.line !== "function") throw new Error(`highlighter ${entry.id} needs line()`); } });
     // Formatting-toolbar buttons for such a format: { id: format, groups: [[{ id, html, title, action }]] }
     const toolbars = ctx.registry({ validate: (entry) => { if (!Array.isArray(entry.groups)) throw new Error(`toolbar ${entry.id} needs groups`); } });
+    // Tabs in the preview pane that are not files: { id, element, tab() -> { label, title, iconText, iconClass } | null
+    // (null while closed), show({ fresh }), close() } (History's diff).
+    const paneViews = ctx.registry({ validate: (entry) => { for (const key of ["tab", "show", "close"]) if (typeof entry[key] !== "function") throw new Error(`pane view ${entry.id} needs ${key}()`); } });
     const open = (registry) => ({ add: registry.add, get: registry.get, all: registry.all });
     // What the editor shows (tabs, the preview's file and part, the selection): read view.get(), change it through its actions.
     const view = createView(ctx.state(EMPTY_VIEW));
@@ -66,10 +68,10 @@ export default defineModule({
     let parts = null;
     function attach(port) {
       if (parts) throw new Error("editor: already attached");
-      parts = createSurface({ port, view, marks, previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars),
+      parts = createSurface({ port, view, marks, paneViews: open(paneViews), previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars),
         workspace: ctx.use("workspace"), shell: ctx.use("shell") });
       return parts;
     }
-    return { previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars), marks, view, attach, parts: () => parts };
+    return { previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars), paneViews: open(paneViews), marks, view, attach, parts: () => parts };
   }
 });

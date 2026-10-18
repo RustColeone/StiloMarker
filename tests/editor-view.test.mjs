@@ -56,10 +56,10 @@ test("tabs open once, close (the preview falls back to the last tab) and move", 
   assert.throws(() => view.get().previewOpenTabIds.push("x"), TypeError, "only actions change the tabs");
 });
 
-test("the diff tab: shown, then closed back to the last file tab", () => {
+test("a pane view (the diff): shown, then closed back to the last file tab", () => {
   const { view } = fresh();
   view.reset(project("a", "a"));
-  view.showDiff("__diff__");
+  view.showView("__diff__");
   assert.equal(view.get().previewFileId, "__diff__");
   view.closeTab("preview", "__diff__");
   assert.equal(view.get().previewFileId, "a");
@@ -71,14 +71,14 @@ test("keepTabs: tabs only for files that still exist, the active file among them
   view.openTab("source", "b");
   view.openTab("preview", "b");
   view.showPreview("b");
-  view.keepTabs(project("c", "a", "c"), { diffTabId: "__diff__", diffActive: false });
+  view.keepTabs(project("c", "a", "c"), { views: ["__diff__"], open: [] });
   assert.deepEqual(view.get().sourceOpenTabIds, ["a", "c"]);
   assert.deepEqual(view.get().previewOpenTabIds, ["a"]);
   assert.equal(view.get().previewFileId, "a", "the shown file is gone: the last tab is shown");
-  view.showDiff("__diff__");
-  view.keepTabs(project("c", "a", "c"), { diffTabId: "__diff__", diffActive: true });
-  assert.equal(view.get().previewFileId, "__diff__", "an open diff stays shown");
-  view.keepTabs(project(null, "a", "c"), { diffTabId: "__diff__", diffActive: false });
+  view.showView("__diff__");
+  view.keepTabs(project("c", "a", "c"), { views: ["__diff__"], open: ["__diff__"] });
+  assert.equal(view.get().previewFileId, "__diff__", "an open view stays shown");
+  view.keepTabs(project(null, "a", "c"), { views: ["__diff__"], open: [] });
   assert.deepEqual(view.get().sourceOpenTabIds, [], "no active file: no source tabs");
   assert.equal(view.get().previewFileId, "a");
 });

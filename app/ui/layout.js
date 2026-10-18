@@ -128,8 +128,9 @@ export function createLayout(app) {
       if (mobileView === "chat") {
         caption = "CHAT";
       } else if (mobileView === "preview") {
-        const name = app.view.get().previewFileId === app.DIFF_TAB_ID
-          ? (app.diffState.active ? `${app.diffState.path.split("/").pop()} (diff)` : null)
+        const paneView = app.shownPaneView(); // a preview tab that is not a file (History's diff)
+        const name = paneView
+          ? (paneView.tab()?.caption ?? paneView.tab()?.label ?? null)
           : app.controller.getProject()?.nodes?.[app.view.get().previewFileId]?.name;
         caption = name ? `PREVIEW — ${name}` : "PREVIEW";
       } else {

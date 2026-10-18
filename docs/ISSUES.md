@@ -69,6 +69,20 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.71: History owns snapshots and the diff tab
+
+Step S4d-1. Nothing changes for users.
+
+- Snapshots, the version label, the Snapshots and Workspace History dialogs
+  and their menu items moved from `app/features` and `main.js` into the History
+  module.
+- The diff is a tab in the preview pane through a new Editor extension point
+  for tabs that are not files; the Editor draws the preview pane itself.
+- `shell-browser.py` now compares a snapshot in the diff tab and closes it.
+  It caught two slips before release: renaming a file failed (a name the
+  Editor's port still used had moved), and Compare failed (one call still used
+  the diff's old action name).
+
 ### v0.1.70: resuming and leaving belong to their modules
 
 Step S4c-2. Nothing changes for users.

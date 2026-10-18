@@ -11,10 +11,6 @@
 //   selectionNodeId    the node selected in the explorer
 //   draggingTabState   { pane, fileId } while a tab is dragged, else null
 
-// The preview's diff tab (comparing the open file with a snapshot): a preview
-// target that is not a project file.
-export const DIFF_TAB_ID = "__diff__";
-
 export const EMPTY_VIEW = {
   sourceOpenTabIds: [], previewOpenTabIds: [], previewFileId: null, previewPart: null,
   sourcePart: null, selectionNodeId: null, draggingTabState: null
@@ -87,9 +83,9 @@ export function createView(state) {
       state.set("show preview", { previewFileId: fileId, previewPart: partId });
     },
 
-    // The diff tab is a preview target but not a project file.
-    showDiff(diffTabId) {
-      state.set("show diff", { previewFileId: diffTabId });
+    // A pane view (editor.paneViews: History's diff) is a preview target but not a project file.
+    showView(viewId) {
+      state.set("show a view", { previewFileId: viewId });
     },
 
     clearParts() {
@@ -102,19 +98,21 @@ export function createView(state) {
 
     // After the project changed: tabs only for files that still exist, the
     // active file among the source tabs, and the preview showing a tab.
-    keepTabs(project, { diffTabId, diffActive }) {
+    // views: every pane view's id; open: those open now.
+    keepTabs(project, { views = [], open = [] } = {}) {
       const view = get();
       const sourceOpenTabIds = view.sourceOpenTabIds.filter((id) => isFile(project, id));
       const previewOpenTabIds = view.previewOpenTabIds.filter((id) => isFile(project, id));
       if (project.activeFileId && !sourceOpenTabIds.includes(project.activeFileId)) sourceOpenTabIds.push(project.activeFileId);
       if (!project.activeFileId) sourceOpenTabIds.length = 0;
       let previewFileId = view.previewFileId;
-      if (previewFileId === diffTabId) {
-        if (!diffActive) previewFileId = previewOpenTabIds[previewOpenTabIds.length - 1] ?? null;
+      const isView = views.includes(previewFileId);
+      if (isView) {
+        if (!open.includes(previewFileId)) previewFileId = previewOpenTabIds[previewOpenTabIds.length - 1] ?? null;
       } else if (previewFileId && !isFile(project, previewFileId)) {
         previewFileId = null;
       }
-      if (previewFileId && previewFileId !== diffTabId && !previewOpenTabIds.includes(previewFileId)) previewOpenTabIds.push(previewFileId);
+      if (previewFileId && !views.includes(previewFileId) && !previewOpenTabIds.includes(previewFileId)) previewOpenTabIds.push(previewFileId);
       if (!previewFileId && previewOpenTabIds.length > 0) previewFileId = previewOpenTabIds[previewOpenTabIds.length - 1];
       const same = (a, b) => a.length === b.length && a.every((id, i) => id === b[i]);
       state.set("keep tabs", {

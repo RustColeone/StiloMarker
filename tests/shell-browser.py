@@ -107,6 +107,24 @@ async def main():
         await page.keyboard.press('Control+s')
         await page.wait_for_function('window.__shellTest.log.includes("shell: command workspace.save")')
 
+        # Save took a snapshot (History's). After an edit, comparing with it opens
+        # the diff as a tab in the preview pane (an Editor pane view); closing the
+        # tab brings the file's preview back.
+        await page.wait_for_selector('.app-toast:has-text("Snapshot saved: notes.md")')
+        await page.keyboard.press('End')
+        await page.keyboard.type(' and more')
+        await page.evaluate('window.__shellTest.shell.run("history.snapshots")')
+        await page.click('#snapshots-list .snapshot-item')
+        await page.click('#snapshots-compare-btn')
+        await page.wait_for_selector('#preview-diff-view:not([hidden])')
+        diff = await page.evaluate('''() => [document.querySelector("#preview-output").hidden,
+            [...document.querySelectorAll("#preview-tab-strip .editor-tab")].map((t) => t.textContent.trim()).filter((s) => s.includes("±")).length,
+            document.querySelector("#diff-body").textContent.includes("and more")]''')
+        assert diff == [True, 1, True], diff
+        await page.click('#preview-tab-strip .editor-tab:has-text("±") .tab-close')
+        await page.wait_for_selector('#preview-diff-view', state='hidden')
+        assert not await page.locator('#preview-output').is_hidden()
+
         # The rename dialog keeps ".md" out of the field and puts it back.
         await page.evaluate('() => { void window.__shellTest.renameFileById("a"); }')
         await page.wait_for_selector('#input-dialog[open]')
@@ -222,7 +240,7 @@ async def main():
         await context.close()
         await browser.close()
         print(json.dumps({'checks': ['file-type lists from File types', 'five menus with their items', 'one menu open at a time', 'live titles',
-                                     'menu item runs its command', 'Ctrl+S runs Save', 'rename keeps the extension',
+                                     'menu item runs its command', 'Ctrl+S runs Save', 'a snapshot compared in the diff tab', 'rename keeps the extension',
                                      'late menus and commands appear', 'Replace File replaces an image', 'status bar items from their owners', 'Settings sections and fields', 'the trace and its tab', 'a diagram previews as a diagram', 'phone menu panel'], 'runtimeErrors': 0}))
 
 

@@ -9,7 +9,8 @@ import { getPath, isBmapFileName } from "../../workspace/index.js";
 export function createTabs(app) {
 
   function ensureOpenTabs(project) {
-    app.view.keepTabs(project, { diffTabId: app.DIFF_TAB_ID, diffActive: Boolean(app.diffState.active) });
+    const views = app.paneViews.all();
+    app.view.keepTabs(project, { views: views.map((view) => view.id), open: views.filter((view) => view.tab()).map((view) => view.id) });
   }
 
   function openSourceTab(fileId) {
@@ -125,10 +126,11 @@ export function createTabs(app) {
 
   function setPreviewFile(fileId) {
     const project = app.controller.getProject();
-    if (fileId === app.DIFF_TAB_ID) {
-      if (!app.diffState.active) return;
+    const paneView = app.paneViews.get(fileId); // a tab that is not a file (History's diff)
+    if (paneView) {
+      if (!paneView.tab()) return;
       app.captureViewState();
-      app.view.showDiff(app.DIFF_TAB_ID);
+      app.view.showView(fileId);
       app.updateStatus(project);
       return;
     }
@@ -546,17 +548,11 @@ export function createTabs(app) {
       allowReorder: true
     });
 
-    const previewExtraTabs = app.diffState.active
-      ? [{
-          id: app.DIFF_TAB_ID,
-          label: app.diffState.path.split("/").pop(),
-          title: `Diff: ${app.diffState.path} — current vs ${app.formatSnapshotTime(app.diffState.createdAt)}`,
-          iconText: "±",
-          iconClass: "tab-diff-icon",
-          onActivate: () => setPreviewFile(app.DIFF_TAB_ID),
-          onClose: app.closeDiff
-        }]
-      : [];
+    // Open pane views get tabs after the files' (History's diff).
+    const previewExtraTabs = app.paneViews.all().flatMap((paneView) => {
+      const tab = paneView.tab();
+      return tab ? [{ id: paneView.id, ...tab, onActivate: () => setPreviewFile(paneView.id), onClose: () => paneView.close() }] : [];
+    });
     renderTabStrip({
       strip: app.elements.previewTabStrip,
       pane: "preview",

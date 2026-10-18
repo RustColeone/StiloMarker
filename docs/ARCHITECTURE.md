@@ -327,7 +327,10 @@ That is where bugs are hard to find. Steps, each its own release:
 | S4b | The status bar is Shell's (v0.1.68, `statusBar.add({ id, order, … })` → a handle to set its text, dot, title, visibility), and each item is its owner's, drawn from the owner's own state as it changes rather than on every redraw: where the project lives and folder access (Workspace, from the project), the server (Cloud, from Sync's status and the account), the collaborators and the Session panel (Sync), the character count (Editor), the snapshot version (`main.js` until S4d). A person's colour is Identity's (`participantColor`), shared by their cursor, dot and chip. Pixel-identical | done (v0.1.68) |
 | S4c-1 | Sync owns the connection's life (v0.1.69, `adapters/connection.js`): joining a PIN session (Join, after the user agrees) and keeping it (auto-reconnect with backoff), what changes as the status does (the shared or own workspace, the in-step revision, reconnect toasts, a too-old app upgraded), switching between the shared workspace and the tab's own (`sync.switchMode`, the Session panel's switch), and sending a change (`sync.publish`: the base revision stamped, an image's bytes uploaded first, a refused write reloaded). Chats and the Agent page hear their own events on Sync's stream; the Assistant asks the agent again when a session connects or drops; the Explorer and Cloud call Sync directly. A deliberate switch to the tab's own workspace is announced (`"switched"`), so only that cancels an automatic resume | done (v0.1.69) |
 | S4c-2 | Resuming and leaving (v0.1.70): Cloud resumes the last session (`adapters/resume.js`, `service/recovery.js`: at start, back on the page, back online, the welcome page's Resume; a deliberate switch to the tab's own workspace cancels it); Workspace reattaches the device folder when the project opens; when the page hides or goes, each module keeps its own part (the Editor where the reader was, Workspace this browser's copy and the unsaved-changes warning, Sync the in-step revision and leaving the session). `main.js` keeps one call to start the resume | done (v0.1.70) |
-| S4d–S4e | Connecting and boot (Sync, Cloud); snapshots, the diagram's generate, the welcome screen (History, the diagram, Editor); the `elements` table, then `main.js` only starts the kernel | |
+| S4d-1 | History owns snapshots on the page (v0.1.71, `history.attach(port)`, `adapters/surface.js`): the snapshots, the version label (drawn as the project changes), the host's counters, the Snapshots and Workspace History dialogs and their commands, all moved from `app/features`. The diff is a tab in the preview pane through a new Editor extension point, `editor.paneViews` (a tab that is not a file: `{ id, element, tab(), show({ fresh }), close() }`); the Editor draws the preview pane (a file's preview or a pane view) and takes edits made in a preview. Which cloud workspace is open is Sync's (`sync.cloudWorkspace()`). The diff names left the Editor's port, the snapshot ones Cloud's; `main.js` hands out 40 getters (58 before) | done (v0.1.71) |
+| S4d-2 | Diagrams as an extension: generating, loading the view, their settings and export | next |
+| S4d-3 | The comments glue (Comments), the welcome page (Editor), the maintenance commands (Workspace) | |
+| S4e | Connecting and boot (Sync, Cloud); snapshots, the diagram's generate, the welcome screen (History, the diagram, Editor); the `elements` table, then `main.js` only starts the kernel | |
 | S4 | `main.js` only starts the kernel; then the server's `WorkspaceRegistry` the same way | |
 
 ### Notes for module authors
@@ -439,6 +442,10 @@ That is where bugs are hard to find. Steps, each its own release:
   react to the setting with `shell.settings.on((view, changed) => …)`, not to
   the control. A new section: `settingsDialog.addPage({ id, label, order,
   body })` with a `[data-settings-fields]` box in the body.
+- A tab in the preview pane that is not a file (History's diff):
+  `editor.paneViews.add({ id, element, tab() -> { label, title, iconText,
+  iconClass, caption? } | null, show({ fresh }), close() })`; `tab()` is null
+  while it is closed. Show it with `editor.view.showView(id)`.
 - Marking a file's lines for review (the agent's applied edits do this):
   `editor.marks.put({ [path]: { owner, kind, lineStart, lineEnd, title?,
   bar?() } }, why)` tints those lines and the gutter (`is-<kind>`), badges

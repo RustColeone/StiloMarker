@@ -2,7 +2,12 @@
 // compare one with the open file (in the preview's diff tab), restore or delete
 // it. Loaded the first time the dialog opens; the app passes in what it needs.
 
-import { query } from "../ui/dom.js";
+// A node of this dialog's markup (it must be there).
+function query(selector) {
+  const node = document.querySelector(selector);
+  if (!node) throw new Error(`Missing DOM node: ${selector}`);
+  return node;
+}
 
 export function createSnapshotsDialog(deps) {
   const {

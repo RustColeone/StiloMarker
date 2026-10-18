@@ -1,11 +1,12 @@
 // Per-file snapshots (local or on the server), the S.E.N version label, the
 // restore helpers shared with Workspace History, and the preview's diff tab
 // comparing the open file with a snapshot.
-// main.js creates this on first use and passes its shared values in `app`.
-import { getPath, isTextFileName } from "../domain/project-model.js";
-import { createFileSnapshot, createServerSnapshot, deleteServerSnapshot, deleteVersion, diffLines, getServerSnapshotContent, getVersionContent,
-  listFileVersions, listServerSnapshotPaths, listServerSnapshotVersions, listSnapshotPaths } from "../modules/history/index.js";
-import { ignore } from "../kernel/index.js";
+// Part of History: created when History is attached, given its context in `app` (surface.js).
+import { getPath, isTextFileName } from "../../workspace/index.js";
+import { createServerSnapshot, deleteServerSnapshot, getServerSnapshotContent, listServerSnapshotPaths, listServerSnapshotVersions } from "./api.js";
+import { createFileSnapshot, deleteVersion, getVersionContent, listFileVersions, listSnapshotPaths } from "./local-store.js";
+import { diffLines } from "../model/diff.js";
+import { ignore } from "../../../kernel/index.js";
 
 export function createSnapshots(app) {
   // Newest snapshot per file path: { count, editSessions, sessionEdits }. The
@@ -313,7 +314,7 @@ export function createSnapshots(app) {
     app.diffState.createdAt = createdAt;
     app.diffState.currentChange = -1;
     if (app.settings.preview === "hidden") app.togglePreview();
-    app.view.showDiff(app.DIFF_TAB_ID); // make the diff the active preview tab
+    app.view.showView(app.DIFF_TAB_ID); // make the diff the active preview tab
     app.updateStatus(project); // renders the tab strip + shows the diff pane
     renderDiff(); // immediate full render so blocks are fresh (updateStatus may have debounced)
     if (app.diffState.blocks.length) gotoChange(1); // jump to the first change

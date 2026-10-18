@@ -26,10 +26,9 @@ import explorerModule from "./modules/explorer/index.js";
 import { createDiagramExport } from "./features/diagram-export.js";
 import { registerPreviews } from "./features/previews.js";
 import { createLayout } from "./ui/layout.js";
-import editorModule, { DIFF_TAB_ID, escapeHtmlAttribute, forgetViewStates, getRelativeProjectPath, normalizePath, renderMarkdown } from "./modules/editor/index.js";
+import editorModule, { escapeHtmlAttribute, forgetViewStates, getRelativeProjectPath, normalizePath, renderMarkdown } from "./modules/editor/index.js";
 import { createDialogs } from "./ui/dialogs.js";
 import { createLineComments } from "./modules/comments/index.js";
-import { createSnapshots } from "./features/snapshots.js";
 
 document.querySelectorAll("[data-app-version]").forEach((label) => { label.textContent = `v${APP_VERSION}`; });
 
@@ -177,13 +176,6 @@ const elements = {
   menuBar: query(".menu-bar"),
   openServerDialog: query("#open-server-dialog"),
   importFileInput: query("#import-file-input"),
-  previewDiffView: query("#preview-diff-view"),
-  diffBody: query("#diff-body"),
-  diffRuler: query("#diff-ruler"),
-  diffPrevChange: query("#diff-prev-change"),
-  diffNextChange: query("#diff-next-change"),
-  previewDiffLabel: query("#preview-diff-label"),
-  previewDiffStats: query("#preview-diff-stats"),
   previewCollapseButton: query("#preview-collapse-button"),
   sourceCollapseButton: query("#source-collapse-button"),
   sourceToggleActivityButton: query("#source-toggle-activity-button"),
@@ -238,7 +230,7 @@ const syncState = modules.sync.status;
 // workspace the server has confirmed (only those may lose their dirty mark).
 workspace.saving.attach({
   busy: () => editorParts.isComposing(),
-  scope: () => snapshotProjectKey(),
+  scope: () => settings.syncedProjectId || controller.getProject()?.id || "local", // whose saved positions: the cloud workspace's, else the project's
   shared: () => syncMode.get().workspaceMode === "synced",
   confirmed: (project, ids) => (syncMode.get().workspaceMode !== "synced" ? ids
     : collaboration.isConnected?.() ? ids.filter((id) => !collaboration.hasUnsyncedText?.(getPath(project, id))) : [])
@@ -253,8 +245,7 @@ var editorParts = modules.editor.attach({
   saveUserState: (ws, openFiles, activeFile) => saveUserState(settings.serverUrl, identity.token(), ws.team, ws.path, openFiles, activeFile),
   logDebug, traceEditorEvent, formatEditorDebugValue,
   commentsForActiveFile, scheduleCommentReanchor,
-  imageSrcFor, closeDiff, formatSnapshotTime,
-  get diffState() { return diffState; },
+  imageSrcFor,
   renderWelcomeState, setMobileExplorerOpen, togglePreview,
   scope: () => chatWorkspaceKey(), isReadOnly: () => isReadOnlyWorkspace(), onDrop: (event) => handleEditorDrop(event)
 });
@@ -266,10 +257,12 @@ var explorerParts = modules.explorer.attach({
   openAccessEditor, openMtreeToolsDialog, remapPersonaPaths, initialContentForKind,
   exportDiagram: createDiagramExport({ get controller() { return controller; }, loadBmapView, notify, logDebug })
 });
+// Snapshots, the version label, the diff tab and History's dialogs (modules/history/adapters/surface.js).
+var historyParts = modules.history.attach({ togglePreview, logDebug });
 // The cloud file browser, accounts and hosting (modules/cloud/adapters/surface.js).
 var cloudParts = modules.cloud.attach({
   elements, logDebug, flashStatusPanel, openSettingsDialog, refreshChatStatus, loadLineComments,
-  ensureSnapshotsMigrated, refreshSnapshotBaselines, snapshotDirtyFiles, setMobileExplorerOpen
+  setMobileExplorerOpen
 });
 var chatsPage = modules.chats.attach({ cloudWorkspaceTarget, chatWorkspaceKey, personaAvatarSrc, isMobileLayout, logDebug }); // the side panel's Chats page
 // Diagrams and character sheets add their previews to the Editor's extension point.
@@ -338,7 +331,6 @@ function loadBmapView() {
 // being committed. The preview view has already updated itself in place, so the
 // synchronous updateStatus callback must skip re-rendering the preview pane —
 // re-rendering would rebuild the diagram and reset its scroll/selection.
-let _previewUpdating = false;
 
 const debugState = {
   entries: [],
@@ -503,27 +495,11 @@ function findNext(...args) { return editorParts.findNext(...args); }
 function findPrev(...args) { return editorParts.findPrev(...args); }
 function openFindBar(...args) { return editorParts.openFindBar(...args); }
 
-// ============================ Snapshots + Diff ==============================
-// Per-file, content-addressed history (the History module). Diff state caches
-// the fetched old-version text so renderDiff() can run synchronously (in the
-// diff overlay). `path` is the file whose version being compared.
-// The diff lives in the preview pane's tab strip as a single special (non-file)
-// tab, keyed by this sentinel id. When it's the active preview tab the pane shows
-// the diff overlay instead of #preview-output. It compares the CURRENT content of
-// `fileId` against the cached `oldText` snapshot — independent of which file the
-// editor has active, so it behaves like any other preview tab.
-const diffState = { active: false, fileId: null, path: null, versionId: null, oldText: "", createdAt: 0, blocks: [], currentChange: -1 };
-
-// A stable-enough key to group snapshots by project: the cloud workspace id when
-// synced, otherwise the local project id.
 // True when this session only has read access to the open cloud workspace.
 function isReadOnlyWorkspace() {
   return syncMode.get().workspaceMode === "synced" && syncState.role === "reader";
 }
 
-function snapshotProjectKey() {
-  return settings.syncedProjectId || controller.getProject()?.id || "local";
-}
 
 // ---- Line comments -----------------------------------------------------------
 // A note attached to a LINE, like a breakpoint: it lives in metadata beside the
@@ -564,119 +540,16 @@ function renderEditorFromModel(...args) { return lineCommentsUi().renderEditorFr
 function scheduleCommentReanchor(...args) { return lineCommentsUi().scheduleCommentReanchor(...args); }
 async function submitLineComment(...args) { return lineCommentsUi().submitLineComment(...args); }
 
-// ---- Where snapshots live ----------------------------------------------------
-// A cloud workspace keeps snapshots ON THE SERVER, so they follow you to any
-// device. A local/private project (no account, or not a cloud workspace) keeps
-// them in this browser's IndexedDB as before. Everything goes through this one
-// adapter so the dialog and diff code never care which backend they talk to.
-function cloudWorkspaceTarget() {
-  const token = identity.token();
-  const ws = settings.lastWorkspace;
-  if (!token || !ws?.team || !ws?.path) return null;
-  if (settings.syncedProjectId !== `${ws.team}/${ws.path}`) return null; // on-screen project IS that workspace
-  return { serverUrl: settings.serverUrl, token, team: ws.team, path: ws.path };
-}
-// ---- Snapshots, version label and the diff tab (./features/snapshots.js) ----
-// Created on first use. The module reads main's shared values through this
-// context, so it always sees their current values. `var`: a forwarding
-// function can run during startup, before this line is reached.
-var snapshotsInstance;
-function snapshots() {
-  return (snapshotsInstance ??= createSnapshots({
-    view: editorView,
-    get workspace() { return workspace; },
-    get DIFF_TAB_ID() { return DIFF_TAB_ID; },
-    get cloudWorkspaceTarget() { return cloudWorkspaceTarget; },
-    get collaboration() { return collaboration; },
-    get controller() { return controller; },
-    get diffState() { return diffState; },
-    get elements() { return elements; },
-    get escapeHtmlAttribute() { return escapeHtmlAttribute; },
-    get logDebug() { return logDebug; },
-    get render() { return render; },
-    get settings() { return settings; },
-    get showToast() { return showToast; },
-    get snapshotProjectKey() { return snapshotProjectKey; },
-    get togglePreview() { return togglePreview; },
-    get updateStatus() { return updateStatus; },
-    versionItem: shell.statusBar.add({ id: "version", order: 50, className: "status-item-version", hidden: true })
-  }));
-}
-async function applyHistoryOperations(...args) { return snapshots().applyHistoryOperations(...args); }
-function closeDiff(...args) { return snapshots().closeDiff(...args); }
-async function createSnapshotNow(...args) { return snapshots().createSnapshotNow(...args); }
-function ensureSnapshotsMigrated(...args) { return snapshots().ensureSnapshotsMigrated(...args); }
-function formatBytes(...args) { return snapshots().formatBytes(...args); }
-function formatSnapshotTime(...args) { return snapshots().formatSnapshotTime(...args); }
-function gotoChange(...args) { return snapshots().gotoChange(...args); }
-function projectPaths(...args) { return snapshots().projectPaths(...args); }
-function refreshSnapshotBaselines(...args) { return snapshots().refreshSnapshotBaselines(...args); }
-function renderDiff(...args) { return snapshots().renderDiff(...args); }
-function renderVersionLabel(...args) { return snapshots().renderVersionLabel(...args); }
-function scheduleDiffRefresh(...args) { return snapshots().scheduleDiffRefresh(...args); }
-function scheduleVersionLabel(...args) { return snapshots().scheduleVersionLabel(...args); }
-function setSnapshotBaselines(...args) { return snapshots().setSnapshotBaselines(...args); }
-async function showFileDiff(...args) { return snapshots().showFileDiff(...args); }
-async function snapshotDirtyFiles(...args) { return snapshots().snapshotDirtyFiles(...args); }
-function snapshotStore(...args) { return snapshots().snapshotStore(...args); }
-function writeAtPathOperations(...args) { return snapshots().writeAtPathOperations(...args); }
-
-let workspaceHistory = null;
-let workspaceHistoryLoading = null;
-
-async function openWorkspaceHistory() {
-  if (!cloudWorkspaceTarget()) {
-    showToast("Workspace History is for cloud workspaces — open one from the server first");
-    return;
-  }
-  workspaceHistoryLoading ??= import("./features/workspace-history.js").then(({ createWorkspaceHistory }) => {
-    workspaceHistory = createWorkspaceHistory({
-      controller, cloudWorkspaceTarget, showToast, notify, confirmAction, formatSnapshotTime, formatBytes,
-      projectPaths, writeAtPathOperations, applyHistoryOperations
-    });
-    return workspaceHistory;
-  }).catch((error) => {
-    workspaceHistoryLoading = null;
-    throw error;
-  });
-  try {
-    await (await workspaceHistoryLoading).open();
-  } catch (error) {
-    notify(`Workspace History could not load: ${error.message}`);
-  }
-}
-
-let snapshotsDialog = null;
-let snapshotsDialogLoading = null;
-
-// The Snapshots dialog lives in app/features/snapshots-dialog.js and loads on first use.
-async function openSnapshotsDialog() {
-  snapshotsDialogLoading ??= import("./features/snapshots-dialog.js").then(({ createSnapshotsDialog }) => {
-    snapshotsDialog = createSnapshotsDialog({
-      controller, collaboration, getPath, getWorkspaceMode: () => syncMode.get().workspaceMode, snapshotStore, ensureSnapshotsMigrated,
-      setSnapshotBaselines, refreshSnapshotBaselines, createSnapshotNow, showFileDiff, showToast, notify,
-      confirmAction, formatSnapshotTime, formatBytes, projectPaths, writeAtPathOperations,
-      applyHistoryOperations, workspace
-    });
-    return snapshotsDialog;
-  }).catch((error) => {
-    snapshotsDialogLoading = null;
-    throw error;
-  });
-  try {
-    await (await snapshotsDialogLoading).open();
-  } catch (error) {
-    notify(`Snapshots could not load: ${error.message}`);
-  }
-}
-
-
+// The cloud workspace on screen (Sync's), for the code that still asks main.js.
+function cloudWorkspaceTarget() { return modules.sync.cloudWorkspace(); }
+// Snapshots, the version label, the diff tab and History's dialogs (the History module).
+function createSnapshotNow(...args) { return historyParts.createSnapshotNow(...args); }
 
 // The live session is Sync's; it is given what only the app can do, and
 // tells its news through events (modules/sync/index.js).
 const collaboration = modules.sync.attach({
   async preserveLocalFiles(files) {
-    const store = snapshotStore();
+    const store = historyParts.snapshotStore();
     for (const [path, content] of files) {
       await store.create(path, content, "Recovery: local edits before cloud reload");
     }
@@ -749,17 +622,6 @@ modules.sync.events.on("status", () => pruneRemoteCursors(syncState.presence));
 modules.sync.events.on("remote-cursor", (event) => {
   onRemoteCursor(event);
 });
-// The host stamped this file's S.E.N counters on the operation it just
-// accepted. Adopt them verbatim — we never count locally while synced, so
-// everyone in the room shows the same sitting number.
-modules.sync.events.on("host-counters", ({ path, counters }) => {
-  const project = controller.getProject();
-  const nodeId = getNodeIdByPath(project, path);
-  if (!nodeId) return;
-  applyHostCounters(project, nodeId, counters);
-  scheduleVersionLabel();
-});
-
 modules.sync.events.on("patch-confirmed", () => {
   // Text confirmed by server — now safe to send the definitive cursor position.
   const activeFile = controller.getActiveFile();
@@ -1100,7 +962,7 @@ function persistSettings() { applyWorkspaceSettings(); } // the settings save th
 applyWorkspaceSettings();
 
 // The editor's side of a redraw: the tabs, the shown file, the preview, links,
-// chat, the snapshot version. (The status bar's items draw themselves.)
+// chat. (The status bar's items, the snapshot version among them, draw themselves.)
 function updateStatus(project) {
   ensureOpenTabs(project);
   renderTabs(project);
@@ -1110,45 +972,11 @@ function updateStatus(project) {
   const activeFile = project.activeFileId ? project.nodes[project.activeFileId] : null;
   const previewFile = editorView.get().previewFileId ? project.nodes[editorView.get().previewFileId] : null;
   showActiveFile(project); // the source editor shows the active file (the Editor)
-  // The preview is not rebuilt when the change came from the preview itself,
-  // nor while the user edits inside it (renderPreviewOrDiff): a rebuild would
-  // reset a diagram's scroll and selection, or pull focus out of the field.
-  renderPreviewOrDiff(project, previewFile); // the diff tab still shows if it's the active preview tab
+  editorParts.drawPreviewPane(project, previewFile); // a file's preview, or a pane view such as History's diff
   renderLinksPanel(project, activeFile);
   renderChatPanel(project);
-  renderVersionLabel();
 }
 
-// Paint the preview pane: either the diff overlay (when the diff tab is the active
-// preview tab) or the normal preview for `previewFile`. The two are mutually
-// exclusive and each hides the other's DOM.
-function renderPreviewOrDiff(project, previewFile) {
-  const showingDiff = diffState.active && editorView.get().previewFileId === DIFF_TAB_ID;
-  if (showingDiff) {
-    const wasHidden = elements.previewDiffView ? elements.previewDiffView.hidden : true;
-    if (elements.previewDiffView) elements.previewDiffView.hidden = false;
-    if (elements.preview) elements.preview.hidden = true;
-    // Full immediate render when the tab is (re)activated; debounce the routine
-    // live refreshes while the file is being edited underneath.
-    if (wasHidden) renderDiff();
-    else scheduleDiffRefresh();
-    return;
-  }
-  if (elements.previewDiffView) elements.previewDiffView.hidden = true;
-  if (elements.preview) elements.preview.hidden = false;
-  // Skip the redundant preview rebuild when the change came from the preview
-  // itself, or while the user is editing INSIDE the preview (e.g. a bmap node's
-  // Name/Text inspector field): renderPreviewContent() does a full
-  // replaceChildren(), so rebuilding here would yank focus out of the field.
-  const editingInPreview = elements.preview.contains(document.activeElement)
-    && document.activeElement !== elements.preview;
-  if (!_previewUpdating && !editingInPreview) {
-    const previewState = renderPreviewContent(elements.preview, project, previewFile);
-    if (previewState.shouldTypeset) {
-      void typesetPreview(previewState.content);
-    }
-  }
-}
 
 function render(project) {
   if (editorParts?.isTyping()) {
@@ -1219,26 +1047,7 @@ logDebug("response", "Debug log initialized", `panel=${settings.debugPanel ? "vi
 function publishSnapshot() { modules.sync.publishSnapshot(); }
 function publishOperation(operation) { return modules.sync.publish(operation); }
 
-function updateFileContentFromPreview(fileId, nextContent, reason = "preview edit") {
-  const project = controller.getProject();
-  const file = project.nodes[fileId];
-  if (!file || file.kind !== "file") {
-    return;
-  }
-  if (file.content === nextContent) {
-    return;
-  }
-
-  // The preview already re-rendered itself; suppress its redundant re-render
-  // in the synchronous updateStatus the write triggers (commit runs at once).
-  _previewUpdating = true;
-  try {
-    workspace.write(getPath(project, fileId), nextContent, { source: "preview" }).catch((error) => notify(error.message));
-  } finally {
-    _previewUpdating = false;
-  }
-  logDebug("action", "Bmap preview updated", reason);
-}
+function updateFileContentFromPreview(...args) { return editorParts.updateFileContentFromPreview(...args); }
 
 function sanitizeGeneratedFileName(name) {
   const cleaned = String(name ?? "")
@@ -1326,7 +1135,7 @@ async function quickGenerateBmapFile(bmapFileId, request) {
 // preview view, otherwise the active source file. Null in chat view.
 function currentMobileFileId() {
   if (layout().mobileView() === "chat") return null;
-  if (layout().mobileView() === "preview") return editorView.get().previewFileId === DIFF_TAB_ID ? null : editorView.get().previewFileId;
+  if (layout().mobileView() === "preview") return editorParts.shownPaneView() ? null : editorView.get().previewFileId;
   return controller.getActiveFile()?.id ?? null;
 }
 
@@ -1415,9 +1224,6 @@ elements.importFileInput.addEventListener("change", async (event) => {
 
 
 shell.commands.add({ id: "editor.find-replace", title: "Find & Replace", menu: { id: "edit", group: 0, order: 1 }, run: () => openFindBar(true) });
-shell.commands.add({ id: "history.create-snapshot", title: "Create Snapshot", menu: { id: "create", group: 1, order: 1 }, run: () => void createSnapshotNow() });
-shell.commands.add({ id: "history.snapshots", title: "Snapshots…", menu: { id: "edit", group: 0, order: 2 }, run: () => void openSnapshotsDialog() });
-shell.commands.add({ id: "history.workspace-history", title: "Workspace History…", menu: { id: "edit", group: 0, order: 3 }, run: () => void openWorkspaceHistory() });
 // Click a gutter line number to add/edit that line's comment (breakpoint-style).
 elements.editorGutter?.addEventListener("click", (event) => {
   const row = event.target.closest?.(".editor-gutter-line");
@@ -1444,8 +1250,6 @@ document.addEventListener("click", (event) => {
   if (event.target.closest?.("#line-comment-popover, .editor-gutter-line")) return;
   closeCommentPopover();
 });
-elements.diffNextChange?.addEventListener("click", () => gotoChange(1));
-elements.diffPrevChange?.addEventListener("click", () => gotoChange(-1));
 
 bindPaneDropTarget(elements.sourcePane, "source");
 bindPaneDropTarget(elements.sourceTabStrip, "source");
@@ -1472,12 +1276,11 @@ var layoutInstance;
 function layout() {
   return (layoutInstance ??= createLayout({
     view: editorView,
-    get DIFF_TAB_ID() { return DIFF_TAB_ID; },
+    shownPaneView: () => editorParts.shownPaneView(),
     get chat() { return chat; },
     get closeMenus() { return closeMenus; },
     get controller() { return controller; },
     get currentMobileFileId() { return currentMobileFileId; },
-    get diffState() { return diffState; },
     get elements() { return elements; },
     get isMobileLayout() { return isMobileLayout; },
     get isPreviewableFileName() { return isPreviewableFileName; },
@@ -1799,6 +1602,3 @@ void refreshChatStatus({ silent: true });
 
 // Resume the last session (Cloud's), so a reload is not a fresh start.
 void cloudParts.resumeSession();
-// Local/no-server workspaces never fire the cloud open path, so seed the S.E.N
-// baselines here too. Harmless for cloud: the open path refreshes them again.
-void refreshSnapshotBaselines();

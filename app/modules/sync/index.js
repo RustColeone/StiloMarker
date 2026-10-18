@@ -32,6 +32,8 @@
 // mode, whether this tab works on a shared workspace or its own local
 // project (service/mode.js): get() -> { workspaceMode, privateProject },
 // share(currentProject), leave() -> the kept project, forgetKept(), restore(saved).
+// cloudWorkspace() -> { serverUrl, token, team, path } | null: the cloud
+// workspace on screen (signed in, and the open project is it).
 //   transformTextPatch   sanitizeProjectForSync
 import { createLiveView, defineModule } from "../../kernel/index.js";
 import * as api from "./adapters/api.js";
@@ -101,10 +103,21 @@ export default defineModule({
       if (!connection) throw new Error(`sync.${name}: attach Sync first`);
       return connection[name](...args);
     };
+    // The cloud workspace on screen, for code that talks to the server about it
+    // (snapshots, comments, the agent's conversations): null unless signed in
+    // and the open project is that workspace.
+    const shell = ctx.use("shell"), identity = ctx.use("identity");
+    function cloudWorkspace() {
+      const token = identity.token();
+      const { lastWorkspace: ws, serverUrl, syncedProjectId } = shell.settings;
+      if (!token || !ws?.team || !ws?.path) return null;
+      if (syncedProjectId !== `${ws.team}/${ws.path}`) return null;
+      return { serverUrl, token, team: ws.team, path: ws.path };
+    }
     // The session on the page: the status bar's collaborators and the Session panel.
     addSessionView({ shell: ctx.use("shell"), status, mode });
     return { createCollaborationRuntime, syncVersion, mode, status, attach, session: () => session, events: { on: events.on },
-      publish: connected("publish"), publishSnapshot: connected("publishSnapshot"), switchMode: connected("switchMode"),
+      cloudWorkspace, publish: connected("publish"), publishSnapshot: connected("publishSnapshot"), switchMode: connected("switchMode"),
       connectSaved: connected("connectSaved"), reconnectLater: connected("reconnectLater") };
   }
 });

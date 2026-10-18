@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v0.1.70";
+const CACHE_NAME = "mdnotes-shell-v0.1.71";
 // The extensions' files (EXTENSION_FILES), written by tools/protocol-sync.mjs.
 importScripts("./extensions/offline.js");
 const APP_SHELL = [
@@ -113,6 +113,7 @@ const APP_SHELL = [
   "./app/modules/editor/model/font.js",
   "./app/modules/editor/adapters/settings-fields.js",
   "./app/modules/editor/adapters/char-count.js",
+  "./app/modules/editor/adapters/preview-pane.js",
   "./app/modules/editor/adapters/editor-core.js",
   "./app/modules/editor/adapters/surface.js",
   "./app/modules/editor/adapters/editor-events.js",
@@ -141,6 +142,10 @@ const APP_SHELL = [
   "./app/modules/comments/model/anchors.js",
   "./app/modules/comments/adapters/api.js",
   "./app/modules/history/index.js",
+  "./app/modules/history/adapters/surface.js",
+  "./app/modules/history/adapters/snapshots.js",
+  "./app/modules/history/adapters/snapshots-dialog.js",
+  "./app/modules/history/adapters/workspace-history.js",
   "./app/modules/history/model/diff.js",
   "./app/modules/history/adapters/api.js",
   "./app/modules/history/adapters/trash.js",
@@ -168,14 +173,11 @@ const APP_SHELL = [
   "./app/modules/models/model/catalog.js",
   "./app/modules/models/adapters/direct.js",
   "./app/features/module-map-tools.js",
-  "./app/features/workspace-history.js",
-  "./app/features/snapshots-dialog.js",
   "./app/features/previews.js",
   "./app/modules/editor/adapters/tabs.js",
   "./app/modules/editor/adapters/preview.js",
   "./app/ui/layout.js",
-  "./app/ui/dialogs.js",
-  "./app/features/snapshots.js"
+  "./app/ui/dialogs.js"
 ];
 
 self.addEventListener("install", (event) => {

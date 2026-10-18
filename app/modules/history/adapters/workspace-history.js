@@ -2,8 +2,14 @@
 // compare one with the workspace as it is now, restore one file or everything.
 // Loaded the first time the dialog opens; the app passes in what it needs.
 
-import { createWorkspaceBackup, getWorkspaceBackupContent, listWorkspaceBackupFiles, listWorkspaceBackups } from "../modules/history/index.js";
-import { query } from "../ui/dom.js";
+import { createWorkspaceBackup, getWorkspaceBackupContent, listWorkspaceBackupFiles, listWorkspaceBackups } from "./api.js";
+import { UPDATE_FILE } from "../../workspace/index.js";
+// A node of this dialog's markup (it must be there).
+function query(selector) {
+  const node = document.querySelector(selector);
+  if (!node) throw new Error(`Missing DOM node: ${selector}`);
+  return node;
+}
 
 export function createWorkspaceHistory(deps) {
   const {
@@ -213,7 +219,7 @@ export function createWorkspaceHistory(deps) {
       const content = await fetchBackupContent(backup.id, path);
       const current = projectPaths(controller.getProject());
       const ops = current.files.has(path)
-        ? [{ type: "update-file", path, content }]
+        ? [{ type: UPDATE_FILE, path, content }]
         : writeAtPathOperations(path, content, current.folders);
       await applyHistoryOperations(ops);
       showToast(`Restored ${path.split("/").pop()}`);
@@ -269,7 +275,7 @@ export function createWorkspaceHistory(deps) {
         const content = await fetchBackupContent(backup.id, file.path);
         ops.push(historyState.status.get(file.path) === "deleted"
           ? { type: "create-file", parentPath: parentOf(file.path), name: file.path.split("/").pop(), content }
-          : { type: "update-file", path: file.path, content });
+          : { type: UPDATE_FILE, path: file.path, content });
       }
       await applyHistoryOperations(ops);
       showToast(`Workspace restored to ${formatSnapshotTime(backup.createdAt)}`);

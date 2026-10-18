@@ -10,7 +10,6 @@
 // What other code may call is FUNCTIONS below (editor.parts()).
 import { escapeHtmlAttribute } from "../model/html.js";
 import { getRelativePath, getRelativeProjectPath, normalizePath } from "../model/paths.js";
-import { DIFF_TAB_ID } from "../service/view.js";
 import { getNodeIdByPath, getPath, isBmapFileName, isImageFileName, isMarkdownFileName } from "../../workspace/index.js";
 import { createAutocomplete } from "./autocomplete.js";
 import { createEditorCore } from "./editor-core.js";
@@ -23,6 +22,7 @@ import { createResume } from "./resume.js";
 import { createShowFile } from "./show-file.js";
 import { createTabs } from "./tabs.js";
 import { createCharCount } from "./char-count.js";
+import { createPreviewPane } from "./preview-pane.js";
 
 // What main.js attaches (editor.attach(port)); each entry should move to an
 // owner, or become an extension point, and leave this list.
@@ -30,12 +30,12 @@ export const PORT = [
   "collaboration", "workspaceMode", "settings", "elements", "identity", "saveUserState",
   "logDebug", "traceEditorEvent", "formatEditorDebugValue",
   "commentsForActiveFile", "scheduleCommentReanchor",
-  "imageSrcFor", "closeDiff", "diffState", "formatSnapshotTime",
+  "imageSrcFor",
   "renderWelcomeState", "setMobileExplorerOpen", "togglePreview",
   "scope", "isReadOnly", "onDrop"
 ];
 
-export function createSurface({ port, view, marks, previews, highlighters, toolbars, workspace, shell }) {
+export function createSurface({ port, view, marks, paneViews, previews, highlighters, toolbars, workspace, shell }) {
   const missing = PORT.filter((name) => !(name in port));
   if (missing.length) throw new Error(`editor.attach: the port lacks ${missing.join(", ")}`);
   const composing = { now: false }; // an IME composition is under way
@@ -89,7 +89,7 @@ export function createSurface({ port, view, marks, previews, highlighters, toolb
     // The file the editor's text is (what its DOM shows), or null.
     shown: { fileId: null },
 
-    view, marks, previews, highlighters, toolbars, parts: workspace.parts, DIFF_TAB_ID,
+    view, marks, paneViews, previews, highlighters, toolbars, workspace, parts: workspace.parts,
     escapeHtmlAttribute, normalizePath, getRelativePath, getRelativeProjectPath,
     notify: (message) => shell.notify(message),
     showToast: (message, options) => shell.toast(message, options),
@@ -129,6 +129,7 @@ export function createSurface({ port, view, marks, previews, highlighters, toolb
   add(createResume(app));
   add(createShowFile(app, composing));
   add(createCharCount(app, shell.statusBar));
+  add(createPreviewPane(app));
   installEditorEvents(app, composing);
   // The editor's settings, whoever changed them: new glyph metrics mean every
   // measured overlay (caret, cursors, search highlights) and the gutter's

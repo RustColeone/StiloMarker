@@ -17,7 +17,6 @@ import { createProviders } from "./providers.js";
 // owner, or become an extension point, and leave this list.
 export const PORT = [
   "elements", "logDebug", "flashStatusPanel", "openSettingsDialog", "refreshChatStatus", "loadLineComments",
-  "ensureSnapshotsMigrated", "refreshSnapshotBaselines", "snapshotDirtyFiles",
   "setMobileExplorerOpen"
 ];
 
@@ -33,6 +32,10 @@ export function createSurface({ port, shell, workspace, identity, sync, editor, 
   const app = {
     view: editor.view, identity, history, mode: sync.mode, settings: shell.settings, syncState: sync.status,
     switchWorkspaceMode: (next) => sync.switchMode(next),
+    // Snapshots are History's.
+    ensureSnapshotsMigrated: (...args) => history.parts().ensureSnapshotsMigrated(...args),
+    refreshSnapshotBaselines: (...args) => history.parts().refreshSnapshotBaselines(...args),
+    snapshotDirtyFiles: (...args) => history.parts().snapshotDirtyFiles(...args),
     notify: (message) => shell.notify(message),
     showToast: (message, options) => shell.toast(message, options),
     showConfirmDialog: (options) => shell.confirm(options),
