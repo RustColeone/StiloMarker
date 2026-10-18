@@ -69,6 +69,19 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.67: Settings' sections belong to their modules
+
+Step S4a-2. Nothing changes for users.
+
+- Settings → Agent is the Models module's, with the Assistant's connected
+  tools; Settings → Collaboration is the Cloud module's. Both look exactly as
+  before.
+- The agent's status is asked again when its settings or the server address
+  change, by Models, and the Agent page redraws whenever that status changes.
+- `shell-browser.py` checks that choosing your own key shows its fields and
+  status, that a pasted key is trimmed and the agent asked again, and that
+  Collaboration's fields follow their settings.
+
 ### v0.1.66: Shell owns the Settings dialog
 
 Step S4a-1. One small change for users:

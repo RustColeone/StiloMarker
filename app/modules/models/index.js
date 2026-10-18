@@ -10,13 +10,14 @@
 //   chosenModel(models, saved, fallback) -> model
 // API only: agent, the agent's connection (adapters/agent.js): status() ->
 //   { status, detail, configured, models, modelProviders, selectedModel... },
-//   refresh({ signedIn, silent }), choose(model), served({ provider, model }), ensureReady({ signedIn }),
+//   refresh({ signedIn?, silent }) (signedIn as last told when left out), choose(model), served({ provider, model }), ensureReady({ signedIn }),
 //   ownKeyReady(), requestOverride() (what a request carries with the user's
 //   own key), settingsLine() -> { text, ok }, on(listener).
 import { defineModule } from "../../kernel/index.js";
 import { runDirectReply } from "./adapters/direct.js";
 import { chosenModel, groupByProvider } from "./model/catalog.js";
 import { AGENT_STATUS, createAgentConnection } from "./adapters/agent.js";
+import { addAgentSettings } from "./adapters/settings-section.js";
 
 export { runDirectReply } from "./adapters/direct.js";
 export { chosenModel, groupByProvider } from "./model/catalog.js";
@@ -27,10 +28,12 @@ export default defineModule({
   name: "models",
   level: 2,
   uses: ["shell"],
-  owns: { rules: ["chat-completions stream", "models grouped by provider"], state: ["the agent's connection"] },
+  owns: { rules: ["chat-completions stream", "models grouped by provider"], state: ["the agent's connection"], elements: ["Settings → Agent"] },
   start(ctx) {
     const shell = ctx.use("shell");
     const agent = createAgentConnection({ state: ctx.state(AGENT_STATUS), server: shell.server, settings: shell.settings });
+    // Settings → Agent: where the key comes from, and the agent's status.
+    addAgentSettings({ dialog: shell.settingsDialog, settings: shell.settings, agent });
     return { runDirectReply, groupByProvider, chosenModel, agent };
   }
 });

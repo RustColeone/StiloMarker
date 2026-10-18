@@ -115,18 +115,8 @@ const elements = {
   newFileSubmitButton: query("#new-file-submit-button"),
   settingsButton: query("#settings-button"),
   settingsDialog: query("#settings-dialog"),
-  agentSourceSelect: query("#agent-source-select"),
-  agentSourceNote: query("#agent-source-note"),
-  agentOwnFields: query("#agent-own-fields"),
-  agentApiKeyInput: query("#agent-api-key-input"),
-  agentApiUrlInput: query("#agent-api-url-input"),
-  agentModelInput: query("#agent-model-input"),
-  agentRunnerSelect: query("#agent-runner-select"),
-  agentRunnerNote: query("#agent-runner-note"),
-  agentStatusLine: query("#agent-status-line"),
   accountLockedNote: query("#account-locked-note"),
   serverUrlInput: query("#server-url-input"),
-  autoReconnectInput: query("#auto-reconnect-input"),
   serverPinInput: query("#server-pin-input"),
   displayNameInput: query("#display-name-input"),
   pingServerButton: query("#ping-server-button"),
@@ -433,10 +423,6 @@ async function refreshChatStatus(options) {
   if (chatNeeded()) await loadChat(); // loading checks the status itself
 }
 
-function applyAgentSettingsStatus() {
-  chat?.applyAgentSettingsStatus();
-}
-
 /** Group chats name their characters by path; follow a rename or move of a
  *  character file, or of a folder holding one. */
 function remapPersonaPaths(oldPath, newPath) { chatsPage.remapPersonaPaths(oldPath, newPath); } // Chats follows renamed characters
@@ -462,29 +448,6 @@ function personaAvatarSrc(project, personaNodeId, avatar) {
   if (/^(https?:\/\/|data:image\/)/i.test(value)) return value;
   const resolved = resolveProjectAssetUrl(project, personaNodeId, value);
   return resolved && resolved !== value ? resolved : "";
-}
-
-// Populate the Agent settings controls from `settings` and toggle the own-key
-// fields. Called when the settings dialog opens.
-function applyAgentSettingsControls() {
-  if (elements.agentSourceSelect) elements.agentSourceSelect.value = settings.agentSource === "own" ? "own" : "server";
-  const own = settings.agentSource === "own";
-  if (elements.agentOwnFields) elements.agentOwnFields.hidden = !own;
-  if (elements.agentRunnerSelect) elements.agentRunnerSelect.value = settings.agentRunner === "browser" ? "browser" : "server";
-  if (elements.agentRunnerNote) {
-    elements.agentRunnerNote.textContent = settings.agentRunner === "browser"
-      ? "Characters' replies call the API URL above straight from this browser, so it can be a model on this computer (e.g. Ollama at http://localhost:11434/v1/chat/completions; allow this site in OLLAMA_ORIGINS). The key may be left empty for a local model. The Agent tab still goes through this server."
-      : "Your key is sent over HTTPS to this server's proxy for each request and is never stored server-side. It stays in this browser.";
-  }
-  if (elements.agentApiKeyInput) elements.agentApiKeyInput.value = settings.agentApiKey || "";
-  if (elements.agentApiUrlInput) elements.agentApiUrlInput.value = settings.agentApiUrl || "";
-  if (elements.agentModelInput) elements.agentModelInput.value = settings.agentModel || "";
-  if (elements.agentSourceNote) {
-    elements.agentSourceNote.textContent = own
-      ? "The agent uses your key, sent to this server's proxy per request. Works from anywhere; billed to you."
-      : "Uses the key configured on the server you're connected to. Requires the server to have a key and to allow your session.";
-  }
-  applyAgentSettingsStatus();
 }
 
 // Starting content for a new file of `kind`: a default diagram, a character
@@ -738,11 +701,6 @@ async function openSnapshotsDialog() {
 }
 
 
-elements.serverUrlInput.value = settings.serverUrl;
-elements.serverPinInput.value = settings.serverPin;
-elements.displayNameInput.value = settings.displayName;
-if (elements.accountUsernameInput) elements.accountUsernameInput.value = settings.accountUsername ?? "";
-if (elements.autoReconnectInput) elements.autoReconnectInput.checked = settings.autoReconnect !== false;
 
 // The live session is Sync's; it is given what only the app can do, and
 // tells its news through events (modules/sync/index.js).
@@ -2143,15 +2101,8 @@ elements.statusBrowserItem.addEventListener("click", () => {
 });
 // ── Settings (Shell's dialog; its sections and fields are their owners') ──
 function openSettingsDialog(tab = "appearance") { shell.settingsDialog.open(tab); }
-// The Agent and Collaboration sections, until their owners add them (S4a-2).
-shell.settingsDialog.addPage({ id: "agent", label: "Agent", order: 20, body: document.querySelector("#settings-panel-agent") });
-shell.settingsDialog.addPage({ id: "collaboration", label: "Collaboration", order: 30, body: document.querySelector("#settings-panel-collaboration") });
-shell.settingsDialog.onOpen(() => {
-  applyAgentSettingsControls();
-  chat?.mcpControls.render();
-  // Re-check the agent backend so the Agent section shows fresh status.
-  void refreshChatStatus({ silent: true });
-});
+// The Agent page draws Settings → Agent's connected tools: load it with Settings.
+shell.settingsDialog.onOpen(() => { if (!chat) void loadChat(); });
 // The diagram's settings (until diagrams are a module).
 shell.settingsDialog.fields.add({ page: "appearance", id: "bmap-generate-scope-select", order: 110, label: "Bmap Generate Context",
   key: "bmapGenerateScope", control: "select", options: [["connected", "Connected nodes only"], ["all", "All linked files"]],
@@ -2162,35 +2113,6 @@ shell.settingsDialog.fields.add({ page: "appearance", id: "bmap-auto-pan-input",
 settings.on((view, changed) => {
   if (changed.some((key) => ["explorer", "explorerAnchor", "preview"].includes(key))) persistSettings();
 });
-
-// ── Agent settings ──────────────────────────────────────────────────────────
-elements.agentRunnerSelect?.addEventListener("change", (event) => {
-  settings.change({ agentRunner: event.target.value === "browser" ? "browser" : "server" });
-  applyAgentSettingsControls();
-  logDebug("action", "Character replies run", settings.agentRunner);
-});
-elements.agentSourceSelect?.addEventListener("change", (event) => {
-  settings.change({ agentSource: event.target.value === "own" ? "own" : "server" });
-  applyAgentSettingsControls();
-  logDebug("action", "Agent source changed", settings.agentSource);
-  void refreshChatStatus({ silent: true });
-});
-function bindAgentField(inputEl, key) {
-  inputEl?.addEventListener("input", (event) => {
-    settings.change({ [key]: event.target.value });
-  });
-  // Persist + re-evaluate availability only when the field loses focus, so we
-  // don't thrash on every keystroke of a pasted key.
-  inputEl?.addEventListener("change", () => {
-    settings.change({ [key]: settings[key]?.trim() ?? "" });
-    inputEl.value = settings[key];
-    applyAgentSettingsStatus();
-    void refreshChatStatus({ silent: true });
-  });
-}
-bindAgentField(elements.agentApiKeyInput, "agentApiKey");
-bindAgentField(elements.agentApiUrlInput, "agentApiUrl");
-bindAgentField(elements.agentModelInput, "agentModel");
 
 elements.statusServerItem.addEventListener("click", () => {
   logDebug("action", "Status bar: open collaboration settings");
@@ -2252,27 +2174,11 @@ window.matchMedia(`(max-width: ${MOBILE_MAX_WIDTH}px)`)
     applyMobileViewState();
   });
 
-elements.serverUrlInput.addEventListener("change", (event) => {
-  settings.change({ serverUrl: event.target.value.trim() });
-  void refreshChatStatus({ silent: true });
-});
-
-elements.serverPinInput.addEventListener("change", (event) => {
-  settings.change({ serverPin: event.target.value });
-});
-
-elements.displayNameInput.addEventListener("change", (event) => {
-  settings.change({ displayName: event.target.value.trim() });
-});
-
-elements.autoReconnectInput?.addEventListener("change", (event) => {
-  settings.change({ autoReconnect: event.target.checked });
-  if (!settings.autoReconnect) {
-    // Disabling auto-reconnect cancels any pending retry and forgets the session.
-    clearReconnectTimer();
-    settings.change({ wasConnected: false });
-  }
-  logDebug("action", "Auto-reconnect setting changed", settings.autoReconnect ? "on" : "off");
+// Turning auto-reconnect off cancels any pending retry and forgets the session.
+settings.on((view, changed) => {
+  if (!changed.includes("autoReconnect") || view.autoReconnect) return;
+  clearReconnectTimer();
+  settings.change({ wasConnected: false }, "auto-reconnect turned off");
 });
 // ---- The cloud file browser, accounts and hosting (the Cloud module) ----
 function handleAccountLogout(...args) { return cloudParts.handleAccountLogout(...args); }

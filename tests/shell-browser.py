@@ -157,6 +157,18 @@ async def main():
         assert await page.input_value('#preview-select') == 'hidden'
         await page.click('#settings-tab-strip [data-page="collaboration"]')
         assert await page.is_hidden('#settings-panel-appearance') and await page.is_visible('#settings-panel-collaboration')
+        # Collaboration (Cloud's) shows its settings, whoever changed them.
+        await page.evaluate('window.__shellTest.shell.settings.change({ displayName: "Ada" }, "test")')
+        assert await page.input_value('#display-name-input') == 'Ada'
+        # Agent (Models'): choosing your own key shows its fields, its note and the status line.
+        await page.click('#settings-tab-strip [data-page="agent"]')
+        await page.select_option('#agent-source-select', 'own')
+        agent = await page.evaluate('[document.querySelector("#agent-own-fields").hidden, document.querySelector("#agent-status-line").textContent]')
+        assert agent == [False, 'Enter your API key below to enable the agent.'], agent
+        await page.fill('#agent-api-key-input', '  sk-test  ')
+        await page.press('#agent-api-key-input', 'Tab')
+        assert await page.evaluate('window.__shellTest.shell.settings.agentApiKey') == 'sk-test'
+        await page.wait_for_function('document.querySelector("#agent-status-line").textContent.startsWith("Ready")')
         await page.keyboard.press('Escape')
         assert not errors, errors
 

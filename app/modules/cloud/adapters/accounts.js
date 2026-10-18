@@ -143,7 +143,6 @@ export function createAccounts(app) {
     // The collaborator display name defaults to the username.
     if (!app.settings.displayName) {
       app.settings.change({ displayName: result.username });
-      if (app.elements.displayNameInput) app.elements.displayNameInput.value = result.username;
     }
     app.logDebug("response", "Account login succeeded", `${result.username} teams=${(result.teams ?? []).join(",")}`);
     if (!silent) app.flashStatusPanel("success", app.elements.accountSection);

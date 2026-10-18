@@ -12,6 +12,7 @@
 // pingServer (the server's routes, adapters/api.js).
 import { defineModule } from "../../kernel/index.js";
 import { createSurface } from "./adapters/surface.js";
+import { addCollaborationSettings } from "./adapters/settings-section.js";
 
 export { pingServer, saveUserState, uploadAsset } from "./adapters/api.js";
 
@@ -20,10 +21,12 @@ export default defineModule({
   level: 5,
   uses: ["shell", "workspace", "identity", "sync", "editor", "history"],
   owns: {
-    elements: ["the file browser", "the account controls", "the access dialog", "hosting"],
+    elements: ["the file browser", "the account controls", "the access dialog", "hosting", "Settings → Collaboration"],
     state: ["the file browser's place and selection"]
   },
   start(ctx) {
+    const shell = ctx.use("shell");
+    addCollaborationSettings({ dialog: shell.settingsDialog, settings: shell.settings });
     let parts = null;
     function attach(port) {
       if (parts) throw new Error("cloud: already attached");

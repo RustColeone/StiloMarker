@@ -127,6 +127,12 @@ export function createAgentPanel({ port, shell, workspace, identity, sync, edito
     } : null
   });
 
+  // The page follows the agent's status (Models'), whoever asked the server.
+  models.agent.on(() => app.renderChatPanel(app.controller.getProject()));
+  // Settings → Agent's connected tools are this page's: drawn when Settings opens.
+  shell.settingsDialog.onOpen(() => app.mcpControls.render());
+  if (shell.settingsDialog.isOpen()) app.mcpControls.render();
+
   /** A chat workspace pushed by the server (another participant changed it). */
   function receiveChatWorkspace(project, workspace) {
     app.ensureChatWorkspaceLoaded(project);
@@ -138,7 +144,7 @@ export function createAgentPanel({ port, shell, workspace, identity, sync, edito
     receiveChatEvent: (event) => chatsPage.receive(event),
     receiveChatWorkspace, renderChatPanel: app.renderChatPanel, refreshChatStatus: app.refreshChatStatus,
     findBatchMessage: app.findBatchMessage, remapPersonaPaths: chatsPage.remapPersonaPaths,
-    applyAgentSettingsStatus: app.applyAgentSettingsStatus, ensureChatWorkspaceLoaded: app.ensureChatWorkspaceLoaded,
+    ensureChatWorkspaceLoaded: app.ensureChatWorkspaceLoaded,
     chatState, get mcpControls() { return app.mcpControls; }, isOwnBatch: app.isOwnBatch
   };
 }

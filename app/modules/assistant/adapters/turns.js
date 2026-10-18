@@ -7,21 +7,10 @@ import { contextFiles, projectSnapshot } from "../../characters/index.js";
 
 export function createTurns(app) {
   const { chatConnectionInfo, chatWorkspaceKey, collaboration, controller, elements, logDebug, settings, identity, chatState, TAB_ID, agent, agentStatus, signedIn } = app;
-  // Reflect the live agent availability into Settings → Agent's status line.
-  function applyAgentSettingsStatus() {
-    if (!elements.agentStatusLine) return;
-    const { text, ok } = agent.settingsLine();
-    elements.agentStatusLine.textContent = text;
-    elements.agentStatusLine.classList.toggle("is-success", ok);
-    elements.agentStatusLine.classList.toggle("is-error", !ok);
-  }
-
+  // Ask the server again whether its agent can be used (Models'); the page
+  // redraws as the answer changes the status (panel.js listens).
   async function refreshChatStatus({ silent = false } = {}) {
-    const refreshing = agent.refresh({ signedIn: signedIn(), silent });
-    if (!silent) app.renderChatPanel(controller.getProject());
-    await refreshing;
-    applyAgentSettingsStatus();
-    app.renderChatPanel(controller.getProject());
+    await agent.refresh({ signedIn: signedIn(), silent });
   }
 
   async function handleChatSubmit() {
@@ -213,5 +202,5 @@ export function createTurns(app) {
     }
   }
 
-  return { applyAgentSettingsStatus, refreshChatStatus, handleChatSubmit, retryLastChatTurn, stopAgentTurn, runAgentTurn };
+  return { refreshChatStatus, handleChatSubmit, retryLastChatTurn, stopAgentTurn, runAgentTurn };
 }

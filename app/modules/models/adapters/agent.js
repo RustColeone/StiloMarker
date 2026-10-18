@@ -7,8 +7,11 @@ export { AGENT_STATUS };
 
 // state: ctx.state(AGENT_STATUS); server: Shell's; settings: Shell's.
 export function createAgentConnection({ state, server, settings }) {
-  // signedIn: whether someone is signed in (Identity's to say, asked by the caller).
-  async function refresh({ signedIn = false, silent = false } = {}) {
+  // signedIn: whether someone is signed in (Identity's to say, told by the
+  // caller); without it, as the last caller said.
+  let lastSignedIn = false;
+  async function refresh({ signedIn = lastSignedIn, silent = false } = {}) {
+    lastSignedIn = signedIn;
     state.set("checking the agent", { status: "checking", ...(silent ? {} : { detail: "Checking chat backend..." }) });
     try {
       const answer = await server.request("/api/chat/status", { failure: "Chat status failed." });
