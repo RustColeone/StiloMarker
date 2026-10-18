@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-18 · release `v0.1.60` (deployed with v0.1.54–v0.1.59; public check passed, no console errors)
+Last updated: 2026-10-18 · release `v0.1.61` (not deployed; v0.1.60 is live)
 
 ---
 
@@ -68,6 +68,22 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.61: the side panel's Agent and Chats are separate pages
+
+Step S3d-1. Nothing changes for users: the tabs look and work the same.
+Underneath, each has its own input box and conversation instead of the two
+swapping their drafts and messages in one shared set.
+
+- Shell has pages in tab hosts, like a browser's tabs: a feature adds itself
+  as a page (a label, its own body, what "+" does, a badge), and Shell draws
+  the strip, shows one page and remembers which (`settings.openPages`,
+  migrated from `chatTab`). The side panel is the first host; the log panel's
+  tabs and the Settings sections can become hosts later.
+- The Agent and Chats were one 1,666-line file sharing the conversation list,
+  the input and its handlers, with a dozen "which tab is this" branches. The
+  Chats page is now `features/chats-page.js` (331 lines) with its own body;
+  it shares only the agent's server connection, which it is given.
 
 ### v0.1.60: the Cloud module
 

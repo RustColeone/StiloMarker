@@ -5428,7 +5428,16 @@ menu {
   border-bottom-color: var(--accent);
 }
 
-.chat-panel.is-chats #chat-mcp-summary {
+/* A page of the side panel (Shell's pages): the Agent, Chats. */
+.panel-page {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.panel-page[hidden] {
   display: none;
 }
 
@@ -7025,12 +7034,12 @@ pre.proposal-diff-block {
 }
 
 /* Outside a conversation there is nothing to write into. */
-.chat-panel.is-chats-browse .chat-compose-shell {
+#chats-page.is-browsing .chat-compose-shell {
   display: none;
 }
 
 /* The header strip: list search, or the open conversation's title. */
-.chat-panel.is-chats .rp-cast {
+#chats-page .rp-cast {
   flex-wrap: nowrap;
   gap: 6px;
   min-height: 36px;

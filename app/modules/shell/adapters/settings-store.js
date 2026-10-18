@@ -42,6 +42,8 @@ function createDefaultSettings() {
     chatModel: "",
     // Which chat tab is open: "agent" or "chats" ("roleplay" from v0.1.25 means chats).
     chatTab: "agent",
+    // The page open in each tab host ({ side: "agent" | "chats" }; Shell's pages).
+    openPages: {},
     // Runtime memory: true while the user has an active/intended session, so the
     // app can auto-reconnect on next load or after a dropped connection.
     wasConnected: false,
@@ -92,9 +94,13 @@ function loadSettings() {
       ? Boolean(parsed.previewWidthCustomized)
       : hasPreviewWidth && Number(parsed.previewWidth) !== defaults.previewWidth;
 
+    // The side panel's open page was `chatTab` ("roleplay" before Chats).
+    const openPages = parsed.openPages && typeof parsed.openPages === "object" ? parsed.openPages
+      : { side: parsed.chatTab === "chats" || parsed.chatTab === "roleplay" ? "chats" : "agent" };
     return {
       ...defaults,
       ...parsed,
+      openPages,
       previewWidthCustomized: migratedPreviewWidthCustomized
     };
   } catch (error) {

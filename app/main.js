@@ -245,8 +245,6 @@ const elements = {
   chatStatusText: query("#chat-status-text"),
   chatModelSelect: query("#chat-model-select"),
   chatNewThreadButton: query("#chat-new-thread-button"),
-  chatTabs: query("#chat-tabs"),
-  chatCastBar: query("#chat-cast-bar"),
   chatCollapseButton: query("#chat-collapse-button"),
   chatThreadList: query("#chat-thread-list"),
   chatAddActiveFileButton: query("#chat-add-active-file-button"),
@@ -602,7 +600,7 @@ function loadChat() {
       chatWorkspaceKey, clearAgentDecorations, collaboration, controller, createFileInFolder, elements,
       escapeHtmlAttribute, getSelectedParent, isMobileLayout, jumpToAgentChange, logDebug, notify,
       openFileFromExplorer, openSettingsDialog, personaAvatarSrc, promptForName, workspace,
-      registerAgentDecorations, settings, showConfirmDialog, showToast, storedProject,
+      registerAgentDecorations, settings, showConfirmDialog, showToast, storedProject, pages: shell.pages,
       updateEditorAgentBar, identity,
       get workspaceMode() { return syncMode.get().workspaceMode; }
     });

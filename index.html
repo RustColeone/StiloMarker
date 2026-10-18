@@ -224,26 +224,23 @@
         <aside id="chat-panel" class="chat-panel" aria-label="Chat panel">
           <!-- Toolbar -->
           <header class="chat-toolbar">
-            <div id="chat-tabs" class="chat-tabs" role="tablist" aria-label="Chat mode">
-              <button class="chat-tab" type="button" role="tab" data-chat-tab="agent" aria-selected="true" title="The workspace agent: asks, edits and organizes files">Agent</button>
-              <button class="chat-tab" type="button" role="tab" data-chat-tab="chats" aria-selected="false" title="Chat live with the people in this project and with its characters">Chats</button>
-            </div>
+            <!-- A tab host (Shell's pages): each feature adds its page; the strip is drawn from them. -->
+            <div id="chat-tabs" class="chat-tabs" role="tablist" aria-label="Side panel" data-tab-host="side"></div>
             <div class="chat-toolbar-actions">
-              <button id="chat-new-thread-button" class="chat-toolbar-icon-btn" type="button" aria-label="New chat" title="New chat">&#43;</button>
+              <button id="chat-new-thread-button" class="chat-toolbar-icon-btn" type="button" aria-label="New chat" title="New chat" data-tab-host-new="side">&#43;</button>
               <button id="chat-history-toggle-button" class="chat-toolbar-icon-btn" type="button" aria-label="Chat history" title="Chat history" aria-pressed="false">&#9776;</button>
               <button id="chat-collapse-button" class="chat-toolbar-icon-btn" type="button" aria-label="Collapse chat" title="Collapse chat" aria-expanded="true">&#8250;</button>
             </div>
           </header>
 
+          <!-- The Agent page -->
+          <section id="agent-page" class="panel-page" aria-label="Agent">
           <!-- History drawer (toggled by the history button) -->
           <div id="chat-history-pane" class="chat-history-pane" hidden>
             <input id="chat-history-search" class="chat-history-search" type="search" placeholder="Search conversations"
               aria-label="Search conversations" autocomplete="off" spellcheck="false">
             <div id="chat-thread-list" class="chat-thread-list"></div>
           </div>
-
-          <!-- Chats: the current view's header (search, or the conversation's title) -->
-          <div id="chat-cast-bar" class="rp-cast" aria-label="Characters in this chat" hidden></div>
 
           <!-- Conversation -->
           <div id="chat-message-list" class="chat-message-list" role="log" aria-label="Chat conversation" aria-live="polite"></div>
@@ -269,6 +266,26 @@
               </div>
             </form>
           </div>
+          </section>
+
+          <!-- The Chats page: people and characters, live -->
+          <section id="chats-page" class="panel-page" aria-label="Chats" hidden>
+            <!-- The current view's header (search, or the conversation's title) -->
+            <div id="chats-cast-bar" class="rp-cast" aria-label="Characters in this chat"></div>
+            <div id="chats-message-list" class="chat-message-list" role="log" aria-label="Chats conversation" aria-live="polite"></div>
+            <div class="chat-compose-shell">
+              <form id="chats-compose-form" class="chat-compose-form">
+                <div id="chats-context-list" class="chat-context-list"></div>
+                <textarea id="chats-input" class="chat-input" rows="2" spellcheck="true" placeholder="Message…"></textarea>
+                <div class="chat-compose-footer">
+                  <button id="chats-add-file-button" class="chat-compose-chip-btn" type="button"
+                    title="Attach the open file — or drag files here from the explorer">&#64; File</button>
+                  <span class="chat-compose-spacer"></span>
+                  <button id="chats-send-button" class="chat-send-button" type="submit" title="Send (Enter)" aria-label="Send">&#8593;</button>
+                </div>
+              </form>
+            </div>
+          </section>
         </aside>
       </div>
 

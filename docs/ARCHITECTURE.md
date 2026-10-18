@@ -316,7 +316,9 @@ That is where bugs are hard to find. Steps, each its own release:
 | S3o-3 | Workspace owns saving (v0.1.58): the four storage services moved into its adapters (this browser's copy, folders on disk, on-device folders, the save queue), and `workspace.saving` does what `main.js` did: the trailing browser copy flushed when the page may go away, a local project's folder, auto-save (idle and periodic) and Save. What only the app knows comes as hooks (`saving.attach({ busy, scope, shared, confirmed })`): an IME composition, the workspace a save belongs to, which files the server confirmed | done (v0.1.58) |
 | S3o-4 | Drawing the app again is asked of Shell (v0.1.59): `shell.render(project, { only: "status" }?)` announces a `render` event that `main.js` answers; the Editor and the Explorer no longer carry `render` and `updateStatus` in their ports (Editor port 25 → 23 names, Explorer 16 → 13 since S3b). Splitting `main.js`'s render into each module's own listener is step 4 | done (v0.1.59) |
 | S3c | The Cloud module (v0.1.60, level 5): signing in and out, the file browser (the server's teams and folders, this device's projects) and its two providers, deleting to the Trash, moving and copying, project access, hosting and publishing, opening a cloud workspace, and its dialogs' controls. The server's workspace routes (the legacy sync service) are its `api.js`; two unused calls were dropped. `main.js` attaches a port (12 names); the 967-line cloud browser is split by job. Getters handed out by `main.js`: 89 → 62; `main.js` 3,146 → 2,971 lines | done (v0.1.60) |
-| S3d | The chat panel into the Assistant module | next |
+| S3d-1 | Pages in tab hosts (v0.1.61): Shell's `pages` make any place with a tab strip (`data-tab-host`) host features as pages, like a browser's tabs; a page has its own body, an optional "+" action and a badge, and never knows its neighbours. The side panel's Agent and Chats became two pages with separate bodies (each its own conversation, input, attachments and drops); the Chats page left `chat-panel.js` for `features/chats-page.js`, sharing only the agent's server connection, which it is given | done (v0.1.61) |
+| S3d-2 | The agent's server connection (whether it is set up, the model chosen, what a request carries) gets an owner; then the Chats page moves into the Chats module | next |
+| S3d-3 | The Agent page into the Assistant module, with its services (chat API, storage, sync, MCP controls, agent undo) | |
 | S4 | `main.js` only starts the kernel; then the server's `WorkspaceRegistry` the same way | |
 
 ### Notes for module authors
@@ -341,6 +343,11 @@ That is where bugs are hard to find. Steps, each its own release:
 - Saving: `workspace.saving.schedule(project)` after a change,
   `saveActiveFile()`, `runAutoSave(why)`; the storage itself (loadProject,
   saveProject, folders) is Workspace's static API.
+- A feature with its own page next to others (like a browser tab): give the
+  host a tab strip (`data-tab-host="name"`, and a "+" button with
+  `data-tab-host-new="name"`), then `shell.pages.add({ host, id, label, title,
+  order, body, newItem?, shown?(visible) })`; `pages.badge(host, id, n)` shows
+  a count. Shell remembers the open page per host (`settings.openPages`).
 - Drawing the app again: `shell.render(project)` (or `{ only: "status" }` for
   the panes and status bar without the tree). Never call `main.js`'s render.
 - Settings: read `shell.settings.key`; change with `shell.settings.change({ key:

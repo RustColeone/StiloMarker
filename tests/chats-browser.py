@@ -108,13 +108,13 @@ async def browser_for(b, user, viewport={"width": 1280, "height": 860}, own=None
     await page.wait_for_selector('.tree-row[title="Cast"]', timeout=30000)
     if extra.get("is_mobile"):
         await page.locator("#mobile-chat-toggle").click()
-    await page.wait_for_selector("#chat-cast-bar .cv-search", timeout=30000)
+    await page.wait_for_selector("#chats-cast-bar .cv-search", timeout=30000)
     return ctx, page, errors
 
 
 async def send(page, text):
-    await page.locator("#chat-input").fill(text)
-    await page.locator("#chat-send-button").click()
+    await page.locator("#chats-input").fill(text)
+    await page.locator("#chats-send-button").click()
 
 
 async def main():
@@ -142,14 +142,14 @@ async def main():
 
         # A → B privately; B sees it live with an unread badge.
         await a.click('[data-chats-start="user:bob"]')
-        await a.wait_for_selector("#chat-input:visible")
+        await a.wait_for_selector("#chats-input:visible")
         await send(a, "hello from anna about the lighthouse")
-        await bb.wait_for_function('document.querySelector(\'[data-chat-tab="chats"]\').dataset.unread === "1"', timeout=15000)
+        await bb.wait_for_function('document.querySelector(\'[data-page="chats"]\').dataset.unread === "1"', timeout=15000)
         assert await bb.locator('[data-chats-open][data-unread] .cv-badge').inner_text() == "1"
         ok("B gets the message live with an unread badge")
         await bb.click("[data-chats-open]")
         await bb.wait_for_selector('.cv-message:has-text("hello from anna")')
-        await bb.wait_for_function('!document.querySelector(\'[data-chat-tab="chats"]\').dataset.unread', timeout=15000)
+        await bb.wait_for_function('!document.querySelector(\'[data-page="chats"]\').dataset.unread', timeout=15000)
         ok("opening the chat clears the badge")
         await send(bb, "hi anna")
         await a.wait_for_selector('.cv-message:has-text("hi anna")', timeout=15000)

@@ -24,6 +24,9 @@
 //   render(project, { only? })  ask for the app to be drawn again (only: "status"
 //                            for the panes and status without the tree); the
 //                            app listens: events.on("render", ({ project, only }) => …)
+//   pages                    features as pages in tab hosts, like a browser's tabs:
+//                            pages.add({ host, id, label, body, newItem?, shown? }),
+//                            show(host, id), active(host), badge(host, id, n) (adapters/pages.js)
 //   settings                 the app's settings, read-only (settings.theme);
 //                            settings.change({ key: value }, why?) saves a change,
 //                            settings.on(listener) hears them (service/settings.js)
@@ -36,6 +39,7 @@ import { createKeyboard } from "./adapters/keyboard.js";
 import { createMenuBar } from "./adapters/menu-bar.js";
 import { createServer } from "./adapters/server.js";
 import { watchPageErrors } from "./adapters/page-errors.js";
+import { createPages } from "./adapters/pages.js";
 import { loadSettings, patchStoredSettings } from "./adapters/settings-store.js";
 import { SECRET_SETTINGS, keysToSave } from "./service/settings.js";
 
@@ -47,7 +51,7 @@ export default defineModule({
   level: 1,
   uses: [],
   owns: {
-    registries: ["commands", "menus"],
+    registries: ["commands", "menus", "pages"],
     elements: ["menu bar", "notice dialog", "confirm dialog", "input dialog", "form dialog", "toasts"],
     connection: ["the server address"],
     events: ["render"],
@@ -113,6 +117,7 @@ export default defineModule({
       copyText: dialogs.copyText,
       server: createServer(),
       settings,
+      pages: createPages({ registry: ctx.registry({ key: "key" }), settings }),
       render: (project, { only } = {}) => events.emit("render", { project, only }),
       events: { on: events.on }
     };

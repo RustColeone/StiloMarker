@@ -87,8 +87,8 @@ async def open_page(browser, requests, viewport, hold=None, **options):
 
 
 async def send(page, text):
-    await page.locator('#chat-input').fill(text)
-    await page.locator('#chat-send-button').click()
+    await page.locator('#chats-input').fill(text)
+    await page.locator('#chats-send-button').click()
 
 
 async def main():
@@ -119,7 +119,7 @@ async def main():
         # A private chat with a character answers every message.
         await page.click('[data-chats-start="char:aria.persona.skill"]')
         # The browser's chat store opens asynchronously: wait for the chat to show.
-        await page.wait_for_function('document.querySelector("#chat-input").placeholder === "Message Captain Aria Voss"', timeout=10000)
+        await page.wait_for_function('document.querySelector("#chats-input").placeholder === "Message Captain Aria Voss"', timeout=10000)
         await send(page, 'Ahoy')
         await page.wait_for_selector('.cv-message.rp-message:has-text("Captain Aria Voss answers #1")', timeout=15000)
         assert requests[0]['mode'] == 'persona' and requests[0]['persona']['name'] == 'Captain Aria Voss'
@@ -132,11 +132,11 @@ async def main():
         await page.check('[data-chats-pick="char:bram.persona.skill"]')
         await page.click('[data-chats-confirm]')
         await page.wait_for_function('document.querySelector(".cv-head-sub")?.textContent === "3 members"')
-        await page.locator('#chat-input').fill('')
-        await page.locator('#chat-input').type('@ar')
+        await page.locator('#chats-input').fill('')
+        await page.locator('#chats-input').type('@ar')
         await page.locator('.rp-popover .rp-item.is-active').wait_for()
-        await page.locator('#chat-input').press('Enter')
-        assert await page.locator('#chat-input').input_value() == '@aria '
+        await page.locator('#chats-input').press('Enter')
+        assert await page.locator('#chats-input').input_value() == '@aria '
         await send(page, 'The storm hits.')  # narration: nobody replies
         await page.wait_for_timeout(600)
         assert len(requests) == 1
