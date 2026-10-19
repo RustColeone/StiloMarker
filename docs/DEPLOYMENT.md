@@ -885,3 +885,29 @@ among them), nineteen browser suites.
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261019T094954Z-v0.1.88`.
 172/172 data files (taken with the service stopped), every JSON file valid.
+
+## Verified release: v0.1.95
+
+Deployed on 2026-10-19 at 18:07 UTC, with every release since v0.1.88
+(v0.1.89–v0.1.95): an ended or unknown session token answered 403 instead of
+503 (v0.1.89), the first visit's empty preview (v0.1.90), and step 5's first
+parts: on the phone, one file's two views (v0.1.91), the chat as a drawer from
+the right (v0.1.93), the Log as a sheet from the bottom (v0.1.94, v0.1.95)
+and drawer swipes that start just inside the screen edge (v0.1.95); on the
+desktop, a tab's menu (v0.1.92). App version `0.1.95`; sync compatibility
+unchanged at `117`. The service's command line and environment file are
+unchanged.
+
+Public checks: ping (`0.1.95`, accounts on, hosting on), the service worker's
+cache label `mdnotes-shell-v0.1.95`, the new scripts served
+(`frame/drawer.js`, `frame/sheet.js`, `tab-menu.js`), the server's own files
+refused (`server/mdnotes_server.py`, `server/whitelist.json`,
+`server/stilomarker.env` answer as the app's page), an unknown session token
+on the state route answered 403 (v0.1.88 answered 503), and a clean journal
+(accounts loaded, the agent's providers ready, no errors).
+
+Validation: 245 Node tests, all 22 Python suites (the backend self-test
+among them), 23 browser suites.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261019T180656Z-v0.1.95`.
+172/172 data files (taken with the service stopped), every JSON file valid.
