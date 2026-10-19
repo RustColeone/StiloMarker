@@ -1,5 +1,5 @@
 // Exporting a diagram as SVG, PNG or JPG (the Explorer's "Export As" for it).
-import { downloadBlob, fileBaseName, fileTypeExtension, isBmapFileName } from "../../../../app/modules/workspace/index.js";
+import { downloadBlob, fileBaseName, fileTypeExtension } from "../../../../app/modules/workspace/index.js";
 import { normalizeBmapAst, parseBmap } from "../model/bmap.js";
 
 export function createDiagramExport(app) {
@@ -46,7 +46,7 @@ export function createDiagramExport(app) {
   async function exportBmapAs(nodeId, format) {
     const project = app.controller.getProject();
     const node = project.nodes[nodeId];
-    if (!node || node.kind !== "file" || !isBmapFileName(node.name)) {
+    if (!node || node.kind !== "file" || !app.isDiagram(node.name)) {
       app.notify(`Export As is only available for ${fileTypeExtension("bmap")} diagrams.`);
       return;
     }

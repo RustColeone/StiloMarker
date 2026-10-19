@@ -21,34 +21,6 @@ function getEditorToolbarFormat(fileName) {
   return builtinTypes.isText(name) ? builtinTypes.formatOf(name) : null;
 }
 
-const BMAP_NODE_RECT_SNIPPET = `.node {
-  id: node-id
-  name: Node Name
-  text: Description
-  shape: rect
-  pos: {x: 60, y: 60}
-}
-`;
-
-const BMAP_NODE_CIRCLE_SNIPPET = `.node {
-  id: node-id
-  name: Node Name
-  text: Description
-  shape: circle
-  pos: {x: 60, y: 60}
-}
-`;
-
-const BMAP_CONNECT_SNIPPET = `.connect {
-  from: node-a.side.1
-  to: node-b.side.3
-  styles: {
-    mode: bezier
-    arrow: end
-  }
-}
-`;
-
 const MTREE_NOTE_SNIPPET = `[Node Name]
 Note: Description
 `;
@@ -76,13 +48,6 @@ const TOOLBAR_SPECS = {
       { id: "md-table", html: "Table", title: "Insert table", action: { kind: "table" } },
       { id: "md-codeblock", html: "Code", title: "Code block", action: { kind: "block", snippet: "```\n\n```\n", caret: 4 } },
       { id: "md-hr", html: "&horbar;", title: "Horizontal rule", action: { kind: "block", snippet: "---\n" } }
-    ]
-  ],
-  bmap: [
-    [
-      { id: "bmap-node-rect", html: "Node&nbsp;&#9645;", title: "Insert rectangle node", action: { kind: "block", snippet: BMAP_NODE_RECT_SNIPPET, caret: 14 } },
-      { id: "bmap-node-circle", html: "Node&nbsp;&#9711;", title: "Insert circle node", action: { kind: "block", snippet: BMAP_NODE_CIRCLE_SNIPPET, caret: 14 } },
-      { id: "bmap-connect", html: "Connection", title: "Insert connection", action: { kind: "block", snippet: BMAP_CONNECT_SNIPPET } }
     ]
   ],
   mtree: [

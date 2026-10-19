@@ -329,7 +329,8 @@ That is where bugs are hard to find. Steps, each its own release:
 | S4c-2 | Resuming and leaving (v0.1.70): Cloud resumes the last session (`adapters/resume.js`, `service/recovery.js`: at start, back on the page, back online, the welcome page's Resume; a deliberate switch to the tab's own workspace cancels it); Workspace reattaches the device folder when the project opens; when the page hides or goes, each module keeps its own part (the Editor where the reader was, Workspace this browser's copy and the unsaved-changes warning, Sync the in-step revision and leaving the session). `main.js` keeps one call to start the resume | done (v0.1.70) |
 | S4d-1 | History owns snapshots on the page (v0.1.71, `history.attach(port)`, `adapters/surface.js`): the snapshots, the version label (drawn as the project changes), the host's counters, the Snapshots and Workspace History dialogs and their commands, all moved from `app/features`. The diff is a tab in the preview pane through a new Editor extension point, `editor.paneViews` (a tab that is not a file: `{ id, element, tab(), show({ fresh }), close() }`); the Editor draws the preview pane (a file's preview or a pane view) and takes edits made in a preview. Which cloud workspace is open is Sync's (`sync.cloudWorkspace()`). The diff names left the Editor's port, the snapshot ones Cloud's; `main.js` hands out 40 getters (58 before) | done (v0.1.71) |
 | S4d-2a | Diagrams' browser code is an extension (v0.1.72, `extensions/bmap-diagram`): the diagram editor (moved whole from `app/ui/bmap-view.js`, still over budget, recorded under its new path), the format, the preview, Quick Generate, export, its two settings. Two Explorer extension points: `explorer.fileMenus` (a file type's own context-menu entries, e.g. Export As) and `explorer.newFiles` (a new file's first content; character sheets use it too). The name `bmap-diagram` keeps the "the core never names an extension" check meaningful ("diagram" is an everyday word in the core) | done (v0.1.72) |
-| S4d-2b | The `.bmap` file type moves into the extension's manifest, with its styles; the core's by-name checks (the Editor's tabs and autocomplete) become extension points | next |
+| S4d-2b | The Editor no longer knows diagrams (v0.1.73): their highlighting, toolbar buttons and autocomplete are the extension's (`adapters/source.js`) through the Editor's `highlighters`, `toolbars` and a new `completions` extension point; a preview may say `showOnOpen` (opening the file shows it there too) instead of the tabs checking for a diagram by name; Workspace's `isBmapFileName` is gone | done (v0.1.73) |
+| S4d-2c | The `.bmap` file type itself into the extension's manifest, with its styles. Waits on two things: extension settings (Shell's settings refuse keys they do not know, so `bmapGenerateScope` and `bmapAutoPan` have core defaults) and a generic overview in the server's generate endpoint (`bmap_overview`) | later |
 | S4d-3 | The comments glue (Comments), the welcome page (Editor), the maintenance commands (Workspace) | |
 | S4e | Layout and gestures (Shell, the groundwork for step 5's areas), the `elements` table; then `main.js` only starts the kernel | |
 | S4 | `main.js` only starts the kernel; then the server's `WorkspaceRegistry` the same way | |
@@ -447,6 +448,11 @@ That is where bugs are hard to find. Steps, each its own release:
   react to the setting with `shell.settings.on((view, changed) => …)`, not to
   the control. A new section: `settingsDialog.addPage({ id, label, order,
   body })` with a `[data-settings-fields]` box in the body.
+- Autocomplete for a format: `editor.completions.add({ id: format,
+  find({ text, cursor, force }) -> { kind, token, start, end } | null,
+  items(context, { project, file, projectFiles(kind) }), label(context) })`.
+  A preview whose file is used through it (a diagram's editor) adds
+  `showOnOpen: true`.
 - A tab in the preview pane that is not a file (History's diff):
   `editor.paneViews.add({ id, element, tab() -> { label, title, iconText,
   iconClass, caption? } | null, show({ fresh }), close() })`; `tab()` is null

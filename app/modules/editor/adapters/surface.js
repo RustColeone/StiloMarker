@@ -10,7 +10,7 @@
 // What other code may call is FUNCTIONS below (editor.parts()).
 import { escapeHtmlAttribute } from "../model/html.js";
 import { getRelativePath, getRelativeProjectPath, normalizePath } from "../model/paths.js";
-import { getNodeIdByPath, getPath, isBmapFileName, isImageFileName, isMarkdownFileName } from "../../workspace/index.js";
+import { getNodeIdByPath, getPath, isImageFileName, isMarkdownFileName } from "../../workspace/index.js";
 import { createAutocomplete } from "./autocomplete.js";
 import { createEditorCore } from "./editor-core.js";
 import { installEditorEvents } from "./editor-events.js";
@@ -35,7 +35,7 @@ export const PORT = [
   "scope", "isReadOnly", "onDrop"
 ];
 
-export function createSurface({ port, view, marks, paneViews, previews, highlighters, toolbars, workspace, shell }) {
+export function createSurface({ port, view, marks, paneViews, completions, previews, highlighters, toolbars, workspace, shell }) {
   const missing = PORT.filter((name) => !(name in port));
   if (missing.length) throw new Error(`editor.attach: the port lacks ${missing.join(", ")}`);
   const composing = { now: false }; // an IME composition is under way
@@ -89,7 +89,7 @@ export function createSurface({ port, view, marks, paneViews, previews, highligh
     // The file the editor's text is (what its DOM shows), or null.
     shown: { fileId: null },
 
-    view, marks, paneViews, previews, highlighters, toolbars, workspace, parts: workspace.parts,
+    view, marks, paneViews, completions, previews, highlighters, toolbars, workspace, parts: workspace.parts,
     escapeHtmlAttribute, normalizePath, getRelativePath, getRelativeProjectPath,
     notify: (message) => shell.notify(message),
     showToast: (message, options) => shell.toast(message, options),
@@ -162,7 +162,7 @@ export function createSurface({ port, view, marks, paneViews, previews, highligh
   app.editorLinkTooltip.el.addEventListener("mouseleave", () => app.hideLinkTooltip(true));
 
   function isPreviewableFileName(name) {
-    return isMarkdownFileName(name) || isImageFileName(name) || isBmapFileName(name)
+    return isMarkdownFileName(name) || isImageFileName(name)
       || previews.all().some((preview) => preview.matches({ name, content: "" }));
   }
 

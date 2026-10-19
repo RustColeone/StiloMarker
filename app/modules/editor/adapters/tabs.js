@@ -4,7 +4,7 @@
 // main.js creates this through createPanes and passes its shared values in `app`;
 // what the panes show is the Editor's view (app.view, service/view.js).
 import { normalizeServerUrl } from "../../shell/index.js";
-import { getPath, isBmapFileName } from "../../workspace/index.js";
+import { getPath } from "../../workspace/index.js";
 
 export function createTabs(app) {
 
@@ -156,7 +156,8 @@ export function createTabs(app) {
     // On mobile the explorer is a flyout overlay — close it so the opened file
     // is visible without an extra tap.
     app.setMobileExplorerOpen(false);
-    if (isBmapFileName(node.name)) {
+    // A file whose preview is how it is used (a diagram's editor) shows there too.
+    if (app.previews.all().some((preview) => preview.showOnOpen && preview.matches(node))) {
       setPreviewFile(fileId);
       if (app.settings.preview === "hidden") {
         app.togglePreview();

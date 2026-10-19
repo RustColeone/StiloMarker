@@ -1,4 +1,4 @@
-// Source-pane syntax highlighting for Markdown, .mtree and .bmap files, and
+// Source-pane syntax highlighting for Markdown and .mtree files, and
 // for formats added to the `highlighters` extension point (app.highlighters:
 // { id: format, line(rawLine, { escape, blank }) -> one `editor-line` div }),
 // with a per-line memo so typing re-highlights only changed lines.
@@ -94,103 +94,6 @@ export function createHighlighter(app) {
     });
   }
 
-  function highlightBmapValue(rawVal) {
-    const trimmed = rawVal.trim();
-    if (!trimmed) return "";
-
-    // Opening brace for styles: { sub-block
-    if (trimmed === "{") {
-      return `<span class="token-bmap-brace">${escapeEditorHtml(rawVal)}</span>`;
-    }
-
-    // Inline object: {x: 120, y: 80}
-    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-      const leading = escapeEditorHtml(rawVal.slice(0, rawVal.indexOf("{")));
-      const inner = trimmed.slice(1, -1);
-      const highlightedInner = inner.replace(/([a-zA-Z]\w*)(\s*:\s*)(-?\d+\.?\d*)/g, (m, k, sep, v) =>
-        `<span class="token-bmap-style-key">${escapeEditorHtml(k)}</span><span class="token-bmap-sep">${escapeEditorHtml(sep)}</span><span class="token-bmap-number">${escapeEditorHtml(v)}</span>`
-      );
-      return `${leading}<span class="token-bmap-brace">{</span>${highlightedInner}<span class="token-bmap-brace">}</span>`;
-    }
-
-    // Keywords
-    const BMAP_KEYWORDS = new Set(["rect", "circle", "bezier", "straight", "end", "start", "both", "none", "true", "false"]);
-    if (BMAP_KEYWORDS.has(trimmed)) {
-      return `<span class="token-bmap-keyword">${escapeEditorHtml(rawVal)}</span>`;
-    }
-
-    // Connector endpoint: nodeId.side.N
-    const endpointMatch = trimmed.match(/^(\S+?)\.side\.([0-3])$/);
-    if (endpointMatch) {
-      const [, nodeId, idx] = endpointMatch;
-      const leading = escapeEditorHtml(rawVal.slice(0, rawVal.indexOf(nodeId)));
-      return `${leading}<span class="token-bmap-endpoint-node">${escapeEditorHtml(nodeId)}</span><span class="token-bmap-sep">.side.</span><span class="token-bmap-endpoint-side">${escapeEditorHtml(idx)}</span>`;
-    }
-
-    // Scan for hex color values (may appear mid-string, e.g., "1px solid #aaa")
-    const colorPattern = /#([0-9a-fA-F]{3,8})\b/g;
-    const parts = [];
-    let lastIdx = 0;
-    let m;
-    while ((m = colorPattern.exec(rawVal)) !== null) {
-      if (m.index > lastIdx) {
-        parts.push(`<span class="token-bmap-value">${escapeEditorHtml(rawVal.slice(lastIdx, m.index))}</span>`);
-      }
-      const hex = m[0];
-      parts.push(`<span class="token-color-swatch" style="background:${app.escapeHtmlAttribute(hex)}"></span><span class="token-bmap-color">${escapeEditorHtml(hex)}</span>`);
-      lastIdx = m.index + hex.length;
-    }
-    if (parts.length > 0) {
-      if (lastIdx < rawVal.length) {
-        parts.push(`<span class="token-bmap-value">${escapeEditorHtml(rawVal.slice(lastIdx))}</span>`);
-      }
-      return parts.join("");
-    }
-
-    // Plain number (with optional unit)
-    if (/^\s*-?\d+(\.\d+)?(px|em|rem|%|pt)?\s*$/.test(rawVal)) {
-      return `<span class="token-bmap-number">${escapeEditorHtml(rawVal)}</span>`;
-    }
-
-    return `<span class="token-bmap-value">${escapeEditorHtml(rawVal)}</span>`;
-  }
-
-  function highlightBmapLines(value) {
-    const lines = value.replace(/\r\n/g, "\n").split("\n");
-    return lines.map((rawLine) => {
-      const trimmed = rawLine.trimStart();
-      const indent = escapeEditorHtml(rawLine.slice(0, rawLine.length - trimmed.length));
-
-      if (!trimmed) return renderWhitespaceOnlyEditorLine(rawLine);
-
-      // Comment
-      if (trimmed.startsWith("//")) {
-        return `<div class="editor-line"><span class="token-bmap-comment">${escapeEditorHtml(rawLine)}</span></div>`;
-      }
-
-      // Block opener: .node { or .connect {
-      const blockOpenMatch = trimmed.match(/^(\.(node|connect))(\s*\{.*)$/);
-      if (blockOpenMatch) {
-        const [, selector, , rest] = blockOpenMatch;
-        return `<div class="editor-line">${indent}<span class="token-bmap-selector">${escapeEditorHtml(selector)}</span><span class="token-bmap-brace">${escapeEditorHtml(rest)}</span></div>`;
-      }
-
-      // Closing brace
-      if (trimmed === "}") {
-        return `<div class="editor-line">${indent}<span class="token-bmap-brace">}</span></div>`;
-      }
-
-      // Key: value line
-      const kvMatch = trimmed.match(/^([a-zA-Z][\w-]*)(\s*:\s*)(.*)$/);
-      if (kvMatch) {
-        const [, key, sep, val] = kvMatch;
-        return `<div class="editor-line">${indent}<span class="token-bmap-key">${escapeEditorHtml(key)}</span><span class="token-bmap-sep">${escapeEditorHtml(sep)}</span>${highlightBmapValue(val)}</div>`;
-      }
-
-      return `<div class="editor-line">${escapeEditorHtml(rawLine)}</div>`;
-    });
-  }
-
   // One markdown source line → its editor HTML, given whether it starts inside a
   // ``` fence. Returns the fence state after it. Highlighting is otherwise
   // line-local, which is what lets renderEditorContent memoize it per line.
@@ -265,7 +168,7 @@ export function createHighlighter(app) {
 
   // The highlighter follows the file's format (File types module); anything
   // else highlights as Markdown.
-  const HIGHLIGHTED_FORMATS = new Set(["mtree", "bmap"]);
+  const HIGHLIGHTED_FORMATS = new Set(["mtree"]);
   const added = (format) => app.highlighters?.get(format) ?? null;
   function editorHighlightKind(name) {
     const format = builtinTypes.formatOf(name ?? "");
@@ -275,7 +178,6 @@ export function createHighlighter(app) {
   const lineTools = { escape: escapeEditorHtml, blank: renderWhitespaceOnlyEditorLine };
   function highlightEditorLines(kind, normalized) {
     if (kind === "mtree") return highlightMtreeLines(normalized);
-    if (kind === "bmap") return highlightBmapLines(normalized);
     const highlighter = added(kind);
     if (highlighter) return normalized.replace(/\r\n/g, "\n").split("\n").map((line) => highlighter.line(line, lineTools));
     return highlightMarkdownLines(normalized);

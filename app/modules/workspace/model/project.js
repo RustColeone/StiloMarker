@@ -19,7 +19,6 @@ function createId(prefix) {
 
 const isAllowedFileName = (name) => builtinTypes.isKnown(name);
 const isTextFileName = (name) => builtinTypes.isText(name);
-const isBmapFileName = (name) => builtinTypes.is(name, "bmap");
 const isMtreeFileName = (name) => builtinTypes.is(name, "mtree");
 const isImageFileName = (name) => builtinTypes.isImage(name);
 // Notes and character files edit and preview the same way.
@@ -502,7 +501,6 @@ export {
   isMarkdownFileName,
   isMtreeFileName,
   isPersonaFileName,
-  isBmapFileName,
   isTextFileName,
   listVisibleNodes,
   markFileSaved,

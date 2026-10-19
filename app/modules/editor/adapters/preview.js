@@ -3,7 +3,8 @@
 // plain mind-map trees are built in; other kinds of file add a preview to the
 // `previews` extension point:
 //   previews.add({ id, matches(file) -> bool, render(target, project, file, tools) -> { shouldTypeset, content },
-//                  cacheable?: bool, printHtml?(project, file, tools) -> html })
+//                  cacheable?: bool, printHtml?(project, file, tools) -> html,
+//                  showOnOpen?: bool (opening the file shows it here too: a diagram's editor) })
 // tools.markdownHtml(project, file, text) renders Markdown with the project's
 // link and image resolution; tools.part is the id of the one part of the file
 // to show (a file with parts, Workspace's `parts`), or null for all of it. A cacheable preview is a pure function of the

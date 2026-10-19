@@ -7,6 +7,7 @@ import {
   buildTableSnippet,
   getEditorToolbarFormat
 } from "../app/modules/editor/index.js";
+import { toolbarGroups } from "../extensions/bmap-diagram/browser/adapters/source.js";
 
 const { bmapService, mtreeService, markdownService } = await loadModules();
 
@@ -58,8 +59,8 @@ test("toolbar: html table snippet renders through the markdown preview", () => {
   assert.match(markdownService.renderMarkdown(snippet), /<table>/);
 });
 
-test("toolbar: bmap block snippets parse without errors", () => {
-  for (const button of TOOLBAR_SPECS.bmap.flat()) {
+test("toolbar: the diagram extension's block snippets parse without errors", () => {
+  for (const button of toolbarGroups.flat()) {
     const parsed = bmapService.parseBmap(button.action.snippet);
     assert.equal(parsed.parseErrors.length, 0, `bmap snippet ${button.id} had parse errors`);
   }

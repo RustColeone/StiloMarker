@@ -1,17 +1,21 @@
 // Diagrams (.bmap), an extension. It uses only the core's public extension
 // points:
 //   Editor     a preview: the diagram editor (adapters/view.js, loaded the
-//              first time a diagram is shown) and edits written back
+//              first time a diagram is shown) and edits written back; in the
+//              source editor, highlighting, toolbar buttons and autocomplete
+//              (adapters/source.js)
 //   Explorer   "Export As" (PNG, JPG, SVG) on a diagram, and a new diagram's
 //              first content
 //   Shell      its two settings in Settings → Appearance
 //   Assistant  Quick Generate asks the server's agent for a note
-// The file type is still one of File types' built-in ones (see extension.json).
+// The file type is still one of File types' built-in ones (see extension.json),
+// and so are its two settings' defaults (Shell) and the server's Quick Generate.
 import { defineModule } from "../../../app/kernel/index.js";
 import { createDefaultBmap } from "./model/bmap.js";
 import { createDiagramExport } from "./adapters/export.js";
 import { createGenerate } from "./adapters/generate.js";
 import { addDiagramPreview } from "./adapters/preview.js";
+import { completions, highlighter, toolbarGroups } from "./adapters/source.js";
 
 const TYPE = "bmap";
 
@@ -28,7 +32,7 @@ export default defineModule({
     const generate = createGenerate({ shell, workspace, identity: ctx.use("identity"), sync: ctx.use("sync"), editor, log });
     const preview = addDiagramPreview({ editor, shell, workspace, isDiagram: (name) => types.is(name, TYPE), generate, log });
 
-    const exportAs = createDiagramExport({ get controller() { return workspace.project(); }, loadBmapView: preview.load,
+    const exportAs = createDiagramExport({ get controller() { return workspace.project(); }, loadBmapView: preview.load, isDiagram: (name) => types.is(name, TYPE),
       notify: (message) => shell.notify(message), logDebug: log });
     explorer.fileMenus.add({
       id: TYPE,
@@ -39,6 +43,9 @@ export default defineModule({
       }
     });
     explorer.newFiles.add({ id: TYPE, content: () => createDefaultBmap() });
+    editor.highlighters.add({ id: TYPE, ...highlighter });
+    editor.toolbars.add({ id: TYPE, groups: toolbarGroups });
+    editor.completions.add({ id: TYPE, ...completions });
 
     shell.settingsDialog.fields.add({ page: "appearance", id: "bmap-generate-scope-select", order: 110, label: "Bmap Generate Context",
       key: "bmapGenerateScope", control: "select", options: [["connected", "Connected nodes only"], ["all", "All linked files"]],

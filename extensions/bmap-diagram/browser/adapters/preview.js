@@ -12,6 +12,7 @@ export function addDiagramPreview({ editor, shell, workspace, isDiagram, generat
 
   editor.previews.add({
     id: "bmap", matches: (file) => isDiagram(file.name), cacheable: false,
+    showOnOpen: true, // the diagram editor is how a diagram is used
     viewState: () => diagramView?.getView?.() ?? null, // the pan and zoom, remembered per file
     render(target, project, file) {
       if (!viewModule) {

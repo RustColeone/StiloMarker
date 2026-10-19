@@ -224,6 +224,18 @@ async def main():
         # A diagram previews as the diagram editor, not as its text (lost in v0.1.48).
         await page.evaluate('window.__shellTest.openFileFromExplorer("d")')
         await page.wait_for_selector('#preview-output .bmap-editor', timeout=15000)
+        # In the source editor the extension's highlighting, toolbar buttons and
+        # autocomplete apply to the diagram (the Editor's extension points).
+        await page.wait_for_selector('#editor-content .token-bmap-selector')
+        await page.evaluate('window.__shellTest.shell.settings.change({ showFormatToolbar: true }, "test")')
+        await page.wait_for_selector('#editor-format-toolbar [data-toolbar-button-id="bmap-node-rect"]')
+        await page.focus('#editor-content')
+        await page.keyboard.press('Control+End')
+        await page.keyboard.press('Enter')
+        await page.keyboard.type('.no')
+        await page.wait_for_selector('#editor-autocomplete:not([hidden])')
+        assert 'node' in await page.locator('#editor-autocomplete').inner_text()
+        await page.keyboard.press('Escape')
         # Diagrams are an extension (extensions/bmap-diagram): its Export As in the
         # explorer's menu, and a new diagram's first content.
         await page.locator('.tree-row[title="welcome.bmap"]').click(button='right')
@@ -250,7 +262,7 @@ async def main():
         await browser.close()
         print(json.dumps({'checks': ['file-type lists from File types', 'five menus with their items', 'one menu open at a time', 'live titles',
                                      'menu item runs its command', 'Ctrl+S runs Save', 'a snapshot compared in the diff tab', 'rename keeps the extension',
-                                     'late menus and commands appear', 'Replace File replaces an image', 'status bar items from their owners', 'Settings sections and fields', 'the trace and its tab', 'a diagram previews as a diagram', 'diagram Export As and new diagram (extension)', 'phone menu panel'], 'runtimeErrors': 0}))
+                                     'late menus and commands appear', 'Replace File replaces an image', 'status bar items from their owners', 'Settings sections and fields', 'the trace and its tab', 'a diagram previews as a diagram', 'diagram source: highlighting, toolbar, autocomplete (extension)', 'diagram Export As and new diagram (extension)', 'phone menu panel'], 'runtimeErrors': 0}))
 
 
 asyncio.run(main())

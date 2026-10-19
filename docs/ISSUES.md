@@ -69,6 +69,17 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.73: the Editor no longer knows diagrams
+
+Step S4d-2b. Nothing changes for users.
+
+- A diagram's highlighting, toolbar buttons and autocomplete moved from the
+  Editor into the diagram extension, through the Editor's extension points
+  (autocomplete got one). Opening a diagram still shows it in the preview,
+  now because its preview says so.
+- `shell-browser.py` now checks a diagram's highlighting, its toolbar button
+  and its autocomplete in the source editor.
+
 ### v0.1.72: diagrams are an extension
 
 Step S4d-2a. One small change for users:
