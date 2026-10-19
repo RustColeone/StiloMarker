@@ -22,7 +22,7 @@ import { createExplorerView } from "./tree.js";
 // owner, or become an extension point, and leave this list.
 export const PORT = [
   "settings",
-  "elements", "logDebug", "canManagePreview", "openAccessEditor", "openMtreeToolsDialog",
+  "elements", "canManagePreview", "openAccessEditor", "openMtreeToolsDialog",
   "remapPersonaPaths"
 ];
 
@@ -49,6 +49,7 @@ export function createSurface({ port, workspace, editor, shell, sync, types, fil
     fileMenuOf: (name) => fileMenus.get(types.typeOf(name)?.id ?? "") ?? null,
     newFileContent: (kind, name) => newFiles.get(kind)?.content(name) ?? "",
     imageSrcFor: (project, node) => workspace.location.assetSrc(project, node), // an image's address (Workspace's location)
+    logDebug: (...args) => shell.log(...args), // the log panel (Shell's)
     // Changes made here reach the shared workspace through Sync.
     publishOperation: (operation) => sync.publish(operation),
     publishSnapshot: () => sync.publishSnapshot(),

@@ -336,7 +336,9 @@ That is where bugs are hard to find. Steps, each its own release:
 | S4e-1 | Owners for what `main.js` still answered (v0.1.76). Where the open project lives is Workspace's `location` (a key naming it, an image's address, resolving a link to an image), which Sync configures; paths inside a project moved from the Editor to Workspace. Sync answers `connectionInfo()`; Characters `avatarSrc()`. The File menu's commands are their owners': Save (Workspace, which says `"saved"`; History snapshots), New Project, Open Project, File Manager and the two imports (Cloud, now `cloud.*`), Export (Explorer, `explorer.*`), Save as PDF (Editor). The Editor's port lost `imageSrcFor` and `scope`, Explorer's `imageSrcFor`, Chats' and the Assistant's four workspace names | done (v0.1.76) |
 | S4e-2 | The redraw is Shell's (v0.1.77, `adapters/render.js`): every redraw goes through `shell.render`, and each module draws its own part on the `render` event (the Editor its tabs, file, preview pane and links; the Explorer the tree; the Agent page itself). A full redraw waits while a module says it is busy (`shell.holdRendering`: the Editor while typing; at most every 1.5 s in a long burst), as `main.js` used to do. Workspace saves and asks for a redraw on each change of the project | done (v0.1.77) |
 | S4e-3 | The frame is Shell's (v0.1.78, `adapters/frame/`), and step 5's areas begin: the left (explorer sidebar, docked or floating, its sections), right (side panel), bottom (log) areas and the middle's source and preview panes, shown, hidden and sized by Shell (`frame.toggle(area)`, the splitters), announced as `"area"`, `"resized"`, `"layout"`. On the phone, panes come from their owners (`frame.phonePanes.add`: the Editor's source and preview with their captions and files, the Assistant's chat); Shell owns the carousel, the drawer, the flyouts and the ⋮ menu. The Assistant loads its page itself when the side panel shows; the Editor and Explorer took Find, tab overflow, Copy on code blocks and drop cleanup. `ui/layout.js` and `services/chat-ui-service.js` are gone; the page looks the same (compared pixel for pixel) | done (v0.1.78) |
-| S4e-4 | The `elements` table; then `main.js` only starts the kernel | |
+| S4e-4a | The log panel is Shell's (v0.1.79, `adapters/log-panel.js`: the bottom area's entries and the trace tab), and every module logs with `shell.log(kind, message, detail)` instead of a port's `logDebug`; module lines from before Shell starts wait in `main.js` and follow. Flashing a status panel (`shell.flash`) and updating a too-old app (`shell.upgradeApp`) are Shell's; joining's confirmation is Sync's; the editor's input trace is the Editor's. `ui/dialogs.js` is gone; `main.js` hands out 4 getters | done (v0.1.79) |
+| S4e-4b | The remaining port entries (the Editor's session, read-only and drops; the Explorer's access editor, module-map tools, renamed characters; Sync's remote changes, signing in again, uploads; Cloud's, Chats', the Assistant's); the module-map tools as an extension; the character-sheet preview to Characters | next |
+| S4e-4c | The boot sequence and the `elements` table; then `main.js` only starts the kernel | |
 | S4 | `main.js` only starts the kernel; then the server's `WorkspaceRegistry` the same way | |
 
 ### Notes for module authors
@@ -457,6 +459,8 @@ That is where bugs are hard to find. Steps, each its own release:
   "splitter" | "window"`), `"layout"`. A pane on the phone:
   `shell.frame.phonePanes.add({ id, order, element(), caption(), fileId(),
   shown?() })`.
+- A line in the log panel: `shell.log(kind, message, detail?)` (`"action"`,
+  `"response"`, `"error"`…); `shell.logLines()` reads them (tests).
 - An item in the status bar: `shell.statusBar.add({ id, order, title?,
   action?, dot?, grow?, hidden? })` returns `{ set({ text, tone, title,
   hidden }), element, extra }`; draw it from your own state when that changes.

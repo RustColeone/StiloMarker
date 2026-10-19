@@ -22,7 +22,7 @@ import { createTurns } from "./turns.js";
 // What main.js attaches (assistant.load(port)); each entry should move to an
 // owner, or become an extension point, and leave this list.
 export const PORT = [
-  "elements", "logDebug", "storedProject", "chatsPage"
+  "elements", "storedProject", "chatsPage"
 ];
 
 export function createAgentPanel({ port, shell, workspace, identity, sync, editor, explorer, models, characters }) {
@@ -38,6 +38,7 @@ export function createAgentPanel({ port, shell, workspace, identity, sync, edito
     cloudWorkspaceTarget: () => sync.cloudWorkspace(),
     chatConnectionInfo: () => sync.connectionInfo(),
     isMobileLayout: () => shell.frame.isPhone(),
+    logDebug: (...args) => shell.log(...args),
     openSettingsDialog: (page) => shell.settingsDialog.open(page),
     chatWorkspaceKey: (project = workspace.project().getProject()) => workspace.location.key(project),
     personaAvatarSrc: (...args) => characters.avatarSrc(...args),

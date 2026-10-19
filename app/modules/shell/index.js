@@ -42,12 +42,16 @@
 //   frame                    the areas around the editor: toggle(area), shown(area), isPhone(),
 //                            revealSection(id), phonePanes.add(pane), showPane(id)…; events "area",
 //                            "resized", "layout" (adapters/frame/index.js)
+//   log(kind, message, detail?)  a line in the log panel (kind "action", "response", "error"…);
+//                            logLines() -> [{ kind, message, detail, timestamp }] (for tests)
+//   flash(panel, "success" | "error")   flash a status panel's border
+//   upgradeApp(detail)       the server refused this tab as too old: update it (once per tab)
 //   settings                 the app's settings, read-only (settings.theme);
 //                            settings.change({ key: value }, why?) saves a change,
 //                            settings.on(listener) hears them (service/settings.js)
 // Errors nothing caught go into the kernel's trace; `stiloTrace()` in the
 // console prints it.
-import { createLiveView, defineModule } from "../../kernel/index.js";
+import { createLiveView, defineModule, ignore } from "../../kernel/index.js";
 import { createCommands } from "./service/commands.js";
 import { createDialogs } from "./adapters/dialogs.js";
 import { createKeyboard } from "./adapters/keyboard.js";
@@ -61,7 +65,8 @@ import { applyTheme } from "./adapters/theme.js";
 import { addMaintenanceCommands, clearAppStorage } from "./adapters/maintenance.js";
 import { createRender } from "./adapters/render.js";
 import { createFrame } from "./adapters/frame/index.js";
-import { registerOfflineShell } from "./adapters/offline.js";
+import { registerOfflineShell, upgradeApp } from "./adapters/offline.js";
+import { createLogPanel, flash } from "./adapters/log-panel.js";
 import { loadSettings, patchStoredSettings } from "./adapters/settings-store.js";
 import { SECRET_SETTINGS, keysToSave } from "./service/settings.js";
 
@@ -75,7 +80,7 @@ export default defineModule({
   uses: [],
   owns: {
     registries: ["commands", "menus", "pages", "settings fields", "status bar items", "phone panes"],
-    elements: ["menu bar", "the Settings dialog", "the status bar", "the frame: areas, splitters, phone panes and gestures", "notice dialog", "confirm dialog", "input dialog", "form dialog", "toasts"],
+    elements: ["menu bar", "the Settings dialog", "the status bar", "the log panel", "the frame: areas, splitters, phone panes and gestures", "notice dialog", "confirm dialog", "input dialog", "form dialog", "toasts"],
     connection: ["the server address"],
     events: ["render", "clearing-caches", "area", "resized", "layout"],
     diagnostics: ["uncaught errors", "stiloTrace()"],
@@ -150,6 +155,10 @@ export default defineModule({
     const frame = createFrame({ settings, events, registry: ctx.registry(), commands, run, closeMenus: () => menuBar.close(),
       openSettings: (page) => settingsDialog.open(page), log: (message) => ctx.log(message) });
     frame.apply();
+    // The log panel (the bottom area): drawn when the layout changes (shown, hidden).
+    const logPanel = createLogPanel({ settings, copyText: dialogs.copyText, notify: (message) => notice(message) });
+    events.on("layout", () => logPanel.render());
+    logPanel.render();
 
     return {
       commands: { add: commands.add, get: commands.get, all: commands.all, onChange: commands.onChange },
@@ -169,6 +178,10 @@ export default defineModule({
       settingsDialog,
       statusBar: createStatusBar({ registry: ctx.registry() }),
       frame,
+      log: logPanel.log,
+      logLines: logPanel.lines,
+      flash,
+      upgradeApp: (detail) => upgradeApp(detail, { log: logPanel.log, notify: (message) => notice(message), toast: dialogs.showToast, ignore }),
       render: redraw.render,
       holdRendering: redraw.holdWhile,
       clearAppStorage,

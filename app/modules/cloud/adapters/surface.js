@@ -17,7 +17,7 @@ import { createProviders } from "./providers.js";
 // What main.js attaches (cloud.attach(port)); each entry should move to an
 // owner, or become an extension point, and leave this list.
 export const PORT = [
-  "elements", "logDebug", "flashStatusPanel", "openSettingsDialog", "refreshChatStatus"
+  "elements", "refreshChatStatus"
 ];
 
 // The editor's functions the cloud parts call (editor.parts()).
@@ -32,6 +32,10 @@ export function createSurface({ port, shell, workspace, identity, sync, editor, 
   const app = {
     view: editor.view, identity, history, mode: sync.mode, settings: shell.settings, syncState: sync.status,
     switchWorkspaceMode: (next) => sync.switchMode(next),
+    logDebug: (...args) => shell.log(...args), // the log panel (Shell's)
+    openSettingsDialog: (page) => shell.settingsDialog.open(page),
+    // A status panel's border flashes (Settings → Collaboration's server line, by default).
+    flashStatusPanel: (type, panel = document.getElementById("server-status-text")?.closest(".settings-status-panel")) => shell.flash(panel, type),
     setMobileExplorerOpen: (open) => shell.frame.setExplorerOpen(open), // the phone's explorer drawer (Shell's frame)
     loadLineComments: (options) => comments.load(options), // the open workspace's comments (Comments')
     // Snapshots are History's.

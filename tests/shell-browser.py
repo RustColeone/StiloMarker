@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get('STILO_TEST_URL', 'http://127.0.0.1:8765')
 PNG = bytes.fromhex('89504e470d0a1a0a0000000d4948445200000001000000010806000000'
                     '1f15c4890000000d49444154789c6360f8cf0000000301010018dd8db40000000049454e44ae426082')
-HOOK = b'\nwindow.__shellTest = { shell, controller, renameFileById, openFileFromExplorer, get log() { return debugState.entries.map((e) => e.message); } };\n'
+HOOK = b'\nwindow.__shellTest = { shell, controller, renameFileById, openFileFromExplorer, get log() { return shell.logLines().map((e) => e.message); } };\n'
 
 
 def project():

@@ -9,10 +9,20 @@ import { patchStoredSettings } from "../../shell/index.js";
 const RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 20000, 30000];
 const MAX_RECONNECT_ATTEMPTS = 10;
 
-// port: upgrade(detail) (the app is too old for the server), confirmJoin() ->
-// Promise<boolean>, flash(type) (the shared-session section's border).
-export function createConnection({ session, status, mode, events, workspace, shell, port, log, doc = globalThis.document }) {
+export function createConnection({ session, status, mode, events, workspace, shell, log, doc = globalThis.document }) {
   const settings = shell.settings;
+  // The shared-session section's border flashes on joining (or failing to).
+  const flash = (type) => shell.flash(doc?.getElementById("connect-server-button")?.closest(".settings-section"), type);
+  // Before joining, the user agrees: the host's workspace will replace theirs.
+  function confirmJoin() {
+    const dialog = doc.getElementById("accept-connection-dialog");
+    const message = doc.getElementById("accept-connection-message");
+    if (message) message.textContent = "If you join as a peer, the host\u2019s workspace will replace your current content. Export your work first if you want to keep it.";
+    return new Promise((resolve) => {
+      dialog.addEventListener("close", () => resolve(dialog.returnValue === "accept"), { once: true });
+      dialog.showModal();
+    });
+  }
   const controller = () => workspace.project();
   const redraw = () => shell.render(controller().getProject());
 
@@ -41,7 +51,7 @@ export function createConnection({ session, status, mode, events, workspace, she
       settings.change({ wasConnected: true }, "joined a session");
       reconnect.attempts = 0;
       clearReconnectTimer();
-      port.flash("success");
+      flash("success");
       log("Server connected", settings.displayName || "anonymous");
       return true;
     } finally {
@@ -77,7 +87,7 @@ export function createConnection({ session, status, mode, events, workspace, she
     settings.change({ serverUrl: value("server-url-input").trim(), serverPin: value("server-pin-input"),
       displayName: value("display-name-input").trim() }, "Join");
     // Confirmed before any network call or change to the workspace.
-    if (!await port.confirmJoin()) return;
+    if (!await confirmJoin()) return;
     reconnect.attempts = 0;
     clearReconnectTimer();
     try {
@@ -86,7 +96,7 @@ export function createConnection({ session, status, mode, events, workspace, she
     } catch (error) {
       status.change({ status: "offline", detail: error.message }, "joining failed");
       log("Server connect failed", error.message);
-      port.flash("error");
+      flash("error");
       redraw();
     }
   }
@@ -114,12 +124,12 @@ export function createConnection({ session, status, mode, events, workspace, she
     const before = previous.status;
     // The server refused this tab as too old (a stale cached app): stop and
     // bring the app up to date rather than let it overwrite content.
-    if (next.status === "upgrade-required") { port.upgrade(next.detail); return; }
+    if (next.status === "upgrade-required") { shell.upgradeApp(next.detail); return; }
     // A dropped stream recovers by itself; say the work is safe.
     if (next.status === "reconnecting" && before !== "reconnecting") shell.toast("Connection lost — reconnecting… your changes are kept.");
     if (next.status === "connected" && before === "reconnecting") shell.toast("Reconnected to the cloud workspace.");
     // A clean connect means this app is a good version: a later minimum-version
-    // bump may reload it by itself again (port.upgrade's one-time guard).
+    // bump may reload it by itself again (shell.upgradeApp's one-time guard).
     if (next.status === "connected") {
       try { globalThis.sessionStorage?.removeItem("mdnotes.upgradeReloaded"); } catch (error) { ignore(error, "session storage is blocked"); }
     }

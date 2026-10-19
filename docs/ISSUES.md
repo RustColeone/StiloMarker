@@ -69,6 +69,15 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.79: Shell owns the log panel
+
+Step S4e-4a. Nothing changes for users.
+
+- The log panel and its trace tab are Shell's, and every module writes to it
+  through Shell rather than through `main.js`. Lines logged while the app
+  starts no longer fail and get dropped (the trace used to fill with "the log
+  panel is not ready yet" during start-up); they wait and follow.
+
 ### v0.1.78: Shell owns the frame
 
 Step S4e-3. Nothing changes for users.

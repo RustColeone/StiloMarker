@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v0.1.78";
+const CACHE_NAME = "mdnotes-shell-v0.1.79";
 // The extensions' files (EXTENSION_FILES), written by tools/protocol-sync.mjs.
 importScripts("./extensions/offline.js");
 const APP_SHELL = [
@@ -59,6 +59,8 @@ const APP_SHELL = [
   "./app/modules/shell/adapters/offline.js",
   "./app/modules/shell/adapters/maintenance.js",
   "./app/modules/shell/adapters/render.js",
+  "./app/modules/shell/adapters/log-panel.js",
+  "./app/modules/editor/adapters/debug-trace.js",
   "./app/modules/shell/adapters/frame/index.js",
   "./app/modules/shell/adapters/frame/areas.js",
   "./app/modules/shell/adapters/frame/phone.js",
@@ -179,8 +181,7 @@ const APP_SHELL = [
   "./app/features/module-map-tools.js",
   "./app/features/previews.js",
   "./app/modules/editor/adapters/tabs.js",
-  "./app/modules/editor/adapters/preview.js",
-  "./app/ui/dialogs.js"
+  "./app/modules/editor/adapters/preview.js"
 ];
 
 self.addEventListener("install", (event) => {

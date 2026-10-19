@@ -7,7 +7,7 @@ import { escapeHtmlAttribute } from "../../editor/index.js";
 import { applyHostCounters, getNodeIdByPath, getPath } from "../../workspace/index.js";
 import { createSnapshots } from "./snapshots.js";
 
-export const PORT = ["logDebug"];
+export const PORT = [];
 
 // The diff tab's id among the preview's tabs (not a project file).
 export const DIFF_TAB_ID = "__diff__";
@@ -29,7 +29,7 @@ export function createSurface({ port, shell, workspace, editor, sync }) {
     cloudWorkspaceTarget: () => sync.cloudWorkspace(),
     // Snapshots are grouped by project: the cloud workspace's id, else the local project's.
     snapshotProjectKey: () => settings.syncedProjectId || controller().getProject()?.id || "local",
-    logDebug: (...args) => port.logDebug(...args),
+    logDebug: (...args) => shell.log(...args),
     togglePreview: () => shell.frame.toggle("preview"),
     showToast: (message, options) => shell.toast(message, options),
     render: (project) => shell.render(project),

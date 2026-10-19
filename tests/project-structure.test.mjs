@@ -124,7 +124,6 @@ test("module instances created on first use are declared with var", async () => 
   // startup, before the line holding the instance — a \`let\` there throws.
   const mainSource = await readFile(resolveFromRoot("app/main.js"), "utf8");
   assert.doesNotMatch(mainSource, /^(let|const) \w+Instance\b/m);
-  assert.ok((mainSource.match(/^var \w+Instance;/gm) ?? []).length >= 1); // the ones still created on first use (fewer as features become modules)
 });
 
 test("the offline app shell lists every app module", async () => {

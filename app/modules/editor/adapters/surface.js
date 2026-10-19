@@ -24,12 +24,12 @@ import { createTabs } from "./tabs.js";
 import { createCharCount } from "./char-count.js";
 import { createPreviewPane } from "./preview-pane.js";
 import { installFrameParts } from "./frame-parts.js";
+import { createDebugTrace } from "./debug-trace.js";
 
 // What main.js attaches (editor.attach(port)); each entry should move to an
 // owner, or become an extension point, and leave this list.
 export const PORT = [
   "collaboration", "workspaceMode", "settings", "elements", "identity", "saveUserState",
-  "logDebug", "traceEditorEvent", "formatEditorDebugValue",
   "isReadOnly", "onDrop"
 ];
 
@@ -92,6 +92,7 @@ export function createSurface({ port, view, marks, paneViews, completions, lineN
     lineNotesOf: (file) => (file ? lineNotes.all().flatMap((provider) => provider.notes(file).map((note) => ({ kind: provider.kind, ...note }))) : []), toolbars, workspace, parts: workspace.parts,
     escapeHtmlAttribute, normalizePath, getRelativePath, getRelativeProjectPath,
     notify: (message) => shell.notify(message),
+    logDebug: (...args) => shell.log(...args), // the log panel (Shell's)
     showToast: (message, options) => shell.toast(message, options),
     // Drawing the app again is asked of Shell; the app listens.
     render: (project) => shell.render(project),
@@ -126,6 +127,7 @@ export function createSurface({ port, view, marks, paneViews, completions, lineN
     }
     return part;
   };
+  add(createDebugTrace(app, shell));
   add(createHighlighter(app));
   add(createEditorCore(app));
   add(createAutocomplete(app));

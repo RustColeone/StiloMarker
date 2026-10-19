@@ -28,7 +28,7 @@ export function createLocalChats(options) {
 export const loadChatsView = () => import("./adapters/view.js");
 
 // What main.js attaches (chats.attach(port)); each entry should find an owner.
-const PORT = ["logDebug"];
+const PORT = [];
 
 export default defineModule({
   name: "chats",
@@ -52,6 +52,7 @@ export default defineModule({
         collaboration: () => sync.session(),
         cloudWorkspaceTarget: () => sync.cloudWorkspace(),
         isMobileLayout: () => shell.frame.isPhone(),
+        logDebug: (...args) => shell.log(...args),
         // The key the open project's chats are kept under (Workspace's location, which Sync tells).
         chatWorkspaceKey: (project = workspace.project().getProject()) => workspace.location.key(project),
         personaAvatarSrc: (...args) => ctx.use("characters").avatarSrc(...args)

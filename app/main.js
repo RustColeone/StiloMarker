@@ -23,7 +23,6 @@ import { query } from "./ui/dom.js";
 import explorerModule from "./modules/explorer/index.js";
 import { registerPreviews } from "./features/previews.js";
 import editorModule, { escapeHtmlAttribute, forgetViewStates, getRelativeProjectPath, normalizePath, renderMarkdown } from "./modules/editor/index.js";
-import { createDialogs } from "./ui/dialogs.js";
 
 document.querySelectorAll("[data-app-version]").forEach((label) => { label.textContent = `v${APP_VERSION}`; });
 
@@ -190,9 +189,13 @@ const elements = {
 // ---- Modules (docs/ARCHITECTURE.md) ----
 // The app is moving into modules one step at a time. Code still in this file
 // reaches a module only through the public API the kernel hands back.
-const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, syncModule, historyModule, explorerModule, commentsModule, cloudModule, modelsModule, charactersModule, chatsModule, assistantModule, ...extensionModules], {
-  log: (owner, ...args) => { try { logDebug("action", `${owner}: ${args.join(" ")}`); } catch (error) { ignore(error, "the log panel is not ready yet"); } }
+const earlyLog = [];
+var modules;
+modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, syncModule, historyModule, explorerModule, commentsModule, cloudModule, modelsModule, charactersModule, chatsModule, assistantModule, ...extensionModules], {
+  // Modules' log lines go to the log panel (Shell's); those from before Shell started wait.
+  log: (owner, ...args) => (modules?.shell ? modules.shell.log("action", `${owner}: ${args.join(" ")}`) : earlyLog.push(`${owner}: ${args.join(" ")}`))
 });
+for (const line of earlyLog.splice(0)) modules.shell.log("action", line);
 const { shell, workspace, identity } = modules;
 
 // The app's settings: Shell's. Read them here; change them with settings.change({ key: value }).
@@ -227,12 +230,11 @@ var editorParts = modules.editor.attach({
   get workspaceMode() { return syncMode.get().workspaceMode; },
   settings, elements, identity,
   saveUserState: (ws, openFiles, activeFile) => saveUserState(settings.serverUrl, identity.token(), ws.team, ws.path, openFiles, activeFile),
-  logDebug, traceEditorEvent, formatEditorDebugValue,
   isReadOnly: () => isReadOnlyWorkspace(), onDrop: (event) => handleEditorDrop(event)
 });
 // The explorer and file actions, given what no module owns yet (modules/explorer/adapters/surface.js).
 var explorerParts = modules.explorer.attach({
-  settings, elements, logDebug,
+  settings, elements,
   canManagePreview: () => Boolean(identity.account()) && syncMode.get().workspaceMode === "synced"
     && collaboration.isConnected() && Boolean(settings.lastWorkspace?.team),
   openAccessEditor, openMtreeToolsDialog, remapPersonaPaths
@@ -243,14 +245,14 @@ modules.explorer.newFiles.add({ id: "persona", content(name) {
   return personaTemplate(/^new character( \d+)?$/i.test(base) ? "New Character" : base);
 } });
 // Snapshots, the version label, the diff tab and History's dialogs (modules/history/adapters/surface.js).
-var historyParts = modules.history.attach({ logDebug });
+var historyParts = modules.history.attach({});
 // The cloud file browser, accounts and hosting (modules/cloud/adapters/surface.js).
 var cloudParts = modules.cloud.attach({
-  elements, logDebug, flashStatusPanel, openSettingsDialog, refreshChatStatus
+  elements, refreshChatStatus
 });
-var chatsPage = modules.chats.attach({ logDebug });
+var chatsPage = modules.chats.attach({});
 // The Agent page (the Assistant's), which loads itself the first time it is needed.
-modules.assistant.attach({ elements, logDebug, storedProject, chatsPage }); // the side panel's Chats page
+modules.assistant.attach({ elements, storedProject, chatsPage }); // the side panel's Chats page
 // Diagrams and character sheets add their previews to the Editor's extension point.
 registerPreviews(modules.editor.previews, {
   view: editorView, settings, escapeHtmlAttribute, normalizePath, getRelativeProjectPath,
@@ -282,14 +284,8 @@ function syncEditorScroll(...args) { return editorParts.syncEditorScroll(...args
 function transformEditorSelection(...args) { return editorParts.transformEditorSelection(...args); }
 
 
-const debugState = {
-  entries: [],
-  maxEntries: 300,
-  activeTab: "all"
-};
 
 
-const debugTabs = [...elements.debugTabStrip.querySelectorAll(".debug-tab")].map((element) => ({ id: element.dataset.tab, element }));
 
 
 
@@ -307,56 +303,18 @@ function remapPersonaPaths(oldPath, newPath) { chatsPage.remapPersonaPaths(oldPa
 /** A persona's avatar as an <img> src, or "" when it doesn't resolve. */
 
 
-// ---- Dialogs, toasts and the debug log (./ui/dialogs.js) ----
-// Created on first use. The module reads main's shared values through this
-// context, so it always sees their current values. `var`: a forwarding
-// function can run during startup, before this line is reached.
-var dialogsInstance;
-function dialogs() {
-  return (dialogsInstance ??= createDialogs({
-    get shell() { return shell; },
-    get controller() { return controller; },
-    get debugState() { return debugState; },
-    get debugTabs() { return debugTabs; },
-    historyPosition: () => editorParts.historyPosition(),
-    get elements() { return elements; },
-    get escapeEditorHtml() { return escapeEditorHtml; },
-    get getEditorLineIndexAtOffset() { return getEditorLineIndexAtOffset; },
-    get getEditorSelection() { return getEditorSelection; },
-    get settings() { return settings; }
-  }));
-}
 async function confirmAction(message) { return shell.confirm(String(message)); }
-async function copyDebugLogToClipboard(...args) { return dialogs().copyDebugLogToClipboard(...args); }
 async function copyTextToClipboard(text) { return shell.copyText(text); }
-function flashStatusPanel(...args) { return dialogs().flashStatusPanel(...args); }
-async function forceAppUpgrade(...args) { return dialogs().forceAppUpgrade(...args); }
-function formatEditorDebugValue(...args) { return dialogs().formatEditorDebugValue(...args); }
-function logDebug(...args) { return dialogs().logDebug(...args); }
+function logDebug(...args) { return shell.log(...args); } // the log panel (Shell's)
 function notify(message) { return shell.notify(message); }
 async function promptForName(message, value = "", options = {}) { return shell.input({ title: message, message, value, submitLabel: "Save", ...options }); }
-function renderDebugPanel(...args) { return dialogs().renderDebugPanel(...args); }
-function showAcceptConnectionDialog(...args) { return dialogs().showAcceptConnectionDialog(...args); }
 function showConfirmDialog(options) { return shell.confirm(options); }
 function showToast(message, options) { return shell.toast(message, options); }
-function traceEditorEvent(...args) { return dialogs().traceEditorEvent(...args); }
 
 /** Resolve an image node to a usable <img> src. Local/PIN workspaces inline the
  *  bytes as a data: URL in content; directory-backed cloud workspaces keep the
  *  bytes on the server and serve them by the file's workspace path. */
 
-function getEditorLineIndexAtOffset(textOffset) {
-  const lineEls = Array.from(elements.editorContent.children);
-  let remaining = Math.max(0, textOffset);
-  for (let index = 0; index < lineEls.length; index += 1) {
-    const lineLen = lineEls[index].textContent.length;
-    if (remaining <= lineLen) {
-      return index;
-    }
-    remaining -= lineLen + 1;
-  }
-  return Math.max(0, lineEls.length - 1);
-}
 
 function showEditorAutocomplete(...args) { return editorParts.showEditorAutocomplete(...args); }
 
@@ -435,10 +393,7 @@ const collaboration = modules.sync.attach({
       return null;
     }
   },
-  uploadAsset,
-  upgrade: (detail) => forceAppUpgrade(detail),
-  confirmJoin: () => showAcceptConnectionDialog(),
-  flash: (type) => flashStatusPanel(type, elements.sharedSessionSection)
+  uploadAsset
 });
 // What happens as the session changes is Sync's (adapters/connection.js); the
 // editor drops the carets of people who left.
@@ -593,21 +548,7 @@ bindTabStripReorderTarget(elements.previewTabStrip, "preview");
 
 // ── Settings (Shell's dialog; its sections and fields are their owners') ──
 function openSettingsDialog(tab = "appearance") { shell.settingsDialog.open(tab); }
-// The log panel (main.js's until it is Shell's) draws when the frame's layout changes.
-shell.events.on("layout", () => renderDebugPanel());
 
-debugTabs.forEach((tab) => {
-  tab.element.addEventListener("click", () => {
-    debugState.activeTab = tab.id;
-    renderDebugPanel();
-  });
-});
-
-elements.debugCopyButton.addEventListener("click", () => {
-  void copyDebugLogToClipboard().catch((error) => notify(error.message));
-});
-
-elements.debugClearButton.addEventListener("click", () => dialogs().clearDebugLog());
 
 // ---- The cloud file browser, accounts and hosting (the Cloud module) ----
 function handleAccountLogout(...args) { return cloudParts.handleAccountLogout(...args); }

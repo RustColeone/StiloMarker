@@ -16,8 +16,7 @@
 // publish, reconnect...), created once main.js gives it what only the app can
 // do: { replaceProject(project), applyOperation(clientId, operation),
 // preserveLocalFiles(files), reauthenticate(), uploadAsset(...) }.
-// session() -> the same. The connection's life (adapters/connection.js; the
-// port also gives upgrade(detail), confirmJoin(), flash(type)): publish(op)
+// session() -> the same. The connection's life (adapters/connection.js): publish(op)
 // sends a change (stamped, an image's bytes uploaded first, a refused write
 // reloaded), publishSnapshot(), switchMode("synced" | "private"),
 // connectSaved({ auto }), reconnectLater(); Join, the shared/own switch and
@@ -79,7 +78,7 @@ export default defineModule({
 
     function attach(port) {
       if (session) throw new Error("sync: already attached");
-      for (const name of ["replaceProject", "applyOperation", "preserveLocalFiles", "reauthenticate", "uploadAsset", "upgrade", "confirmJoin", "flash"]) {
+      for (const name of ["replaceProject", "applyOperation", "preserveLocalFiles", "reauthenticate", "uploadAsset"]) {
         if (typeof port[name] !== "function") throw new Error(`sync.attach: the port lacks ${name}`);
       }
       session = createCollaborationRuntime({
@@ -99,7 +98,7 @@ export default defineModule({
         onPatchConfirmed: () => events.emit("patch-confirmed"),
         onEvent: (event, { ownClientId }) => events.emit("event", { event, ownClientId })
       });
-      connection = createConnection({ session, status, mode, events, workspace, shell: ctx.use("shell"), port,
+      connection = createConnection({ session, status, mode, events, workspace, shell: ctx.use("shell"),
         log: (...parts) => ctx.log(parts.join(" ")) });
       return session;
     }
