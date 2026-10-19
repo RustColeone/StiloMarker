@@ -5,6 +5,7 @@ import asyncio,json,mimetypes,os
 from pathlib import Path
 from urllib.parse import urlparse,parse_qs
 from playwright.async_api import async_playwright
+from helpers.app_hook import app_hook
 ROOT=Path(__file__).resolve().parents[1]
 BASE='https://stilomarker.ngantech.net'
 async def main():
@@ -55,7 +56,7 @@ async def main():
      if path!='/app/main.js':await route.continue_();return
      response=await route.fetch();body=await response.body()
     else:body=file.read_bytes()
-    if path=='/app/main.js':body+=b'\nwindow.recoveryTest={controller,collaboration,render:(p)=>shell.render(p),setActiveSourceFile,handleAccountLogout,getMode:()=>syncMode.get().workspaceMode,getStatus:()=>syncState.status,hasAccount:()=>Boolean(identity.account())};'
+    if path=='/app/main.js':body+=app_hook('window.recoveryTest={controller,collaboration,render:(p)=>shell.render(p),setActiveSourceFile,handleAccountLogout,getMode:()=>syncMode.get().workspaceMode,getStatus:()=>syncState.status,hasAccount:()=>Boolean(identity.account())};')
     await route.fulfill(content_type=mimetypes.guess_type(str(file))[0] or 'text/plain',body=body)
    else:await route.continue_()
   await context.route('**/*',route)

@@ -4,6 +4,7 @@
 //
 // API:
 //   attach({ read, write })        where the username and password are kept
+//                                  (Shell's settings, from the start; adapters/stored-sign-in.js)
 //   account() -> { token, username, teams } | null      token() -> string | null
 //   signIn(username, password, { isCurrent }) -> the server's reply
 //   canRestore()   restore({ isCurrent }) -> reply | null
@@ -16,6 +17,7 @@ import { defineModule } from "../../kernel/index.js";
 export { participantColor } from "./model/colors.js";
 import { createIdentityApi } from "./adapters/api.js";
 import { createAccount } from "./service/account.js";
+import { signInSettings } from "./adapters/stored-sign-in.js";
 
 export default defineModule({
   name: "identity",
@@ -27,6 +29,8 @@ export default defineModule({
     const api = createIdentityApi(server);
     const events = ctx.emitter();
     const account = createAccount({ api, server, events, log: (message) => ctx.log(message) });
+    const { settings } = ctx.use("shell");
+    if (settings) account.attach(signInSettings(settings));
     const signedIn = () => {
       const token = account.token();
       if (!token) throw new Error("Sign in first.");

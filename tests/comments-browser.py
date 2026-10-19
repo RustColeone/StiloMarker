@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
 from helpers.chat_hook import inject_chat_internals, WAIT_LOADED
+from helpers.app_hook import app_hook
 
 ROOT = Path(__file__).resolve().parents[1]
 TMP = tempfile.TemporaryDirectory()
@@ -49,7 +50,7 @@ def api(method, path, body=None, token=None):
 checks = []
 def ok(name): checks.append(name); print("  ok ", name)
 
-HOOK = b"\nwindow.__w = { controller, workspace, collaboration, get project() { return controller.getProject(); } };\n"
+HOOK = app_hook("window.__w = { controller, workspace, collaboration, get project() { return controller.getProject(); } };")
 AGENT = {"next": None}  # the reply Anna's agent gives next
 
 

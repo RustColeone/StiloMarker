@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const manifestPath = resolve(root, 'package.json');
-const modulePath = resolve(root, 'app/version.js');
+const modulePath = resolve(root, 'app/modules/shell/model/version.js');
 const workerPath = resolve(root, 'service-worker.js');
 const [manifestText, moduleText, workerText] = await Promise.all(
   [manifestPath, modulePath, workerPath].map((path) => readFile(path, 'utf8'))

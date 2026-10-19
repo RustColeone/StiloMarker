@@ -1,5 +1,7 @@
-import { ROOT_ID, addFile, addFolder, createProject, findChildByName, isImageFileName } from "../domain/project-model.js";
-import { bytesToDataUrl, getMimeTypeForFileName } from "../modules/workspace/index.js";
+// The welcome project a first visit starts with (./Template, listed in its
+// template-manifest.json), fetched file by file.
+import { ROOT_ID, addFile, addFolder, createProject, findChildByName, isImageFileName } from "../model/project.js";
+import { bytesToDataUrl, getMimeTypeForFileName } from "./file-content.js";
 
 async function fetchTemplateEntry(path) {
   const response = await fetch(`./Template/${path}`, { cache: "no-store" });

@@ -17,8 +17,12 @@
 //   isStale(error) -> boolean
 //   events.on("written", ({ path, source }) => …)
 //   openProject(project) -> the project store (once): getProject(), subscribe(),
-//                   getActiveFile(), and the changes (updateContent, applySyncOperation…)
+//                   getActiveFile(), and the changes (updateContent, applySyncOperation…).
+//                   In a page Workspace opens it itself at the start: the project
+//                   this browser kept, else a seed project, and on a first visit
+//                   the welcome template when it arrives (events "started-over" { project })
 //   project()       -> that store
+//   restoredProject() -> the project this browser kept, as the page started with it (or null)
 //   attach(ports)   for code from before the restructure, which still edits and
 //                   syncs: { commit(path, previous, next, source), replace(operation, source) }
 //   parts.add(provider) -> remove()    an extension point: a kind of file that
@@ -58,7 +62,7 @@
 // the text-patch rules.
 import { defineModule } from "../../kernel/index.js";
 import { createWriter, StaleWriteError } from "./service/writer.js";
-import { createProjectController } from "./service/project-store.js";
+import { createProjectController, seedDefaultProject } from "./service/project-store.js";
 import { getNodeByPath } from "./model/project.js";
 
 const PART_FUNCTIONS = ["list", "body", "withBody", "rename", "remove", "take", "insert"];
@@ -86,6 +90,8 @@ import { addStatusItems } from "./adapters/status-items.js";
 import { createLocation } from "./adapters/location.js";
 import { createShared } from "./adapters/shared.js";
 import { addWorkspaceCommands, reattachDeviceFolder, watchPage } from "./adapters/page-life.js";
+import { loadProject } from "./adapters/browser-copy.js";
+import { loadTemplateProject } from "./adapters/template.js";
 
 export default defineModule({
   name: "workspace",
@@ -152,9 +158,41 @@ export default defineModule({
       void reattachDeviceFolder({ store, settings: shell.settings, log: (...parts) => ctx.log(parts.join(" ")) });
       return store;
     }
+    // A first visit (nothing kept in this browser) gets the welcome template,
+    // unless something took over while it loaded. It is only a placeholder,
+    // fetched file by file: installed inside a cloud workspace restoring itself
+    // on a fresh device, the next reconnect would upload it there (seen on a
+    // slow connection). Installed, it is a fresh start ("started-over").
+    function installTemplate() {
+      const placeholder = store.getProject();
+      void loadTemplateProject().then((project) => {
+        const current = store.getProject();
+        const edited = Object.values(current.nodes ?? {}).some((node) => node?.dirty);
+        if (location.shared() || current.id !== placeholder.id || edited) {
+          ctx.log("Default template not installed: a workspace or edits arrived first");
+          return;
+        }
+        store.replaceProject(project);
+        events.emit("started-over", { project });
+        ctx.log(`Default template loaded: ${project.name}`);
+      }).catch((error) => ctx.log(`Default template load failed: ${error.message}`));
+    }
+    // In a page, the project opens at once: the one this browser kept, else a
+    // seed project until the template arrives. Its name shows in the title bar.
+    let restored = null;
+    if (globalThis.window) {
+      restored = loadProject();
+      openProject(restored ?? seedDefaultProject());
+      if (!restored) ctx.whenStarted(installTemplate);
+      shell.events.on("render", ({ project }) => {
+        const label = globalThis.document?.getElementById("project-name-label");
+        if (project && label) label.textContent = project.name;
+      });
+    }
     return {
       openProject,
       project: () => store,
+      restoredProject: () => restored,
       write: writer.write,
       patchOperation: writer.patchOperation,
       asPatch: writer.asPatch,

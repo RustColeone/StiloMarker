@@ -4,9 +4,8 @@
 // and made. The server's half is server/stilo/modules/assistant, which
 // resolves edit_file.
 //
-// API: attach(port): what main.js still provides (PORT in adapters/panel.js);
-// the Agent page then loads by itself on first use (the side panel or its
-// phone pane shown, or Settings open). load() -> Promise<panel>; panel() -> it, once loaded.
+// API: once the app has started, the Agent page loads by itself on first use
+// (the side panel or its phone pane shown, or Settings open). load() -> Promise<panel>; panel() -> it, once loaded.
 // Static, for code from before the restructure: editsHtml(edits),
 // editsLabel(edits), undoSteps(op, project), sendGenerationRequest (a diagram's notes).
 import { defineModule } from "../../kernel/index.js";
@@ -35,11 +34,11 @@ export default defineModule({
     // phone pane shown, or Settings open: its Agent section shows the page's
     // connected tools), so a session that never opens it never downloads it.
     const shell = ctx.use("shell");
-    let port = null;
+    let started = false;
     function load() {
-      if (!port) return Promise.resolve(null); // not attached yet
+      if (!started) return Promise.resolve(null); // the app is still starting
       loading ??= import("./adapters/panel.js").then(({ createAgentPanel }) => {
-        panel = createAgentPanel({ port, shell, workspace: ctx.use("workspace"), identity: ctx.use("identity"),
+        panel = createAgentPanel({ shell, workspace: ctx.use("workspace"), identity: ctx.use("identity"),
           sync: ctx.use("sync"), editor: ctx.use("editor"), explorer: ctx.use("explorer"), models: ctx.use("models"),
           characters: ctx.use("characters") });
         panel.chatState.shouldScrollToBottom = true;
@@ -67,11 +66,11 @@ export default defineModule({
       menu: { id: "view", group: 0, order: 4 }, run: () => shell.frame.toggle("right") });
     // On the phone the side panel is a pane of its own.
     shell.frame.phonePanes.add({ id: "chat", order: 30, element: () => document.getElementById("chat-panel"), caption: () => "CHAT", fileId: () => null });
-    // attach(port): what main.js still provides; the page loads now if the side panel shows.
-    function attach(given) {
-      port = given;
-      if (shell.settings.chatPanel === "shown" && !shell.frame.isPhone()) void load();
-    }
-    return { editsHtml, editsLabel, attach, load, panel: () => panel };
+    // Once the app has started, the page loads at once if the side panel shows.
+    ctx.whenStarted(() => {
+      started = true;
+      if (globalThis.document && shell.settings.chatPanel === "shown" && !shell.frame.isPhone()) void load();
+    });
+    return { editsHtml, editsLabel, load, panel: () => panel };
   }
 });

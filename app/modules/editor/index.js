@@ -5,9 +5,9 @@
 // its extension point for other kinds of file (adapters/preview.js), and the
 // Markdown renderer.
 //
-// API: attach(port) -> parts: creates the source editor, find, autocomplete,
-// links, the tab strips and the preview, given what main.js still provides
-// (adapters/surface.js lists it: PORT); parts() -> the same functions.
+// API: parts() -> the source editor's, find's, autocomplete's, links', the tab
+// strips' and the preview's functions (adapters/surface.js), created when the
+// Editor starts in a page.
 // previews, highlighters, toolbars, completions (autocomplete for a format),
 // lineNotes (notes on lines in the gutter: comments), welcome (parts of the
 // page shown when no file is open),
@@ -79,8 +79,6 @@ export default defineModule({
     addEditorSettings({ dialog: shell.settingsDialog, settings: shell.settings });
     applyEditorFont(shell.settings);
     shell.settings.on((view, changed) => { if (changed.some((key) => FONT_KEYS.includes(key))) applyEditorFont(view); });
-    // The source editor, find, autocomplete, links, the tab strips and the preview:
-    // created once main.js attaches what no module owns yet (surface.js, PORT).
     let parts = null;
     // Keeping the open tabs on the server for a cloud workspace: Cloud says how (configure).
     let saveOpenTabs = async () => {};
@@ -88,13 +86,12 @@ export default defineModule({
     // What is dropped into the source editor is handled by whoever configures it (the Explorer adds files).
     let handleDrop = async () => {};
     const drops = { handle: (event) => handleDrop(event), configure(handle) { handleDrop = handle; } };
-    function attach(port) {
-      if (parts) throw new Error("editor: already attached");
-      parts = createSurface({ port, view, marks, identity: ctx.use("identity"), openTabsStore, drops, paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), welcome: open(welcome), previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars),
+    // The source editor, find, autocomplete, links, the tab strips and the preview (in a page).
+    if (globalThis.document) {
+      parts = createSurface({ view, marks, identity: ctx.use("identity"), openTabsStore, drops, paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), welcome: open(welcome), previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars),
         workspace: ctx.use("workspace"), shell: ctx.use("shell") });
-      return parts;
     }
     return { previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars), paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), welcome: open(welcome), marks,
-      openTabs: { configure: openTabsStore.configure }, drops: { configure: drops.configure }, view, attach, parts: () => parts };
+      openTabs: { configure: openTabsStore.configure }, drops: { configure: drops.configure }, view, parts: () => parts };
   }
 });

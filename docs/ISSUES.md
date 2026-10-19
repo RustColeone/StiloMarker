@@ -69,6 +69,18 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.82: main.js only starts the modules
+
+Step S4e-4c. Nothing changes for users.
+
+- `app/main.js` (4,539 lines when the moves out of it began) is now 27: it
+  starts the modules and nothing else. Each module finds its own part of the
+  page and does its own part of the start; resuming the last session waits
+  until every module has started, as before. The start screen, Settings and
+  the status bar were compared pixel for pixel with v0.1.81.
+- The first-visit template still stays out of a cloud workspace that opens
+  while it loads (the template race test passes).
+
 ### v0.1.81: the last of main.js's ports
 
 Step S4e-4b2.

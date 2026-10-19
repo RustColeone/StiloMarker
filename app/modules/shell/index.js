@@ -66,6 +66,7 @@ import { addMaintenanceCommands, clearAppStorage } from "./adapters/maintenance.
 import { createRender } from "./adapters/render.js";
 import { createFrame } from "./adapters/frame/index.js";
 import { registerOfflineShell, upgradeApp } from "./adapters/offline.js";
+import { APP_VERSION } from "./model/version.js";
 import { createLogPanel, flash } from "./adapters/log-panel.js";
 import { loadSettings, patchStoredSettings } from "./adapters/settings-store.js";
 import { SECRET_SETTINGS, keysToSave } from "./service/settings.js";
@@ -124,6 +125,14 @@ export default defineModule({
     const root = document.querySelector(".menu-bar");
     const menuBar = root ? createMenuBar({ root, commands, menus, run, report }) : { close() {} };
     createKeyboard({ commands, run, report });
+    // The menu bar's menus; their items are other modules' commands.
+    menus.add({ id: "file", label: "File", order: 1 });
+    menus.add({ id: "edit", label: "Edit", order: 2 });
+    menus.add({ id: "create", label: "Create", order: 3 });
+    menus.add({ id: "view", label: "View", order: 4 });
+    menus.add({ id: "settings", label: "Settings", order: 5 });
+    // The app's version, wherever the page shows it.
+    globalThis.document?.querySelectorAll("[data-app-version]").forEach((label) => { label.textContent = `v${APP_VERSION}`; });
 
     async function confirm(request) {
       const options = typeof request === "string" ? { message: request } : request;
@@ -159,6 +168,14 @@ export default defineModule({
     const logPanel = createLogPanel({ settings, copyText: dialogs.copyText, notify: (message) => notice(message) });
     events.on("layout", () => logPanel.render());
     logPanel.render();
+    // The server is where the settings say.
+    const server = createServer();
+    server.configure({ address: () => settings.serverUrl });
+    // Once the app is there: its files kept for offline use (in a page).
+    ctx.whenStarted(() => {
+      logPanel.log("response", "Debug log initialized", `panel=${settings.debugPanel ? "visible" : "hidden"}`);
+      if (globalThis.window) void registerOfflineShell();
+    });
 
     return {
       commands: { add: commands.add, get: commands.get, all: commands.all, onChange: commands.onChange },
@@ -172,7 +189,7 @@ export default defineModule({
       form,
       toast: dialogs.showToast,
       copyText: dialogs.copyText,
-      server: createServer(),
+      server,
       settings,
       pages,
       settingsDialog,

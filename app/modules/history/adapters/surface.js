@@ -1,20 +1,15 @@
-// History on the page, created once main.js attaches it: snapshots of files
+// History on the page, created when it starts in a page: snapshots of files
 // (snapshots.js) and the version label in the status bar, the preview pane's
 // diff tab (an Editor pane view), and the Snapshots and Workspace History
-// dialogs, which load the first time they open. PORT is what main.js still
-// provides because no module owns it yet.
+// dialogs, which load the first time they open.
 import { escapeHtmlAttribute } from "../../editor/index.js";
 import { applyHostCounters, getNodeIdByPath, getPath } from "../../workspace/index.js";
 import { createSnapshots } from "./snapshots.js";
 
-export const PORT = [];
-
 // The diff tab's id among the preview's tabs (not a project file).
 export const DIFF_TAB_ID = "__diff__";
 
-export function createSurface({ port, shell, workspace, editor, sync }) {
-  const missing = PORT.filter((name) => !(name in port));
-  if (missing.length) throw new Error(`history.attach: the port lacks ${missing.join(", ")}`);
+export function createSurface({ shell, workspace, editor, sync }) {
   const $ = (id) => document.getElementById(id);
   const settings = shell.settings;
   const controller = () => workspace.project();

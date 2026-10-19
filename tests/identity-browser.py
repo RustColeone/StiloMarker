@@ -11,6 +11,7 @@ import asyncio, json, os, socket, subprocess, sys, tempfile, time, urllib.reques
 from pathlib import Path
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
+from helpers.app_hook import app_hook
 
 ROOT = Path(__file__).resolve().parents[1]
 TMP = tempfile.TemporaryDirectory()
@@ -46,7 +47,7 @@ def api(method, path, body=None):
 checks = []
 def ok(name): checks.append(name); print("  ok ", name)
 
-HOOK = b"\nwindow.__id = { identity, openAccessEditor: (...a) => cloudParts.openAccessEditor(...a), controller, render: (p) => shell.render(p) };\n"
+HOOK = app_hook("window.__id = { identity, openAccessEditor: (...a) => cloudParts.openAccessEditor(...a), controller, render: (p) => shell.render(p) };")
 
 
 async def open_page(b, settings=None):

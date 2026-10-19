@@ -12,7 +12,9 @@
 //
 // ctx.use(name) returns a declared dependency's api; ctx.registry() and
 // ctx.emitter() make the module's own extension points and events, and
-// ctx.state(initial) the state it owns (see createState).
+// ctx.state(initial) the state it owns (see createState). ctx.whenStarted(fn)
+// runs fn once every module has started (in start order): what may only
+// happen when the whole app is there, like resuming the last session.
 
 import { trace, describe, brief, callerOf } from "./trace.js";
 
@@ -52,6 +54,7 @@ export async function startModules(definitions, { log = () => {} } = {}) {
   }
   const order = [...definitions].sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
   const apis = new Map();
+  const afterStart = [];
   for (const definition of order) {
     const ctx = Object.freeze({
       name: definition.name,
@@ -64,12 +67,17 @@ export async function startModules(definitions, { log = () => {} } = {}) {
       registry: (options) => createRegistry({ ...options, owner: definition.name }),
       emitter: () => createEmitter(definition.name, log),
       state: (initial, options) => createState(definition.name, initial, trace, options),
-      log: (...args) => { trace.record("log", definition.name, args.join(" ")); log(definition.name, ...args); }
+      log: (...args) => { trace.record("log", definition.name, args.join(" ")); log(definition.name, ...args); },
+      whenStarted: (fn) => { afterStart.push({ name: definition.name, fn }); }
     });
     const api = await definition.start(ctx);
     apis.set(definition.name, Object.freeze(api ?? {}));
     trace.record("log", "kernel", `started ${definition.name}`);
     log("kernel", `started ${definition.name}`);
+  }
+  for (const { name, fn } of afterStart) {
+    await fn();
+    trace.record("log", "kernel", `${name} ran what waited for the start`);
   }
   return Object.freeze(Object.fromEntries(apis));
 }

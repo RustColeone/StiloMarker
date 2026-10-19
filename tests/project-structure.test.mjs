@@ -69,40 +69,43 @@ test("index.html exposes required element ids", async () => {
   }
 });
 
-test("main.js wires core feature symbols", async () => {
-  // Code split out of main.js lives in app/ui/ and the modules it moved into;
-  // the wiring may be in any of them.
+test("main.js only starts the modules; the features are wired in them", async () => {
+  // Every feature lives in a module (or an extension) and wires itself there.
   const { readdir } = await import("node:fs/promises");
-  const split = [];
-  for (const dir of ["app/ui", "app/modules/editor/adapters", "app/modules/chats/adapters", "app/modules/comments/adapters", "app/modules/explorer/adapters", "app/modules/cloud/adapters", "app/modules/assistant/adapters", "app/modules/sync/adapters"]) {
-    for (const name of (await readdir(resolveFromRoot(dir))).filter((n) => n.endsWith(".js"))) split.push(`${dir}/${name}`);
-  }
-  const mainSource = [await readFile(resolveFromRoot("app/main.js"), "utf8"),
-    ...await Promise.all(split.map((file) => readFile(resolveFromRoot(file), "utf8")))].join("\n");
+  const walk = async (dir) => (await Promise.all((await readdir(resolveFromRoot(dir), { withFileTypes: true }))
+    .map((entry) => entry.isDirectory() ? walk(`${dir}/${entry.name}`) : [`${dir}/${entry.name}`]))).flat();
+  const files = [...await walk("app/modules"), ...await walk("extensions")].filter((file) => file.endsWith(".js"));
+  const source = (await Promise.all(files.map((file) => readFile(resolveFromRoot(file), "utf8")))).join("\n");
   const symbols = [
-    /shell\.registerOffline\(\)/,
-    /modules\.sync\.session\(\)/,
+    /registerOfflineShell\(\)/,
     /workspace\.typed\(/,
     /layout\.show-session/,
-    /editorView\.reset/,
+    /view\.reset\(/,
     /text\/mdnotes-file-id/,
     /cloud\.import-file/,
     /openAddFileDialog/,
     /renderPreviewContent/,
-    /isImageFileName/,
     /showEditorAutocomplete/,
     /replaceImageFile/,
-    /logDebug/,
-    /shell\.menus\.add\(\{ id: "settings"/,
+    /menus\.add\(\{ id: "settings"/,
     /toggleQuickAddMenu/,
     /toggleFilterMenu/,
     /mode\.share\(/,
     /mode\.leave\(/,
     /switchWorkspaceMode/,
     /explorer\.newFiles\.add/,
-    /sendGenerationRequest/
+    /sendGenerationRequest/,
+    /resumeSession\(\)/,
+    /loadTemplateProject\(\)/
   ];
-  symbols.forEach((pattern) => assert.match(mainSource, pattern));
+  symbols.forEach((pattern) => assert.match(source, pattern));
+  // main.js imports the modules and starts them; it touches nothing on the page.
+  const main = await readFile(resolveFromRoot("app/main.js"), "utf8");
+  assert.match(main, /await startModules\(/);
+  assert.doesNotMatch(main, /document|window|querySelector|\.attach\(|\.parts\(\)/);
+  for (const [, target] of main.matchAll(/^import .* from "([^"]+)";$/gm)) {
+    assert.match(target, /^\.\/(kernel|modules\/[a-z-]+)\/index\.js$|^\.\/extensions\.js$/, `main.js imports ${target}`);
+  }
 });
 
 test("feature modules split out of main.js load on demand", async () => {
@@ -120,14 +123,6 @@ test("feature modules split out of main.js load on demand", async () => {
   assert.match(diagramPreview, /import\("\.\/view\.js"\)/);
   // Not imported statically any more (that would load them at startup).
   assert.doesNotMatch(mainSource, /^import .*(bmap-view|module-map-tools|mtree-module-map-service)/m);
-});
-
-test("module instances created on first use are declared with var", async () => {
-  // main.js forwards calls to split-out modules through functions that create
-  // the module on first use. Those functions are hoisted and can run during
-  // startup, before the line holding the instance — a \`let\` there throws.
-  const mainSource = await readFile(resolveFromRoot("app/main.js"), "utf8");
-  assert.doesNotMatch(mainSource, /^(let|const) \w+Instance\b/m);
 });
 
 test("the offline app shell lists every app module", async () => {

@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from playwright.async_api import async_playwright
 from helpers.chat_hook import CHAT_HOOK, WAIT_LOADED, inject_chat_internals
+from helpers.app_hook import app_hook
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get('STILO_TEST_URL', 'https://stilomarker.ngantech.net')
 
@@ -57,7 +58,7 @@ async def main():
             if file.is_file():
                 body = inject_chat_internals(path, file.read_bytes())
                 if path == '/app/main.js':
-                    body += b'\nwindow.__chatTest = {controller, renderChatPanel: (p) => modules.assistant.panel()?.renderChatPanel(p), collaboration, setChatConnection: connection => { if (connection) syncMode.share(controller.getProject()); else syncMode.leave(); collaboration.getConnectionInfo = () => connection; }, ' + CHAT_HOOK.encode() + b'};\n'
+                    body += app_hook('window.__chatTest = {controller, renderChatPanel: (p) => modules.assistant.panel()?.renderChatPanel(p), collaboration, setChatConnection: connection => { if (connection) syncMode.share(controller.getProject()); else syncMode.leave(); collaboration.getConnectionInfo = () => connection; }, ' + CHAT_HOOK + '};')
                 await route.fulfill(status=200, content_type=mimetypes.guess_type(str(file))[0] or 'application/octet-stream', body=body)
             else: await route.continue_()
         await context.route('**/*', route_request)

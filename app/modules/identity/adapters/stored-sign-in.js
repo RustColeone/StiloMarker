@@ -1,8 +1,5 @@
-// Legacy (before the module restructure): where Identity keeps the stored
-// sign-in. The settings themselves are Shell's (shell.settings); the theme is
-// Shell's to apply and the source font the Editor's.
-
-// Where Identity keeps the account's stored sign-in: in these settings.
+// Where Identity keeps the account's stored sign-in: in Shell's settings
+// (accountUsername, accountPassword, accountSuccess).
 export function signInSettings(settings) {
   return {
     read: () => ({ username: settings.accountUsername, password: settings.accountPassword, proven: settings.accountSuccess }),

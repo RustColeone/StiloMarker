@@ -3,8 +3,8 @@
 // copying, adding files, creating, renaming and deleting, exporting, the
 // context-menu actions, and the explorer's events. They share one context,
 // `app`: the Explorer's own state (the clipboard, a file being added), every
-// part's functions, the editor's functions it uses, Shell's dialogs, and PORT,
-// what main.js still provides because no module owns it yet.
+// part's functions, the editor's functions it uses, Shell's dialogs and
+// settings, and its elements on the page (elements.js).
 import { getPath, isImageFileName } from "../../workspace/index.js";
 import {
   createMarkdownReference, fileExtensionOf, getNextDefaultFileName, getNextDefaultFolderName, inferNameFromUrl,
@@ -17,25 +17,17 @@ import { createExporting } from "./exporting.js";
 import { createMoves } from "./moves.js";
 import { createNaming } from "./naming.js";
 import { createExplorerView } from "./tree.js";
-
-// What main.js attaches (explorer.attach(port)); each entry should move to an
-// owner, or become an extension point, and leave this list.
-export const PORT = [
-  "settings", "elements"
-];
+import { findElements } from "./elements.js";
 
 // The editor's functions the explorer calls (editor.parts()).
 const EDITOR = [
   "applyEditorEdit", "clearEditorDropCaret", "getEditorSelection", "getEditorText", "getEditorTextOffsetFromPoint",
   "isPreviewableFileName", "openDroppedFileInPane", "openFileFromExplorer", "openPreviewTab", "replaceEditorRange",
-  "setActiveSourceFile", "setActiveSourcePart", "setEditorSelection", "setPreviewFile"
+  "setActiveSourceFile", "setActiveSourcePart", "setEditorSelection", "setPreviewFile", "focusEditor"
 ];
 
-export function createSurface({ port, workspace, editor, shell, sync, types, fileMenus, rootMenus, newFiles, events }) {
-  const missing = PORT.filter((name) => !(name in port));
-  if (missing.length) throw new Error(`explorer.attach: the port lacks ${missing.join(", ")}`);
+export function createSurface({ workspace, editor, shell, sync, types, fileMenus, rootMenus, newFiles, events }) {
   const editorParts = editor.parts();
-  if (!editorParts) throw new Error("explorer.attach: attach the editor first");
 
   const app = {
     // A file staged in the Add File dialog.
@@ -71,7 +63,8 @@ export function createSurface({ port, workspace, editor, shell, sync, types, fil
   };
   Object.defineProperty(app, "controller", { get: () => workspace.project(), enumerable: true });
   Object.defineProperty(app, "collaboration", { get: () => sync.session(), enumerable: true });
-  for (const name of PORT) Object.defineProperty(app, name, { get: () => port[name], enumerable: true });
+  app.settings = shell.settings;
+  app.elements = findElements();
   for (const name of EDITOR) app[name] = editorParts[name];
 
   const add = (part) => {

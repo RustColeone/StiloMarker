@@ -6,6 +6,7 @@ import asyncio, json, os, socket, subprocess, sys, tempfile, time, urllib.reques
 from pathlib import Path
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
+from helpers.app_hook import app_hook
 
 ROOT = Path(__file__).resolve().parents[1]
 TMP = tempfile.TemporaryDirectory()
@@ -51,7 +52,7 @@ async def main():
         async def route(rt):
             if urlparse(rt.request.url).path == "/app/main.js":
                 response = await rt.fetch()
-                await rt.fulfill(response=response, body=await response.body() + b"\nwindow.__t = { shell, identity };\n"); return
+                await rt.fulfill(response=response, body=await response.body() + app_hook("window.__t = { shell, identity };")); return
             await rt.continue_()
         await ctx.route("**/*", route)
         page = await ctx.new_page(); errors = []

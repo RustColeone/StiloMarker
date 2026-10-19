@@ -9,9 +9,8 @@
 //   createCloudChats(getTarget) -> store       getTarget() -> { serverUrl, token, team, path } | null
 //   createLocalChats({ workspaceKey, listCharacters, runReply, onEvent, records? }) -> store
 //   loadChatsView() -> Promise<{ createChatsView(deps) }>   loaded when the Chats tab first opens
-// API: attach(port) -> page: the side panel's Chats page (adapters/page.js),
-// given what main.js still provides (PORT below); page() -> the same:
-// render(project), badge(), receive(event), remapPersonaPaths(old, new),
+// API: page() -> the side panel's Chats page (adapters/page.js), created
+// when it starts in a page: render(project), badge(), receive(event), remapPersonaPaths(old, new),
 // giveAgentThreads({ oldGroupThreads(project), movedGroupThreads(threads) }), view().
 // A character sheet's preview and a new sheet's template are its
 // (adapters/sheet.js). It draws on each redraw (Shell's), follows renamed characters (the
@@ -32,9 +31,6 @@ export function createLocalChats(options) {
 
 export const loadChatsView = () => import("./adapters/view.js");
 
-// What main.js attaches (chats.attach(port)); each entry should find an owner.
-const PORT = [];
-
 export default defineModule({
   name: "chats",
   level: 5,
@@ -44,13 +40,9 @@ export default defineModule({
     // Character sheets in the editor: their preview, and a new sheet's template.
     addCharacterSheet({ editor: ctx.use("editor"), explorer: ctx.use("explorer"), characters: ctx.use("characters") });
     let page = null;
-    function attach(port) {
-      if (page) throw new Error("chats: already attached");
-      const missing = PORT.filter((name) => !(name in port));
-      if (missing.length) throw new Error(`chats.attach: the port lacks ${missing.join(", ")}`);
+    if (globalThis.document) {
       const shell = ctx.use("shell"), editor = ctx.use("editor"), sync = ctx.use("sync"), workspace = ctx.use("workspace");
       const app = {
-        ...Object.fromEntries(PORT.map((name) => [name, port[name]])),
         models: ctx.use("models"), identity: ctx.use("identity"), settings: shell.settings, pages: shell.pages,
         notify: (message) => shell.notify(message),
         showToast: (message, options) => shell.toast(message, options),
@@ -80,8 +72,7 @@ export default defineModule({
       ctx.use("explorer").events.on("path-changed", ({ from, to }) => page.remapPersonaPaths(from, to));
       // The Agent page's old Roleplay threads, handed over through Workspace.
       workspace.handover.receive("agent-group-threads", (threads) => page.giveAgentThreads(threads));
-      return page;
     }
-    return { attach, page: () => page };
+    return { page: () => page };
   }
 });

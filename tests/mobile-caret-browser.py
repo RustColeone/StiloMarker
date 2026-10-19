@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright
+from helpers.app_hook import app_hook
 
 ROOT = Path(os.environ.get('STILO_ASSET_ROOT', Path(__file__).resolve().parents[1]))
 BASE = os.environ.get('STILO_TEST_URL', 'https://stilomarker.ngantech.net')
@@ -59,7 +60,7 @@ async def main():
             if file.is_file():
                 body = file.read_bytes()
                 if path == '/app/main.js':
-                    body += b'\nwindow.__caretTest={controller,getEditorSelection:(...a)=>editorParts.getEditorSelection(...a),getViewState};\n'
+                    body += app_hook('window.__caretTest={controller,getEditorSelection:(...a)=>editorParts.getEditorSelection(...a),getViewState};')
                 await route.fulfill(status=200,
                                     content_type=mimetypes.guess_type(str(file))[0] or 'application/octet-stream',
                                     body=body)

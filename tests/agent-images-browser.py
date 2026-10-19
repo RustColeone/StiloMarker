@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from playwright.async_api import async_playwright
 from helpers.chat_hook import CHAT_HOOK, WAIT_LOADED, inject_chat_internals
+from helpers.app_hook import app_hook
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get('STILO_TEST_URL', 'http://127.0.0.1:8765')
@@ -78,7 +79,7 @@ async def main():
             if file.is_file():
                 body = inject_chat_internals(path, file.read_bytes())
                 if path == '/app/main.js':
-                    body += b'\nwindow.__imgTest = {controller, performLogin:(...a)=>modules.cloud.parts().performLogin(...a), syncState, ' + CHAT_HOOK.encode() + b'};\n'
+                    body += app_hook('window.__imgTest = {controller, performLogin:(...a)=>modules.cloud.parts().performLogin(...a), syncState, ' + CHAT_HOOK + '};')
                 await route.fulfill(status=200, content_type=mimetypes.guess_type(str(file))[0] or 'application/octet-stream', body=body)
             else:
                 await route.continue_()

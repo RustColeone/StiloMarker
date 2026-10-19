@@ -2,7 +2,7 @@
 // the server for a cloud workspace), backups of whole cloud workspaces, and
 // comparing two versions of a text. The server's half is
 // server/stilo/modules/history; their messages are protocol/history.contract.json.
-// On the page (attach(port), adapters/surface.js): snapshots and the version
+// On the page (adapters/surface.js, created as it starts): snapshots and the version
 // label in the status bar, the preview's diff tab (an Editor pane view), the
 // Snapshots and Workspace History dialogs.
 //
@@ -18,9 +18,9 @@
 //   trash.open(team, { onChange })   the team's trash: deleted cloud projects, kept
 //                                    for a number of days (restore, delete now)
 //   trash.list(team)  trash.restore(team, id)  trash.remove(team, id)
-//   attach(port) -> parts: snapshotStore(), createSnapshotNow(label), snapshotDirtyFiles(label),
+//   parts() -> snapshotStore(), createSnapshotNow(label), snapshotDirtyFiles(label),
 //     ensureSnapshotsMigrated(), refreshSnapshotBaselines(), showFileDiff(path, versionId, createdAt),
-//     openSnapshotsDialog(), openWorkspaceHistory(), renderVersionLabel()...   parts() -> the same
+//     openSnapshotsDialog(), openWorkspaceHistory(), renderVersionLabel()... (in a page; null otherwise)
 import { defineModule } from "../../kernel/index.js";
 import { forgetOldSnapshots } from "./adapters/local-store.js";
 import { createTrash } from "./adapters/trash.js";
@@ -39,12 +39,10 @@ export default defineModule({
     elements: ["the trash dialog", "the Snapshots dialog", "the Workspace History dialog", "the diff tab", "the version in the status bar"] },
   start(ctx) {
     forgetOldSnapshots();
-    let parts = null;
-    function attach(port) {
-      if (parts) throw new Error("history: already attached");
-      parts = createSurface({ port, shell: ctx.use("shell"), workspace: ctx.use("workspace"), editor: ctx.use("editor"), sync: ctx.use("sync") });
-      return parts;
-    }
-    return { trash: createTrash({ shell: ctx.use("shell"), identity: ctx.use("identity") }), attach, parts: () => parts };
+    // Snapshots, the version label, the diff tab and the dialogs (in a page).
+    const parts = globalThis.document
+      ? createSurface({ shell: ctx.use("shell"), workspace: ctx.use("workspace"), editor: ctx.use("editor"), sync: ctx.use("sync") })
+      : null;
+    return { trash: createTrash({ shell: ctx.use("shell"), identity: ctx.use("identity") }), parts: () => parts };
   }
 });

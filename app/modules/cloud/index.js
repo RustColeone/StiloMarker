@@ -4,10 +4,10 @@
 // moving and copying them, who may open a project, hosting this project for
 // guests or publishing it to a team, and opening a cloud workspace.
 //
-// API: attach(port) -> parts: creates it, given what main.js still provides
-// (adapters/surface.js lists it: PORT); parts() -> the same functions
-// (handleOpenWorkspace(team, path, options), openFileBrowser({ side }),
-// performLogin, openAccessEditor...).
+// API: parts() -> its functions (handleOpenWorkspace(team, path, options),
+// openFileBrowser({ side }), performLogin, openAccessEditor...), created when
+// it starts in a page (adapters/surface.js). Once the whole app has started
+// it asks for the agent's status and resumes the last session.
 // Static, for code from before the restructure: saveUserState, uploadAsset,
 // pingServer (the server's routes, adapters/api.js).
 import { defineModule } from "../../kernel/index.js";
@@ -30,13 +30,18 @@ export default defineModule({
     addCollaborationSettings({ dialog: shell.settingsDialog, settings: shell.settings });
     let parts = null;
     addServerItem({ shell, sync: ctx.use("sync"), identity: ctx.use("identity"), ping: () => parts?.pingCurrentServer() });
-    function attach(port) {
-      if (parts) throw new Error("cloud: already attached");
-      parts = createSurface({ port, shell: ctx.use("shell"), workspace: ctx.use("workspace"), identity: ctx.use("identity"),
+    if (globalThis.document) {
+      parts = createSurface({ shell: ctx.use("shell"), workspace: ctx.use("workspace"), identity: ctx.use("identity"),
         sync: ctx.use("sync"), editor: ctx.use("editor"), history: ctx.use("history"), comments: ctx.use("comments"),
         explorer: ctx.use("explorer"), models: ctx.use("models") });
-      return parts;
+      parts.renderHostTargets();
+      // Once the whole app is there: the agent's status asked, and the last
+      // session resumed, so a reload is not a fresh start.
+      ctx.whenStarted(() => {
+        void parts.refreshChatStatus({ silent: true });
+        void parts.resumeSession();
+      });
     }
-    return { attach, parts: () => parts };
+    return { parts: () => parts };
   }
 });

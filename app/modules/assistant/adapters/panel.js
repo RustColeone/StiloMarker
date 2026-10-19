@@ -1,12 +1,11 @@
 // The side panel's Agent page (the Assistant module's, loaded the first time
 // the panel or Settings is shown): the agent's conversations and their sync,
 // its turns and the edits it proposes (Keep / Drop), and the Agent status in
-// Settings. It also draws the Chats page (the Chats module's) while that is
-// open, until Shell's areas draw pages (docs/ARCHITECTURE.md, step 5).
+// Settings.
 //
 // Its parts share one context, `app` (as the Editor's and the Explorer's do):
 // the page's state, every part's functions, what the modules below offer, and
-// PORT, what main.js still provides.
+// its elements on the page (elements.js).
 import { escapeHtmlAttribute } from "../../editor/index.js";
 import { UPDATE_FILE } from "../../workspace/index.js";
 import { normalizeServerUrl } from "../../shell/index.js";
@@ -18,19 +17,12 @@ import { createRender } from "./render.js";
 import { createReview } from "./review.js";
 import { createThreads } from "./threads.js";
 import { createTurns } from "./turns.js";
+import { findElements } from "./elements.js";
 
-// What main.js attaches (assistant.load(port)); each entry should move to an
-// owner, or become an extension point, and leave this list.
-export const PORT = [
-  "elements", "storedProject"
-];
-
-export function createAgentPanel({ port, shell, workspace, identity, sync, editor, explorer, models, characters }) {
-  const missing = PORT.filter((name) => !(name in port));
-  if (missing.length) throw new Error(`assistant.load: the port lacks ${missing.join(", ")}`);
+export function createAgentPanel({ shell, workspace, identity, sync, editor, explorer, models, characters }) {
   const { settings, pages } = shell;
   const app = {
-    ...Object.fromEntries(PORT.map((name) => [name, port[name]])),
+    elements: findElements(),
     settings, pages, identity, models, workspace, escapeHtmlAttribute,
     controller: workspace.project(),
     collaboration: sync.session(),
@@ -58,7 +50,8 @@ export function createAgentPanel({ port, shell, workspace, identity, sync, edito
     agent: models.agent,
     agentStatus: () => models.agent.status(),
     signedIn: () => Boolean(identity.account()),
-    legacyChatProjectId: port.storedProject?.id ?? "server-project",
+    // Conversations from before they were kept per workspace: under the project this browser kept.
+    legacyChatProjectId: workspace.restoredProject()?.id ?? "server-project",
     legacyChatScope: settings.syncedProjectId
       ? `cloud:${normalizeServerUrl(settings.serverUrl)}/${settings.syncedProjectId}` : null,
     // Changed by more than one part: always read and written as app.x.

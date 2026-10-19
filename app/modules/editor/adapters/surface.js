@@ -6,7 +6,7 @@
 //   - the Editor's own state: undo history, search, autocomplete, the render
 //     cache, dragging text, other people's cursors, the file shown;
 //   - every part's functions, the view, the project (Workspace) and dialogs (Shell);
-//   - PORT: what main.js still provides, because no module owns it yet.
+//   - its elements on the page (elements.js) and the settings (Shell's).
 // What other code may call is FUNCTIONS below (editor.parts()).
 import { escapeHtmlAttribute } from "../model/html.js";
 import { getRelativePath, getRelativeProjectPath, normalizePath } from "../../workspace/index.js";
@@ -27,15 +27,9 @@ import { installFrameParts } from "./frame-parts.js";
 import { createDebugTrace } from "./debug-trace.js";
 import { installTogether } from "./together.js";
 
-// What main.js attaches (editor.attach(port)); each entry should move to an
-// owner, or become an extension point, and leave this list.
-export const PORT = [
-  "settings", "elements"
-];
+import { findElements } from "./elements.js";
 
-export function createSurface({ port, view, marks, paneViews, completions, lineNotes, welcome, identity, openTabsStore, drops, previews, highlighters, toolbars, workspace, shell }) {
-  const missing = PORT.filter((name) => !(name in port));
-  if (missing.length) throw new Error(`editor.attach: the port lacks ${missing.join(", ")}`);
+export function createSurface({ view, marks, paneViews, completions, lineNotes, welcome, identity, openTabsStore, drops, previews, highlighters, toolbars, workspace, shell }) {
   const composing = { now: false }; // an IME composition is under way
 
   const app = {
@@ -121,9 +115,8 @@ export function createSurface({ port, view, marks, paneViews, completions, lineN
   Object.defineProperty(app, "editorIsComposing", { get: () => composing.now, enumerable: true });
   // Shared or this tab's own (Workspace's location, which Sync tells).
   Object.defineProperty(app, "workspaceMode", { get: () => (workspace.location.shared() ? "synced" : "private"), enumerable: true });
-  for (const name of PORT) {
-    Object.defineProperty(app, name, { get: () => port[name], enumerable: true });
-  }
+  app.settings = shell.settings;
+  app.elements = findElements();
 
   // The parts. Assigning a function onto a name the context already holds
   // throws: two parts (or a part and the port) never share a name.
@@ -209,14 +202,27 @@ export function createSurface({ port, view, marks, paneViews, completions, lineN
   }
 
 
+  // What the editor shows starts from the open project, and starts over with a fresh one (Workspace's template).
+  view.reset(workspace.project().getProject());
+  workspace.events.on("started-over", ({ project }) => view.reset(project));
+  app.attachSelectionChangeListener();
+  window.addEventListener("resize", app.scheduleOverviewRuler);
+  // Files and tabs dropped on the panes and their tab strips; tabs reordered on a strip.
+  app.bindPaneDropTarget(app.elements.sourcePane, "source");
+  app.bindPaneDropTarget(app.elements.sourceTabStrip, "source");
+  app.bindPaneDropTarget(app.elements.previewPane, "preview");
+  app.bindPaneDropTarget(app.elements.previewTabStrip, "preview");
+  app.bindTabStripReorderTarget(app.elements.sourceTabStrip, "source");
+  app.bindTabStripReorderTarget(app.elements.previewTabStrip, "preview");
+
   // What other code calls: the parts' functions, and a few questions about the
   // editor's own state (never the state itself).
   return Object.freeze({
-    // Plain values only: reading a getter would call main.js's port during the attach.
     ...Object.fromEntries(Object.entries(Object.getOwnPropertyDescriptors(app))
       .filter(([name, d]) => typeof d.value === "function" && !["notify", "showToast", "scope", "render", "updateStatus"].includes(name))
       .map(([name, d]) => [name, d.value])),
     isComposing: () => composing.now,
+    focusEditor: () => app.elements.editorContent.focus(),
     isFindOpen: () => app.searchState.open,
     dropOffset: () => app.editorDragState.dropOffset,
     historyPosition: () => `${app.editorHistory.index}/${app.editorHistory.stack.length}`, // for the log panel's editor trace

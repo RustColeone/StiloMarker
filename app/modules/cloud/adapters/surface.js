@@ -3,7 +3,7 @@
 // browser and its two places (the server and this device), managing entries,
 // project access, opening a cloud workspace, and the dialogs' controls. They
 // share one context, `app`: the browser's own state, every part's functions,
-// what the modules below offer, and PORT, what main.js still provides.
+// what the modules below offer, and its elements on the page (elements.js).
 import { createAccess } from "./access.js";
 import { createAccounts } from "./accounts.js";
 import { createBrowser } from "./browser.js";
@@ -14,21 +14,13 @@ import { createResume } from "./resume.js";
 import { addProjectCommands } from "./projects.js";
 import { saveUserState, uploadAsset } from "./api.js";
 import { createProviders } from "./providers.js";
-
-// What main.js attaches (cloud.attach(port)); each entry should move to an
-// owner, or become an extension point, and leave this list.
-export const PORT = [
-  "elements"
-];
+import { findElements } from "./elements.js";
 
 // The editor's functions the cloud parts call (editor.parts()).
 const EDITOR = ["showResumedFile", "currentWorkspaceView", "cachedWorkspaceView"];
 
-export function createSurface({ port, shell, workspace, identity, sync, editor, history, comments, explorer, models }) {
-  const missing = PORT.filter((name) => !(name in port));
-  if (missing.length) throw new Error(`cloud.attach: the port lacks ${missing.join(", ")}`);
+export function createSurface({ shell, workspace, identity, sync, editor, history, comments, explorer, models }) {
   const editorParts = editor.parts();
-  if (!editorParts) throw new Error("cloud.attach: attach the editor first");
 
   const app = {
     view: editor.view, identity, history, mode: sync.mode, settings: shell.settings, syncState: sync.status,
@@ -53,7 +45,7 @@ export function createSurface({ port, shell, workspace, identity, sync, editor, 
   };
   Object.defineProperty(app, "controller", { get: () => workspace.project(), enumerable: true });
   Object.defineProperty(app, "collaboration", { get: () => sync.session(), enumerable: true });
-  for (const name of PORT) Object.defineProperty(app, name, { get: () => port[name], enumerable: true });
+  app.elements = findElements();
   for (const name of EDITOR) app[name] = editorParts[name];
 
   const add = (part) => {

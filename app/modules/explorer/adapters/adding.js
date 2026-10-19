@@ -136,7 +136,7 @@ export function createAdding(app) {
     }
 
     const dropOffset = app.editorDropOffset() ?? app.getEditorSelection().start;
-    app.elements.editorContent.focus();
+    app.focusEditor();
     const ref = app.createMarkdownReference(activeFile, createdFile);
     app.replaceEditorRange(dropOffset, dropOffset, ref, dropOffset + ref.length, dropOffset + ref.length);
     app.logDebug("action", "Dropped image inserted", fileName);

@@ -27,6 +27,15 @@ test("using an undeclared, missing, same-level or higher module is refused", asy
   assert.throws(() => defineModule({ name: "x", level: 1, uses: [], start() {} }), /needs "owns"/);
 });
 
+test("whenStarted runs once every module has started, in start order", async () => {
+  const seen = [];
+  await startModules([
+    mod("top", 2, ["base"], (ctx) => { seen.push("start top"); ctx.whenStarted(() => seen.push("then top")); }),
+    mod("base", 1, [], (ctx) => { seen.push("start base"); ctx.whenStarted(async () => { await null; seen.push("then base"); }); })
+  ]);
+  assert.deepEqual(seen, ["start base", "start top", "then base", "then top"]);
+});
+
 test("a module that fails to start stops the start", async () => {
   const started = [];
   await assert.rejects(startModules([
