@@ -1,6 +1,7 @@
 // Tabs and groups: each group's tab strip (a tab is a file in a view; overflow
-// menu, reorder, drag files in), a tab coming on screen in its group (its
-// view's body moves there: groups.js draws that), and resuming the last view
+// menu, reorder, drag files in, drag tabs to the other group), a tab coming on
+// screen in its group (its view's body moves there: groups.js draws that),
+// groups closing with their last tab, and resuming the last view
 // (the open tabs per workspace, kept on the server through app.saveUserState).
 // What the groups show is the Editor's view (app.view, service/view.js).
 import { normalizeServerUrl } from "../../shell/index.js";
@@ -296,6 +297,7 @@ export function createTabs(app) {
     if (tab.view === "preview") {
       app.view.closeTab("preview", tab.fileId, group);
       app.updateStatus(project);
+      closeGroupIfEmpty(group);
       return;
     }
     const wasShown = project.activeFileId === tab.fileId && app.view.get().hosts.source === group;
@@ -304,6 +306,7 @@ export function createTabs(app) {
 
     if (!wasShown) {
       app.updateStatus(project);
+      closeGroupIfEmpty(group);
       return;
     }
 
@@ -318,9 +321,49 @@ export function createTabs(app) {
     const nextProject = structuredClone(project);
     nextProject.activeFileId = null;
     app.controller.replaceProject(nextProject);
+    closeGroupIfEmpty(group);
   }
   const closeSourceTab = (fileId) => closeTab(app.view.get().hosts.source, { fileId, view: "source" });
   const closePreviewTab = (fileId) => closeTab(app.view.get().hosts.preview, { fileId, view: "preview" });
+
+  // ---- Groups come and go. The frame shows and hides them: the left is its
+  // "source" area and the right its "preview" one (named for the default).
+  const otherGroup = (group) => (group === "left" ? "right" : "left");
+  const areaOf = (group) => (group === "left" ? "source" : "preview");
+
+  // A tab moved (or, keep: opened too) to the other group, before or after a
+  // tab there or at the end. It comes on screen there, the group shown; the
+  // group it left closes if that was its last tab.
+  function moveTabToGroup(from, tab, { keep = false, target = null, placeAfter = false } = {}) {
+    const to = otherGroup(from);
+    const project = app.controller.getProject();
+    if (project.nodes[tab.fileId]?.kind !== "file") return;
+    app.captureViewState();
+    app.setAreaShown(areaOf(to), true);
+    app.view.moveToGroup(from, to, { fileId: tab.fileId, view: tab.view }, { keep, target, placeAfter });
+    if (tab.view === "source") {
+      app.view.pick(tab.fileId);
+      if (project.activeFileId !== tab.fileId) app.controller.setActiveFile(tab.fileId);
+      else app.updateStatus(project);
+      scheduleSaveUserState();
+    } else {
+      app.updateStatus(project);
+    }
+    if (!keep) closeGroupIfEmpty(from);
+  }
+
+  // A group left with no tab closes, when the other one shows (on the
+  // desktop): the bodies it held go there, so what opens next shows, and it
+  // hides. Hiding a group with its × keeps its tabs (reading mode).
+  function closeGroupIfEmpty(group) {
+    const state = app.view.get();
+    const empty = state.groups.find((g) => g.id === group)?.tabs.length === 0;
+    const viewTabs = state.hosts.preview === group && app.paneViews.all().some((paneView) => paneView.tab());
+    if (!empty || viewTabs || app.phonePane() || app.settings[areaOf(otherGroup(group))] === "hidden") return;
+    app.view.closeGroup(group);
+    app.setAreaShown(areaOf(group), false);
+    app.updateStatus(app.controller.getProject());
+  }
 
   function reorderTabs(group, dragged, target, placeAfter = false) {
     app.view.moveTab(group, dragged, target, placeAfter);
@@ -495,9 +538,10 @@ export function createTabs(app) {
         event.preventDefault();
         app.openTabMenu(group, entry, event.clientX, event.clientY);
       });
-      // Reordered within the group by dragging.
+      // Reordered within the group by dragging, or dragged in from the other group.
       const dragging = () => app.view.get().draggingTabState;
       const reorders = () => dragging()?.group === group && !sameTab(dragging(), entry);
+      const arrives = () => Boolean(dragging()) && dragging().group !== group;
       tab.addEventListener("dragstart", (event) => {
         app.view.dragTab({ group, fileId, view });
         event.dataTransfer?.setData("text/mdnotes-tab", JSON.stringify({ group, fileId, view }));
@@ -509,15 +553,18 @@ export function createTabs(app) {
         app.view.dragTab(null);
       });
       tab.addEventListener("dragover", (event) => {
-        if (reorders()) event.preventDefault();
+        if (reorders() || arrives()) event.preventDefault();
       });
       tab.addEventListener("drop", (event) => {
-        if (!reorders()) return;
+        if (!reorders() && !arrives()) return;
         event.preventDefault();
+        event.stopPropagation();
         const rect = tab.getBoundingClientRect();
         const placeAfter = event.clientX > rect.left + (rect.width / 2);
-        const { fileId: draggedId, view: draggedView } = dragging();
-        reorderTabs(group, { fileId: draggedId, view: draggedView }, entry, placeAfter);
+        const { group: from, fileId: draggedId, view: draggedView } = dragging();
+        app.view.dragTab(null);
+        if (from === group) reorderTabs(group, { fileId: draggedId, view: draggedView }, entry, placeAfter);
+        else moveTabToGroup(from, { fileId: draggedId, view: draggedView }, { target: entry, placeAfter });
       });
       close.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -602,9 +649,10 @@ export function createTabs(app) {
     }
   }
 
+  // A tab dropped on a strip, past its tabs: to the end of the group (from the other group: moved there).
   function bindTabStripReorderTarget(strip, group) {
     strip.addEventListener("dragover", (event) => {
-      if (app.view.get().draggingTabState?.group !== group) {
+      if (!app.view.get().draggingTabState) {
         return;
       }
       event.preventDefault();
@@ -612,18 +660,17 @@ export function createTabs(app) {
 
     strip.addEventListener("drop", (event) => {
       const dragging = app.view.get().draggingTabState;
-      if (dragging?.group !== group) {
-        return;
-      }
-      const targetTab = event.target.closest(".editor-tab[data-file-id]");
-      if (targetTab) {
+      if (!dragging || event.target.closest(".editor-tab[data-file-id]")) {
         return;
       }
 
       event.preventDefault();
-      reorderTabs(group, { fileId: dragging.fileId, view: dragging.view }, null);
+      app.view.dragTab(null);
+      const tab = { fileId: dragging.fileId, view: dragging.view };
+      if (dragging.group === group) reorderTabs(group, tab, null);
+      else moveTabToGroup(dragging.group, tab);
     });
   }
 
-  return { ensureOpenTabs, openSourceTab, openPreviewTab, activateTab, setActiveSourceFile, currentWorkspaceView, cacheWorkspaceView, cachedWorkspaceView, showResumedFile, scheduleSaveUserState, restoreResumeState, setActiveSourcePart, setPreviewFile, openFileFromExplorer, canOpenFileInPane, setPaneDropActive, clearPaneDropState, openDroppedFileInPane, openPartInPane, bindPaneDropTarget, closeTab, closeSourceTab, closePreviewTab, reorderTabs, tabOverflowButton, closeTabOverflowMenu, openTabOverflowMenu, renderTabStrip, renderTabs, bindTabStripReorderTarget };
+  return { ensureOpenTabs, openSourceTab, openPreviewTab, activateTab, setActiveSourceFile, currentWorkspaceView, cacheWorkspaceView, cachedWorkspaceView, showResumedFile, scheduleSaveUserState, restoreResumeState, setActiveSourcePart, setPreviewFile, openFileFromExplorer, canOpenFileInPane, setPaneDropActive, clearPaneDropState, openDroppedFileInPane, openPartInPane, bindPaneDropTarget, closeTab, closeSourceTab, closePreviewTab, reorderTabs, moveTabToGroup, tabOverflowButton, closeTabOverflowMenu, openTabOverflowMenu, renderTabStrip, renderTabs, bindTabStripReorderTarget };
 }

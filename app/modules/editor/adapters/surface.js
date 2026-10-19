@@ -108,6 +108,8 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
     phonePane: () => (shell.frame.isPhone() ? shell.frame.phoneView() : null),
     showPhonePane: (id) => shell.frame.showPane(id),
     togglePreview: () => shell.frame.toggle("preview"),
+    // A group shown or hidden on the desktop (the frame's "source" and "preview" areas).
+    setAreaShown: (area, shown) => { if (!shell.frame.isPhone() && shell.frame.shown(area) !== shown) shell.frame.toggle(area); },
     copyText: (text) => shell.copyText(text),
     redrawRemoteCursors: () => app.renderRemoteCursors(Array.from(app.remoteCursorsByClient.values())),
     isPreviewableFileName,

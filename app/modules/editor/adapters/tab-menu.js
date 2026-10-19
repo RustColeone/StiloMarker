@@ -1,7 +1,7 @@
 // A tab's menu (right-click on a tab): closing it, the others in its group,
 // those to its right or all of them; opening the file as Source or Preview in
 // the same group (a tab is a file in a view: step 5 of docs/ARCHITECTURE.md);
-// copying its path.
+// moving it to the other group or opening it there too; copying its path.
 // Part of the Editor module: `app` is its shared context (surface.js).
 import { getPath } from "../../workspace/index.js";
 import { sameTab } from "../service/view.js";
@@ -73,6 +73,9 @@ export function createTabMenu(app) {
       null,
       openAs("source"),
       openAs("preview"),
+      null,
+      ["Move to Other Group", () => app.moveTabToGroup(group, tab)],
+      ["Open to the Side", () => app.moveTabToGroup(group, tab, { keep: true })],
       null,
       ["Copy Path", () => void app.copyText(getPath(project, tab.fileId))]
     ], x, y);

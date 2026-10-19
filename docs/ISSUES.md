@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-19 · release `v0.1.97` (not deployed; v0.1.95 is live)
+Last updated: 2026-10-19 · release `v0.1.98` (not deployed; v0.1.95 is live)
 
 ---
 
@@ -68,6 +68,22 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.98: editor groups come and go
+
+Step 5h. On the desktop.
+
+- A tab's menu has **Move to Other Group** and **Open to the Side**, and a
+  tab can be dragged onto the other group's tabs. The source editor or the
+  preview follows the tab.
+- When a group's last tab closes, the group closes and the other takes the
+  width, holding both the source editor and the preview, so the next file
+  opened from the explorer shows there. View → Toggle Source / Toggle
+  Preview brings the group back. Hiding a group with its × keeps its tabs,
+  as before.
+- Fixed, older than groups: with the other pane hidden, a pane's header
+  wrapped its × onto a second row.
+- New browser test: `editor-groups-browser.py`.
 
 ### v0.1.97: editor groups: Open as in the same group
 

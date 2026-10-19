@@ -147,3 +147,29 @@ test("activate: a tab comes on screen in its group, and its view's body moves th
   assert.deepEqual(plain(groupOf(view.get(), "left").tabs), [source("a")]);
   assert.equal(view.get().previewFileId, "a", "closing a tab elsewhere leaves the preview alone");
 });
+
+test("moveToGroup: a tab moves (or is opened too) to the other group, its body following; closeGroup hands the bodies over", () => {
+  const { view, log } = fresh();
+  view.reset(project("a", "a", "b"));
+  view.openTab("source", "b");
+  view.moveToGroup("left", "right", source("b"));
+  let state = view.get();
+  assert.deepEqual(plain(groupOf(state, "left")), { id: "left", tabs: [source("a")], active: source("a") });
+  assert.deepEqual(plain(groupOf(state, "right")), { id: "right", tabs: [preview("a"), source("b")], active: source("b") });
+  assert.equal(state.hosts.source, "right", "the source editor follows the tab");
+  assert.equal(state.focus, "right");
+  view.moveToGroup("right", "left", preview("a"), { keep: true, target: source("a") });
+  state = view.get();
+  assert.deepEqual(plain(groupOf(state, "left").tabs), [preview("a"), source("a")], "opened to the side, before the target");
+  assert.deepEqual(plain(groupOf(state, "right").tabs), [preview("a"), source("b")], "and kept where it was");
+  assert.equal(state.hosts.preview, "left");
+  assert.equal(state.previewFileId, "a");
+  assert.equal(log.entries().at(-1).message, "open tab to the side");
+  view.moveToGroup("right", "left", source("b"), { target: preview("a"), placeAfter: true });
+  state = view.get();
+  assert.deepEqual(plain(groupOf(state, "left").tabs), [preview("a"), source("b"), source("a")]);
+  assert.deepEqual(plain(groupOf(state, "right")), { id: "right", tabs: [preview("a")], active: preview("a") }, "the group it left shows its last tab");
+  view.closeGroup("left");
+  assert.deepEqual({ ...view.get().hosts }, { source: "right", preview: "right" });
+  assert.equal(view.get().focus, "right");
+});

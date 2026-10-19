@@ -82,7 +82,7 @@ async def main():
         # The menu of a source tab: the view it is in ticked, a one-view file not previewable.
         entries = await tab_menu('source', 'MeitanteiCure.mtree')
         labels = [label for label, _, _ in entries]
-        assert labels == ['Close', 'Close Others', 'Close to the Right', 'Close All', 'Open as Source', 'Open as Preview', 'Copy Path'], labels
+        assert labels == ['Close', 'Close Others', 'Close to the Right', 'Close All', 'Open as Source', 'Open as Preview', 'Move to Other Group', 'Open to the Side', 'Copy Path'], labels
         assert entries[4] == ['Open as Source', True, True] and entries[5][1] is True, entries
         await page.keyboard.press('Escape')
         assert await page.evaluate(MENU) is None, 'Escape closes the menu'

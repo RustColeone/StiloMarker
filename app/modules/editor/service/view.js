@@ -20,7 +20,8 @@
 //
 // Today's layout is the default: the source tabs on the left, the preview tabs
 // on the right. The actions that take a view work in the group holding that
-// view's body unless given a group; activate moves a body to another group.
+// view's body unless given a group; activate and moveToGroup move a body to
+// another group, and closeGroup hands a closed group's bodies to the other.
 
 const seal = (groups) => Object.freeze(groups.map((group) => Object.freeze({
   ...group, tabs: Object.freeze(group.tabs.map((tab) => Object.freeze({ ...tab }))), active: group.active ? Object.freeze({ ...group.active }) : null
@@ -128,6 +129,40 @@ export function createView(state) {
         else tabs.splice(at + (placeAfter ? 1 : 0), 0, { ...dragged });
         return { ...g, tabs };
       });
+    },
+
+    // A tab moved (or, keep: copied) to another group, before or after a tab
+    // there or at the end, where it comes on screen (its body follows). The
+    // group it left shows its last tab.
+    moveToGroup(from, to, tab, { keep = false, target = null, placeAfter = false } = {}) {
+      const moving = { fileId: tab.fileId, view: tab.view };
+      const groups = get().groups.map((g) => {
+        if (g.id === from && !keep && from !== to) {
+          const tabs = g.tabs.filter((t) => !sameTab(t, moving));
+          return { ...g, tabs, active: sameTab(g.active, moving) ? tabs.at(-1) ?? null : g.active };
+        }
+        if (g.id === to) {
+          const rest = g.tabs.filter((t) => !sameTab(t, moving));
+          const at = target ? rest.findIndex((t) => sameTab(t, target)) : -1;
+          const tabs = [...rest];
+          if (at < 0) tabs.push(moving);
+          else tabs.splice(at + (placeAfter ? 1 : 0), 0, moving);
+          return { ...g, tabs, active: moving };
+        }
+        return g;
+      });
+      const patch = { groups: seal(groups), hosts: Object.freeze({ ...get().hosts, [moving.view]: to }), focus: to };
+      if (moving.view === "preview") Object.assign(patch, { previewFileId: moving.fileId, previewPart: null });
+      state.set(keep ? "open tab to the side" : "move tab to group", patch);
+    },
+
+    // A group closed (its last tab gone): the bodies it held go to the other,
+    // where what opens next shows.
+    closeGroup(group) {
+      const other = get().groups.find((g) => g.id !== group)?.id;
+      if (!other) return;
+      const hosts = Object.fromEntries(Object.entries(get().hosts).map(([view, holder]) => [view, holder === group ? other : holder]));
+      state.set("close group", { hosts: Object.freeze(hosts), focus: other });
     },
 
     showPreview(fileId, partId = null) {
