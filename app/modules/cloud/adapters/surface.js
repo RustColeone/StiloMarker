@@ -12,6 +12,7 @@ import { createManage } from "./manage.js";
 import { createOpening } from "./opening.js";
 import { createResume } from "./resume.js";
 import { addProjectCommands } from "./projects.js";
+import { saveUserState, uploadAsset } from "./api.js";
 import { createProviders } from "./providers.js";
 
 // What main.js attaches (cloud.attach(port)); each entry should move to an
@@ -73,6 +74,29 @@ export function createSurface({ port, shell, workspace, identity, sync, editor, 
   app.browserState = { provider: opfsProvider, intent: "open", mode: "open", multiSelect: false, checked: new Set(), pendingTransfer: null, path: "", entries: [], atRoot: true, selection: null };
   installCloudEvents(app);
   addProjectCommands(app, { shell, editor, sync });
+  // What Sync and the Editor need from the server's accounts and workspaces:
+  // signing in again when the account's token died (a server restart; only
+  // with a sign-in proven before, and null to let Sync stop retrying), an
+  // image's bytes uploaded, and the open tabs kept for this workspace.
+  sync.configure({
+    async reauthenticate() {
+      if (!identity.canRestore()) return null;
+      const token = sync.session().getConnectionInfo()?.token;
+      try {
+        await app.performLogin(app.settings.accountUsername, app.settings.accountPassword, {
+          silent: true, isCurrent: () => Boolean(token) && sync.session().getConnectionInfo()?.token === token
+        });
+        app.logDebug("action", "Re-authenticated after token expiry", app.settings.accountUsername);
+        return identity.token();
+      } catch (error) {
+        app.logDebug("response", "Re-authentication failed", error.message);
+        if (![401, 403].includes(error.status)) throw error;
+        return null;
+      }
+    },
+    uploadAsset
+  });
+  editor.openTabs.configure((ws, openFiles, activeFile) => saveUserState(app.settings.serverUrl, identity.token(), ws.team, ws.path, openFiles, activeFile));
   // The welcome page (no file open): Resume the last cloud workspace, and open
   // one from the server when signed in.
   const welcomeResume = document.getElementById("welcome-resume");

@@ -39,7 +39,7 @@ async def main():
                     response = await route.fetch(); body = await response.body()
                 else: body = file.read_bytes()
                 if path == '/app/main.js':
-                    body += b'\nwindow.__caretTest={controller,setActiveSourceFile,setEditorSelection,getEditorSelection,getViewState,setViewState:(...a)=>editorParts.setViewState(...a)};\n'
+                    body += b'\nwindow.__caretTest={controller,setActiveSourceFile,setEditorSelection,getEditorSelection:(...a)=>editorParts.getEditorSelection(...a),getViewState,setViewState:(...a)=>editorParts.setViewState(...a)};\n'
                 await route.fulfill(status=200, content_type=mimetypes.guess_type(str(file))[0] or 'application/octet-stream', body=body)
             else: await route.continue_()
         await context.route('**/*', route_request)

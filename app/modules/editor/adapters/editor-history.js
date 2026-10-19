@@ -167,9 +167,8 @@ export function installHistory(ed, app) {
     } finally {
       ed.typing = false;
     }
-    if (app.collaboration.isConnected() && app.workspaceMode === "synced") {
-      app.collaboration.scheduleTextPatch(getPath(app.controller.getProject(), activeFile.id), activeFile.content, nextContent);
-    }
+    // Typed: Workspace says so, and Sync sends the patch when the workspace is shared.
+    app.workspace.typed(getPath(app.controller.getProject(), activeFile.id), activeFile.content, nextContent);
     // Keep find matches/highlights accurate as the text changes underneath them.
     if (app.searchState.open) app.computeSearchMatches();
   }

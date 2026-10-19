@@ -81,8 +81,8 @@ test("main.js wires core feature symbols", async () => {
     ...await Promise.all(split.map((file) => readFile(resolveFromRoot(file), "utf8")))].join("\n");
   const symbols = [
     /shell\.registerOffline\(\)/,
-    /modules\.sync\.attach\(/,
-    /scheduleTextPatch/,
+    /modules\.sync\.session\(\)/,
+    /workspace\.typed\(/,
     /layout\.show-session/,
     /generate-module-map/,
     /editorView\.reset/,

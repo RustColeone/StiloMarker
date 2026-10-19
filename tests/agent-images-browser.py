@@ -78,7 +78,7 @@ async def main():
             if file.is_file():
                 body = inject_chat_internals(path, file.read_bytes())
                 if path == '/app/main.js':
-                    body += b'\nwindow.__imgTest = {controller, performLogin, syncState, ' + CHAT_HOOK.encode() + b'};\n'
+                    body += b'\nwindow.__imgTest = {controller, performLogin:(...a)=>modules.cloud.parts().performLogin(...a), syncState, ' + CHAT_HOOK.encode() + b'};\n'
                 await route.fulfill(status=200, content_type=mimetypes.guess_type(str(file))[0] or 'application/octet-stream', body=body)
             else:
                 await route.continue_()

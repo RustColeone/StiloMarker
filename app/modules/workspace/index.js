@@ -36,6 +36,11 @@
 //   location: where the open project lives (Sync configures it): key(project),
 //     assetSrc(project, node) (an image's address), resolveAsset(project, fromNodeId, url)
 //   events "saved": the user saved (Save, Ctrl+S); History takes a snapshot
+//   What the Editor and Sync share (adapters/shared.js): typed(path, previous, next),
+//     applyRemote(clientId, op), replace(project, { keepView }), editing.configure({ shows, apply }),
+//     presence (carets); events "text-changed", "remote-change", "remote-applied",
+//     "replacing", "replaced", "file-replaced", "own-caret", "other-caret", "carets-kept".
+//     holdSaving(busyNow): saving waits while busy (the Editor's IME composition)
 //   saving: schedule(project) after a change (this browser's copy, a local
 //       project's folder, auto-save), saveActiveFile() (Save), runAutoSave(why),
 //       scheduleAutoSave(), flush() (the browser copy, now), and
@@ -77,6 +82,7 @@ export { createProjectSaveQueue, savedFileIds, snapshotProject } from "./adapter
 import { createSaving } from "./adapters/saving.js";
 import { addStatusItems } from "./adapters/status-items.js";
 import { createLocation } from "./adapters/location.js";
+import { createShared } from "./adapters/shared.js";
 import { addWorkspaceCommands, reattachDeviceFolder, watchPage } from "./adapters/page-life.js";
 
 export default defineModule({
@@ -93,6 +99,11 @@ export default defineModule({
     };
     const types = ctx.use("file-types");
     const writer = createWriter({ types, emit: events.emit, read });
+    const location = createLocation();
+    // What the Editor and Sync (same level) share through here (adapters/shared.js).
+    const shared = createShared({ store: () => store, events });
+    writer.attach(shared.ports);
+    const savingHolds = new Set();
     const parts = ctx.registry({ validate: checkParts });
     // Saving: this browser's copy, a local project's folder, auto-save, Save.
     const saving = createSaving({ store: () => store, settings: ctx.use("shell").settings, log: (...parts) => ctx.log(...parts) });
@@ -128,6 +139,13 @@ export default defineModule({
         shell.render(next);
       });
       drawStatus(store.getProject());
+      // Saving's questions (in a page): busy while the Editor holds it (an IME
+      // composition), the workspace a save belongs to, shared or not, and which
+      // files the server has confirmed (Sync tells the location).
+      if (globalThis.window) {
+        saving.attach({ busy: () => [...savingHolds].some((busy) => busy()), scope: () => location.key(store.getProject()),
+          shared: () => location.shared(), confirmed: (project, ids) => location.confirmed(project, ids) });
+      }
       // A project opened from a folder on this device keeps saving to it after a reload.
       void reattachDeviceFolder({ store, settings: shell.settings, log: (...parts) => ctx.log(parts.join(" ")) });
       return store;
@@ -139,12 +157,17 @@ export default defineModule({
       patchOperation: writer.patchOperation,
       asPatch: writer.asPatch,
       fits: writer.fits,
-      attach: writer.attach,
+      typed: shared.typed,
+      applyRemote: shared.applyRemote,
+      replace: shared.replace,
+      editing: shared.editing,
+      presence: shared.presence,
+      holdSaving(busyNow) { savingHolds.add(busyNow); return () => savingHolds.delete(busyNow); },
       isStale: (error) => error instanceof StaleWriteError,
       events: { on: events.on },
       parts: { add: parts.add, of: (name) => parts.get(types.typeOf(name)?.id ?? "") ?? null },
       saving,
-      location: createLocation()
+      location
     };
   }
 });

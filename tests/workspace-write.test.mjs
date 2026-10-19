@@ -41,7 +41,7 @@ test("an edit lands beside other people's changes, and refuses to guess", () => 
   assert.equal(placeHunks(diffHunks(repeated, "a\nB\na\nb\n"), repeated, `x\n${repeated}${repeated}`), null);
 });
 
-// A real project in the module, with fake editing/sync ports beside it.
+// A real project in the module; what it announces stands in for Sync.
 async function harness(files) {
   const shell = { name: "shell", level: 1, uses: [], owns: {}, start: () => ({ settings: { autoSave: false, on() {} }, settingsDialog: { fields: { add() {} }, onOpen() {} }, statusBar: { add: () => ({ set() {} }) }, commands: { add() {} }, events: { on() {} }, render() {}, holdRendering() {} }) };
   const { workspace } = await startModules([shell, fileTypesModule, workspaceModule]);
@@ -50,10 +50,9 @@ async function harness(files) {
   const store = workspace.openProject(project);
   const contentOf = (path) => getNodeByPath(store.getProject(), path).content;
   const commits = [], replaced = [], written = [];
-  workspace.attach({
-    commit: (path, previous, next, source) => { commits.push({ path, previous, next, source }); store.updateContent(getNodeIdByPath(store.getProject(), path), next); },
-    replace: async (operation) => { replaced.push(operation); store.updateContent(getNodeIdByPath(store.getProject(), operation.path), operation.content); }
-  });
+  // What Sync would send: Workspace announces each committed text change and each file replaced whole.
+  workspace.events.on("text-changed", ({ path, previous, next, source }) => commits.push({ path, previous, next, source }));
+  workspace.events.on("file-replaced", ({ operation }) => replaced.push(operation));
   workspace.events.on("written", (event) => written.push(event));
   const set = (path, text) => store.updateContent(getNodeIdByPath(store.getProject(), path), text);
   return { workspace, store, contentOf, set, commits, replaced, written };

@@ -5,14 +5,13 @@ import workspaceModule from "./modules/workspace/index.js";
 import identityModule from "./modules/identity/index.js";
 import historyModule from "./modules/history/index.js";
 import extensionModules from "./extensions.js";
-import { createWorkspacePorts } from "./features/workspace-ports.js";
 import { APP_VERSION } from "./version.js";
-import { seedDefaultProject, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isImageFileName, isTextFileName } from "./domain/project-model.js";
+import { seedDefaultProject, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isImageFileName } from "./domain/project-model.js";
 import { loadProject } from "./modules/workspace/index.js";
 import syncModule from "./modules/sync/index.js";
 import { parsePersona, personaTemplate } from "./services/persona-service.js";
 import { signInSettings } from "./services/settings-service.js";
-import cloudModule, { saveUserState, uploadAsset } from "./modules/cloud/index.js";
+import cloudModule from "./modules/cloud/index.js";
 import modelsModule from "./modules/models/index.js";
 import chatsModule from "./modules/chats/index.js";
 import charactersModule from "./modules/characters/index.js";
@@ -215,22 +214,11 @@ const syncState = modules.sync.status;
 // Saving is Workspace's; what it cannot know is said here: an IME composition
 // under way, which workspace a save belongs to, and which files of a shared
 // workspace the server has confirmed (only those may lose their dirty mark).
-workspace.saving.attach({
-  busy: () => editorParts.isComposing(),
-  scope: () => settings.syncedProjectId || controller.getProject()?.id || "local", // whose saved positions: the cloud workspace's, else the project's
-  shared: () => syncMode.get().workspaceMode === "synced",
-  confirmed: (project, ids) => (syncMode.get().workspaceMode !== "synced" ? ids
-    : collaboration.isConnected?.() ? ids.filter((id) => !collaboration.hasUnsyncedText?.(getPath(project, id))) : [])
-});
 // The Editor's parts (source editor, find, autocomplete, links, tabs, preview),
 // created now and given what no module owns yet: each entry of this port should
 // find an owner or become an extension point (modules/editor/adapters/surface.js).
 var editorParts = modules.editor.attach({
-  get collaboration() { return collaboration; },
-  get workspaceMode() { return syncMode.get().workspaceMode; },
-  settings, elements, identity,
-  saveUserState: (ws, openFiles, activeFile) => saveUserState(settings.serverUrl, identity.token(), ws.team, ws.path, openFiles, activeFile),
-  isReadOnly: () => isReadOnlyWorkspace(), onDrop: (event) => handleEditorDrop(event)
+  settings, elements, onDrop: (event) => handleEditorDrop(event)
 });
 // The explorer and file actions, given what no module owns yet (modules/explorer/adapters/surface.js).
 var explorerParts = modules.explorer.attach({
@@ -261,27 +249,21 @@ registerPreviews(modules.editor.previews, {
 });
 // ---- The Editor's parts (the Editor module: adapters/surface.js) ----
 // Forwarders: code here still calls the editor's functions by name.
-function applyEditorEdit(...args) { return editorParts.applyEditorEdit(...args); }
 function getViewState(...args) { return editorParts.getViewState(...args); }
 function isPreviewableFileName(...args) { return editorParts.isPreviewableFileName(...args); }
 function redrawRemoteCursors(...args) { return editorParts.redrawRemoteCursors(...args); }
 function attachSelectionChangeListener(...args) { return editorParts.attachSelectionChangeListener(...args); }
 function clamp(...args) { return editorParts.clamp(...args); }
 function clearEditorDropCaret(...args) { return editorParts.clearEditorDropCaret(...args); }
-function getEditorSelection(...args) { return editorParts.getEditorSelection(...args); }
 function getEditorText(...args) { return editorParts.getEditorText(...args); }
 function handleIndentKeydown(...args) { return editorParts.handleIndentKeydown(...args); }
 function notifyEditorChanged(...args) { return editorParts.notifyEditorChanged(...args); }
-function onRemoteCursor(...args) { return editorParts.onRemoteCursor(...args); }
-function pruneRemoteCursors(...args) { return editorParts.pruneRemoteCursors(...args); }
-function queueExternalEditorSelection(...args) { return editorParts.queueExternalEditorSelection(...args); }
 function refreshFormatToolbar(...args) { return editorParts.refreshFormatToolbar(...args); }
 function renderEditorContent(...args) { return editorParts.renderEditorContent(...args); }
 function renderRemoteCursors(...args) { return editorParts.renderRemoteCursors(...args); }
 function scheduleOverviewRuler(...args) { return editorParts.scheduleOverviewRuler(...args); }
 function setEditorSelection(...args) { return editorParts.setEditorSelection(...args); }
 function syncEditorScroll(...args) { return editorParts.syncEditorScroll(...args); }
-function transformEditorSelection(...args) { return editorParts.transformEditorSelection(...args); }
 
 
 
@@ -323,97 +305,8 @@ function findNext(...args) { return editorParts.findNext(...args); }
 function findPrev(...args) { return editorParts.findPrev(...args); }
 function openFindBar(...args) { return editorParts.openFindBar(...args); }
 
-// True when this session only has read access to the open cloud workspace.
-function isReadOnlyWorkspace() {
-  return syncMode.get().workspaceMode === "synced" && syncState.role === "reader";
-}
-
-
-
-
-// The live session is Sync's; it is given what only the app can do, and
-// tells its news through events (modules/sync/index.js).
-const collaboration = modules.sync.attach({
-  async preserveLocalFiles(files) {
-    const store = historyParts.snapshotStore();
-    for (const [path, content] of files) {
-      await store.create(path, content, "Recovery: local edits before cloud reload");
-    }
-    showToast(`Local changes saved in Snapshots (${files.size} file(s)); loading the cloud version.`);
-  },
-  replaceProject(project) {
-    const view = collaboration.isReconnecting() ? currentWorkspaceView() : null;
-    controller.replaceProject(project);
-    if (view) restoreResumeState(view);
-  },
-  applyOperation(clientId, operation) {
-    try {
-      const activeFile = controller.getActiveFile();
-      const activePath = activeFile ? getPath(controller.getProject(), activeFile.id) : null;
-      if (
-        operation.type === "patch-file" &&
-        activeFile &&
-        activePath === operation.path &&
-        elements.editorContent === document.activeElement
-      ) {
-        const selection = getEditorSelection();
-        const insertedLength = String(operation.text ?? "").length;
-        queueExternalEditorSelection(
-          activeFile.id,
-          transformEditorSelection(selection, Number(operation.start), Number(operation.end), insertedLength)
-        );
-      }
-      controller.applySyncOperation(operation);
-      // After a remote patch lands, immediately advance that peer's cached
-      // cursor to the end of their insertion so it stays visible and correct
-      // without waiting for their next selectionchange broadcast.
-      if (operation.type === "patch-file" && clientId) {
-        editorParts.moveRemoteCursor(clientId, Number(operation.start) + String(operation.text ?? "").length);
-      }
-    } catch (error) {
-      ignore(error, "applying a remote change failed; reloading from the server");
-      collaboration?.reloadFromServer("Sync conflict — reloading from server.").catch(ignored("reloading after a failed remote change failed"));
-    }
-  },
-  // The account token died (server restart). Sign in again with the stored,
-  // previously-proven credentials so reconnect can continue; return null to let
-  // the runtime stop retrying instead of looping on a dead token.
-  async reauthenticate() {
-    if (!identity.canRestore()) return null;
-    const token = collaboration.getConnectionInfo()?.token;
-    try {
-      await performLogin(settings.accountUsername, settings.accountPassword, {
-        silent: true, isCurrent: () => Boolean(token) && collaboration.getConnectionInfo()?.token === token
-      });
-      logDebug("action", "Re-authenticated after token expiry", settings.accountUsername);
-      return identity.token();
-    } catch (error) {
-      logDebug("response", "Re-authentication failed", error.message);
-      if (![401, 403].includes(error.status)) throw error;
-      return null;
-    }
-  },
-  uploadAsset
-});
-// What happens as the session changes is Sync's (adapters/connection.js); the
-// editor drops the carets of people who left.
-modules.sync.events.on("status", () => pruneRemoteCursors(syncState.presence));
-modules.sync.events.on("remote-cursor", (event) => {
-  onRemoteCursor(event);
-});
-modules.sync.events.on("patch-confirmed", () => {
-  // Text confirmed by server — now safe to send the definitive cursor position.
-  const activeFile = controller.getActiveFile();
-  if (activeFile && collaboration.isConnected()) {
-    const sel = getEditorSelection();
-    // Path (not node id) so peers can match it — see renderRemoteCursors.
-    const path = getPath(controller.getProject(), activeFile.id);
-    collaboration.scheduleAwareness(path, sel.start, sel.end);
-  }
-});
-workspace.attach(createWorkspacePorts({ controller, collaboration, publishOperation, getEditorSelection, applyEditorEdit,
-  get workspaceMode() { return syncMode.get().workspaceMode; },
-  editorShowsWholeFile: () => !editorView.get().sourcePart && isTextFileName(controller.getActiveFile()?.name ?? "") }));
+// The live session (Sync's; it reaches the project and the Editor through Workspace).
+const collaboration = modules.sync.session();
 
 attachSelectionChangeListener();
 
@@ -462,10 +355,8 @@ function bindTabStripReorderTarget(...args) { return editorParts.bindTabStripReo
 function cachedWorkspaceView(...args) { return editorParts.cachedWorkspaceView(...args); }
 function clearPaneDropState(...args) { return editorParts.clearPaneDropState(...args); }
 function closeTabOverflowMenu(...args) { return editorParts.closeTabOverflowMenu(...args); }
-function currentWorkspaceView(...args) { return editorParts.currentWorkspaceView(...args); }
 function openFileFromExplorer(...args) { return editorParts.openFileFromExplorer(...args); }
 function openTabOverflowMenu(...args) { return editorParts.openTabOverflowMenu(...args); }
-function restoreResumeState(...args) { return editorParts.restoreResumeState(...args); }
 function setActiveSourceFile(...args) { return editorParts.setActiveSourceFile(...args); }
 function setPreviewFile(...args) { return editorParts.setPreviewFile(...args); }
 function showResumedFile(...args) { return editorParts.showResumedFile(...args); }
@@ -554,7 +445,6 @@ function openSettingsDialog(tab = "appearance") { shell.settingsDialog.open(tab)
 function handleAccountLogout(...args) { return cloudParts.handleAccountLogout(...args); }
 async function handleOpenWorkspace(...args) { return cloudParts.handleOpenWorkspace(...args); }
 async function openAccessEditor(...args) { return cloudParts.openAccessEditor(...args); }
-async function performLogin(...args) { return cloudParts.performLogin(...args); }
 async function pingCurrentServer(...args) { return cloudParts.pingCurrentServer(...args); }
 function renderHostTargets(...args) { return cloudParts.renderHostTargets(...args); }
 

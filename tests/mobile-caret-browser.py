@@ -59,7 +59,7 @@ async def main():
             if file.is_file():
                 body = file.read_bytes()
                 if path == '/app/main.js':
-                    body += b'\nwindow.__caretTest={controller,getEditorSelection,getViewState};\n'
+                    body += b'\nwindow.__caretTest={controller,getEditorSelection:(...a)=>editorParts.getEditorSelection(...a),getViewState};\n'
                 await route.fulfill(status=200,
                                     content_type=mimetypes.guess_type(str(file))[0] or 'application/octet-stream',
                                     body=body)

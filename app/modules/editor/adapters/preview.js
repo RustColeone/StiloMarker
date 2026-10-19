@@ -106,8 +106,8 @@ export function createPreview(app, previews) {
 
   function previewRenderKeyFor(project, file) {
     const structure = Object.values(project.nodes).map((node) => `${node.id}/${node.parentId ?? ""}/${node.name}`).join("|");
-    const token = app.workspaceMode === "synced" ? (app.collaboration.getConnectionInfo?.()?.token ?? "") : "";
-    return `${file.id}\u0000${file.name}\u0000${app.workspaceMode}\u0000${token}\u0000${structure}\u0000${file.content}`;
+    const where = app.workspace.location; // images' addresses depend on the connection
+    return `${file.id}\u0000${file.name}\u0000${where.shared()}\u0000${where.assetsKey()}\u0000${structure}\u0000${file.content}`;
   }
 
   function renderPreviewContent(target, project, file) {

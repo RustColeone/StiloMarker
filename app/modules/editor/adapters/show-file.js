@@ -54,7 +54,7 @@ export function createShowFile(app, composing) {
     // A reader may open and read the project but never write to it (the server
     // refuses their operations regardless; this stops the UI inviting edits that
     // would only bounce back).
-    const readOnly = app.isReadOnly();
+    const readOnly = app.workspace.location.readOnly();
     elements.editorContent.contentEditable = isTextFile && !readOnly ? "true" : "false";
     elements.editorContent.dataset.readonly = readOnly ? "true" : "false";
     elements.editorContent.dataset.placeholder = isTextFile

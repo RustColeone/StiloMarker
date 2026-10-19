@@ -308,18 +308,12 @@ export function installCursors(ed, app) {
     }, true);
     document.addEventListener("selectionchange", () => {
       if (document.activeElement === app.elements.editorContent && !ed.rendering && !app.editorIsComposing) app.rememberEditorSelection();
-      if (!app.collaboration.isConnected()) return;
       const activeFile = app.controller.getActiveFile();
       if (!activeFile) return;
       const sel = ed.getEditorSelection();
-      // Suppress cursor broadcast while a text patch is pending for this file —
-      // peers would see a stale position (before the text arrives).  The cursor
-      // is sent automatically once the patch is confirmed by the server.
-      const path = getPath(app.controller.getProject(), activeFile.id);
-      if (app.collaboration.hasPendingPatch(path)) return;
-      // Broadcast the PATH as the file identifier so peers (who may hold a different
-      // node id for the same file) can match it — see renderRemoteCursors.
-      app.collaboration.scheduleAwareness(path, sel.start, sel.end);
+      // My caret (Workspace's presence; Sync shows it to the others). By PATH,
+      // since others may hold another node id for the same file.
+      app.workspace.presence.setOwn({ path: getPath(app.controller.getProject(), activeFile.id), start: sel.start, end: sel.end });
     });
   }
 

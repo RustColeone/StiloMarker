@@ -17,9 +17,7 @@
     "image extension list": [
       "server/mdnotes_server.py"
     ],
-    "operation patch-file": [
-      "app/main.js"
-    ],
+    "operation patch-file": [],
     "operation replace-project": [],
     "operation update-file": [
       "server/mdnotes_server.py"
@@ -27,5 +25,5 @@
     "sync protocol number": []
   },
   "uncoveredTwins": 0,
-  "mainGetters": 4
+  "mainGetters": 1
 }

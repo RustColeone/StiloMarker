@@ -81,12 +81,16 @@ export default defineModule({
     // The source editor, find, autocomplete, links, the tab strips and the preview:
     // created once main.js attaches what no module owns yet (surface.js, PORT).
     let parts = null;
+    // Keeping the open tabs on the server for a cloud workspace: Cloud says how (configure).
+    let saveOpenTabs = async () => {};
+    const openTabsStore = { save: (...args) => saveOpenTabs(...args), configure(save) { saveOpenTabs = save; } };
     function attach(port) {
       if (parts) throw new Error("editor: already attached");
-      parts = createSurface({ port, view, marks, paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), welcome: open(welcome), previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars),
+      parts = createSurface({ port, view, marks, identity: ctx.use("identity"), openTabsStore, paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), welcome: open(welcome), previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars),
         workspace: ctx.use("workspace"), shell: ctx.use("shell") });
       return parts;
     }
-    return { previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars), paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), welcome: open(welcome), marks, view, attach, parts: () => parts };
+    return { previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars), paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), welcome: open(welcome), marks,
+      openTabs: { configure: openTabsStore.configure }, view, attach, parts: () => parts };
   }
 });

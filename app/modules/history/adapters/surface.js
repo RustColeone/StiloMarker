@@ -111,6 +111,12 @@ export function createSurface({ port, shell, workspace, editor, sync }) {
   shell.commands.add({ id: "history.create-snapshot", title: "Create Snapshot", menu: { id: "create", group: 1, order: 1 }, run: () => void snapshots.createSnapshotNow() });
   shell.commands.add({ id: "history.snapshots", title: "Snapshots…", menu: { id: "edit", group: 0, order: 2 }, run: () => void openSnapshotsDialog() });
   shell.commands.add({ id: "history.workspace-history", title: "Workspace History…", menu: { id: "edit", group: 0, order: 3 }, run: () => void openWorkspaceHistory() });
+  // Before a reload replaces local edits with the cloud's copy (Sync's), they are kept as snapshots.
+  sync.keepers.add(async (files) => {
+    const store = snapshots.snapshotStore();
+    for (const [path, content] of files) await store.create(path, content, "Recovery: local edits before cloud reload");
+    shell.toast(`Local changes saved in Snapshots (${files.size} file(s)); loading the cloud version.`);
+  });
   // Save (Workspace's) marks a point to compare against later: a snapshot.
   workspace.events.on("saved", () => void snapshots.createSnapshotNow());
   // A project without a server never opens a cloud workspace (which counts them),

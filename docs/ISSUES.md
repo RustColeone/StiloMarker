@@ -69,6 +69,17 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.80: the Editor and Sync meet in Workspace
+
+Step S4e-4b1. Nothing changes for users.
+
+- The Editor and Sync, which may not call each other, now share what they
+  must through Workspace: typing goes out as patches, others' changes and
+  carets come in, a reload keeps the view, and carets are a small presence
+  model there. `main.js` no longer carries any of it.
+- The write-path, comments, session-recovery and editing browser tests (two
+  browsers on one workspace among them) pass through the new route.
+
 ### v0.1.79: Shell owns the log panel
 
 Step S4e-4a. Nothing changes for users.

@@ -25,15 +25,15 @@ import { createCharCount } from "./char-count.js";
 import { createPreviewPane } from "./preview-pane.js";
 import { installFrameParts } from "./frame-parts.js";
 import { createDebugTrace } from "./debug-trace.js";
+import { installTogether } from "./together.js";
 
 // What main.js attaches (editor.attach(port)); each entry should move to an
 // owner, or become an extension point, and leave this list.
 export const PORT = [
-  "collaboration", "workspaceMode", "settings", "elements", "identity", "saveUserState",
-  "isReadOnly", "onDrop"
+  "settings", "elements", "onDrop"
 ];
 
-export function createSurface({ port, view, marks, paneViews, completions, lineNotes, welcome, previews, highlighters, toolbars, workspace, shell }) {
+export function createSurface({ port, view, marks, paneViews, completions, lineNotes, welcome, identity, openTabsStore, previews, highlighters, toolbars, workspace, shell }) {
   const missing = PORT.filter((name) => !(name in port));
   if (missing.length) throw new Error(`editor.attach: the port lacks ${missing.join(", ")}`);
   const composing = { now: false }; // an IME composition is under way
@@ -101,6 +101,9 @@ export function createSurface({ port, view, marks, paneViews, completions, lineN
     // key the saved positions are kept under, and an image's address.
     scope: () => workspace.location.key(workspace.project()?.getProject()),
     imageSrcFor: (project, node) => workspace.location.assetSrc(project, node),
+    identity,
+    // The open tabs kept on the server for a cloud workspace (Cloud says how: openTabsStore).
+    saveUserState: (...args) => openTabsStore.save(...args),
     // The frame (Shell's): closing the phone's explorer drawer, showing the preview pane.
     setMobileExplorerOpen: (open) => shell.frame.setExplorerOpen(open),
     togglePreview: () => shell.frame.toggle("preview"),
@@ -114,6 +117,8 @@ export function createSurface({ port, view, marks, paneViews, completions, lineN
   };
   Object.defineProperty(app, "controller", { get: () => workspace.project(), enumerable: true });
   Object.defineProperty(app, "editorIsComposing", { get: () => composing.now, enumerable: true });
+  // Shared or this tab's own (Workspace's location, which Sync tells).
+  Object.defineProperty(app, "workspaceMode", { get: () => (workspace.location.shared() ? "synced" : "private"), enumerable: true });
   for (const name of PORT) {
     Object.defineProperty(app, name, { get: () => port[name], enumerable: true });
   }
@@ -178,6 +183,7 @@ export function createSurface({ port, view, marks, paneViews, completions, lineN
     app.renderLinksPanel(project, activeFile);
   });
   installFrameParts(app, shell);
+  installTogether(app, workspace, composing);
   // Where the reader was, kept when the page hides or goes (resume.js, tabs.js).
   const keepView = () => { app.captureViewState(); app.cacheWorkspaceView(); };
   window.addEventListener("pagehide", keepView);
