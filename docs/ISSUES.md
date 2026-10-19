@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-19 · release `v0.1.89` (not deployed; v0.1.88 is live)
+Last updated: 2026-10-19 · release `v0.1.90` (not deployed; v0.1.88 is live)
 
 ---
 
@@ -68,6 +68,18 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.90: a first visit's preview shows the welcome file
+
+Found while starting step 5; old (v0.1.60 had it too).
+
+- On a first visit, the source editor showed the welcome file but the
+  preview said "No preview file selected" (on the phone, Preview stayed
+  empty) until the first edit or a reload. The welcome template replaces the
+  starting project, and the app drew it before the editor had switched its
+  view to the new project; nothing drew again. It draws again now. A new
+  browser test (`first-visit-browser.py`) visits with nothing kept, on a
+  desktop and a phone.
 
 ### v0.1.89: an ended session is refused, not a storage failure
 

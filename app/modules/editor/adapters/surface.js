@@ -204,7 +204,12 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
 
   // What the editor shows starts from the open project, and starts over with a fresh one (Workspace's template).
   view.reset(workspace.project().getProject());
-  workspace.events.on("started-over", ({ project }) => view.reset(project));
+  // The project was replaced (and drawn) before this: draw again with the new view,
+  // or the preview stays empty until the first edit.
+  workspace.events.on("started-over", ({ project }) => {
+    view.reset(project);
+    shell.render(project);
+  });
   app.attachSelectionChangeListener();
   window.addEventListener("resize", app.scheduleOverviewRuler);
   // Files and tabs dropped on the panes and their tab strips; tabs reordered on a strip.
