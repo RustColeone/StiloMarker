@@ -14,7 +14,9 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
-from mdnotes_server import EDIT_SESSION_GAP_SECONDS, AccountStore, WorkspaceRegistry, build_server  # noqa: E402
+from mdnotes_server import EDIT_SESSION_GAP_SECONDS, AccountStore, build_server  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from helpers.app import App  # noqa: E402
 from stilo.modules.sync import VERSION as SYNC_LEVEL, open_live  # noqa: E402
 from stilo.modules.workspace import bump_edit_counters, default_project, node_id_by_path  # noqa: E402
 from stilo.modules.identity import ACCESS_FILE  # noqa: E402
@@ -224,7 +226,7 @@ def run_broker_selftest(state_file):
         "bob": {"password": "pw", "teams": ["qa"]},
         "carol": {"password": "pw", "teams": ["other"]},
     }
-    _reg = WorkspaceRegistry("2468", state_file, master_pin="1367", accounts=_acct, data_dir=_data)
+    _reg = App("2468", state_file, master_pin="1367", accounts=_acct, data_dir=_data)
     _alice = _reg.identity.login("alice", "pw")["token"]
     _bob = _reg.identity.login("bob", "pw")["token"]
     _alice_id = {"username": "alice", "teams": ["qa"]}

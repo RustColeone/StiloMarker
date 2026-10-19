@@ -25,6 +25,7 @@ every 15 seconds the sessions whose lease ran out are closed):
                  old, new}, "dropped" {workspace_id} (a project closed for good)
     open_live    as above
 """
+from pathlib import Path
 from types import SimpleNamespace
 
 from stilo.kernel import define_module
@@ -64,6 +65,10 @@ def start(ctx):
                           projects=ctx.use("projects"), identity=ctx.use("identity"), make=make, emit=events.emit)
     add_routes(transport, directory, VERSION)
     ctx.every(LEASE_SWEEP_SECONDS, directory.expire_leases)
+    if ctx.config.get("state_file") is not None:
+        transport.keep_private(Path(ctx.config["state_file"]).name)  # the PIN session's project
+    # The ping: the sync level a browser must have, and that sessions can be hosted for guests.
+    transport.ping.add({"id": "sync", "fields": lambda: {**announce(), "hosting": True}})
     return SimpleNamespace(directory=directory, places=Places(ctx.use("projects"), directory),
                            events=SimpleNamespace(on=events.on), open_live=make)
 

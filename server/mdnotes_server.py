@@ -1,290 +1,66 @@
+"""The Stilo Marker server: read the settings (command line and environment),
+start the modules (server/stilo/modules; docs/ARCHITECTURE.md) and listen.
+Everything the server does is a module's."""
 import argparse
-import gzip
 import json
-import mimetypes
 import os
-import posixpath
-import threading
-from functools import partial
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import sys
 from pathlib import Path
-from urllib.parse import urlparse
-
 
 # Support both the standalone server and importlib-based test runners.
-import sys
-_mcp_module_dir = str(Path(__file__).resolve().parent)
-if _mcp_module_dir not in sys.path:
-    sys.path.insert(0, _mcp_module_dir)
-from stilo.kernel import start_modules
-from stilo.modules import (assistant as assistant_module, characters as characters_module, cloud as cloud_module, file_types as file_types_module,
-                           identity as identity_module, models as models_module, projects as projects_module, sync as sync_module, history as history_module, comments as comments_module, chats as chats_module, transport as transport_module, workspace as workspace_module)
-from stilo.kernel.log import log as _log
-from stilo.modules.sync import announce as sync_announce
-from stilo.modules.identity import ACCOUNT_FILE, AccountStore
+_SERVER_DIR = str(Path(__file__).resolve().parent)
+if _SERVER_DIR not in sys.path:
+    sys.path.insert(0, _SERVER_DIR)
+from stilo.kernel import start_modules  # noqa: E402
+from stilo.kernel.log import log as _log  # noqa: E402
+from stilo.modules import (assistant, characters, chats, cloud, comments, file_types, history, identity, models,  # noqa: E402
+                           projects, sync, transport, workspace)
+from stilo.modules.identity import ACCOUNT_FILE, AccountStore  # noqa: E402
 
-
-def start_server_modules(config=None):
-    """The server's modules (docs/ARCHITECTURE.md), started with the server's
-    settings (config); more join as the restructure moves code."""
-    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE, identity_module.MODULE, models_module.MODULE, projects_module.MODULE, sync_module.MODULE, characters_module.MODULE, history_module.MODULE, comments_module.MODULE, chats_module.MODULE, assistant_module.MODULE, cloud_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"), config=config)
-
+MODULES = [transport, file_types, workspace, identity, models, projects, sync, characters, history, comments, chats, assistant, cloud]
+ROOT = Path(__file__).resolve().parents[1]   # the app's files, served as they are
 
 
 def _read_int_env(name: str, default: int, minimum: int, maximum: int) -> int:
-    raw = os.environ.get(name, "")
     try:
-        value = int(raw)
+        value = int(os.environ.get(name, ""))
     except (TypeError, ValueError):
         return default
     return max(minimum, min(maximum, value))
 
 
-# Human-facing release version comes from the package manifest. The sync
-# compatibility level is Sync's (protocol/sync.contract.json).
-APP_VERSION = json.loads((Path(__file__).resolve().parents[1] / "package.json").read_text(encoding="utf-8"))["version"]
+# The release, from the package manifest (the sync level is Sync's).
+APP_VERSION = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["version"]
 
-# How often live workspaces that changed are backed up (see WorkspaceRegistry
-# backups). Each active day keeps one daily backup, refreshed on each sweep.
+# How often the open projects that changed are backed up (History's sweep).
 BACKUP_SWEEP_SECONDS = _read_int_env("MDNOTES_BACKUP_SWEEP_SECONDS", 15 * 60, 60, 24 * 3600)
 
-# A writing "sitting": edits to one file separated by less than this gap belong
-# to the same session. It is the E in the S.E.N version label — snapshots you
-# cut, sittings since then, edits in this sitting. Owned by whoever hosts the
-# document (this server, or the sharer in a guest-hosted session) so everyone in
-# the room shares one session number instead of each peer counting its own.
+# A writing "sitting": edits to one file less than this apart are one session
+# (the E in the S.E.N version label). The host of the document counts them,
+# so everyone in the room shares one number.
 EDIT_SESSION_GAP_SECONDS = _read_int_env("MDNOTES_EDIT_SESSION_GAP", 600, 30, 86_400)
 
 
-class WorkspaceRegistry:
-    """The server's modules, started together with the server's settings, as code
-    and tests from before the restructure reach them. Goes in step S4s-6
-    (docs/ARCHITECTURE.md)."""
-
-    def __init__(self, pin: str, legacy_state_file: Path, master_pin: str | None = None,
-                 accounts: "AccountStore | None" = None, data_dir: Path | None = None, trash_days: int = 30, agent=None):
-        self.modules = start_server_modules({"pin": pin, "master_pin": master_pin, "state_file": legacy_state_file,
-                                             "accounts": accounts, "data_dir": data_dir, "trash_days": trash_days,
-                                             "edit_gap": EDIT_SESSION_GAP_SECONDS, "backup_sweep_seconds": BACKUP_SWEEP_SECONDS,
-                                             "agent": agent})
-        self.identity = self.modules["identity"]
-        self.projects = self.modules["projects"]
-        self.directory = self.modules["sync"].directory
-        self.history = self.modules["history"]
-        self.comments = self.modules["comments"]
-        self.chats = self.modules["chats"]
-        self.cloud = self.modules["cloud"]
-        self.assistant = self.modules["assistant"]
-        self.data_dir = data_dir
-
-    def backup_sweep(self, now=None):
-        """Daily backups for every live workspace that changed since its last one (History's)."""
-        return self.history.sweep(now)
-
-    # ---- Sync's directory, as code and tests from before the move call it ------
-    brokers = property(lambda self: self.directory.workspaces)
-    token_workspace = property(lambda self: self.directory.token_workspace)
-    default_broker = property(lambda self: self.directory.default)
-
-    def open_workspace(self, *args, **kwargs):
-        return self.directory.open_workspace(*args, **kwargs)
-
-    def connect(self, *args, **kwargs):
-        return self.directory.connect(*args, **kwargs)
-
-    def expire_leases(self) -> int:
-        return self.directory.expire_leases()
-
-    def close_session(self, token: str) -> None:
-        self.directory.close_session(token)
-
-    def broker_for_token(self, token: str):
-        return self.directory.broker_for_token(token)
+def settings(pin, state_file, master_pin=None, accounts=None, data_dir=None, trash_days=30, static_root=ROOT, agent=None) -> dict:
+    """What the modules are started with (ctx.config)."""
+    return {"pin": pin, "master_pin": master_pin, "state_file": state_file, "accounts": accounts, "data_dir": data_dir,
+            "trash_days": trash_days, "edit_gap": EDIT_SESSION_GAP_SECONDS, "backup_sweep_seconds": BACKUP_SWEEP_SECONDS,
+            "static_root": static_root, "app_version": APP_VERSION, "agent": agent}
 
 
-
-# Compressed static files, keyed by path and invalidated when the file changes
-# on disk, so a release is never served stale bytes. Bounded: it only ever holds
-# the app shell (~1MB raw), but a stray tree of text files must not grow it.
-_GZIP_CACHE: dict[str, tuple[int, int, bytes]] = {}
-_GZIP_CACHE_LOCK = threading.Lock()
-_GZIP_CACHE_MAX = 256
+def start_server_modules(config=None):
+    """The server's modules, started with these settings: their APIs by name, and stop()."""
+    return start_modules([module.MODULE for module in MODULES], config=config,
+                         log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"))
 
 
-def _gzip_static(path: Path, content: bytes) -> bytes:
-    try:
-        stat = path.stat()
-        key, stamp = str(path), (stat.st_mtime_ns, stat.st_size)
-    except OSError:
-        return gzip.compress(content, compresslevel=6, mtime=0)
-    with _GZIP_CACHE_LOCK:
-        hit = _GZIP_CACHE.get(key)
-        if hit and (hit[0], hit[1]) == stamp:
-            return hit[2]
-    # mtime=0: identical bytes for identical files, whichever worker compressed them.
-    packed = gzip.compress(content, compresslevel=6, mtime=0)
-    with _GZIP_CACHE_LOCK:
-        if len(_GZIP_CACHE) >= _GZIP_CACHE_MAX:
-            _GZIP_CACHE.clear()
-        _GZIP_CACHE[key] = (stamp[0], stamp[1], packed)
-    return packed
-
-
-class MDNotesRequestHandler(BaseHTTPRequestHandler):
-    server_version = "MDNotesServer/0.1"
-
-    def __init__(self, *args, registry: WorkspaceRegistry, static_root: Path, transport, **kwargs):
-        self.transport = transport
-        self.registry = registry
-        self.static_root = static_root
-        super().__init__(*args, **kwargs)
-
-    def log_message(self, format, *args):
-        return
-
-    def _log_request(self, status: int, detail: str = ""):
-        """Log HTTP requests with method, path, status and optional detail."""
-        indicator = "✓" if status < 400 else "✗"
-        tag = "HTTP"
-        line = f"{indicator} {self.command} {self.path}  →  {status}"
-        if detail:
-            line += f"  ({detail})"
-        _log(tag, line)
-
-    def do_OPTIONS(self):
-        self.send_response(HTTPStatus.NO_CONTENT)
-        self._send_cors_headers()
-        self.end_headers()
-
-    def do_GET(self):
-        parsed = urlparse(self.path)
-        if not self.transport.handle(self, "GET", parsed):
-            return self._serve_static(parsed.path)
-
-    def do_POST(self):
-        parsed = urlparse(self.path)
-        if not self.transport.handle(self, "POST", parsed):
-            self._write_json(HTTPStatus.NOT_FOUND, {"message": "Not found"})
-
-    def _send_cors_headers(self):
-        self.transport.send_cors(self, urlparse(self.path).path)
-
-    def _write_json(self, status, payload):
-        self.transport.write_json(self, status, payload, urlparse(self.path).path)
-
-    # Server-side files that live under the repo (== static root) but must never
-    # be handed out over HTTP: collaboration state, account whitelist, secrets,
-    # the Python source, the virtualenv and any dotfiles. Matched on the first
-    # path segment or the basename so both dirs and specific files are covered.
-    _STATIC_DENY_SEGMENTS = frozenset({"server", "data", "venv", ".git", "__pycache__"})
-    _STATIC_DENY_SUFFIXES = (".env", ".py", ".pyc")
-    _STATIC_DENY_NAMES = frozenset({ACCOUNT_FILE, "session-state.json", "test-session-state.json"})
-
-    def _is_denied_static(self, safe_path: str) -> bool:
-        if not safe_path:
-            return False
-        segments = safe_path.split("/")
-        if segments[0] in self._STATIC_DENY_SEGMENTS or any(seg.startswith(".") for seg in segments):
-            return True
-        base = segments[-1]
-        return base in self._STATIC_DENY_NAMES or base.endswith(self._STATIC_DENY_SUFFIXES)
-
-    def _serve_static(self, request_path: str):
-        relative = request_path or "/"
-        if relative == "/":
-            relative = "/index.html"
-
-        safe_path = posixpath.normpath(relative).lstrip("/")
-        # Block sensitive server-side files before touching the filesystem. Fall
-        # back to index.html (SPA behaviour) rather than confirming existence.
-        if self._is_denied_static(safe_path):
-            safe_path = "index.html"
-        candidate = (self.static_root / safe_path).resolve()
-        if not str(candidate).startswith(str(self.static_root.resolve())) or not candidate.exists() or candidate.is_dir():
-            candidate = self.static_root / "index.html"
-
-        content = candidate.read_bytes()
-        content_type, _ = mimetypes.guess_type(str(candidate))
-        content_type = content_type or "application/octet-stream"
-        # Text assets were sent raw: ~930KB of JavaScript per first load or per
-        # release, ~4x what gzip makes it. Compress when the browser accepts it.
-        encoded = None
-        if self._is_compressible(content_type, len(content)) and self._accepts_gzip():
-            encoded = _gzip_static(candidate, content)
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Vary", "Accept-Encoding")  # caches must keep the variants apart
-        if encoded is not None:
-            content = encoded
-            self.send_header("Content-Encoding", "gzip")
-        self.send_header("Content-Length", str(len(content)))
-        self.end_headers()
-        self.wfile.write(content)
-
-    _COMPRESSIBLE_TYPES = ("text/", "application/javascript", "application/json", "application/manifest+json", "image/svg+xml")
-
-    @classmethod
-    def _is_compressible(cls, content_type: str, size: int) -> bool:
-        # Tiny files gain nothing; images, fonts and archives are compressed already.
-        return size >= 1024 and content_type.startswith(cls._COMPRESSIBLE_TYPES)
-
-    def _accepts_gzip(self) -> bool:
-        """True when Accept-Encoding allows gzip (an explicit q=0 refuses it)."""
-        for part in (self.headers.get("Accept-Encoding") or "").split(","):
-            name, _, params = part.strip().partition(";")
-            if name.strip().lower() not in ("gzip", "*"):
-                continue
-            quality = 1.0
-            for param in params.split(";"):
-                key, _, value = param.strip().partition("=")
-                if key.strip().lower() == "q":
-                    try:
-                        quality = float(value)
-                    except ValueError:
-                        quality = 0.0
-            return quality > 0
-        return False
-
-
-# Routes from before the restructure, in the order the if-chains checked them.
-# Each writes its own response; Transport only finds it. Modules take theirs
-# over as they move, and this list shrinks (docs/ARCHITECTURE.md).
-
-
-def build_server(host: str, port: int, pin: str, static_root: Path, state_file: Path, master_pin: str | None = None, agent=None, whitelist_file: Path | None = None, data_dir: Path | None = None, trash_days: int = 30):
-    accounts = AccountStore(whitelist_file)
-    registry = WorkspaceRegistry(pin, state_file, master_pin=master_pin, accounts=accounts, data_dir=data_dir, trash_days=trash_days,
-                                 agent=agent)
-    modules = registry.modules
-    transport = modules["transport"]
-    transport.add_route("GET", "/api/ping", lambda request: {
-            "message": "pong",
-            "server": "mdnotes",
-            "appVersion": APP_VERSION,
-            **sync_announce(),
-            "accounts": registry.identity.enabled,  # capability flag for the Login UI
-            "hosting": True,  # this backend supports ephemeral guest-PIN hosting
-        })
-    handler = partial(MDNotesRequestHandler, registry=registry, static_root=static_root, transport=transport)
-
-    class QuietThreadingHTTPServer(ThreadingHTTPServer):
-        """Suppress noisy client-disconnect tracebacks on Windows."""
-        def handle_error(self, request, client_address):
-            import sys
-            exc = sys.exc_info()[1]
-            if isinstance(exc, (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, OSError)):
-                return
-            super().handle_error(request, client_address)
-
-    class ServerWithModules(QuietThreadingHTTPServer):
-        def server_close(self):
-            # The modules stop: the last backups (a restart must not lose the
-            # day's state), Chats' last copies, their timers.
-            registry.modules.stop()
-            super().server_close()
-
-    server = ServerWithModules((host, port), handler)
+def build_server(host: str, port: int, pin: str, static_root: Path, state_file: Path, master_pin: str | None = None, agent=None,
+                 whitelist_file: Path | None = None, data_dir: Path | None = None, trash_days: int = 30):
+    """The modules started and listening: serve_forever(), shutdown(), server_close()
+    (which stops the modules first: the last backups, their timers), .modules."""
+    modules = start_server_modules(settings(pin, state_file, master_pin, AccountStore(whitelist_file), data_dir, trash_days,
+                                            static_root, agent))
+    server = modules["transport"].listen(host, port, on_close=modules.stop)
     server.modules = modules
     return server
 

@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('mdnotes_server', ROOT / 'server/mdnotes_server.py')
 server = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(server)
+from helpers.app import App  # noqa: E402
 from stilo.modules.workspace import default_project  # noqa: E402
 DAY = 86400
 PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
@@ -25,7 +26,7 @@ class WorkspaceBackupTests(unittest.TestCase):
         accounts = server.AccountStore(None)
         accounts.users = {'alice': {'password': 'pw', 'teams': ['qa']}, 'bob': {'password': 'pw', 'teams': ['qa']},
                           'carol': {'password': 'pw', 'teams': ['other']}}
-        self.reg = server.WorkspaceRegistry('2468', Path(self.tmp.name) / 'state.json', accounts=accounts, data_dir=data)
+        self.reg = App('2468', Path(self.tmp.name) / 'state.json', accounts=accounts, data_dir=data)
         self.alice = self.reg.identity.login('alice', 'pw')['token']
         self.reg.projects.create_workspace(self.alice, 'qa', 'Novel')
         self.path = 'workspaces/Novel'
@@ -145,9 +146,8 @@ class WorkspaceBackupTests(unittest.TestCase):
     def test_shutdown_takes_a_final_backup(self):
         httpd = server.build_server('127.0.0.1', 0, '2468', ROOT, Path(self.tmp.name) / 's.json',
                                     data_dir=Path(self.tmp.name) / 'data')
-        httpd.RequestHandlerClass.keywords['registry'].brokers.update(self.reg.brokers)
-        reg = httpd.RequestHandlerClass.keywords['registry']
-        reg.data_dir = self.reg.data_dir
+        # The server's own modules, over the same data folder, with this test's open project.
+        httpd.modules['sync'].directory.workspaces.update(self.reg.brokers)
         self.op({'type': 'create-file', 'parentPath': '', 'name': 'late.md', 'content': 'written just before a restart'})
         httpd.server_close()
         names = {f['path'] for b in self.reg.history.list_backups(self.alice, 'qa', self.path)['backups']

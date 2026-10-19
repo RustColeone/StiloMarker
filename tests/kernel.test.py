@@ -211,7 +211,7 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(last, {"type": "error", "status": 400, "message": "bad request"})
 
     def test_cors_headers_follow_the_route(self):
-        self.t.add_legacy_route("POST", "/api/chat/mcp", lambda h, p: None, allow_headers=("Authorization",))
+        self.t.add_route("POST", "/api/chat/mcp", lambda request: {}, allow_headers=("Authorization",))
         handler = FakeHandler()
         self.t.send_cors(handler, "/api/chat/mcp")
         self.assertEqual(handler.sent["Access-Control-Allow-Headers"], "Content-Type, Authorization")

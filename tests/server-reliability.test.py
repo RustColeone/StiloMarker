@@ -11,6 +11,7 @@ from unittest.mock import patch
 spec = importlib.util.spec_from_file_location('mdnotes_server', Path(__file__).resolve().parents[1] / 'server/mdnotes_server.py')
 server = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(server)
+from helpers.app import App  # noqa: E402
 from stilo.modules.sync import open_live  # noqa: E402
 from stilo.modules.workspace import default_project, node_id_by_path  # noqa: E402
 import os  # noqa: E402
@@ -322,7 +323,7 @@ class ReliabilityTests(unittest.TestCase):
             self.broker.apply_operation(reader, {'type': 'create-folder', 'parentPath': '', 'name': 'x'})
 
     def test_lease_sweep_removes_a_session_even_without_a_stream(self):
-        registry = server.WorkspaceRegistry('2468', Path(self.tmp.name) / 'default.json')
+        registry = App('2468', Path(self.tmp.name) / 'default.json')
         session = registry.connect(None, '2468', 'Phone', leased=True)
         token = session['token']
         broker = registry.broker_for_token(token)
@@ -335,7 +336,7 @@ class ReliabilityTests(unittest.TestCase):
             broker.get_state(token)
 
     def test_explicit_leave_clears_presence_and_token_mapping(self):
-        registry = server.WorkspaceRegistry('2468', Path(self.tmp.name) / 'default.json')
+        registry = App('2468', Path(self.tmp.name) / 'default.json')
         session = registry.connect(None, '2468', 'Phone')
         token = session['token']
         broker = registry.broker_for_token(token)

@@ -1,0 +1,9 @@
+{
+  "about": "Transport's network message (rule 7): the server's ping. Transport answers who the server is and its release; each module adds what it can do (Identity: accounts; Sync: the sync level and hosting for guests). The server half serves it (server/stilo/modules/transport/__init__.py); the browser's Cloud calls it (Settings → Collaboration's server line).",
+  "module": "transport",
+  "browser": "cloud",
+  "version": 1,
+  "routes": [
+    { "method": "GET", "path": "/api/ping", "reply": ["message", "server", "appVersion", "accounts", "minSyncVersion", "transport", "hosting"] }
+  ]
+}

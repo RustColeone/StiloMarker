@@ -3,7 +3,8 @@
   "level": 1,
   "uses": [],
   "owns": {
-    "registries": ["routes"],
-    "http": ["route matching", "CORS headers", "JSON responses", "errors to status codes"]
+    "registries": ["routes", "ping"],
+    "http": ["the listener", "route matching", "CORS headers", "JSON responses", "errors to status codes", "the app's files"],
+    "routes": ["/api/ping"]
   }
 }

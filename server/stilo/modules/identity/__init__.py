@@ -11,8 +11,8 @@ Static, for code from before the restructure:
 API (started by the kernel; config: accounts (an AccountStore), data_dir):
     the Identity (service/identity.py): require(token), require_team(...),
     access(...), may_open(...), role(...), can(...), claim(...), team_members(team)...
-    It serves the sign-in route; who may open a project is read and set
-    through Projects' routes.
+    It serves the sign-in route (and the ping says whether there are accounts);
+    who may open a project is read and set through Projects' routes.
 """
 from types import SimpleNamespace
 
@@ -36,7 +36,11 @@ def open_identity(accounts: AccountStore | None = None, data_dir=None) -> Identi
 
 def start(ctx):
     identity = open_identity(ctx.config.get("accounts"), ctx.config.get("data_dir"))
-    add_routes(ctx.use("transport"), identity)
+    transport = ctx.use("transport")
+    add_routes(transport, identity)
+    transport.keep_private(ACCOUNT_FILE)  # passwords: never served, wherever it lies
+    # The ping says whether this server has accounts (the browser shows sign-in).
+    transport.ping.add({"id": "identity", "fields": lambda: {"accounts": identity.enabled}})
     return identity
 
 

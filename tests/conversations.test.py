@@ -16,6 +16,7 @@ from stilo.modules.chats.adapters import store as chats  # noqa: E402
 spec = importlib.util.spec_from_file_location('mdnotes_server', ROOT / 'server/mdnotes_server.py')
 server = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(server)
+from helpers.app import App  # noqa: E402
 from stilo.modules.assistant import Agent  # noqa: E402
 from stilo.modules.assistant.adapters.routes import add_routes as add_assistant_routes  # noqa: E402
 from helpers.routes import FakeRequest, FakeTransport, call  # noqa: E402
@@ -161,7 +162,7 @@ class RegistryBase(unittest.TestCase):
         accounts.users = {name: {'password': 'pw', 'teams': ['qa']} for name in ('leo', 'amy', 'ben')}
         accounts.users['eve'] = {'password': 'pw', 'teams': ['other']}
         self.data = Path(self.tmp.name) / 'data'
-        self.reg = server.WorkspaceRegistry('2468', Path(self.tmp.name) / 'state.json', accounts=accounts, data_dir=self.data)
+        self.reg = App('2468', Path(self.tmp.name) / 'state.json', accounts=accounts, data_dir=self.data)
         self.addCleanup(self.reg.chats.close)
         self.tokens = {name: self.reg.identity.login(name, 'pw')['token'] for name in ('leo', 'amy', 'ben', 'eve')}
         self.reg.projects.create_workspace(self.tokens['leo'], 'qa', 'Novel', share_team=True)

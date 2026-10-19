@@ -70,6 +70,20 @@ class StaticCompressionTests(unittest.TestCase):
         self.assertEqual(gzip.decompress(second), (self.root / 'app.js').read_bytes())
         self.assertNotEqual(first, second)
 
+    def test_private_files_are_never_served_and_the_ping_comes_from_the_modules(self):
+        import json
+        from stilo.modules.identity import ACCOUNT_FILE
+        (self.root / ACCOUNT_FILE).write_text('{"users": [{"password": "secret"}]}', encoding='utf-8')
+        (self.root / 'state.json').write_text('{"project": "private"}', encoding='utf-8')
+        (self.root / 'notes.py').write_text('SECRET = 1', encoding='utf-8')
+        index = (self.root / 'index.html').read_bytes()
+        for path in ('/' + ACCOUNT_FILE, '/state.json', '/notes.py', '/.env'):
+            with self.subTest(path=path):
+                self.assertEqual(self.get(path)[1], index, "a private file answers as the app's page")
+        ping = json.loads(self.get('/api/ping')[1])
+        self.assertEqual((ping['message'], ping['accounts'], ping['hosting'], ping['minSyncVersion']), ('pong', False, True, 117))
+        self.assertEqual(ping['appVersion'], json.loads((ROOT / 'package.json').read_text())['version'])
+
     def test_spa_fallback_and_index_compress_too(self):
         headers, body = self.get('/no/such/route', 'gzip')
         self.assertEqual(headers['Content-Encoding'], 'gzip')

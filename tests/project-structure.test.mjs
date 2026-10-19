@@ -125,6 +125,17 @@ test("feature modules split out of main.js load on demand", async () => {
   assert.doesNotMatch(mainSource, /^import .*(bmap-view|module-map-tools|mtree-module-map-service)/m);
 });
 
+test("the server's entry only reads its settings and starts the modules", async () => {
+  // Everything the server does is a module's (server/stilo/modules); the entry
+  // file reads the command line and environment, starts them and listens.
+  const entry = await readFile(resolveFromRoot("server/mdnotes_server.py"), "utf8");
+  assert.doesNotMatch(entry, /^class /m, "no classes: a module owns any behaviour");
+  assert.doesNotMatch(entry, /BaseHTTPRequestHandler|add_route|threading/, "no HTTP or threads of its own");
+  for (const [, target] of entry.matchAll(/^from (\S+) import/gm)) {
+    assert.match(target, /^(stilo\.kernel(\.log)?|stilo\.modules(\.identity)?|pathlib)$/, `the entry imports ${target}`);
+  }
+});
+
 test("the offline app shell lists every app module", async () => {
   // The service worker precaches this list; a module missing from it breaks the
   // app offline (or after an update) the first time that module is needed.

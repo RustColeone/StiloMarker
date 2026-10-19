@@ -69,6 +69,16 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.88: the server's entry only starts the modules
+
+Step S4s-6, the last of the server's restructure. Nothing changes for users.
+
+- `server/mdnotes_server.py` (2,577 lines at v0.1.82) is now 123: it reads
+  the command line and environment, starts the server's modules and
+  listens. Serving the app's files (and never the server's own) and the
+  server's ping are the Transport module's; what the ping says about
+  accounts and sync comes from those modules.
+
 ### v0.1.87: the agent is the server Assistant's
 
 Step S4s-5. Nothing changes for users.
