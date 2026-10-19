@@ -2,9 +2,10 @@
 // left area (the explorer) as a drawer from the left edge and the right area
 // (the side panel: Agent, Chats) as one from the right, about 85% wide with
 // the note peeking out (the whole width while typing in it); the bottom area
-// (the Log) as a sheet from the bottom; the ⋮ menu. Buttons and commands open
-// the drawers; a swipe starting near the left or right edge does too, and the
-// sheet's header drags down to close it (drawer.js). The panes
+// (the Log) as a sheet from the bottom, half or full height; the ⋮ menu.
+// Buttons and commands open them; a swipe starting just inside the left or
+// right edge does too (the edge itself is the system's "back"), and the
+// sheet's header drags it (drawer.js, sheet.js). The panes
 // are their owners' (panes.add: the Editor's source and preview), each with the
 // file it shows. The top bar names that file; its name opens the
 // list of open files (and Rename), and one switch shows the same file in its
@@ -30,9 +31,11 @@ export function installMobileViewport(window, element, maxWidth = 900) {
 }
 
 import { createDrawer } from "./drawer.js";
+import { createSheet } from "./sheet.js";
 
 // Touch-gesture tuning.
-const EDGE_ZONE = 24;            // px from an edge that opens its drawer
+const EDGE_INSET = 24;           // px at each side left to the system (its "back" swipe)
+const EDGE_ZONE = 64;            // px from a side within which a drag opens that side's drawer
 const SLOP = 10;                 // px before a gesture is claimed at all
 const DIRECTION_BIAS = 1.3;      // |dx| must exceed |dy| by this much
 const SNAP_FRACTION = 0.35;      // past this share of travel, snap onward
@@ -63,8 +66,7 @@ export function createPhone({ panes, isPhone, closeMenus, events, run, doc = glo
     drag: "drawerDrag", progress: "--drawer-progress", opens: "right", tuning });
   const right = createDrawer({ appEl, panel: $("chat-panel"), button: chatButton, state: "mobileRight",
     drag: "rightDrag", progress: "--right-drawer-progress", opens: "left", tuning, onChange: announce("right") });
-  const bottom = createDrawer({ appEl, panel: $("debug-panel"), state: "mobileBottom",
-    drag: "bottomDrag", progress: "--bottom-sheet-progress", opens: "up", tuning, onChange: announce("bottom") });
+  const bottom = createSheet({ appEl, panel: $("debug-panel"), tuning, onChange: announce("bottom"), doc, win });
   const drawers = { drawer: left, right, bottom }; // by gesture kind
   const sheetHeader = bottom.panel?.querySelector(".debug-panel-header") ?? null;
 
@@ -206,8 +208,9 @@ export function createPhone({ panes, isPhone, closeMenus, events, run, doc = glo
   // a touch at the left edge → drag opens it; otherwise → drag switches panes.
   // Nothing is claimed until the finger moved SLOP px, clearly sideways. The
   // right drawer mirrors the left: an open one closes with a drag to the right,
-  // a touch near the right edge opens it with a drag to the left. The open
-  // sheet's header is the one vertical drag: down closes it.
+  // a touch near the right edge opens it with a drag to the left. Touches in
+  // the outermost EDGE_INSET px are the system's. The open sheet's header is
+  // the one vertical drag: up to full height, down to half or closed.
   function claimsHorizontalScroll(target) {
     let node = target;
     while (node && node !== doc.body) {
@@ -230,6 +233,7 @@ export function createPhone({ panes, isPhone, closeMenus, events, run, doc = glo
     if (event.target.closest?.("dialog, .menu-bar, .explorer-context-menu, .tab-overflow-menu, input, textarea, select, button, a, [contenteditable], .bmap-editor, .cm-editor")) return;
     if (claimsHorizontalScroll(event.target) || win.getSelection()?.isCollapsed === false) return;
     const touch = event.touches[0];
+    if (touch.clientX < EDGE_INSET || touch.clientX > win.innerWidth - EDGE_INSET) return;
     const drawerOpen = left.isOpen(), rightOpen = right.isOpen(), bottomOpen = bottom.isOpen();
     gesture = { startX: touch.clientX, startY: touch.clientY, lastX: touch.clientX, lastY: touch.clientY, lastT: event.timeStamp,
       velocity: 0, kind: null, claimed: false, drawerOpen, rightOpen, onSheet: bottomOpen && Boolean(sheetHeader?.contains(event.target)),
@@ -244,15 +248,14 @@ export function createPhone({ panes, isPhone, closeMenus, events, run, doc = glo
     const dx = touch.clientX - gesture.startX;
     const dy = touch.clientY - gesture.startY;
     if (!gesture.claimed) {
-      // Along the gesture's axis (down on the sheet's header, else sideways).
+      // Along the gesture's axis (up and down on the sheet's header, else sideways).
       const [along, across] = gesture.onSheet ? [dy, dx] : [dx, dy];
       if (Math.abs(along) < SLOP || Math.abs(along) < Math.abs(across) * DIRECTION_BIAS) {
         // Not decisive yet; once it clearly goes the other way, stop looking.
         if (Math.abs(across) > SLOP * 2) gesture = null;
         return;
       }
-      if (gesture.onSheet && dy > 0) gesture.kind = "bottom";
-      else if (gesture.onSheet) gesture.kind = null;
+      if (gesture.onSheet) gesture.kind = "bottom";
       else if (gesture.drawerOpen && dx < 0) gesture.kind = "drawer";
       else if (gesture.rightOpen && dx > 0) gesture.kind = "right";
       else if (gesture.closed && gesture.fromEdge && dx > 0) gesture.kind = "drawer";

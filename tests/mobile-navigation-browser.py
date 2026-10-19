@@ -170,11 +170,14 @@ async def main():
         await gesture('#preview-output',[360,380])
         await page.evaluate('() => { const b = document.querySelector("#mobile-view-toggle"); b.click(); b.click(); }')
         await assert_pane('preview')
-        # The right drawer: a swipe from the right edge opens it; editing in it
-        # owns swipes; a drag to the right, its close button or a tap on the
-        # note beside it closes it.
+        # The right drawer: a swipe starting just inside the right edge opens
+        # it (the outermost 24px are the system's); editing in it owns swipes;
+        # a drag to the right, its close button or a tap on the note beside it
+        # closes it.
         await assert_right('closed')
         await gesture('#preview-output',[300,200],start=380)
+        await assert_right('closed')
+        await gesture('#preview-output',[300,200],start=350)
         await page.wait_for_function(WAIT_LOADED)  # the chat panel loads on demand
         await assert_right('open')
         await gesture('#preview-output',[180,50])
@@ -196,15 +199,19 @@ async def main():
         await page.locator('#preview-output').evaluate('''el => {
           el.innerHTML='<div id="wide-content" style="width:200px;overflow-x:auto"><div style="width:1000px">Wide table</div></div><div class="bmap-editor" id="test-canvas">Diagram canvas</div>';
         }''')
-        await gesture('#wide-content',[70,180],start=5)
+        await gesture('#wide-content',[70,180],start=40)
         await assert_pane('preview')
         assert await page.locator('#app').get_attribute('data-mobile-explorer') == 'closed'
         await gesture('#test-canvas',[180,50])
         await assert_pane('preview')
-        # Edge navigation still works on ordinary content; cancellation restores it.
-        await gesture('#preview-output',[70,180],start=5,ending='touchcancel')
-        assert await page.locator('#app').get_attribute('data-mobile-explorer') == 'closed'
+        # Edge navigation still works on ordinary content, starting just inside
+        # the edge (the edge itself is the system's); cancellation restores it.
         await gesture('#preview-output',[70,180],start=5)
+        await assert_pane('preview')
+        assert await page.locator('#app').get_attribute('data-mobile-explorer') == 'closed'
+        await gesture('#preview-output',[70,180],start=40,ending='touchcancel')
+        assert await page.locator('#app').get_attribute('data-mobile-explorer') == 'closed'
+        await gesture('#preview-output',[70,180],start=40)
         assert await page.locator('#app').get_attribute('data-mobile-explorer') == 'open'
         await page.locator('#mobile-menu-button').click()
         assert await page.locator('#app').get_attribute('data-mobile-explorer') == 'closed'
@@ -234,7 +241,7 @@ async def main():
         await page.set_viewport_size({'width':390,'height':844})
         await page.screenshot(path='/tmp/stilomarker-mobile-source-v0.1.15.png')
         assert not errors,errors
-        print(json.dumps({'mobileViewports':5,'runtimeErrors':len(errors),'checks':['keyboard-height document containment','reachable menus','44px controls','Find controls fit','height resize preserves caret','IME resize preserves DOM','editing owns swipes','cancel and multitouch restore pane','direction reversal','rapid navigation','normal pane swipe','right drawer edge swipe, drag and close','canvas and wide content own gestures','edge drawer','exclusive flyouts','desktop settings preserved','breakpoint state','short-screen settings']}))
+        print(json.dumps({'mobileViewports':5,'runtimeErrors':len(errors),'checks':['keyboard-height document containment','reachable menus','44px controls','Find controls fit','height resize preserves caret','IME resize preserves DOM','editing owns swipes','cancel and multitouch restore pane','direction reversal','rapid navigation','normal pane swipe','right drawer edge swipe, drag and close','canvas and wide content own gestures','edge drawer just inside the edge','the edge itself is the system\'s','exclusive flyouts','desktop settings preserved','breakpoint state','short-screen settings']}))
         await browser.close()
 
 asyncio.run(main())

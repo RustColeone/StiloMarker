@@ -1,10 +1,10 @@
 """Browser regression: on the phone, the bottom area (the Log) is a sheet.
 
-It opens from the View menu as a sheet from the bottom, over the note, and
-shows the log even when the desktop hides it (the default); the note keeps
-its height, even when the desktop shows the Log. Its ×, a tap
-above it, or a drag down on its header closes it; a short drag snaps back.
-One flyout at a time: the chat drawer closes it. The desktop's Log setting is
+It opens from the View menu as a sheet from the bottom, half the height,
+over the note, and shows the log even when the desktop hides it (the
+default); the note keeps its height, even when the desktop shows the Log.
+Its header drags it: a flick goes one step (half, full, half, closed), a slow
+drag settles at the nearest height. Its × or a tap above it closes it. One flyout at a time: the chat drawer closes it. The desktop's Log setting is
 left alone, and crossing to the desktop closes the sheet. Isolated: every API
 is mocked; the welcome template is this checkout's Template folder.
 """
@@ -44,6 +44,24 @@ DRAG = '''({selector, start, moves}) => {
   for (const y of moves) fire("touchmove", y);
   fire("touchend", moves.at(-1));
 }'''
+
+
+# The same, slowly: 10 steps 40ms apart, dy in all.
+SLOW_DRAG = '''({selector, start, dy}) => new Promise((done) => {
+  const target = document.querySelector(selector);
+  const fire = (type, y) => {
+    const touch = new Touch({identifier: 0, target, clientX: 200, clientY: y});
+    target.dispatchEvent(new TouchEvent(type, {bubbles: true, cancelable: true,
+      touches: type === "touchend" ? [] : [touch], changedTouches: [touch]}));
+  };
+  fire("touchstart", start);
+  let step = 0;
+  const timer = setInterval(() => {
+    step += 1;
+    fire("touchmove", start + dy * step / 10);
+    if (step === 10) { clearInterval(timer); fire("touchend", start + dy); done(); }
+  }, 40);
+})'''
 
 
 async def main():
@@ -103,30 +121,41 @@ async def main():
         await page.mouse.click(200, 150)
         assert (await state())['bottom'] == 'closed', 'a tap above closes the sheet'
 
-        # Its header drags down to close; a short drag up or a short slow drag does not.
-        now = await open_log()
+        # Its header drags it: a flick goes one step (half → full → half →
+        # closed); a slow drag settles at the nearest of closed, half and full.
         header = '#debug-panel .debug-panel-heading .eyebrow'
-        top = now['sheetTop'] + 20
-        await page.evaluate(DRAG, {'selector': header, 'start': top, 'moves': [top - 20, top - 40]})
-        assert (await state())['bottom'] == 'open', 'a drag up leaves it open'
-        await page.evaluate('''({selector, start}) => new Promise((done) => {
-          const target = document.querySelector(selector);
-          const fire = (type, y) => {
-            const touch = new Touch({identifier: 0, target, clientX: 200, clientY: y});
-            target.dispatchEvent(new TouchEvent(type, {bubbles: true, cancelable: true,
-              touches: type === "touchend" ? [] : [touch], changedTouches: [touch]}));
-          };
-          fire("touchstart", start);
-          let y = start, step = 0;
-          const timer = setInterval(() => {  // slowly, 40px down in all
-            y += 4; fire("touchmove", y);
-            if (++step === 10) { clearInterval(timer); fire("touchend", y); done(); }
-          }, 40);
-        })''', {'selector': header, 'start': top})
-        assert (await state())['bottom'] == 'open', 'a short slow drag snaps back'
-        await page.evaluate(DRAG, {'selector': header, 'start': top, 'moves': [top + 40, top + 160, top + 260]})
-        now = await state()
-        assert now['bottom'] == 'closed' and now['sheetTop'] >= now['height'], now
+        topbar = await page.evaluate('Math.round(document.querySelector(".topbar").getBoundingClientRect().bottom)')
+
+        async def flick(dy):
+            y = (await state())['sheetTop'] + 20
+            await page.evaluate(DRAG, {'selector': header, 'start': y, 'moves': [y + dy / 3, y + dy * 2 / 3, y + dy]})
+            return await state()
+
+        async def slow(dy):
+            y = (await state())['sheetTop'] + 20
+            await page.evaluate(SLOW_DRAG, {'selector': header, 'start': y, 'dy': dy})
+            return await state()
+
+        now = await open_log()
+        half = now['sheetTop']
+        assert abs(half - now['height'] / 2) <= 2, now
+        now = await flick(-120)
+        assert now['bottom'] == 'open' and abs(now['sheetTop'] - topbar) <= 2, ('flick up: full', now, topbar)
+        now = await slow(60)
+        assert abs(now['sheetTop'] - topbar) <= 2, ('a short slow drag stays full', now)
+        now = await flick(120)
+        assert now['bottom'] == 'open' and abs(now['sheetTop'] - half) <= 2, ('flick down: half', now)
+        now = await slow(-(half - topbar) * 0.7)
+        assert abs(now['sheetTop'] - topbar) <= 2, ('a slow drag most of the way up: full', now)
+        now = await slow((half - topbar) * 0.7)
+        assert abs(now['sheetTop'] - half) <= 2, ('back down most of the way: half', now)
+        now = await slow(40)
+        assert now['bottom'] == 'open' and abs(now['sheetTop'] - half) <= 2, ('a short slow drag snaps back', now)
+        now = await flick(120)
+        assert now['bottom'] == 'closed' and now['sheetTop'] >= now['height'], ('flick down from half: closed', now)
+        now = await open_log()
+        assert abs(now['sheetTop'] - half) <= 2, ('it opens at half again', now)
+        await page.locator('#log-collapse-button').click()
 
         # One flyout at a time: the chat drawer closes the sheet.
         await open_log()
@@ -161,7 +190,7 @@ async def main():
         assert not errors, errors
         await browser.close()
         print(json.dumps({'checks': ['opens from View', 'shows the log while the desktop hides it', 'no row on the phone', 'note keeps its height', 'setting untouched',
-                                     'x closes', 'tap above closes', 'drag up stays', 'short drag snaps back', 'drag down closes',
+                                     'x closes', 'tap above closes', 'flick up: full', 'flick down: half', 'slow drags settle nearest', 'flick down from half: closes', 'opens at half',
                                      'one flyout at a time', 'menu title', 'desktop round trip']}))
 
 

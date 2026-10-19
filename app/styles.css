@@ -3827,8 +3827,9 @@ menu {
   }
 
   /* ── The bottom area (the Log): a sheet from the bottom, driven by
-     data-mobile-bottom; never a row of the workspace on the phone. A tap
-     above it closes it; its header drags down to close it. */
+     data-mobile-bottom, half the screen or (data-sheet-size="full") all of
+     it below the top bar; never a row of the workspace on the phone. A tap
+     above it closes it; its header drags it between the two and down. */
   .app-shell[data-debug="on"] .workspace {
     grid-template-rows: minmax(0, 1fr) 0 0;
   }
@@ -3842,7 +3843,7 @@ menu {
     left: 0;
     right: 0;
     bottom: 0;
-    height: min(60vh, calc(var(--mobile-viewport-height, 100vh) * 0.6));
+    height: calc(var(--mobile-viewport-height, 100vh) * 0.5);
     z-index: 36;
     padding-top: 14px;
     border: 1px solid var(--border);
@@ -3852,7 +3853,11 @@ menu {
     transform: translateY(102%);
     opacity: 0;
     pointer-events: none;
-    transition: transform 0.26s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.2s ease;
+    transition: transform 0.26s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.2s ease, height 0.26s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+
+  .app-shell[data-sheet-size="full"] .workspace-shell .debug-panel {
+    height: calc(var(--mobile-viewport-height, 100vh) - var(--topbar-height));
   }
 
   /* The grab handle. */
@@ -3874,11 +3879,10 @@ menu {
     pointer-events: auto;
   }
 
+  /* While dragged, its height follows the finger. */
   .app-shell[data-bottom-drag="1"] .workspace-shell .debug-panel {
     transition: none;
-    transform: translateY(calc((1 - var(--bottom-sheet-progress, 0)) * 100%));
-    opacity: 1;
-    pointer-events: auto;
+    height: var(--sheet-drag-height);
   }
 
   .app-shell[data-mobile-bottom] .debug-panel-actions button {

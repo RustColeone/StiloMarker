@@ -1,12 +1,11 @@
-// One of the phone's drawers (phone.js): the explorer from the left edge, the
-// side panel from the right, the Log as a sheet from the bottom. Its state is
-// on #app (data-<state>: "open" | "closed"), so the CSS slides it; while a
-// finger drags it, data-<drag> is set and <progress> (0 closed … 1 open)
-// follows the finger. opens: the way a drag opens it ("right", "left", "up").
+// One of the phone's side drawers (phone.js): the explorer from the left
+// edge, the side panel from the right (the bottom sheet is sheet.js). Its
+// state is on #app (data-<state>: "open" | "closed"), so the CSS slides it;
+// while a finger drags it, data-<drag> is set and <progress> (0 closed … 1
+// open) follows the finger. opens: the way a drag opens it ("right", "left").
 // tuning: { snap } past this share of travel it snaps onward; { flick } px/ms
 // that decides regardless of distance.
 export function createDrawer({ appEl, panel, button = null, state, drag, progress, opens, tuning, onChange = () => {} }) {
-  const vertical = opens === "up";
   const sign = opens === "right" ? 1 : -1;
   let size = 1, from = 0;
 
@@ -22,10 +21,10 @@ export function createDrawer({ appEl, panel, button = null, state, drag, progres
     if (open !== was) onChange(open);
   }
 
-  // A drag: travel is the finger's distance along the drawer's axis.
+  // A drag: travel is the finger's distance sideways (right is positive).
   const at = (travel) => from + (sign * travel) / size;
   function begin() {
-    size = Math.max(1, (vertical ? panel?.offsetHeight : panel?.offsetWidth) ?? 1);
+    size = Math.max(1, panel?.offsetWidth ?? 1);
     from = isOpen() ? 1 : 0;
     appEl.dataset[drag] = "1";
   }
@@ -42,5 +41,5 @@ export function createDrawer({ appEl, panel, button = null, state, drag, progres
   }
 
   if (!appEl.dataset[state]) appEl.dataset[state] = "closed";
-  return { isOpen, set, begin, follow, end, reset, vertical, panel };
+  return { isOpen, set, begin, follow, end, reset, vertical: false, panel };
 }

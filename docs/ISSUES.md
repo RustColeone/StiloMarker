@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-19 · release `v0.1.94` (not deployed; v0.1.88 is live)
+Last updated: 2026-10-19 · release `v0.1.95` (not deployed; v0.1.88 is live)
 
 ---
 
@@ -68,6 +68,20 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.95: the phone's sheet and edge swipes, as decided
+
+Step 5e. On the phone only.
+
+- The Log's sheet opens over the lower half of the screen. Dragging its
+  header up gives it the full height (below the top bar); a flick moves it
+  one step (half, full, half, closed), and a slow drag settles at the nearest
+  height. It opens at half each time.
+- The explorer and chat drawers open with a swipe that starts 24–64 px in
+  from their side, no longer at the very edge, where Android and iOS take a
+  swipe as Back. A swipe starting in the outer 24 px does nothing in the app.
+- Tests: `phone-log-sheet-browser.py` checks the heights;
+  `mobile-navigation-browser.py` checks the edge band.
 
 ### v0.1.94: on the phone, the Log is a sheet from the bottom
 

@@ -358,10 +358,12 @@ one. The explorer is a drawer (≡); a file picked there shows in the view on
 screen. The chat button opens the Agent and Chats as a drawer from the right,
 with the note still showing at its left (it takes the whole width while you
 type). Tap the note, drag the drawer to the right, or use its › button to
-close it. Swiping in from the left or right edge opens those drawers too.
-The Log (View → Toggle Log) opens as a sheet from the bottom; tap above it,
-drag its header down, or use its × to close it. Opening it on the phone does
-not change whether the desktop shows it.
+close it. A swipe that starts a finger's width inside the left or right edge
+opens those drawers too (the edge itself is your phone's "back"). The Log
+(View → Toggle Log) opens as a sheet over the lower half of the screen; drag
+its header up for the full height and down again to shrink or close it, or
+tap above it, or use its ×. Opening it on the phone does not change whether
+the desktop shows it.
 
 **Copy/paste rules:**
 - Files and folders can be copied/pasted into any folder or the root.
