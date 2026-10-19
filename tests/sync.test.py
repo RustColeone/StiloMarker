@@ -230,6 +230,18 @@ class ImagesOverHttp(unittest.TestCase):
         self.assertEqual(self.call("GET", "/api/workspaces/asset?token=nobody&path=pics/a.png")[0], 403)
         self.assertEqual(self.call("POST", f"/api/workspaces/asset?token={session}&offset=0", raw=b"x")[0], 400, "no path")
 
+    def test_a_session_that_ended_is_refused_not_a_storage_failure(self):
+        session = json.loads(self.call("POST", "/api/session/connect", {"pin": "2468", "displayName": "Ann"})[2])["token"]
+        self.assertEqual(self.call("GET", f"/api/session/state?token={session}")[0], 200)
+        self.call("POST", f"/api/session/leave?token={session}", {})
+        for method, path, body in (("GET", f"/api/session/state?token={session}", None),
+                                   ("POST", f"/api/operations?token={session}", {"version": 117, "operation": {
+                                       "type": "create-file", "parentPath": "", "name": "x.md", "content": ""}}),
+                                   ("GET", "/api/session/state?token=never-issued", None)):
+            with self.subTest(path=path):
+                status, _, answer = self.call(method, path, body)
+                self.assertEqual(status, 403, answer)
+
 
 if __name__ == "__main__":
     unittest.main()

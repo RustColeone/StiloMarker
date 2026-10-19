@@ -154,6 +154,8 @@ def add_routes(transport, *, agent, threads, identity, directory, version):
             if "conflict" in str(error).lower():
                 raise Refusal(409, {"message": str(error)}) from error
             raise
+        except PermissionError:
+            raise  # an OSError too, but a refusal (403), not storage trouble
         except OSError as error:
             raise Refusal(503, {"message": "Chat storage is unavailable; your local conversation is kept."}) from error
 

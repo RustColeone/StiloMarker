@@ -54,6 +54,8 @@ def add_routes(transport, directory, version: int):
                 if "conflict" in str(error).lower():
                     raise Refusal(409, {"message": str(error)}) from error
                 raise
+            except PermissionError:
+                raise  # an OSError too, but a refusal (403), not storage trouble
             except OSError as error:
                 _log("SYNC", f"storage unavailable: {error}")
                 raise Refusal(503, {"message": "Workspace storage is unavailable; changes are not yet confirmed."}) from error

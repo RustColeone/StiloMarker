@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-19 · release `v0.1.88` (deployed with v0.1.61–v0.1.87; public checks passed)
+Last updated: 2026-10-19 · release `v0.1.89` (not deployed; v0.1.88 is live)
 
 ---
 
@@ -68,6 +68,19 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.89: an ended session is refused, not a storage failure
+
+Found while checking the v0.1.88 deploy; wrong since v0.1.41.
+
+- A request with a session token that is no longer valid (the session ended,
+  or the server restarted) to the project's state or a change was answered
+  503 "Workspace storage is unavailable", and the server logged a storage
+  failure. It is now 403. The browser treated both the same way (it keeps
+  the typing and reconnects), so nothing changes on screen; the server's
+  log and the answer now say what happened. The agent's shared
+  conversations had the same mistake (since v0.1.87). Both are covered by
+  tests over HTTP.
 
 ### v0.1.88: the server's entry only starts the modules
 

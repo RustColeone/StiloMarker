@@ -126,6 +126,8 @@ class RoutesOverHttp(unittest.TestCase):
                 self.assertEqual((status, json.loads(body)["revision"]), (200, 1))
                 status, body = call("POST", f"/api/chat/workspace?token={session}", {"version": 117, "threads": [], "baseRevision": 0})
                 self.assertEqual(status, 409, "a save against an old revision is a conflict")
+                status, _ = call("POST", "/api/chat/workspace?token=never-issued", {"version": 117, "threads": [], "baseRevision": 0})
+                self.assertEqual(status, 403, "an unknown session is refused, not a storage failure")
             finally:
                 httpd.shutdown()
                 httpd.server_close()
