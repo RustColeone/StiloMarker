@@ -46,7 +46,7 @@ def api(method, path, body=None):
 checks = []
 def ok(name): checks.append(name); print("  ok ", name)
 
-HOOK = b"\nwindow.__id = { identity, openAccessEditor, controller, render: (p) => shell.render(p) };\n"
+HOOK = b"\nwindow.__id = { identity, openAccessEditor: (...a) => cloudParts.openAccessEditor(...a), controller, render: (p) => shell.render(p) };\n"
 
 
 async def open_page(b, settings=None):

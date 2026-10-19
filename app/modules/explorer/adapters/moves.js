@@ -136,7 +136,7 @@ export function createMoves(app) {
     // a pending edit lands on the moved file instead of the vanished old path.
     const newPath = getPath(app.controller.getProject(), nodeId);
     app.collaboration.remapPatchPath(oldPath, newPath);
-    app.remapPersonaPaths(oldPath, newPath);
+    app.pathChanged(oldPath, newPath);
     app.publishOperation({ type: "move-node", path: oldPath, parentPath, index: destination.index });
     app.logDebug("action", "Explorer node moved", `${oldPath} -> ${newPath}`);
     return true;

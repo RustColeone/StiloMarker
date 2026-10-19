@@ -21,9 +21,7 @@ import { createExplorerView } from "./tree.js";
 // What main.js attaches (explorer.attach(port)); each entry should move to an
 // owner, or become an extension point, and leave this list.
 export const PORT = [
-  "settings",
-  "elements", "canManagePreview", "openAccessEditor", "openMtreeToolsDialog",
-  "remapPersonaPaths"
+  "settings", "elements"
 ];
 
 // The editor's functions the explorer calls (editor.parts()).
@@ -33,7 +31,7 @@ const EDITOR = [
   "setActiveSourceFile", "setActiveSourcePart", "setEditorSelection", "setPreviewFile"
 ];
 
-export function createSurface({ port, workspace, editor, shell, sync, types, fileMenus, newFiles }) {
+export function createSurface({ port, workspace, editor, shell, sync, types, fileMenus, rootMenus, newFiles, events }) {
   const missing = PORT.filter((name) => !(name in port));
   if (missing.length) throw new Error(`explorer.attach: the port lacks ${missing.join(", ")}`);
   const editorParts = editor.parts();
@@ -48,6 +46,10 @@ export function createSurface({ port, workspace, editor, shell, sync, types, fil
     // A file type's own context-menu entries, and a new file's first content (extension points).
     fileMenuOf: (name) => fileMenus.get(types.typeOf(name)?.id ?? "") ?? null,
     newFileContent: (kind, name) => newFiles.get(kind)?.content(name) ?? "",
+    // Other modules' entries on the project's root (an extension point): the one that offers `action`.
+    rootMenuOf: (action) => rootMenus.all().find((menu) => menu.entries().some(([, id]) => id === action)) ?? null,
+    // A file or folder renamed or moved: announced ("path-changed"; Chats follows its characters).
+    pathChanged: (from, to) => { if (from && from !== to) events.emit("path-changed", { from, to }); },
     imageSrcFor: (project, node) => workspace.location.assetSrc(project, node), // an image's address (Workspace's location)
     logDebug: (...args) => shell.log(...args), // the log panel (Shell's)
     // Changes made here reach the shared workspace through Sync.
@@ -116,9 +118,7 @@ export function createSurface({ port, workspace, editor, shell, sync, types, fil
       const node = app.controller.getProject().nodes[nodeId];
       return node?.kind === "file" && app.isPreviewableFileName(node.name);
     },
-    canManagePreview() {
-      return app.canManagePreview();
-    },
+    rootEntries: () => rootMenus.all().flatMap((menu) => menu.entries()),
     onAction(action, target, options) {
       app.view.pick(target.nodeId, target.partId);
       return app.handleExplorerAction(action, target, options);
@@ -175,6 +175,8 @@ export function createSurface({ port, workspace, editor, shell, sync, types, fil
   // A mark put on a file or taken off shows on its row at once.
   editor.marks.on(() => app.tree.render(app.controller.getProject()));
   installExplorerEvents(app);
+  // Files, text and images dropped into the source editor are added or inserted here.
+  editor.drops.configure((event) => app.handleEditorDrop(event));
   shell.commands.add({ id: "explorer.export", title: "Export Project Zipped", menu: { id: "file", group: 0, order: 8 },
     run: () => app.exportNode(app.controller.getProject().rootId) });
   shell.commands.add({ id: "explorer.export-selected", title: "Export Selected", menu: { id: "file", group: 0, order: 9 },

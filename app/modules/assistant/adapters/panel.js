@@ -22,7 +22,7 @@ import { createTurns } from "./turns.js";
 // What main.js attaches (assistant.load(port)); each entry should move to an
 // owner, or become an extension point, and leave this list.
 export const PORT = [
-  "elements", "storedProject", "chatsPage"
+  "elements", "storedProject"
 ];
 
 export function createAgentPanel({ port, shell, workspace, identity, sync, editor, explorer, models, characters }) {
@@ -111,13 +111,16 @@ export function createAgentPanel({ port, shell, workspace, identity, sync, edito
   add(createTurns(app));
   add(createProposals(app));
   installEvents(app);
-  const { chatState, chatsPage, identity: who, chatWorkspaceKey } = app;
+  const { chatState, identity: who, chatWorkspaceKey } = app;
 
-  // The Chats page (the Chats module's): drawn from here while it is open, and
-  // given the agent's old Roleplay threads to move in once.
-  chatsPage.giveAgentThreads({
-    // Old Roleplay group threads (kind "group") move into Chats once, then leave the agent's list.
-    oldGroupThreads: () => chatState.threads.filter((thread) => thread.kind === "group" && !thread.deleted && thread.messages?.length),
+  // The agent's old Roleplay threads, handed to Chats (on this level) through
+  // Workspace: they move into Chats once.
+  app.workspace.handover.offer("agent-group-threads", {
+    // Old Roleplay group threads (kind "group") of a project move into Chats once, then leave the agent's list.
+    oldGroupThreads(project) {
+      app.ensureChatWorkspaceLoaded(project);
+      return chatState.threads.filter((thread) => thread.kind === "group" && !thread.deleted && thread.messages?.length);
+    },
     movedGroupThreads(threads) {
       for (const thread of threads) { thread.deleted = true; thread.updatedAt = Date.now(); }
       if (threads.length) app.persistChatWorkspaceState();
@@ -155,7 +158,7 @@ export function createAgentPanel({ port, shell, workspace, identity, sync, edito
   // Test access (tests/helpers/chat_hook.py adds a line here).
   return {
     receiveChatWorkspace, renderChatPanel: app.renderChatPanel, refreshChatStatus: app.refreshChatStatus,
-    findBatchMessage: app.findBatchMessage, remapPersonaPaths: chatsPage.remapPersonaPaths,
+    findBatchMessage: app.findBatchMessage,
     ensureChatWorkspaceLoaded: app.ensureChatWorkspaceLoaded,
     chatState, get mcpControls() { return app.mcpControls; }, isOwnBatch: app.isOwnBatch
   };

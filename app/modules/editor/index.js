@@ -18,7 +18,8 @@
 // (service/view.js): reset(project), pick(nodeId, partId?), select(nodeId),
 // openTab/closeTab(pane, fileId), moveTab(pane, id, targetId, after?),
 // showPreview(fileId, partId?), showView(id), clearParts(), dragTab(state),
-// keepTabs(project, { views, open }).
+// keepTabs(project, { views, open }). drops.configure(handle(event)): who
+// handles what is dropped into the source editor (the Explorer).
 //
 // Static, for code from before the restructure: renderMarkdown,
 // extractMarkdownLinks, collectMarkdownReferences, parseMarkdownInlineElements,
@@ -84,13 +85,16 @@ export default defineModule({
     // Keeping the open tabs on the server for a cloud workspace: Cloud says how (configure).
     let saveOpenTabs = async () => {};
     const openTabsStore = { save: (...args) => saveOpenTabs(...args), configure(save) { saveOpenTabs = save; } };
+    // What is dropped into the source editor is handled by whoever configures it (the Explorer adds files).
+    let handleDrop = async () => {};
+    const drops = { handle: (event) => handleDrop(event), configure(handle) { handleDrop = handle; } };
     function attach(port) {
       if (parts) throw new Error("editor: already attached");
-      parts = createSurface({ port, view, marks, identity: ctx.use("identity"), openTabsStore, paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), welcome: open(welcome), previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars),
+      parts = createSurface({ port, view, marks, identity: ctx.use("identity"), openTabsStore, drops, paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), welcome: open(welcome), previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars),
         workspace: ctx.use("workspace"), shell: ctx.use("shell") });
       return parts;
     }
     return { previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars), paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), welcome: open(welcome), marks,
-      openTabs: { configure: openTabsStore.configure }, view, attach, parts: () => parts };
+      openTabs: { configure: openTabsStore.configure }, drops: { configure: drops.configure }, view, attach, parts: () => parts };
   }
 });

@@ -155,7 +155,7 @@ flowchart TB
 
 ### Legacy code during the move
 
-Code from before the restructure (`app/main.js`, `app/features/`,
+Code from before the restructure (`app/main.js`, `app/services/`, `app/ui/`,
 `mdnotes_server.py` and the rest) is not a module, so nothing may depend on
 it. It may use modules, but only through the APIs the kernel hands back, or
 through a module's static export such as `builtinTypes`. Each step moves a
@@ -164,7 +164,7 @@ piece across, and the baseline records what is left.
 ```mermaid
 flowchart TB
   subgraph LegacyB["Legacy browser code"]
-    Main["main.js and app/features/*"]
+    Main["main.js and app/services/*"]
     PM["project-model.js<br/>(type helpers ask File types)"]
   end
   subgraph LegacyS["Legacy server code"]
@@ -338,8 +338,8 @@ That is where bugs are hard to find. Steps, each its own release:
 | S4e-3 | The frame is Shell's (v0.1.78, `adapters/frame/`), and step 5's areas begin: the left (explorer sidebar, docked or floating, its sections), right (side panel), bottom (log) areas and the middle's source and preview panes, shown, hidden and sized by Shell (`frame.toggle(area)`, the splitters), announced as `"area"`, `"resized"`, `"layout"`. On the phone, panes come from their owners (`frame.phonePanes.add`: the Editor's source and preview with their captions and files, the Assistant's chat); Shell owns the carousel, the drawer, the flyouts and the ⋮ menu. The Assistant loads its page itself when the side panel shows; the Editor and Explorer took Find, tab overflow, Copy on code blocks and drop cleanup. `ui/layout.js` and `services/chat-ui-service.js` are gone; the page looks the same (compared pixel for pixel) | done (v0.1.78) |
 | S4e-4a | The log panel is Shell's (v0.1.79, `adapters/log-panel.js`: the bottom area's entries and the trace tab), and every module logs with `shell.log(kind, message, detail)` instead of a port's `logDebug`; module lines from before Shell starts wait in `main.js` and follow. Flashing a status panel (`shell.flash`) and updating a too-old app (`shell.upgradeApp`) are Shell's; joining's confirmation is Sync's; the editor's input trace is the Editor's. `ui/dialogs.js` is gone; `main.js` hands out 4 getters | done (v0.1.79) |
 | S4e-4b1 | Same-level modules meet in Workspace (v0.1.80; decided 2026-10-19). The Editor and Sync (both level 3) never call each other: Workspace announces typed changes (`typed` → `"text-changed"`, which Sync sends), others' changes (`applyRemote` → `"remote-change"`, `"remote-applied"`: the Editor keeps the caret and moves their cursor), project replacement (`replace` → `"replacing"`, `"replaced"`: the view kept on a reconnect), and carets (`presence`: mine from the Editor, others' from Sync); the write path's ports are Workspace's own (`editing.configure` from the Editor); `location` says shared, read-only, which files the server confirmed and what images' addresses depend on. Sync starts its session itself; History keeps local edits before a reload (`sync.keepers`), Cloud supplies signing in again, uploads (`sync.configure`) and the open tabs on the server (`editor.openTabs`). The Sync port, the saving port, `features/workspace-ports.js` and five Editor port entries are gone; `main.js` hands out 1 getter | done (v0.1.80) |
-| S4e-4b2 | The rest of the ports: the Editor's drops and the Explorer's access editor, module-map tools and renamed characters as extension points or events; the module-map tools as an extension; the character-sheet preview to Characters; the Assistant↔Chats hand-over | next |
-| S4e-4c | The boot sequence and the `elements` table; then `main.js` only starts the kernel | |
+| S4e-4b2 | The rest of the ports (v0.1.81). What is dropped into the source editor is handled by whoever configures `editor.drops` (the Explorer). The project root's menu takes other modules' entries (`explorer.rootMenus`: Cloud's Manage Preview, shown when it applies). A rename or move is announced (`explorer.events` `"path-changed"`), and Chats follows its characters. Module maps are an extension (`extensions/module-map`: the dialog, its markup and styles, its `.mtree` menu entry through `explorer.fileMenus`, its Ctrl+S). The character sheet's preview and template are Chats' (Characters shares the Editor's level). The Assistant and Chats (both level 5) no longer call each other: Chats draws itself on Shell's redraw, and the Agent page's old Roleplay threads reach it through Workspace (`workspace.handover`). Cloud asks Models for the agent's status itself. `app/features` is gone, 41 unused forwarders left `main.js` (329 lines), which hands out no getters | done (v0.1.81) |
+| S4e-4c | The boot sequence and the `elements` table; then `main.js` only starts the kernel | next |
 | S4 | `main.js` only starts the kernel; then the server's `WorkspaceRegistry` the same way | |
 
 ### Notes for module authors
@@ -355,6 +355,17 @@ That is where bugs are hard to find. Steps, each its own release:
   entry out of PORT (to an owner, or an extension point) is how the port shrinks.
 - The explorer's functions (the selected folder, creating a file in a folder,
   the context-menu actions): `explorer.parts()` after `explorer.attach(port)`.
+  Its extension points: `fileMenus` (a file type's own entries), `rootMenus`
+  (entries on the project root's menu: `{ id, entries() -> [[label, action]],
+  run(action) }`, empty when they don't apply), `newFiles` (a new file's first
+  content); its news: `explorer.events.on("path-changed", ({ from, to }) => …)`
+  after a rename or move. What is dropped into the source editor goes to
+  `editor.drops.configure(handle(event))` (the Explorer's).
+- Two modules on one level may not call each other; they meet in a lower
+  module. In Workspace: the Editor and Sync (`typed`, `applyRemote`,
+  `replace`, `presence`...), and anything one hands the other
+  (`workspace.handover.offer(name, value)` / `receive(name, receiver)`, in
+  either order: the Agent page's old Roleplay threads to Chats).
 - The live session: `sync.session()` (connect, publish, `isConnected()`...);
   its status `sync.status` (read-only; `status.change({...})` where you ping or
   reconnect); its news `sync.events.on("status" | "remote-cursor" |

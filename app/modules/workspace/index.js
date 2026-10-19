@@ -40,6 +40,8 @@
 //     applyRemote(clientId, op), replace(project, { keepView }), editing.configure({ shows, apply }),
 //     presence (carets); events "text-changed", "remote-change", "remote-applied",
 //     "replacing", "replaced", "file-replaced", "own-caret", "other-caret", "carets-kept".
+//     handover.offer(name, value) / receive(name, receiver): what one module hands
+//     another on its level (the Assistant's old Roleplay threads to Chats); "handed-over".
 //     holdSaving(busyNow): saving waits while busy (the Editor's IME composition)
 //   saving: schedule(project) after a change (this browser's copy, a local
 //       project's folder, auto-save), saveActiveFile() (Save), runAutoSave(why),
@@ -162,6 +164,7 @@ export default defineModule({
       replace: shared.replace,
       editing: shared.editing,
       presence: shared.presence,
+      handover: shared.handover,
       holdSaving(busyNow) { savingHolds.add(busyNow); return () => savingHolds.delete(busyNow); },
       isStale: (error) => error instanceof StaleWriteError,
       events: { on: events.on },

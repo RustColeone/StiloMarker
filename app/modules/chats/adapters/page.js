@@ -4,7 +4,7 @@
 // attachments and drops. It shares nothing with the Agent page: the agent's
 // server connection is the Models module's, what a request carries from the
 // project is Characters'. The Agent page hands over its old Roleplay threads
-// once (giveAgentThreads), and they move into Chats.
+// (through Workspace: giveAgentThreads), and they move into Chats once.
 import { getNodeIdByPath, getPath, isImageFileName, isPersonaFileName } from "../../workspace/index.js";
 import { escapeHtmlAttribute, renderMarkdown } from "../../editor/index.js";
 import { charactersView, contextFiles, parsePersona, personaSummary, projectSnapshot } from "../../characters/index.js";
@@ -172,9 +172,9 @@ export function createChatsPage(app) {
     return store;
   }
 
-  /** Old Roleplay group threads move into Chats once, then leave the agent's list. */
-  async function importRoleplayThreads(store) {
-    const old = agentThreads?.oldGroupThreads() ?? [];
+  /** A project's old Roleplay group threads move into Chats once, then leave the agent's list. */
+  async function importRoleplayThreads(store, project) {
+    const old = agentThreads?.oldGroupThreads(project) ?? [];
     const moved = [];
     for (const thread of old) {
       try {
@@ -228,7 +228,7 @@ export function createChatsPage(app) {
     const store = chatsStoreFor(project);
     if (chats.store() !== store) {
       chats.setStore(store);
-      void importRoleplayThreads(store);
+      void importRoleplayThreads(store, project);
     }
   }
 
@@ -340,7 +340,7 @@ export function createChatsPage(app) {
     giveAgentThreads(threads) {
       agentThreads = threads;
       const store = chats?.store();
-      if (store) void importRoleplayThreads(store);
+      if (store) void importRoleplayThreads(store, controller.getProject());
     },
     view: () => chats, // the Chats view once loaded (tests read it)
     remapPersonaPaths

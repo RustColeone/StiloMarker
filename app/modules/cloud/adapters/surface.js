@@ -18,13 +18,13 @@ import { createProviders } from "./providers.js";
 // What main.js attaches (cloud.attach(port)); each entry should move to an
 // owner, or become an extension point, and leave this list.
 export const PORT = [
-  "elements", "refreshChatStatus"
+  "elements"
 ];
 
 // The editor's functions the cloud parts call (editor.parts()).
 const EDITOR = ["showResumedFile", "currentWorkspaceView", "cachedWorkspaceView"];
 
-export function createSurface({ port, shell, workspace, identity, sync, editor, history, comments }) {
+export function createSurface({ port, shell, workspace, identity, sync, editor, history, comments, explorer, models }) {
   const missing = PORT.filter((name) => !(name in port));
   if (missing.length) throw new Error(`cloud.attach: the port lacks ${missing.join(", ")}`);
   const editorParts = editor.parts();
@@ -47,7 +47,9 @@ export function createSurface({ port, shell, workspace, identity, sync, editor, 
     showToast: (message, options) => shell.toast(message, options),
     showConfirmDialog: (options) => shell.confirm(options),
     promptForName: (message, value = "", options = {}) => shell.input({ title: message, message, value, submitLabel: "Save", ...options }),
-    render: (project) => shell.render(project)
+    render: (project) => shell.render(project),
+    // The agent's status, asked again (Models'; signing in or out changes it).
+    refreshChatStatus: (options = {}) => models.agent.refresh({ signedIn: Boolean(identity.account()), ...options })
   };
   Object.defineProperty(app, "controller", { get: () => workspace.project(), enumerable: true });
   Object.defineProperty(app, "collaboration", { get: () => sync.session(), enumerable: true });
@@ -95,6 +97,19 @@ export function createSurface({ port, shell, workspace, identity, sync, editor, 
       }
     },
     uploadAsset
+  });
+  // "Manage Preview" on the project's root (the Explorer's menu): who may open the
+  // open cloud workspace's preview, while signed in and connected to it.
+  const canManagePreview = () => Boolean(identity.account()) && sync.mode.get().workspaceMode === "synced"
+    && Boolean(sync.session()?.isConnected()) && Boolean(app.settings.lastWorkspace?.team);
+  explorer.rootMenus.add({
+    id: "cloud.manage-preview",
+    entries: () => (canManagePreview() ? [["Manage Preview", "manage-preview"]] : []),
+    async run() {
+      const ws = app.settings.lastWorkspace;
+      if (ws?.team && ws?.path != null) await app.openAccessEditor(ws.team, ws.path, app.controller.getProject().name);
+      else app.notify("Open a server workspace to manage its preview access.");
+    }
   });
   editor.openTabs.configure((ws, openFiles, activeFile) => saveUserState(app.settings.serverUrl, identity.token(), ws.team, ws.path, openFiles, activeFile));
   // The welcome page (no file open): Resume the last cloud workspace, and open

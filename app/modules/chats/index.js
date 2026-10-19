@@ -12,9 +12,14 @@
 // API: attach(port) -> page: the side panel's Chats page (adapters/page.js),
 // given what main.js still provides (PORT below); page() -> the same:
 // render(project), badge(), receive(event), remapPersonaPaths(old, new),
-// giveAgentThreads({ oldGroupThreads(), movedGroupThreads(threads) }), view().
+// giveAgentThreads({ oldGroupThreads(project), movedGroupThreads(threads) }), view().
+// A character sheet's preview and a new sheet's template are its
+// (adapters/sheet.js). It draws on each redraw (Shell's), follows renamed characters (the
+// Explorer's "path-changed") and takes the Assistant's old Roleplay threads
+// (Workspace's handover "agent-group-threads").
 import { defineModule } from "../../kernel/index.js";
 import { createChatsPage } from "./adapters/page.js";
+import { addCharacterSheet } from "./adapters/sheet.js";
 import { createIdbRecordStore } from "./adapters/local-records.js";
 import { createLocalChats as createLocalStore } from "./service/local-chats.js";
 
@@ -33,9 +38,11 @@ const PORT = [];
 export default defineModule({
   name: "chats",
   level: 5,
-  uses: ["shell", "workspace", "identity", "sync", "editor", "characters", "models"],
+  uses: ["shell", "workspace", "identity", "sync", "editor", "explorer", "characters", "models"],
   owns: { events: ["chat-message", "chat-typing", "chat-update"], data: ["the browser's chat store"], elements: ["the Chats page"] },
   start(ctx) {
+    // Character sheets in the editor: their preview, and a new sheet's template.
+    addCharacterSheet({ editor: ctx.use("editor"), explorer: ctx.use("explorer"), characters: ctx.use("characters") });
     let page = null;
     function attach(port) {
       if (page) throw new Error("chats: already attached");
@@ -63,6 +70,16 @@ export default defineModule({
       sync.events.on("event", ({ event }) => {
         if (["chat-message", "chat-typing", "chat-update"].includes(event.type)) page.receive(event);
       });
+      // Drawn on each redraw (Shell's): the unread count on its tab, and the page while it is open.
+      shell.events.on("render", ({ project }) => {
+        if (!project) return;
+        page.badge();
+        if (shell.pages.active("side") === "chats") page.render(project);
+      });
+      // Group chats name their characters by path: a renamed or moved character file (or folder) is followed.
+      ctx.use("explorer").events.on("path-changed", ({ from, to }) => page.remapPersonaPaths(from, to));
+      // The Agent page's old Roleplay threads, handed over through Workspace.
+      workspace.handover.receive("agent-group-threads", (threads) => page.giveAgentThreads(threads));
       return page;
     }
     return { attach, page: () => page };

@@ -30,10 +30,10 @@ import { installTogether } from "./together.js";
 // What main.js attaches (editor.attach(port)); each entry should move to an
 // owner, or become an extension point, and leave this list.
 export const PORT = [
-  "settings", "elements", "onDrop"
+  "settings", "elements"
 ];
 
-export function createSurface({ port, view, marks, paneViews, completions, lineNotes, welcome, identity, openTabsStore, previews, highlighters, toolbars, workspace, shell }) {
+export function createSurface({ port, view, marks, paneViews, completions, lineNotes, welcome, identity, openTabsStore, drops, previews, highlighters, toolbars, workspace, shell }) {
   const missing = PORT.filter((name) => !(name in port));
   if (missing.length) throw new Error(`editor.attach: the port lacks ${missing.join(", ")}`);
   const composing = { now: false }; // an IME composition is under way
@@ -104,6 +104,8 @@ export function createSurface({ port, view, marks, paneViews, completions, lineN
     identity,
     // The open tabs kept on the server for a cloud workspace (Cloud says how: openTabsStore).
     saveUserState: (...args) => openTabsStore.save(...args),
+    // Something dropped into the source editor (a file, text, an image): whoever takes drops (drops.configure: the Explorer).
+    onDrop: (event) => drops.handle(event),
     // The frame (Shell's): closing the phone's explorer drawer, showing the preview pane.
     setMobileExplorerOpen: (open) => shell.frame.setExplorerOpen(open),
     togglePreview: () => shell.frame.toggle("preview"),

@@ -12,6 +12,10 @@
 //   editing.configure({ shows(id), apply(next) })  the Editor: the file it shows whole,
 //                                  and applying an edit to it as if typed (the write path)
 //   presence                       carets: own (the Editor's) and others' (Sync's)
+//   handover.offer(name, value) / handover.receive(name, receiver(value))
+//                                  something one module hands another on its level,
+//                                  in either order (the Assistant's old Roleplay
+//                                  threads, which Chats moves in); announced "handed-over"
 //
 // The write path's two ports (service/writer.js) are answered here too: a text
 // change goes through the editor when it shows the file (so it joins the undo
@@ -67,8 +71,24 @@ export function createShared({ store, events }) {
     keep(clientIds) { events.emit("carets-kept", { clientIds }); }
   });
 
+  // Hand-overs between modules on one level: what is offered under a name
+  // reaches whoever receives that name, whichever comes first.
+  const offered = new Map(), receivers = new Map();
+  const handOver = (name) => {
+    if (!offered.has(name)) return;
+    for (const receiver of receivers.get(name) ?? []) receiver(offered.get(name));
+    if (receivers.get(name)?.length) events.emit("handed-over", { name });
+  };
+  const handover = Object.freeze({
+    offer(name, value) { offered.set(name, value); handOver(name); },
+    receive(name, receiver) {
+      receivers.set(name, [...(receivers.get(name) ?? []), receiver]);
+      if (offered.has(name)) { receiver(offered.get(name)); events.emit("handed-over", { name }); }
+    }
+  });
+
   return {
-    typed, applyRemote, replace, ports, presence,
+    typed, applyRemote, replace, ports, presence, handover,
     editing: { configure(next) { editing = { ...editing, ...next }; } }
   };
 }

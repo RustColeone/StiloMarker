@@ -247,11 +247,11 @@ There is no build step: the browser loads the ES modules under `app/` as they ar
 
 | Path | What it holds |
 |------|---------------|
-| `app/main.js` | The app shell: DOM lookups, shared state, the collaboration runtime, the render/status loop, event wiring, settings, boot and reconnect. |
-| `app/editor/` | The source editor: `editor-core.js` (text ↔ DOM, selection, rendering, undo, cursors, keys), `highlight.js`, `autocomplete.js`, `find-replace.js`, `links.js` (tooltip, Linked Notes), `comments.js` (line comments). |
-| `app/features/` | Larger features. `panes.js` (tabs, preview), `file-actions.js` (explorer actions, Add File), `cloud-browser.js` (browser, accounts, hosting), `snapshots.js` (snapshots, version label, diff tab) are loaded with the page; `chat-panel.js`, `workspace-history.js`, `snapshots-dialog.js`, `module-map-tools.js` download the first time they are opened. |
-| `app/ui/` | Views: `explorer-view.js`, `layout.js` (panels, phone panes, gestures), `dialogs.js` (dialogs, toasts, debug log), `bmap-view.js` and `chats-view.js` (on demand), the format toolbar. |
-| `app/services/`, `app/domain/` | Storage, sync, chat API, parsers and the project model, with no DOM wiring. |
+| `app/main.js` | Starts the modules and attaches what they do not own yet (the page's elements), then resumes the last session. |
+| `app/kernel/` | Modules, their levels, state with named actions, events, extension points and the trace. |
+| `app/modules/` | The core's modules (Shell, File types, Workspace, Editor, Sync, History, Explorer, Comments, Cloud, Models, Characters, Chats, Assistant...); `docs/ARCHITECTURE.md` describes each and the rules between them. |
+| `extensions/` | Extensions (diagrams, module maps, URL albums): each a folder the core never names, using only modules' extension points. |
+| `app/services/`, `app/domain/`, `app/ui/` | What is left from before the restructure. |
 
 How the split modules reach `main.js`'s state: each exports a factory that
 `main.js` calls on first use, passing an `app` object of getters (and setters

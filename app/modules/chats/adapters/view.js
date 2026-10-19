@@ -59,7 +59,8 @@ export function createChatsView(deps) {
     ui.loading = !ui.overview;
     const overview = await guard(() => store.overview());
     ui.loading = false;
-    if (store !== ui.store || !overview) { deps.rerender(); return; }
+    // An answer without a list of conversations (a server that doesn't know Chats) counts as none.
+    if (store !== ui.store || !Array.isArray(overview?.conversations)) { deps.rerender(); return; }
     ui.overview = overview;
     if (ui.conversationId != null && !overview.conversations.some((c) => c.id === ui.conversationId)) {
       Object.assign(ui, { view: "list", conversationId: null });

@@ -244,7 +244,7 @@ export function createSnapshots(app) {
   }
 
   // ---- Workspace History (whole-workspace backups) ---------------------------
-  // The dialog lives in app/features/workspace-history.js and loads on first use.
+  // The dialog lives in ./workspace-history.js and loads on first use.
   // These restore helpers stay here: per-file Snapshots restores use them too.
   function projectPaths(project) {
     const folders = new Set();

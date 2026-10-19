@@ -62,10 +62,6 @@ export function createActions(app) {
       await app.deleteSelected();
       return;
     }
-    if (action === "generate-module-map") {
-      app.openMtreeToolsDialog(nodeId);
-      return;
-    }
     if (action === "replace-file") {
       app.chooseReplacementFor(nodeId);
       return;
@@ -78,19 +74,13 @@ export function createActions(app) {
       await app.deleteSelected();
       return;
     }
-    if (action === "manage-preview") {
-      const ws = app.settings.lastWorkspace;
-      if (ws?.team && ws?.path != null) {
-        await app.openAccessEditor(ws.team, ws.path, app.controller.getProject().name);
-      } else {
-        app.notify("Open a server workspace to manage its preview access.");
-      }
-      return;
-    }
     if (action === "export") {
       app.exportNode(nodeId);
       return;
     }
+    // One of another module's entries on the project's root (explorer.rootMenus).
+    const rootMenu = app.rootMenuOf(action);
+    if (rootMenu) { await rootMenu.run(action); return; }
     // One of a file type's own entries (explorer.fileMenus).
     const node = app.controller.getProject().nodes[nodeId];
     const menu = node?.kind === "file" ? app.fileMenuOf(node.name) : null;

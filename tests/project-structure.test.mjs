@@ -11,7 +11,7 @@ test("required workspace files exist", () => {
     "app/main.js",
     "app/modules/sync/service/runtime.js",
     "app/modules/workspace/adapters/file-content.js",
-    "app/services/mtree-module-map-service.js",
+    "extensions/module-map/browser/model/module-map.js",
     "app/domain/project-model.js",
     "app/modules/workspace/adapters/zip.js",
     "app/modules/shell/adapters/offline.js",
@@ -52,11 +52,6 @@ test("index.html exposes required element ids", async () => {
     "notice-dialog",
     "confirm-dialog",
     "input-dialog",
-    "mtree-tools-dialog",
-    "mtree-target-file-select",
-    "mtree-render-preview",
-    "mtree-keep-button",
-    "mtree-undo-button",
     "source-pane",
     "preview-pane",
     "editor-cursors"
@@ -67,14 +62,19 @@ test("index.html exposes required element ids", async () => {
   // File inputs ask the File types module for their accept list (no type is spelled here).
   assert.match(page, /id="import-file-input" type="file" data-file-accept="all" data-file-accept-extra=".zip"/);
   assert.ok(!/id="mtree-generate-button"/.test(page));
+  // The module map dialog is the module-map extension's own markup.
+  const dialog = await readFile(resolveFromRoot("extensions/module-map/browser/adapters/dialog.js"), "utf8");
+  for (const id of ["mtree-tools-dialog", "mtree-target-file-select", "mtree-render-preview", "mtree-keep-button", "mtree-undo-button"]) {
+    assert.match(dialog, new RegExp(`id="${id}"`), `Missing element id: ${id}`);
+  }
 });
 
 test("main.js wires core feature symbols", async () => {
-  // Code split out of main.js lives in app/features/, app/ui/ and the modules it moved into;
+  // Code split out of main.js lives in app/ui/ and the modules it moved into;
   // the wiring may be in any of them.
   const { readdir } = await import("node:fs/promises");
   const split = [];
-  for (const dir of ["app/features", "app/ui", "app/modules/editor/adapters", "app/modules/comments/adapters", "app/modules/explorer/adapters", "app/modules/cloud/adapters", "app/modules/assistant/adapters", "app/modules/sync/adapters"]) {
+  for (const dir of ["app/ui", "app/modules/editor/adapters", "app/modules/chats/adapters", "app/modules/comments/adapters", "app/modules/explorer/adapters", "app/modules/cloud/adapters", "app/modules/assistant/adapters", "app/modules/sync/adapters"]) {
     for (const name of (await readdir(resolveFromRoot(dir))).filter((n) => n.endsWith(".js"))) split.push(`${dir}/${name}`);
   }
   const mainSource = [await readFile(resolveFromRoot("app/main.js"), "utf8"),
@@ -84,7 +84,6 @@ test("main.js wires core feature symbols", async () => {
     /modules\.sync\.session\(\)/,
     /workspace\.typed\(/,
     /layout\.show-session/,
-    /generate-module-map/,
     /editorView\.reset/,
     /text\/mdnotes-file-id/,
     /cloud\.import-file/,
@@ -108,9 +107,14 @@ test("main.js wires core feature symbols", async () => {
 
 test("feature modules split out of main.js load on demand", async () => {
   const mainSource = await readFile(resolveFromRoot("app/main.js"), "utf8");
-  const moduleMap = await readFile(resolveFromRoot("app/features/module-map-tools.js"), "utf8");
+  // The module map dialog is the module-map extension's, loaded the first time it opens.
+  const moduleMap = await readFile(resolveFromRoot("extensions/module-map/browser/adapters/tools.js"), "utf8");
   assert.match(moduleMap, /buildModuleMapSection/);
-  assert.match(mainSource, /import\("\.\/features\/module-map-tools\.js"\)/);
+  const moduleMapExtension = await readFile(resolveFromRoot("extensions/module-map/browser/index.js"), "utf8");
+  assert.match(moduleMapExtension, /import\("\.\/adapters\/tools\.js"\)/);
+  assert.doesNotMatch(moduleMapExtension, /^import .*(tools|model\/module-map)\.js/m);
+  // Its entry on a .mtree file's menu is the Explorer's extension point.
+  assert.match(moduleMapExtension, /fileMenus\.add\(\{\s*id: TYPE,\s*entries: \[\["Generate Module Map", "generate-module-map"\]\]/);
   // The diagram editor is the diagram extension's, loaded the first time a diagram is shown.
   const diagramPreview = await readFile(resolveFromRoot("extensions/bmap-diagram/browser/adapters/preview.js"), "utf8");
   assert.match(diagramPreview, /import\("\.\/view\.js"\)/);
@@ -144,7 +148,7 @@ test("every on-demand import points at a file that exists", async () => {
   const { dirname, join } = await import("node:path");
   const walk = async (dir) => (await Promise.all((await readdir(resolveFromRoot(dir), { withFileTypes: true }))
     .map((entry) => entry.isDirectory() ? walk(`${dir}/${entry.name}`) : [`${dir}/${entry.name}`]))).flat();
-  const files = (await walk("app")).filter((file) => file.endsWith(".js"));
+  const files = [...await walk("app"), ...await walk("extensions")].filter((file) => file.endsWith(".js"));
   let checked = 0;
   for (const file of files) {
     const source = await readFile(resolveFromRoot(file), "utf8");

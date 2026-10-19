@@ -9,7 +9,7 @@ import { groupByProvider } from "../../models/index.js";
 import { contextChipsHtml, paintConversation } from "../../shell/index.js";
 
 export function createRender(app) {
-  const { elements, escapeHtmlAttribute, isMobileLayout, workspace, identity, chatsPage, chatState, isOwnBatch, agent, agentStatus, chatMarkdownCache, pageOpen, OP_ICONS, STATUS_WORDS } = app;
+  const { elements, escapeHtmlAttribute, isMobileLayout, workspace, identity, chatState, isOwnBatch, agent, agentStatus, chatMarkdownCache, pageOpen, OP_ICONS, STATUS_WORDS } = app;
   function renderProposalDiff(op) {
     if (op.type === "create-file" && op.generatedImage) {
       const src = app.generatedImageUrl(op.generatedImage);
@@ -217,13 +217,10 @@ export function createRender(app) {
     return html;
   }
 
-  // The side panel: whichever page is open draws itself; Chats' unread count
-  // shows on its tab either way.
+  // The side panel: whichever page is open draws itself (Chats draws its own).
   function renderChatPanel(project) {
-    app.ensureChatWorkspaceLoaded(project); // first: the Chats page moves old Roleplay threads out of it
-    chatsPage.badge();
-    if (pageOpen("chats")) chatsPage.render(project);
-    else renderAgentPage(project);
+    app.ensureChatWorkspaceLoaded(project);
+    if (!pageOpen("chats")) renderAgentPage(project);
   }
 
   // ---- The Agent page ------------------------------------------------------------

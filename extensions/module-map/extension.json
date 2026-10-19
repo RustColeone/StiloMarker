@@ -1,0 +1,5 @@
+{
+  "about": "Module maps: 'Generate Module Map' on a .mtree file opens a dialog that turns it into a Markdown module map section, written into a new or an existing Markdown file. Everything about it in the browser lives in this folder; the core only offers extension points. The .mtree file type itself is one of File types' built-in types (protocol/file-types.json).",
+  "name": "module-map",
+  "browser": "browser/index.js"
+}

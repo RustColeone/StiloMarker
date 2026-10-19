@@ -20,7 +20,7 @@ export { pingServer, saveUserState, uploadAsset } from "./adapters/api.js";
 export default defineModule({
   name: "cloud",
   level: 5,
-  uses: ["shell", "workspace", "identity", "sync", "editor", "history", "comments"],
+  uses: ["shell", "workspace", "identity", "models", "sync", "editor", "history", "comments", "explorer"],
   owns: {
     elements: ["the file browser", "the account controls", "the access dialog", "hosting", "Settings → Collaboration", "the server in the status bar"],
     state: ["the file browser's place and selection"]
@@ -33,7 +33,8 @@ export default defineModule({
     function attach(port) {
       if (parts) throw new Error("cloud: already attached");
       parts = createSurface({ port, shell: ctx.use("shell"), workspace: ctx.use("workspace"), identity: ctx.use("identity"),
-        sync: ctx.use("sync"), editor: ctx.use("editor"), history: ctx.use("history"), comments: ctx.use("comments") });
+        sync: ctx.use("sync"), editor: ctx.use("editor"), history: ctx.use("history"), comments: ctx.use("comments"),
+        explorer: ctx.use("explorer"), models: ctx.use("models") });
       return parts;
     }
     return { attach, parts: () => parts };

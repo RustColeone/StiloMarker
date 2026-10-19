@@ -14,7 +14,7 @@ function getFileIconClass(node) {
 
 const isExpandableFile = (node) => node.kind === "file" && builtinTypes.typeOf(node.name)?.expandable === true;
 
-function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenPart, onToggleFolder, onSelectNode, onAction, canPasteTarget, canPreviewFile, canManagePreview, onDragNodeStart, onDragPartStart, getFilterMode, getAssetPreviewSrc, listParts, getPartAdder, getSelectedTarget, markOf = () => null, extraEntriesFor = () => [] }) {
+function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenPart, onToggleFolder, onSelectNode, onAction, canPasteTarget, canPreviewFile, rootEntries = () => [], onDragNodeStart, onDragPartStart, getFilterMode, getAssetPreviewSrc, listParts, getPartAdder, getSelectedTarget, markOf = () => null, extraEntriesFor = () => [] }) {
   let menuTarget = null;
   let currentProject = null;
   let activeMenuMode = null;
@@ -106,15 +106,13 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       const format = builtinTypes.formatOf(node.name);
       if (format === "markdown") {
         typeEntries = [["Copy", "copy"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
-      } else if (format === "mtree") {
-        typeEntries = [["Copy", "copy"], ["Generate Module Map", "generate-module-map"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
       } else if (format === "image") {
         typeEntries = [["Copy", "copy"], ["Replace File", "replace-file"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
       } else {
         typeEntries = [["Copy", "copy"], ["Rename", "rename"], ["Delete", "delete"], ["Export", "export"]];
       }
 
-      // A file type's own entries (explorer.fileMenus: a diagram's Export As).
+      // A file type's own entries (explorer.fileMenus: a diagram's Export As, a module map).
       typeEntries.push(...extraEntriesFor(node));
       const addPart = getPartAdder?.(node.id);
       if (addPart) {
@@ -138,11 +136,8 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
   }
 
   function getProjectRootMenuEntries() {
-    const entries = [["Export as Zip", "export"]];
-    if (canManagePreview?.() === true) {
-      entries.push(["Manage Preview", "manage-preview"]);
-    }
-    return entries;
+    // Other modules' entries follow (explorer.rootMenus: Cloud's Manage Preview).
+    return [["Export as Zip", "export"], ...rootEntries()];
   }
 
   function showMenu(x, y, target, mode = "default") {

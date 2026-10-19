@@ -1,10 +1,16 @@
 // Module map tools: the dialog that turns a .mtree file into a Markdown module
-// map section. Loaded the first time the dialog opens; the app passes in what
-// it needs through `deps`.
+// map section. Loaded the first time the dialog opens; the extension passes in
+// what it needs through `deps`.
 
-import { buildModuleMapSection, replaceOrAppendModuleMap } from "../services/mtree-module-map-service.js";
-import { query } from "../ui/dom.js";
-import { builtinTypes } from "../modules/file-types/index.js";
+import { buildModuleMapSection, replaceOrAppendModuleMap } from "../model/module-map.js";
+import { builtinTypes } from "../../../../app/modules/file-types/index.js";
+import { DIALOG_HTML } from "./dialog.js";
+
+function query(selector) {
+  const node = document.querySelector(selector);
+  if (!node) throw new Error(`Missing DOM node: ${selector}`);
+  return node;
+}
 
 export function createModuleMapTools(deps) {
   const {
@@ -12,6 +18,8 @@ export function createModuleMapTools(deps) {
     setActiveSourceFile, setPreviewFile, highlightMarkdownSource, renderMarkdown,
     typesetPreview, handleIndentKeydown, workspace
   } = deps;
+
+  if (!document.getElementById("mtree-tools-dialog")) document.body.insertAdjacentHTML("beforeend", DIALOG_HTML.trim());
 
   const el = {
     dialog: query("#mtree-tools-dialog"),

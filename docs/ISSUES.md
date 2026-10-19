@@ -69,6 +69,23 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.81: the last of main.js's ports
+
+Step S4e-4b2.
+
+- "Generate Module Map" is now the last entry of a `.mtree` file's menu
+  (after Export): module maps are an extension (`extensions/module-map`), and
+  a file type's own entries come after the common ones. The dialog and its
+  Ctrl+S work as before (the dialog was compared pixel for pixel).
+- The Chats tab's unread count now updates on every redraw, even before the
+  Agent page has ever been opened; before, it waited for the Agent page.
+  Drawing it that early showed that the Chats page threw on every redraw
+  when a server answered without a list of conversations; it now treats such
+  an answer as no answer.
+- "Manage Preview" on the project's root, dropping files into the editor,
+  following a renamed character in local group chats and new character
+  sheets work as before, each now run by its own module.
+
 ### v0.1.80: the Editor and Sync meet in Workspace
 
 Step S4e-4b1. Nothing changes for users.

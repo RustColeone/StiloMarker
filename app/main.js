@@ -1,15 +1,14 @@
 import { startModules, ignore, ignored } from "./kernel/index.js";
-import shellModule, { normalizeServerUrl } from "./modules/shell/index.js";
+import shellModule from "./modules/shell/index.js";
 import fileTypesModule from "./modules/file-types/index.js";
 import workspaceModule from "./modules/workspace/index.js";
 import identityModule from "./modules/identity/index.js";
 import historyModule from "./modules/history/index.js";
 import extensionModules from "./extensions.js";
 import { APP_VERSION } from "./version.js";
-import { seedDefaultProject, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isImageFileName } from "./domain/project-model.js";
+import { seedDefaultProject } from "./domain/project-model.js";
 import { loadProject } from "./modules/workspace/index.js";
 import syncModule from "./modules/sync/index.js";
-import { parsePersona, personaTemplate } from "./services/persona-service.js";
 import { signInSettings } from "./services/settings-service.js";
 import cloudModule from "./modules/cloud/index.js";
 import modelsModule from "./modules/models/index.js";
@@ -20,8 +19,7 @@ import commentsModule from "./modules/comments/index.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { query } from "./ui/dom.js";
 import explorerModule from "./modules/explorer/index.js";
-import { registerPreviews } from "./features/previews.js";
-import editorModule, { escapeHtmlAttribute, forgetViewStates, getRelativeProjectPath, normalizePath, renderMarkdown } from "./modules/editor/index.js";
+import editorModule from "./modules/editor/index.js";
 
 document.querySelectorAll("[data-app-version]").forEach((label) => { label.textContent = `v${APP_VERSION}`; });
 
@@ -217,100 +215,34 @@ const syncState = modules.sync.status;
 // The Editor's parts (source editor, find, autocomplete, links, tabs, preview),
 // created now and given what no module owns yet: each entry of this port should
 // find an owner or become an extension point (modules/editor/adapters/surface.js).
-var editorParts = modules.editor.attach({
-  settings, elements, onDrop: (event) => handleEditorDrop(event)
-});
+var editorParts = modules.editor.attach({ settings, elements });
 // The explorer and file actions, given what no module owns yet (modules/explorer/adapters/surface.js).
-var explorerParts = modules.explorer.attach({
-  settings, elements,
-  canManagePreview: () => Boolean(identity.account()) && syncMode.get().workspaceMode === "synced"
-    && collaboration.isConnected() && Boolean(settings.lastWorkspace?.team),
-  openAccessEditor, openMtreeToolsDialog, remapPersonaPaths
-});
-// A new character sheet starts from the template (diagrams add their own: extensions/bmap-diagram).
-modules.explorer.newFiles.add({ id: "persona", content(name) {
-  const base = parsePersona("", name).name;
-  return personaTemplate(/^new character( \d+)?$/i.test(base) ? "New Character" : base);
-} });
+var explorerParts = modules.explorer.attach({ settings, elements });
 // Snapshots, the version label, the diff tab and History's dialogs (modules/history/adapters/surface.js).
-var historyParts = modules.history.attach({});
+modules.history.attach({});
 // The cloud file browser, accounts and hosting (modules/cloud/adapters/surface.js).
-var cloudParts = modules.cloud.attach({
-  elements, refreshChatStatus
-});
-var chatsPage = modules.chats.attach({});
+var cloudParts = modules.cloud.attach({ elements });
+modules.chats.attach({});
 // The Agent page (the Assistant's), which loads itself the first time it is needed.
-modules.assistant.attach({ elements, storedProject, chatsPage }); // the side panel's Chats page
-// Diagrams and character sheets add their previews to the Editor's extension point.
-registerPreviews(modules.editor.previews, {
-  view: editorView, settings, escapeHtmlAttribute, normalizePath, getRelativeProjectPath,
-  personaAvatarSrc: modules.characters.avatarSrc,
-  get controller() { return controller; }
-});
+modules.assistant.attach({ elements, storedProject });
 // ---- The Editor's parts (the Editor module: adapters/surface.js) ----
 // Forwarders: code here still calls the editor's functions by name.
 function getViewState(...args) { return editorParts.getViewState(...args); }
-function isPreviewableFileName(...args) { return editorParts.isPreviewableFileName(...args); }
-function redrawRemoteCursors(...args) { return editorParts.redrawRemoteCursors(...args); }
 function attachSelectionChangeListener(...args) { return editorParts.attachSelectionChangeListener(...args); }
-function clamp(...args) { return editorParts.clamp(...args); }
-function clearEditorDropCaret(...args) { return editorParts.clearEditorDropCaret(...args); }
 function getEditorText(...args) { return editorParts.getEditorText(...args); }
-function handleIndentKeydown(...args) { return editorParts.handleIndentKeydown(...args); }
-function notifyEditorChanged(...args) { return editorParts.notifyEditorChanged(...args); }
-function refreshFormatToolbar(...args) { return editorParts.refreshFormatToolbar(...args); }
 function renderEditorContent(...args) { return editorParts.renderEditorContent(...args); }
-function renderRemoteCursors(...args) { return editorParts.renderRemoteCursors(...args); }
 function scheduleOverviewRuler(...args) { return editorParts.scheduleOverviewRuler(...args); }
 function setEditorSelection(...args) { return editorParts.setEditorSelection(...args); }
-function syncEditorScroll(...args) { return editorParts.syncEditorScroll(...args); }
-
-
-
-
-
-
-
-
 
 // The agent's status, asked again (Models'; the Agent page redraws as it changes).
 function refreshChatStatus(options = {}) { return modules.models.agent.refresh({ signedIn: Boolean(identity.account()), ...options }); }
 
-/** Group chats name their characters by path; follow a rename or move of a
- *  character file, or of a folder holding one. */
-function remapPersonaPaths(oldPath, newPath) { chatsPage.remapPersonaPaths(oldPath, newPath); } // Chats follows renamed characters
-
-
-
-/** A persona's avatar as an <img> src, or "" when it doesn't resolve. */
-
-
-async function confirmAction(message) { return shell.confirm(String(message)); }
-async function copyTextToClipboard(text) { return shell.copyText(text); }
 function logDebug(...args) { return shell.log(...args); } // the log panel (Shell's)
-function notify(message) { return shell.notify(message); }
-async function promptForName(message, value = "", options = {}) { return shell.input({ title: message, message, value, submitLabel: "Save", ...options }); }
-function showConfirmDialog(options) { return shell.confirm(options); }
-function showToast(message, options) { return shell.toast(message, options); }
-
-/** Resolve an image node to a usable <img> src. Local/PIN workspaces inline the
- *  bytes as a data: URL in content; directory-backed cloud workspaces keep the
- *  bytes on the server and serve them by the file's workspace path. */
-
-
-function showEditorAutocomplete(...args) { return editorParts.showEditorAutocomplete(...args); }
-
-function computeSearchMatches(...args) { return editorParts.computeSearchMatches(...args); }
-function findNext(...args) { return editorParts.findNext(...args); }
-function findPrev(...args) { return editorParts.findPrev(...args); }
-function openFindBar(...args) { return editorParts.openFindBar(...args); }
 
 // The live session (Sync's; it reaches the project and the Editor through Workspace).
 const collaboration = modules.sync.session();
 
 attachSelectionChangeListener();
-
-
 
 shell.menus.add({ id: "file", label: "File", order: 1 });
 shell.menus.add({ id: "edit", label: "Edit", order: 2 });
@@ -318,76 +250,14 @@ shell.menus.add({ id: "create", label: "Create", order: 3 });
 shell.menus.add({ id: "view", label: "View", order: 4 });
 shell.menus.add({ id: "settings", label: "Settings", order: 5 });
 
-// Module map tools (.mtree → Markdown) load the first time their dialog opens.
-let moduleMapTools = null;
-let moduleMapToolsLoading = null;
-
-function loadModuleMapTools() {
-  moduleMapToolsLoading ??= import("./features/module-map-tools.js").then(({ createModuleMapTools }) => {
-    moduleMapTools = createModuleMapTools({
-      controller, getPath, getNode, findChildByName, notify, publishOperation,
-      setActiveSourceFile, setPreviewFile, highlightMarkdownSource, renderMarkdown,
-      typesetPreview, handleIndentKeydown, workspace
-    });
-    return moduleMapTools;
-  }).catch((error) => {
-    moduleMapToolsLoading = null;
-    throw error;
-  });
-  return moduleMapToolsLoading;
-}
-
-async function openMtreeToolsDialog(fileId) {
-  try {
-    (await loadModuleMapTools()).open(fileId);
-  } catch (error) {
-    notify(`Module map tools could not load: ${error.message}`);
-  }
-}
-function escapeEditorHtml(...args) { return editorParts.escapeEditorHtml(...args); }
-function highlightMarkdownSource(...args) { return editorParts.highlightMarkdownSource(...args); }
-
-
-
 // ---- Tabs, panes and preview (the Editor module) ----
 function bindPaneDropTarget(...args) { return editorParts.bindPaneDropTarget(...args); }
 function bindTabStripReorderTarget(...args) { return editorParts.bindTabStripReorderTarget(...args); }
-function cachedWorkspaceView(...args) { return editorParts.cachedWorkspaceView(...args); }
-function clearPaneDropState(...args) { return editorParts.clearPaneDropState(...args); }
-function closeTabOverflowMenu(...args) { return editorParts.closeTabOverflowMenu(...args); }
 function openFileFromExplorer(...args) { return editorParts.openFileFromExplorer(...args); }
-function openTabOverflowMenu(...args) { return editorParts.openTabOverflowMenu(...args); }
 function setActiveSourceFile(...args) { return editorParts.setActiveSourceFile(...args); }
-function setPreviewFile(...args) { return editorParts.setPreviewFile(...args); }
-function showResumedFile(...args) { return editorParts.showResumedFile(...args); }
-function tabOverflowButton(...args) { return editorParts.tabOverflowButton(...args); }
-async function typesetPreview(...args) { return editorParts.typesetPreview(...args); }
 
 // ---- The explorer and file actions (the Explorer module) ----
-function suggestUniqueFileName(...args) { return explorerParts.suggestUniqueFileName(...args); }
-function clearExplorerDropState(...args) { return explorerParts.clearExplorerDropState(...args); }
-function createFileInFolder(...args) { return explorerParts.createFileInFolder(...args); }
-function getSelectedParent(...args) { return explorerParts.getSelectedParent(...args); }
-async function handleEditorDrop(...args) { return explorerParts.handleEditorDrop(...args); }
-function moveExplorerNode(...args) { return explorerParts.moveExplorerNode(...args); }
-function openNewFileDialog(...args) { return explorerParts.openNewFileDialog(...args); }
 async function renameFileById(...args) { return explorerParts.renameFileById(...args); }
-
-
-// While the module map tools are open and focused, Ctrl+S writes the map
-// (before Shell's shortcut saves the file).
-document.addEventListener("keydown", (event) => {
-  if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") return;
-  if (!moduleMapTools?.isOpen() || !moduleMapTools.contains(document.activeElement)) return;
-  event.preventDefault();
-  event.stopPropagation();
-  logDebug("action", "Module map written to target");
-  moduleMapTools.write();
-}, true);
-
-function closeMenus() { shell.closeMenus(); }
-
-
 
 // What main.js still draws on each redraw (Shell's): the project's name.
 shell.events.on("render", ({ project }) => {
@@ -422,13 +292,6 @@ if (!storedProject) {
 
 logDebug("response", "Debug log initialized", `panel=${settings.debugPanel ? "visible" : "hidden"}`);
 
-// Sending a change is Sync's (adapters/connection.js).
-function publishOperation(operation) { return modules.sync.publish(operation); }
-
-function updateFileContentFromPreview(...args) { return editorParts.updateFileContentFromPreview(...args); }
-
-
-
 window.addEventListener("resize", scheduleOverviewRuler);
 bindPaneDropTarget(elements.sourcePane, "source");
 bindPaneDropTarget(elements.sourceTabStrip, "source");
@@ -440,17 +303,9 @@ bindTabStripReorderTarget(elements.previewTabStrip, "preview");
 // ── Settings (Shell's dialog; its sections and fields are their owners') ──
 function openSettingsDialog(tab = "appearance") { shell.settingsDialog.open(tab); }
 
-
 // ---- The cloud file browser, accounts and hosting (the Cloud module) ----
 function handleAccountLogout(...args) { return cloudParts.handleAccountLogout(...args); }
-async function handleOpenWorkspace(...args) { return cloudParts.handleOpenWorkspace(...args); }
-async function openAccessEditor(...args) { return cloudParts.openAccessEditor(...args); }
-async function pingCurrentServer(...args) { return cloudParts.pingCurrentServer(...args); }
 function renderHostTargets(...args) { return cloudParts.renderHostTargets(...args); }
-
-
-
-
 
 renderHostTargets(); // needs the live session, which exists from here on
 

@@ -1,3 +1,6 @@
+// A .mtree file (modules, their parents, children and descriptions) read into
+// a graph and written out as a Markdown module map section; a section already
+// in a Markdown file is replaced, else appended.
 const CONTINUATION_TOKEN = "...";
 
 class ModuleNode {

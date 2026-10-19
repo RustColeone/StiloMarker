@@ -57,7 +57,7 @@ export function createNaming(app) {
       // publishing the rename, so a pending edit isn't sent against the old path
       // (which the server just renamed → 400 → disconnect / "server unreachable").
       app.collaboration.remapPatchPath(currentPath, getPath(app.controller.getProject(), node.id));
-      app.remapPersonaPaths(currentPath, getPath(app.controller.getProject(), node.id));
+      app.pathChanged(currentPath, getPath(app.controller.getProject(), node.id));
       app.publishOperation({ type: "rename-node", path: currentPath, name });
       app.showToast(`Renamed to ${name}`);
     } catch (error) {
@@ -179,7 +179,7 @@ export function createNaming(app) {
       // publishing the rename, so a pending edit isn't sent against the old path
       // (which the server just renamed → 400 → disconnect / "server unreachable").
       app.collaboration.remapPatchPath(currentPath, getPath(app.controller.getProject(), node.id));
-      app.remapPersonaPaths(currentPath, getPath(app.controller.getProject(), node.id));
+      app.pathChanged(currentPath, getPath(app.controller.getProject(), node.id));
       app.publishOperation({ type: "rename-node", path: currentPath, name });
       app.showToast(`Renamed to ${name}`);
     } catch (error) {
