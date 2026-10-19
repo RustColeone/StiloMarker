@@ -216,7 +216,7 @@
               </div>
               <button id="log-collapse-button" class="debug-collapse-button" type="button" aria-label="Close the bottom area" title="Close the bottom area">×</button>
             </div>
-            <div class="area-pages">
+            <div class="area-pages" data-tab-host-pages="bottom">
               <div id="log-page" class="log-page">
                 <div id="debug-log-list" class="debug-log-list"></div>
               </div>
@@ -226,7 +226,7 @@
 
         <div id="chat-splitter" class="panel-splitter chat-splitter" role="separator" aria-orientation="vertical" aria-label="Resize chat"></div>
 
-        <aside id="chat-panel" class="chat-panel" aria-label="Chat panel">
+        <aside id="chat-panel" class="chat-panel" aria-label="Chat panel" data-tab-host-pages="side">
           <!-- Toolbar -->
           <header class="chat-toolbar">
             <!-- A tab host (Shell's pages): each feature adds its page; the strip is drawn from them. -->

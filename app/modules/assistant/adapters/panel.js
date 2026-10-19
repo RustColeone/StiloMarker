@@ -89,7 +89,7 @@ export function createAgentPanel({ shell, workspace, identity, sync, editor, exp
 };
   app.STATUS_WORDS = { signin: "Sign in", offline: "Offline", unconfigured: "No key", restricted: "Not allowed", checking: "Checking…" };
   app.chatMarkdownCache = new Map(); // message id -> { content, html }
-  app.pageOpen = (id) => pages.active("side") === id; // which side-panel page is open (Shell's pages)
+  app.pageOpen = (id) => pages.isOpen(id); // whether a page is open where it is (Shell's pages)
 
   const add = (part) => {
     for (const [name, fn] of Object.entries(part)) {
@@ -103,7 +103,7 @@ export function createAgentPanel({ shell, workspace, identity, sync, editor, exp
   add(createRender(app));
   add(createTurns(app));
   add(createProposals(app));
-  installEvents(app);
+  const { pageShown } = installEvents(app);
   const { chatState, identity: who, chatWorkspaceKey } = app;
 
   // The agent's old Roleplay threads, handed to Chats (on this level) through
@@ -150,6 +150,7 @@ export function createAgentPanel({ shell, workspace, identity, sync, editor, exp
 
   // Test access (tests/helpers/chat_hook.py adds a line here).
   return {
+    pageShown, createNewChatConversation: app.createNewChatConversation,
     receiveChatWorkspace, renderChatPanel: app.renderChatPanel, refreshChatStatus: app.refreshChatStatus,
     findBatchMessage: app.findBatchMessage,
     ensureChatWorkspaceLoaded: app.ensureChatWorkspaceLoaded,

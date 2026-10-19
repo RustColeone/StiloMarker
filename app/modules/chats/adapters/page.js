@@ -28,7 +28,7 @@ export function createChatsPage(app) {
   // Draw again: the unread count on the tab, and the page itself while it is open.
   const rerender = () => {
     pages.badge("side", "chats", chats?.unreadTotal() ?? 0);
-    if (pages.active("side") === "chats") render(controller.getProject());
+    if (pages.isOpen("chats")) render(controller.getProject());
   };
   const createLocalChats = (options) => createLocalStore({ ...options, records: createIdbRecordStore() });
   const loadChatsView = () => import("./view.js");

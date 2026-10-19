@@ -24,13 +24,34 @@
 //   pages.available(host, id, available)   a page with nothing to show hides
 //   pages.reveal(host, id)   its section expanded and scrolled to
 //   pages.onChange(host, listener(id))
-export function createPages({ registry, settings, events = null, isPhone = () => false, doc = globalThis.document }) {
+//
+// The areas' pages move (step 5k): right-click a tab or a section's header
+// for Move to Left / Right / Bottom; the page's body (and toolbar) goes to
+// that host as a section or a tab, the area shows it, and the choice is kept
+// (settings.pageHosts). A page shown when its area shows is told (shown).
+//   pages.move(id, host)   pages.hostOf(id) -> host   pages.areaOf(id) -> "left" | "right" | "bottom"
+//   pages.isOpen(id)   the open tab of its host, or a section
+//   pages.visible(id)   open, and its area showing (and its section not collapsed)
+// areaShown(host) and showArea(host): the frame's, for the area holding a host.
+const AREA_HOSTS = { left: "Left", side: "Right", bottom: "Bottom" };
+const HOST_OF_AREA = { left: "left", right: "side", bottom: "bottom" };
+
+export function createPages({ registry, settings, events = null, isPhone = () => false, areaShown = () => true, showArea = () => {},
+  doc = globalThis.document, win = globalThis.window }) {
   const listeners = new Map(); // host -> Set(listener)
   const places = new Map();    // host -> its elements (looked up once)
   const sections = new Map();  // page key -> its section element
   const unavailable = new Set(); // page keys with nothing to show
+  const placed = new Map();      // page key -> the host it is in now (moved, or kept)
 
-  const pagesOf = (host) => registry.all().filter((page) => page.host === host).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const hostOfPage = (page) => placed.get(page.key) ?? page.host;
+  // A page moved in comes after the host's own, in the order they were moved.
+  const orderOf = (page) => {
+    if (!placed.has(page.key)) return page.order ?? 0;
+    return 1000 + Object.keys(settings.pageHosts ?? {}).indexOf(page.id);
+  };
+  const pagesOf = (host) => registry.all().filter((page) => hostOfPage(page) === host).sort((a, b) => orderOf(a) - orderOf(b));
+  const pageById = (id) => registry.all().find((page) => page.id === id && AREA_HOSTS[page.host]) ?? null;
   const shownPagesOf = (host) => pagesOf(host).filter((page) => !unavailable.has(page.key));
   function placeOf(host) {
     if (!places.has(host)) {
@@ -38,6 +59,7 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
         strip: doc?.querySelector(`[data-tab-host="${host}"]`) ?? null,
         toolbar: doc?.querySelector(`[data-tab-host-toolbar="${host}"]`) ?? null,
         plus: doc?.querySelector(`[data-tab-host-new="${host}"]`) ?? null,
+        bodies: doc?.querySelector(`[data-tab-host-pages="${host}"]`) ?? null,
         sections: doc?.querySelector(`[data-section-host="${host}"]`) ?? null
       });
     }
@@ -75,10 +97,27 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
     title.className = "sidebar-panel-title";
     title.textContent = page.label;
     toggle.append(caret, title);
-    if (page.toolbar) toggle.append(page.toolbar);
     section.append(toggle);
-    if (page.body) section.append(page.body);
     sections.set(page.key, section);
+    return section;
+  }
+
+  // A page's body and toolbar in its section: the toolbar in the header, or,
+  // when it holds controls, at the top of the section (no button in a button).
+  function fillSection(page) {
+    const section = sectionOf(page);
+    const toggle = section.querySelector(".sidebar-panel-toggle");
+    if (page.toolbar) {
+      const controls = page.toolbar.matches("button, a, input, select") || page.toolbar.querySelector("button, a, input, select");
+      const home = controls ? section : toggle;
+      if (page.toolbar.parentElement !== home) {
+        if (controls) toggle.after(page.toolbar);
+        else toggle.append(page.toolbar);
+      }
+      page.toolbar.hidden = false;
+    }
+    if (page.body && page.body.parentElement !== section) section.append(page.body);
+    if (page.body) page.body.hidden = false;
     return section;
   }
 
@@ -86,7 +125,11 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
     const pages = pagesOf(host);
     const ids = pages.map((page) => page.id).join(" ");
     if (container.dataset.pages !== ids) {
-      container.append(...pages.map(sectionOf)); // in order
+      container.append(...pages.map(fillSection)); // in order
+      // Sections of pages that left this host go.
+      for (const section of [...container.querySelectorAll(":scope > .sidebar-panel")]) {
+        if (!ids.split(" ").includes(section.dataset.page)) section.remove();
+      }
       container.dataset.pages = ids;
     }
     for (const page of pages) {
@@ -123,7 +166,10 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
     if (strip) {
       const ids = pages.map((page) => page.id).join(" ");
       if (strip.dataset.pages !== ids) {
-        strip.replaceChildren(...pages.map((page) => {
+        const empty = doc.createElement("span");
+        empty.className = "tab-host-empty";
+        empty.textContent = "Empty: right-click a tab or a section and choose Move to…";
+        strip.replaceChildren(...(pages.length ? [] : [empty]), ...pages.map((page) => {
           const button = doc.createElement("button");
           button.type = "button";
           button.className = strip.dataset.tabClass ?? "chat-tab"; // the host's look
@@ -142,6 +188,7 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
     }
     for (const page of pages) {
       const visible = page.id === open;
+      if (page.body && place.bodies && page.body.parentElement !== place.bodies) place.bodies.append(page.body);
       if (page.body && page.body.hidden === visible) page.body.hidden = !visible;
       if (page.toolbar) {
         if (place.toolbar && page.toolbar.parentElement !== place.toolbar) place.toolbar.append(page.toolbar);
@@ -178,6 +225,83 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
     draw(host);
   }
 
+  // ── Moving a page to another area's host ──
+  function move(id, host) {
+    const page = pageById(id);
+    const from = page ? hostOfPage(page) : null;
+    if (!page || !AREA_HOSTS[host] || from === host) return;
+    page.shown?.(false);
+    // Kept as the last move (so it sorts after those before it), or forgotten back home.
+    const others = { ...(settings.pageHosts ?? {}) };
+    delete others[page.id];
+    if (host === page.host) placed.delete(page.key);
+    else placed.set(page.key, host);
+    settings.change({ pageHosts: host === page.host ? others : { ...others, [page.id]: host } }, `move the ${page.id} page to the ${host} area`);
+    draw(from);
+    draw(host);
+    // It shows where it went, and its area with it.
+    if (!placeOf(host).sections) show(host, page.id);
+    showArea(host);
+    if (visible(page.id)) page.shown?.(true);
+    if (placeOf(host).sections) reveal(host, page.id);
+  }
+
+  const hostOf = (id) => {
+    const page = pageById(id);
+    return page ? hostOfPage(page) : null;
+  };
+  const areaOf = (id) => Object.keys(HOST_OF_AREA).find((area) => HOST_OF_AREA[area] === hostOf(id)) ?? null;
+  function isOpen(id) {
+    const host = hostOf(id);
+    if (!host || unavailable.has(pageById(id).key)) return false;
+    return placeOf(host).sections ? true : active(host) === id;
+  }
+  function visible(id) {
+    const host = hostOf(id);
+    return Boolean(host) && isOpen(id) && areaShown(host) && !(placeOf(host).sections && collapsed(id));
+  }
+
+  // The menu on a page's tab or section header: Move to….
+  let menu = null;
+  function closeMenu() {
+    if (menu) menu.hidden = true;
+  }
+  function openMenu(id, x, y) {
+    const host = hostOf(id);
+    if (!host || !doc) return;
+    if (!menu) {
+      menu = doc.createElement("div");
+      menu.className = "explorer-context-menu tab-context-menu page-move-menu";
+      menu.setAttribute("role", "menu");
+      menu.setAttribute("aria-label", "Move the page");
+      doc.body.append(menu);
+      doc.addEventListener("pointerdown", (event) => { if (!menu.hidden && !menu.contains(event.target)) closeMenu(); }, true);
+      doc.addEventListener("keydown", (event) => { if (event.key === "Escape") closeMenu(); });
+      win?.addEventListener("resize", closeMenu);
+    }
+    menu.replaceChildren(...Object.entries(AREA_HOSTS).map(([target, name]) => {
+      const button = doc.createElement("button");
+      button.type = "button";
+      const here = target === host;
+      button.setAttribute("role", here ? "menuitemradio" : "menuitem");
+      if (here) button.setAttribute("aria-checked", "true");
+      button.className = here ? "is-checked" : "";
+      button.disabled = here;
+      button.dataset.moveTo = target;
+      button.textContent = `Move to ${name}`;
+      button.addEventListener("click", () => { closeMenu(); move(id, target); });
+      return button;
+    }));
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    menu.hidden = false;
+    const rect = menu.getBoundingClientRect();
+    const margin = 8;
+    if (rect.right > (win?.innerWidth ?? Infinity) - margin) menu.style.left = `${Math.max(margin, win.innerWidth - margin - rect.width)}px`;
+    if (rect.bottom > (win?.innerHeight ?? Infinity) - margin) menu.style.top = `${Math.max(margin, win.innerHeight - margin - rect.height)}px`;
+    menu.querySelector("button:not(:disabled)")?.focus({ preventScroll: true });
+  }
+
   // A section shown: expanded, and scrolled to.
   function reveal(host, id) {
     if (collapsed(id)) toggleSection(host, id);
@@ -186,31 +310,61 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
   }
 
   function add(page) {
-    const remove = registry.add({ ...page, key: `${page.host}/${page.id}` });
-    if (page.available === false) unavailable.add(`${page.host}/${page.id}`);
+    const key = `${page.host}/${page.id}`;
+    const remove = registry.add({ ...page, key });
+    if (page.available === false) unavailable.add(key);
+    const kept = settings.pageHosts?.[page.id];
+    if (AREA_HOSTS[page.host] && AREA_HOSTS[kept] && kept !== page.host) placed.set(key, kept);
+    const host = placed.get(key) ?? page.host;
     // Bind the host the first time it gets a page: a strip's tabs and its
     // "+" button, or a section host's headers.
-    const place = placeOf(page.host);
+    for (const target of AREA_HOSTS[page.host] ? Object.keys(AREA_HOSTS) : [page.host]) bindHost(target);
+    // Not shown(true) here: a page added while its feature is still being set
+    // up must not draw yet; the feature draws when it is ready.
+    draw(host);
+    return remove;
+  }
+
+  // A host bound the first time a page could be in it: a strip's tabs (and,
+  // in an area, their Move to… menu) and its "+" button, or a section host's
+  // headers.
+  function bindHost(host) {
+    const place = placeOf(host);
     const bindOnce = (element, bind) => {
       if (!element || element.dataset.bound) return;
       element.dataset.bound = "1";
       bind(element);
     };
-    bindOnce(place.strip, (strip) => strip.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-page]");
-      if (button) show(page.host, button.dataset.page);
-    }));
+    const area = Boolean(AREA_HOSTS[host]);
+    bindOnce(place.strip, (strip) => {
+      strip.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-page]");
+        if (button) show(host, button.dataset.page);
+      });
+      if (area) strip.addEventListener("contextmenu", (event) => {
+        const button = event.target.closest("[data-page]");
+        if (!button) return;
+        event.preventDefault();
+        event.stopPropagation();
+        openMenu(button.dataset.page, event.clientX, event.clientY);
+      });
+    });
     bindOnce(place.plus, (plus) => plus.addEventListener("click", () => {
-      pagesOf(page.host).find((entry) => entry.id === active(page.host))?.newItem?.();
+      pagesOf(host).find((entry) => entry.id === active(host))?.newItem?.();
     }));
-    bindOnce(place.sections, (container) => container.addEventListener("click", (event) => {
-      const toggle = event.target.closest(".sidebar-panel-toggle");
-      if (toggle?.dataset.panel) toggleSection(page.host, toggle.dataset.panel);
-    }));
-    // Not shown(true) here: a page added while its feature is still being set
-    // up must not draw yet; the feature draws when it is ready.
-    draw(page.host);
-    return remove;
+    bindOnce(place.sections, (container) => {
+      container.addEventListener("click", (event) => {
+        const toggle = event.target.closest(".sidebar-panel-toggle");
+        if (toggle?.dataset.panel) toggleSection(host, toggle.dataset.panel);
+      });
+      container.addEventListener("contextmenu", (event) => {
+        const toggle = event.target.closest(".sidebar-panel-toggle");
+        if (!toggle?.dataset.panel) return;
+        event.preventDefault();
+        event.stopPropagation(); // the section's own menu, not the sidebar's (the Explorer's)
+        openMenu(toggle.dataset.panel, event.clientX, event.clientY);
+      });
+    });
   }
 
   // The sections follow their kept state, and the viewport while never chosen.
@@ -219,9 +373,15 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
   };
   settings.on?.((view, changed) => { if (changed.includes("sidebarPanels")) drawSectionHosts(); });
   events?.on("layout", drawSectionHosts);
+  // An area shown: the pages open in it are told (they draw, or load).
+  events?.on("area", ({ area, shown }) => {
+    const host = HOST_OF_AREA[area];
+    if (!shown || !host) return;
+    for (const page of pagesOf(host)) if (visible(page.id)) page.shown?.(true);
+  });
 
   return Object.freeze({
-    add, show, active, badge, available, reveal,
+    add, show, active, badge, available, reveal, move, hostOf, areaOf, isOpen, visible, closeMenu,
     onChange(host, listener) {
       if (!listeners.has(host)) listeners.set(host, new Set());
       listeners.get(host).add(listener);

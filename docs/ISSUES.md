@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-19 · release `v0.1.100` (not deployed; v0.1.99 is live)
+Last updated: 2026-10-19 · release `v0.1.101` (not deployed; v0.1.99 is live)
 
 ---
 
@@ -65,9 +65,39 @@ no whitelist or blacklist, so everyone in the team may open it. Since v0.1.52
 the server log says so. Possible fix: refuse to open it (fail closed) until the
 file is fixed. Needs a decision: failing closed locks out its owner too.
 
+### 6. Opening the side panel squeezes the source pane
+**Confidence:** seen happen (measured, live v0.1.99 and dev) · **Severity:** medium (layout)
+
+At 1400×900 with the explorer shown, the source pane is 744 px wide and the
+preview 320 px; showing the side panel makes them 108 px and 532 px. The
+preview's width (while never set by hand) is half the editor grid, but
+`areas.js` measures the grid before the panel that just opened takes its
+space, so the preview is sized for the old, wider grid. The same measure at
+the start gives today's 744/320 split rather than half and half. Possible
+fix: measure after the layout's attributes are set. It changes the default
+split too (to about half), so it waits for a decision.
+
 ---
 
 ## Fixed
+
+### v0.1.101: pages move between the areas
+
+Step 5k. On the desktop (the phone's drawers show what is placed in them).
+
+- Right-click a section's header in the left area, or a tab in the side
+  panel or the bottom area: **Move to Left / Right / Bottom**. A section
+  moved to the side panel or the bottom becomes a tab, its toolbar (the
+  Session's connection label, the Log's filters) in that area's header; a tab
+  moved to the left becomes a section. The area it went to shows it, and an
+  area left with no page says how to fill it.
+- The places are kept (over a reload); moving a page back home forgets it.
+- The Agent page now loads when the area holding it shows, wherever that is.
+- Drags on the phone measure their speed over the last tenth of a second,
+  so touch events arriving in a bunch no longer count as a flick (the sheet
+  test failed once under load from this).
+- New browser test: `area-pages-browser.py`. Found while testing, older than
+  this work: issue 6 above (the side panel squeezes the source pane).
 
 ### v0.1.100: the areas are hosts
 

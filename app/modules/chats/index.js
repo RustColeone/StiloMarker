@@ -66,7 +66,7 @@ export default defineModule({
       shell.events.on("render", ({ project }) => {
         if (!project) return;
         page.badge();
-        if (shell.pages.active("side") === "chats") page.render(project);
+        if (shell.pages.isOpen("chats")) page.render(project);
       });
       // Group chats name their characters by path: a renamed or moved character file (or folder) is followed.
       ctx.use("explorer").events.on("path-changed", ({ from, to }) => page.remapPersonaPaths(from, to));

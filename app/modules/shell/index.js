@@ -100,10 +100,13 @@ export default defineModule({
     const events = ctx.emitter();
     const { commands, menus, run } = createCommands(ctx);
     const dialogs = createDialogs();
-    // The pages in the areas' hosts; the left's sections start collapsed on a
-    // phone, which the frame (made below) tells.
+    // The pages in the areas' hosts; whether an area shows (and the phone,
+    // where the left's sections start collapsed) the frame tells, made below.
     let frame = null;
-    const pages = createPages({ registry: ctx.registry({ key: "key" }), settings, events, isPhone: () => frame?.isPhone() ?? false });
+    const AREA_OF_HOST = { left: "left", side: "right", bottom: "bottom" };
+    const pages = createPages({ registry: ctx.registry({ key: "key" }), settings, events, isPhone: () => frame?.isPhone() ?? false,
+      areaShown: (host) => frame?.shown(AREA_OF_HOST[host]) ?? false,
+      showArea: (host) => { if (frame && !frame.shown(AREA_OF_HOST[host])) frame.toggle(AREA_OF_HOST[host]); } });
     const settingsDialog = createSettingsDialog({ pages, settings, registry: ctx.registry() });
     // The theme follows its setting, and the system's when it is "system".
     applyTheme(settings.theme);

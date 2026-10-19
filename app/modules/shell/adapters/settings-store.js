@@ -44,6 +44,8 @@ function createDefaultSettings() {
     chatTab: "agent",
     // The page open in each tab host ({ side: "agent" | "chats" }; Shell's pages).
     openPages: {},
+    // The area each moved page is in ({ log: "side" }; Shell's pages, Move to…).
+    pageHosts: {},
     // Runtime memory: true while the user has an active/intended session, so the
     // app can auto-reconnect on next load or after a dropped connection.
     wasConnected: false,

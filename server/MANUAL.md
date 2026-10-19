@@ -377,6 +377,11 @@ its header up for the full height and down again to shrink or close it, or
 tap above it, or use its ×. Opening it on the phone does not change whether
 the desktop shows it.
 
+**Moving panels:** right-click a section's title in the left sidebar
+(Linked Notes, Session) or a tab in the side panel (Agent, Chats) or the
+bottom panel (Log) and choose **Move to Left**, **Move to Right** or **Move
+to Bottom**. The panel stays where you put it; move it back the same way.
+
 **Copy/paste rules:**
 - Files and folders can be copied/pasted into any folder or the root.
 - URL album entries can only be pasted into a `.urldb` file.

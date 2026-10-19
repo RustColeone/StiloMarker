@@ -40,6 +40,7 @@ const SLOP = 10;                 // px before a gesture is claimed at all
 const DIRECTION_BIAS = 1.3;      // |dx| must exceed |dy| by this much
 const SNAP_FRACTION = 0.35;      // past this share of travel, snap onward
 const FLICK_VELOCITY = 0.45;     // px/ms that snaps regardless of distance
+const VELOCITY_WINDOW = 100;     // ms of the drag its speed is measured over (bunched events are no flick)
 
 // panes: { add, all } of { id, order, element(), caption() -> text, fileId() -> id | null,
 //   shown?({ fileId })  it came on screen; fileId: the file the previous pane showed (to show too, if it can)
@@ -235,8 +236,8 @@ export function createPhone({ panes, isPhone, closeMenus, events, run, doc = glo
     const touch = event.touches[0];
     if (touch.clientX < EDGE_INSET || touch.clientX > win.innerWidth - EDGE_INSET) return;
     const drawerOpen = left.isOpen(), rightOpen = right.isOpen(), bottomOpen = bottom.isOpen();
-    gesture = { startX: touch.clientX, startY: touch.clientY, lastX: touch.clientX, lastY: touch.clientY, lastT: event.timeStamp,
-      velocity: 0, kind: null, claimed: false, drawerOpen, rightOpen, onSheet: bottomOpen && Boolean(sheetHeader?.contains(event.target)),
+    gesture = { startX: touch.clientX, startY: touch.clientY, lastX: touch.clientX, lastY: touch.clientY,
+      samples: [{ t: event.timeStamp, x: touch.clientX, y: touch.clientY }], velocity: 0, kind: null, claimed: false, drawerOpen, rightOpen, onSheet: bottomOpen && Boolean(sheetHeader?.contains(event.target)),
       fromEdge: touch.clientX <= EDGE_ZONE, fromRightEdge: touch.clientX >= win.innerWidth - EDGE_ZONE,
       closed: !drawerOpen && !rightOpen && !bottomOpen };
   }
@@ -267,11 +268,14 @@ export function createPhone({ panes, isPhone, closeMenus, events, run, doc = glo
       else if (!beginPaneDrag(dx)) { gesture = null; return; }
     }
     const drawer = drawers[gesture.kind];
-    const dt = Math.max(1, event.timeStamp - gesture.lastT);
-    gesture.velocity = drawer?.vertical ? (touch.clientY - gesture.lastY) / dt : (touch.clientX - gesture.lastX) / dt;
+    // The speed over the last VELOCITY_WINDOW ms: one sample kept from before it.
+    const samples = gesture.samples;
+    samples.push({ t: event.timeStamp, x: touch.clientX, y: touch.clientY });
+    while (samples.length > 2 && samples[1].t <= event.timeStamp - VELOCITY_WINDOW) samples.shift();
+    const first = samples[0], dt = Math.max(1, event.timeStamp - first.t);
+    gesture.velocity = drawer?.vertical ? (touch.clientY - first.y) / dt : (touch.clientX - first.x) / dt;
     gesture.lastX = touch.clientX;
     gesture.lastY = touch.clientY;
-    gesture.lastT = event.timeStamp;
     event.preventDefault(); // ours now: no scroll or selection alongside
     if (drawer) drawer.follow(drawer.vertical ? dy : dx);
     else updatePaneDrag(dx);

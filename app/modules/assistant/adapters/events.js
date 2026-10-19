@@ -5,7 +5,7 @@ import { getPath } from "../../workspace/index.js";
 import { shouldSubmitChat } from "../../shell/index.js";
 
 export function installEvents(app) {
-  const { collaboration, controller, elements, isMobileLayout, logDebug, openSettingsDialog, settings, workspace, pages, chatState, agent, agentStatus } = app;
+  const { collaboration, controller, elements, isMobileLayout, logDebug, openSettingsDialog, settings, workspace, chatState, agent, agentStatus } = app;
   function toggleChatHistoryPane() {
     if (!elements.chatHistoryPane) return;
     const willShow = elements.chatHistoryPane.hidden;
@@ -101,22 +101,19 @@ export function installEvents(app) {
     elements.chatSendButton.disabled = !chatState.sending && !elements.chatInput.value.trim();
   });
 
-  // The two pages of the side panel (Shell's pages): each draws only while open.
-  pages.add({
-    host: "side", id: "agent", order: 1, label: "Agent", title: "The workspace agent: asks, edits and organizes files",
-    body: document.querySelector("#agent-page"), toolbar: elements.chatHistoryToggleButton, newItem: app.createNewChatConversation,
-    shown(visible) {
-      if (!visible) {
-        const current = app.getActiveChatThread();
-        if (current) current.draft = elements.chatInput.value;
-        if (elements.chatHistoryPane) elements.chatHistoryPane.hidden = true;
-        return;
-      }
-      chatState.renderedThreadId = null; // reload its draft
-      chatState.shouldScrollToBottom = true;
-      app.renderChatPanel(controller.getProject());
+  // The Agent page (added at start by the module) shown or left: it draws
+  // only while it shows; leaving keeps the draft and folds the history away.
+  function pageShown(visible) {
+    if (!visible) {
+      const current = app.getActiveChatThread();
+      if (current) current.draft = elements.chatInput.value;
+      if (elements.chatHistoryPane) elements.chatHistoryPane.hidden = true;
+      return;
     }
-  });
+    chatState.renderedThreadId = null; // reload its draft
+    chatState.shouldScrollToBottom = true;
+    app.renderChatPanel(controller.getProject());
+  }
 
-  return { toggleChatHistoryPane };
+  return { toggleChatHistoryPane, pageShown };
 }

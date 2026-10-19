@@ -929,6 +929,34 @@ p {
   display: contents;
 }
 
+/* Pages moved between the areas (Move to…): a tab's page in the left area is
+   a section of its own height; a section's body in a tab host gets the
+   section's padding and scrolls; an empty tab host says how to fill it. */
+.sidebar-panel > .panel-page,
+.sidebar-panel > .log-page {
+  height: min(50vh, 460px);
+}
+
+[data-tab-host-pages] > .sidebar-panel-body {
+  flex: 1 1 0;
+  min-height: 0;
+  align-content: start;
+  padding: 10px 12px;
+  overflow: auto;
+}
+
+.chat-panel > .log-page {
+  flex: 1 1 0;
+}
+
+.tab-host-empty {
+  align-self: center;
+  padding: 0 10px;
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .sidebar-panel {
   display: grid;
   gap: 6px;
@@ -5732,7 +5760,28 @@ menu {
   display: flex;
   align-items: center;
   gap: 2px;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+/* A wide page toolbar moved into the side panel's header (the Log's) scrolls;
+   the panel's own buttons keep their size. */
+.chat-toolbar-actions > button {
+  flex: none;
+}
+
+.chat-toolbar-actions .log-toolbar {
+  flex: 0 1 auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chat-toolbar-actions .log-toolbar > * {
+  flex: none;
+}
+
+.chat-toolbar-actions .log-toolbar-spacer {
+  display: none;
 }
 
 .chat-toolbar-icon-btn {

@@ -53,21 +53,35 @@ export default defineModule({
       });
       return loading;
     }
-    // Shown: loaded, or its status asked again and the conversation scrolled to the end.
+    // Shown: loaded, or its status asked again and the conversation drawn, scrolled to the end.
     function showing() {
       if (!panel) { void load(); return; }
       void panel.refreshChatStatus({ silent: true });
-      panel.chatState.shouldScrollToBottom = true;
-      panel.renderChatPanel(ctx.use("workspace").project().getProject());
+      panel.pageShown(true);
     }
-    shell.events.on("area", ({ area, shown }) => { if (shown && area === "right") showing(); });
+    // The Agent page (Shell's pages): in the side panel unless moved; told when
+    // it shows (its tab opened, or its area shown), wherever it is.
+    if (globalThis.document) {
+      shell.pages.add({
+        host: "side", id: "agent", order: 1, label: "Agent", title: "The workspace agent: asks, edits and organizes files",
+        body: document.querySelector("#agent-page"), toolbar: document.querySelector("#chat-history-toggle-button"),
+        newItem: () => void load().then((loaded) => loaded?.createNewChatConversation()),
+        shown(visible) {
+          if (visible) showing();
+          else panel?.pageShown(false);
+        }
+      });
+    }
     shell.settingsDialog.onOpen(() => { if (!panel) void load(); });
     shell.commands.add({ id: "assistant.toggle-chat", title: () => (shell.frame.shown("right") ? "Hide Chat" : "Show Chat"),
       menu: { id: "view", group: 0, order: 4 }, run: () => shell.frame.toggle("right") });
-    // Once the app has started, the page loads at once if the side panel shows.
+    // It loads when the area holding it shows, even on another of its tabs
+    // (its status and Settings → Agent are its), and at once if that area shows.
+    shell.events.on("area", ({ area, shown }) => { if (shown && area === shell.pages.areaOf("agent")) void load(); });
     ctx.whenStarted(() => {
       started = true;
-      if (globalThis.document && shell.settings.chatPanel === "shown" && !shell.frame.isPhone()) void load();
+      const area = shell.pages.areaOf("agent");
+      if (globalThis.document && area && shell.frame.shown(area) && !shell.frame.isPhone()) void load();
     });
     return { editsHtml, editsLabel, load, panel: () => panel };
   }
