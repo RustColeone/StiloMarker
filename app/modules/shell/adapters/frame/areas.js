@@ -28,7 +28,7 @@ export function createAreas({ settings, events, log = () => {}, doc = globalThis
       if (isPhone()) { phone.toggleExplorer(); return; }
       settings.change({ explorer: settings.explorer === "collapsed" ? "expanded" : "collapsed" }, "Toggle Explorer");
     } else if (area === "right") {
-      if (isPhone()) { phone.selectPane(phone.view() === "chat" ? "source" : "chat"); return; }
+      if (isPhone()) { phone.toggleRight(); return; }
       settings.change({ chatPanel: settings.chatPanel === "hidden" ? "shown" : "hidden" }, "Toggle Chat");
     } else if (area === "bottom") {
       settings.change({ debugPanel: !settings.debugPanel }, "Toggle Log");
@@ -47,7 +47,7 @@ export function createAreas({ settings, events, log = () => {}, doc = globalThis
 
   function shown(area) {
     if (area === "left") return settings.explorer !== "collapsed";
-    if (area === "right") return settings.chatPanel === "shown";
+    if (area === "right") return isPhone() && phone ? phone.rightOpen() : settings.chatPanel === "shown";
     if (area === "bottom") return Boolean(settings.debugPanel);
     return settings[area] !== "hidden";
   }
@@ -133,10 +133,10 @@ export function createAreas({ settings, events, log = () => {}, doc = globalThis
     phone?.applyView();
     events.emit("layout", {});
   }
-  // The right area shows by its setting, or when the phone shows a pane in it
+  // The right area shows by its setting, or on the phone, where it is a drawer
   // (that must win over the global [hidden] rule, so the attribute goes).
-  function showsRight(phonePaneElement) {
-    if (rightPanel) rightPanel.hidden = settings.chatPanel === "hidden" && !(phonePaneElement && phonePaneElement === rightPanel);
+  function showsRight(phoneDrawer) {
+    if (rightPanel) rightPanel.hidden = settings.chatPanel === "hidden" && !(phoneDrawer && phoneDrawer === rightPanel);
   }
   settings.on((view, changed) => { if (changed.some((key) => LAYOUT_KEYS.includes(key))) apply(); });
 
@@ -195,6 +195,7 @@ export function createAreas({ settings, events, log = () => {}, doc = globalThis
     phone?.cancelGesture();
     phone?.setExplorerOpen(false);
     phone?.setMenuOpen(false);
+    phone?.setRightOpen(false);
     apply();
   });
 

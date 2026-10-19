@@ -147,28 +147,52 @@ async def main():
             assert await page.locator('.pane-swipe-layer').count() == 0
             assert await page.locator('#app').get_attribute('data-drawer-drag') is None
 
+        async def assert_right(state, view='preview'):
+            await page.wait_for_timeout(360)
+            assert await page.locator('#app').get_attribute('data-mobile-right') == state
+            assert await page.locator('#app').get_attribute('data-right-drag') is None
+            assert await page.locator('#app').get_attribute('data-mobile-view') == view, 'the drawer leaves the view as it was'
+
         await gesture('#editor-content',[180,50])
         await assert_pane('source')
         await page.locator('#mobile-view-toggle').click()  # the same file, previewed
         for ending in ['touchcancel','multitouch']:
-            await gesture('#preview-output',[180,50],ending)
+            await gesture('#preview-output',[360,380],ending)
             await assert_pane('preview')
         # Reversing across the starting point cannot select the wrong neighbor.
-        await gesture('#preview-output',[180,350])
+        await gesture('#preview-output',[360,180])
         await assert_pane('preview')
-        # A rapid switch in the top bar wins over a settling swipe's old timer.
+        # Past the last view nothing moves: the chat is a drawer, not a view.
         await gesture('#preview-output',[180,50])
-        await page.locator('#mobile-view-toggle').click()
-        await assert_pane('source')
-        await page.locator('#mobile-view-toggle').click()
+        await assert_pane('preview')
+        # Rapid switches in the top bar win over a settling swipe's old timer
+        # (both while it settles: one call, as Playwright's clicks wait).
+        await gesture('#preview-output',[360,380])
+        await page.evaluate('() => { const b = document.querySelector("#mobile-view-toggle"); b.click(); b.click(); }')
+        await assert_pane('preview')
+        # The right drawer: a swipe from the right edge opens it; editing in it
+        # owns swipes; a drag to the right, its close button or a tap on the
+        # note beside it closes it.
+        await assert_right('closed')
+        await gesture('#preview-output',[300,200],start=380)
+        await page.wait_for_function(WAIT_LOADED)  # the chat panel loads on demand
+        await assert_right('open')
         await gesture('#preview-output',[180,50])
-        await assert_pane('chat')
-        await gesture('#chat-input',[180,50])
-        await assert_pane('chat')
+        await assert_right('open')
+        await gesture('#chat-input',[300,380])
+        await assert_right('open')
+        await gesture('#chat-panel',[300,380])
+        await assert_right('closed')
+        await page.locator('#mobile-chat-toggle').click()
+        await assert_right('open')
+        drawer = await page.locator('#chat-panel').evaluate('el => { const r = el.getBoundingClientRect(); return [r.left, r.right, innerWidth]; }')
+        assert 0 < drawer[0] < drawer[2] * 0.3 and drawer[1] == drawer[2], drawer  # the note peeks out at the left
         await page.locator('#chat-collapse-button').click()
-        await assert_pane('source')
+        await assert_right('closed')
+        await page.locator('#mobile-chat-toggle').click()
+        await page.mouse.click(20, 400)
+        await assert_right('closed')
         # Horizontal content and the diagram canvas own even edge drags.
-        await page.locator('#mobile-view-toggle').click()
         await page.locator('#preview-output').evaluate('''el => {
           el.innerHTML='<div id="wide-content" style="width:200px;overflow-x:auto"><div style="width:1000px">Wide table</div></div><div class="bmap-editor" id="test-canvas">Diagram canvas</div>';
         }''')
@@ -188,15 +212,16 @@ async def main():
         before=await page.evaluate('localStorage.getItem("mdnotes.settings.v1")')
         await page.locator('#view-menu-button').click()
         await page.locator('[data-command="assistant.toggle-chat"]').click()
-        await assert_pane('chat')
+        await assert_right('open')
         await page.locator('#chat-collapse-button').click()
-        await assert_pane('source')
+        await assert_right('closed')
         assert await page.evaluate('localStorage.getItem("mdnotes.settings.v1")') == before
         await page.locator('#mobile-chat-toggle').click()
         await page.wait_for_function(WAIT_LOADED)  # the chat panel loads on demand
         await page.set_viewport_size({'width':1200,'height':844})
         assert await page.locator('#chat-panel').is_hidden(), 'mobile state leaked into hidden desktop chat'
         await page.set_viewport_size({'width':390,'height':350})
+        assert await page.locator('#app').get_attribute('data-mobile-right') == 'closed', 'the breakpoint closes the drawer'
         await page.locator('#mobile-menu-button').click()
         await page.locator('#settings-menu-button').click()
         await page.locator('[data-command="shell.open-settings"]').click()
@@ -204,12 +229,12 @@ async def main():
         assert dialog['height'] <= dialog['viewport'] and not dialog['overflow'],dialog
         await page.screenshot(path='/tmp/stilomarker-mobile-settings-v0.1.15.png')
         await page.locator('#settings-dialog .dialog-close-corner').click()
-        await page.locator('#mobile-view-toggle').click()  # from the chat: back to the file
+        await page.locator('#mobile-view-toggle').click()
         await assert_pane('source')
         await page.set_viewport_size({'width':390,'height':844})
         await page.screenshot(path='/tmp/stilomarker-mobile-source-v0.1.15.png')
         assert not errors,errors
-        print(json.dumps({'mobileViewports':5,'runtimeErrors':len(errors),'checks':['keyboard-height document containment','reachable menus','44px controls','Find controls fit','height resize preserves caret','IME resize preserves DOM','editing owns swipes','cancel and multitouch restore pane','direction reversal','rapid navigation','normal pane swipe','chat close','canvas and wide content own gestures','edge drawer','exclusive flyouts','desktop settings preserved','breakpoint state','short-screen settings']}))
+        print(json.dumps({'mobileViewports':5,'runtimeErrors':len(errors),'checks':['keyboard-height document containment','reachable menus','44px controls','Find controls fit','height resize preserves caret','IME resize preserves DOM','editing owns swipes','cancel and multitouch restore pane','direction reversal','rapid navigation','normal pane swipe','right drawer edge swipe, drag and close','canvas and wide content own gestures','edge drawer','exclusive flyouts','desktop settings preserved','breakpoint state','short-screen settings']}))
         await browser.close()
 
 asyncio.run(main())

@@ -3,7 +3,8 @@
 The top bar names the file on screen; its name opens the list of the open
 files (with Rename first), and one switch shows the same file in its other
 view, hidden when the file has only one. A file picked in the explorer shows
-in the view on screen. Isolated: every API is mocked; the welcome template
+in the view on screen. The chat is a drawer over the file, not a view: the
+file and its view stay, and the file list closes it. Isolated: every API is mocked; the welcome template
 is this checkout's Template folder.
 """
 import asyncio
@@ -23,6 +24,7 @@ STATE = '''({
   switchHidden: document.querySelector("#mobile-view-toggle").hidden,
   switchTo: document.querySelector("#mobile-view-toggle").dataset.target,
   listOpen: !document.querySelector("#mobile-file-list").hidden,
+  right: document.querySelector("#app").dataset.mobileRight,
   source: document.querySelector("#editor-content").innerText.slice(0, 40),
   preview: document.querySelector("#preview-output").innerText.slice(0, 40)
 })'''
@@ -103,17 +105,20 @@ async def main():
         assert (now['view'], now['file'], now['switchHidden'], now['listOpen']) == ('source', 'welcome.md', False, False), now
         assert now['source'].startswith('# STILO MARKER'), now
 
-        # From the chat, the switch goes back to the file.
+        # The chat opens as a drawer over the file: the file and its view stay.
         await page.locator('#mobile-chat-toggle').click()
         now = await state()
-        assert now['view'] == 'chat' and not now['switchHidden'], now
-        await page.locator('#mobile-view-toggle').click()
-        assert (await state())['view'] == 'source'
+        assert (now['right'], now['view'], now['file'], now['switchHidden']) == ('open', 'source', 'welcome.md', False), now
+        # The file list closes it (one flyout at a time).
+        await page.locator('#mobile-file-button').click()
+        now = await state()
+        assert (now['right'], now['listOpen']) == ('closed', True), now
+        await page.keyboard.press('Escape')
 
         assert not errors, errors
         await browser.close()
         print(json.dumps({'checks': ['switch keeps the file', 'explorer follows the view', 'one-view file hides the switch',
-                                     'open files listed', 'list closes', 'list picks', 'back from the chat']}))
+                                     'open files listed', 'list closes', 'list picks', 'chat drawer over the file']}))
 
 
 asyncio.run(main())

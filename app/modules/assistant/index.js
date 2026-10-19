@@ -60,12 +60,10 @@ export default defineModule({
       panel.chatState.shouldScrollToBottom = true;
       panel.renderChatPanel(ctx.use("workspace").project().getProject());
     }
-    shell.events.on("area", ({ area, shown }) => { if (shown && (area === "right" || area === "chat")) showing(); });
+    shell.events.on("area", ({ area, shown }) => { if (shown && area === "right") showing(); });
     shell.settingsDialog.onOpen(() => { if (!panel) void load(); });
-    shell.commands.add({ id: "assistant.toggle-chat", title: () => (shell.settings.chatPanel === "shown" ? "Hide Chat" : "Show Chat"),
+    shell.commands.add({ id: "assistant.toggle-chat", title: () => (shell.frame.shown("right") ? "Hide Chat" : "Show Chat"),
       menu: { id: "view", group: 0, order: 4 }, run: () => shell.frame.toggle("right") });
-    // On the phone the side panel is a pane of its own.
-    shell.frame.phonePanes.add({ id: "chat", order: 30, element: () => document.getElementById("chat-panel"), caption: () => "CHAT", fileId: () => null });
     // Once the app has started, the page loads at once if the side panel shows.
     ctx.whenStarted(() => {
       started = true;

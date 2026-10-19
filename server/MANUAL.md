@@ -355,7 +355,10 @@ Preview (the file in the other pane), and Copy Path.
 for the list of open files (and Rename). The switch next to it shows the same
 file in its other view (Source ↔ Preview); it is hidden when the file has only
 one. The explorer is a drawer (≡); a file picked there shows in the view on
-screen.
+screen. The chat button opens the Agent and Chats as a drawer from the right,
+with the note still showing at its left (it takes the whole width while you
+type). Tap the note, drag the drawer to the right, or use its › button to
+close it. Swiping in from the left or right edge opens those drawers too.
 
 **Copy/paste rules:**
 - Files and folders can be copied/pasted into any folder or the root.

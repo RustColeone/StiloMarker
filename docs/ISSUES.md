@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-19 · release `v0.1.92` (not deployed; v0.1.88 is live)
+Last updated: 2026-10-19 · release `v0.1.93` (not deployed; v0.1.88 is live)
 
 ---
 
@@ -68,6 +68,23 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.93: on the phone, the chat is a drawer from the right
+
+Step 5c. On the phone only; the desktop looks the same.
+
+- The chat button opens the Agent and Chats as a drawer from the right, about
+  85% of the width, so the note still shows at its left; it takes the whole
+  width while you type in it. A swipe from the right edge opens it too.
+- A tap on the note, a drag to the right, its › button, or opening the
+  explorer, the menu or the file list closes it. The file and its view stay
+  as they were underneath.
+- Swiping between panes is only Source ↔ Preview now; the chat is no longer
+  a third pane.
+- View → Show/Hide Chat names the drawer's state on the phone (it named the
+  desktop setting).
+- Tests: `mobile-navigation-browser.py` and `phone-views-browser.py` check
+  the drawer.
 
 ### v0.1.92: a tab's menu
 

@@ -3772,13 +3772,11 @@ menu {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .app-shell[data-mobile-view="preview"] #source-pane,
-  .app-shell[data-mobile-view="chat"] #source-pane {
+  .app-shell[data-mobile-view="preview"] #source-pane {
     display: none;
   }
 
-  .app-shell[data-mobile-view="source"] .preview-pane,
-  .app-shell[data-mobile-view="chat"] .preview-pane {
+  .app-shell[data-mobile-view="source"] .preview-pane {
     display: none;
   }
 
@@ -3788,24 +3786,44 @@ menu {
     flex-direction: column;
   }
 
-  /* ── Chat: overlays the workspace area, toggled into the pane slot ──
-     Selectors use the child combinator to outrank the base
-     [data-chat="hidden"] .chat-panel rule declared later in the sheet. */
-  .workspace-shell > .chat-panel {
+  /* ── The right area (Agent, Chats): a drawer from the right edge, driven by
+     data-mobile-right. About 85% wide, so the note peeks out (a tap there
+     closes it); the whole width while typing in it. The selectors outrank the
+     base [data-chat="hidden"] .chat-panel rule declared later in the sheet. */
+  .app-shell[data-mobile-right] .workspace-shell > .chat-panel {
+    display: flex;
     grid-column: 1;
     position: absolute;
-    inset: 0;
-    z-index: 26;
-    border-left: 0;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    left: auto;
+    width: 85vw;
+    z-index: 36;
+    border-left: 1px solid var(--border);
+    box-shadow: -6px 0 22px rgba(0, 0, 0, 0.32);
+    transform: translateX(102%);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.26s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.2s ease, width 0.2s ease;
   }
 
-  .app-shell[data-mobile-view="source"] .workspace-shell > .chat-panel,
-  .app-shell[data-mobile-view="preview"] .workspace-shell > .chat-panel {
-    display: none;
+  .app-shell[data-mobile-right="open"] .workspace-shell > .chat-panel {
+    transform: translateX(0);
+    opacity: 1;
+    pointer-events: auto;
   }
 
-  .app-shell[data-mobile-view="chat"] .workspace-shell > .chat-panel {
-    display: flex;
+  .app-shell[data-mobile-right="open"] .workspace-shell > .chat-panel:focus-within {
+    width: 100vw;
+  }
+
+  /* While dragged, the drawer follows the finger (--right-drawer-progress 0 → 1). */
+  .app-shell[data-right-drag="1"] .workspace-shell > .chat-panel {
+    transition: none;
+    transform: translateX(calc((1 - var(--right-drawer-progress, 0)) * 100%));
+    opacity: 1;
+    pointer-events: auto;
   }
 
   /* ── Pane headers removed: the topbar caption carries SOURCE/PREVIEW + file.
