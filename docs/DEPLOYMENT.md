@@ -859,3 +859,29 @@ a caret jump under heavy load, older than this work, now open ISSUES item 3.
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261018T001038Z-v0.1.51`.
 174/174 data files, every JSON file valid.
+
+## Verified release: v0.1.88
+
+Deployed on 2026-10-19 at 09:50 UTC, with every release since v0.1.60
+(v0.1.61–v0.1.88): the browser's restructure steps S3d to S4e (`main.js`
+only starts the modules) and the server's S4s-1 to S4s-6 (the server's
+entry only starts the modules). App version `0.1.88`; sync compatibility
+unchanged at `117`. The service's command line and environment file are
+unchanged.
+
+Public checks: ping (`0.1.88`, accounts on, hosting on), the service worker's
+cache label `mdnotes-shell-v0.1.88`, the new scripts served (`app/main.js`,
+an extension), the server's own files refused (`server/mdnotes_server.py`,
+`server/whitelist.json` answer as the app's page), and a clean journal
+(4 accounts loaded, the agent's providers ready). Sync in a throwaway session
+hosted for guests (in memory only): create, an emoji-safe patch, an old tab
+refused (426), a guest joining by PIN, both leaving, the session gone. One
+finding, older than these releases (since v0.1.41): a request with a session
+token that is no longer valid, on the state and change routes, is answered
+503 ("storage unavailable") instead of 403; fixed in v0.1.89 on `dev`.
+
+Validation: 245 Node tests, all 22 Python suites (the backend self-test
+among them), nineteen browser suites.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261019T094954Z-v0.1.88`.
+172/172 data files (taken with the service stopped), every JSON file valid.
