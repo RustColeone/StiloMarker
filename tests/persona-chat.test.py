@@ -5,7 +5,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'server'))
-import mdnotes_server as server
+from stilo.modules.assistant.service import agent as agent_module  # noqa: E402
+from stilo.modules.assistant import Agent  # noqa: E402
+from stilo.modules.assistant.adapters.routes import add_routes as add_assistant_routes  # noqa: E402
+from stilo.modules.sync import VERSION as SYNC_VERSION  # noqa: E402
+from helpers.routes import FakeRequest, FakeTransport, call  # noqa: E402
 
 OVERRIDE = {'apiKey': 'model-test-key', 'apiUrl': 'https://model.example.invalid'}
 PROJECT = {'rootId': 'root', 'nodes': {
@@ -29,7 +33,7 @@ def tool_call(name, args, call_id='call-1'):
 
 class PersonaTurnTests(unittest.TestCase):
     def run_turn(self, responses, messages=None, persona=PERSONA, cast=CAST, context=None, project=PROJECT):
-        proxy = server.ChatProxy()
+        proxy = Agent()
         proxy.manual_content = 'APP MANUAL TEXT'
         seen = []
         queue = list(responses)
@@ -39,7 +43,7 @@ class PersonaTurnTests(unittest.TestCase):
             return queue.pop(0)
         proxy._complete = completion
         messages = messages if messages is not None else [{'name': 'Leo', 'content': 'Aria, the hold is flooding.', 'self': False}]
-        with patch.object(server, '_log'):
+        with patch.object(agent_module, '_log'):
             result = proxy.chat(messages, context or [], 'Novel', project, override=OVERRIDE,
                                 persona=copy.deepcopy(persona), cast=cast)
         return result, seen
@@ -104,7 +108,7 @@ class PersonaTurnTests(unittest.TestCase):
         self.assertEqual(result['proposedOperations'], [])
 
     def test_last_step_forces_an_answer(self):
-        proxy_steps = server.ChatProxy().max_tool_iterations
+        proxy_steps = Agent().max_tool_iterations
         responses = [tool_call('list_files', {}, f'call-{i}') for i in range(proxy_steps)] + [reply('Fine.')]
         result, seen = self.run_turn(responses)
         self.assertEqual(seen[-1]['tool_choice'], 'none')
@@ -126,7 +130,7 @@ class PersonaTurnTests(unittest.TestCase):
         self.assertEqual(turns[2]['content'], 'Leo: A wave breaks over the rail.')
 
     def test_transcript_edges_and_budget(self):
-        proxy = server.ChatProxy()
+        proxy = Agent()
         turns = proxy._persona_transcript([{'name': 'Aria', 'content': 'I spoke first.', 'self': True},
                                            {'name': 'Leo', 'content': 'Go on.', 'self': False},
                                            {'name': 'Aria', 'content': 'And again.', 'self': True}])
@@ -142,7 +146,7 @@ class PersonaTurnTests(unittest.TestCase):
         self.assertNotIn('Leo: 0 ', kept)
 
     def test_temperature_is_clamped_and_defaulted(self):
-        proxy = server.ChatProxy()
+        proxy = Agent()
         self.assertEqual(proxy._persona_temperature(9), 1.5)
         self.assertEqual(proxy._persona_temperature(-2), 0.0)
         self.assertEqual(proxy._persona_temperature(None), 0.8)
@@ -160,40 +164,32 @@ class PersonaTurnTests(unittest.TestCase):
             self.run_turn([reply('x')], persona={**PERSONA, 'name': '  '})
 
     def test_handler_routes_persona_mode_without_mcp(self):
-        handler = object.__new__(server.MDNotesRequestHandler)
         calls = []
-        handler.chat_proxy = type('Proxy', (), {
-            'authorize_client': lambda self, ip: None,
-            'chat': lambda self, *args, **kwargs: calls.append(kwargs) or {
-                'message': 'ok', 'contextPaths': [], 'proposedOperations': []},
-        })()
-        handler.client_address = ('127.0.0.1', 0)
-        handler.registry = type('Registry', (), {
-            'identity': SimpleNamespace(enabled=True, who=lambda token: {'username': 'leo', 'teams': []} if token == 'acct' else None),
-        })()
-        handler._read_json = lambda: {'mode': 'persona', 'persona': PERSONA, 'cast': CAST, 'accountToken': 'acct',
-                                      'messages': [{'name': 'Leo', 'content': 'hi', 'self': False}]}
-        handler.send_response = handler.send_header = handler.end_headers = lambda *a: None
-        handler._send_cors_headers = lambda: None
-        handler._log_request = lambda *a: None
-        written = []
-        handler.wfile = type('W', (), {'write': lambda self, b: written.append(b), 'flush': lambda self: None})()
-        handler._handle_chat()
+        agent = SimpleNamespace(authorize_client=lambda ip: None,
+                                chat=lambda *args, **kwargs: calls.append(kwargs) or {'message': 'ok', 'contextPaths': [], 'proposedOperations': []})
+        identity = SimpleNamespace(enabled=True, who=lambda token: {'username': 'leo', 'teams': []} if token == 'acct' else None)
+        transport = FakeTransport()
+        add_assistant_routes(transport, agent=agent, threads=None, identity=identity, directory=None, version=117)
+        status, response = call(transport, 'POST', '/api/chat', FakeRequest(
+            {'mode': 'persona', 'persona': PERSONA, 'cast': CAST, 'accountToken': 'acct',
+             'messages': [{'name': 'Leo', 'content': 'hi', 'self': False}]}))
         self.assertEqual(calls[0]['persona']['name'], 'Aria')
         self.assertEqual(calls[0]['cast'], CAST)
         self.assertEqual(calls[0]['mcp_configs'], [])
         self.assertEqual(calls[0]['identity'], {'username': 'leo', 'teams': []})
-        self.assertIn(b'"type": "result"', b''.join(written))
+        self.assertEqual((status, response['message']), (200, 'ok'))
 
     def test_stale_tabs_are_refused(self):
-        self.assertEqual(server.SYNC_LEVEL, 117)
-        handler = object.__new__(server.MDNotesRequestHandler)
-        results = []
-        handler._write_json = lambda status, body: results.append((status, body))
-        handler._log_request = lambda *a: None
-        self.assertTrue(handler._refuse_if_stale(116))
-        self.assertEqual(results[0][0], 426)
-        self.assertFalse(handler._refuse_if_stale(117))
+        self.assertEqual(SYNC_VERSION, 117)
+        saved = []
+        threads = SimpleNamespace(set=lambda workspace, token, payload: saved.append(payload) or {'threads': [], 'revision': 1})
+        directory = SimpleNamespace(broker_for_token=lambda token: None)
+        transport = FakeTransport()
+        add_assistant_routes(transport, agent=None, threads=threads, identity=None, directory=directory, version=SYNC_VERSION)
+        status, body = call(transport, 'POST', '/api/chat/workspace', FakeRequest({'version': 116, 'threads': []}, query={'token': 't'}))
+        self.assertEqual((status, body['upgradeRequired'], body['minVersion']), (426, True, 117))
+        self.assertEqual(saved, [])
+        self.assertEqual(call(transport, 'POST', '/api/chat/workspace', FakeRequest({'version': 117, 'threads': []}, query={'token': 't'}))[0], 200)
 
 
 if __name__ == '__main__':

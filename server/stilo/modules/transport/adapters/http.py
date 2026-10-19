@@ -1,6 +1,7 @@
 """Writing HTTP responses for routes: JSON bodies, CORS headers, and turning a
 data route's errors into status codes. Only this layer sees the request."""
 import json
+import threading
 from http import HTTPStatus
 from urllib.parse import parse_qs
 
@@ -31,6 +32,11 @@ class Request:
         self.path = parsed.path
         self._query = parse_qs(parsed.query)
         self.headers = handler.headers
+        address = getattr(handler, "client_address", None)
+        self.client_ip = address[0] if address else ""
+
+    def header(self, name, default=""):
+        return self.headers.get(name, default)
 
     def query(self, name, default=""):
         return self._query.get(name, [default])[0]
@@ -145,3 +151,63 @@ def run_stream_route(handler, parsed, route, log):
         return
     finally:
         stream.close()
+
+
+def run_line_stream_route(handler, parsed, route, log):
+    """A long answer streamed as lines of JSON (an agent's turn). route["run"](request)
+    checks the request (raising like a data route when refused) and returns
+    produce(emit, cancelled) -> the result. Each emit(event) is one line; a
+    {"type": "heartbeat"} goes out every 15 seconds so a proxy never times out;
+    then {"type": "result", "response": ...} or {"type": "error", "status", "message"}
+    (400 refused, 502 the provider failed, 500 a bug). cancelled() is true once
+    the browser has gone away."""
+    allow = route.get("allow_headers", ())
+    try:
+        produce = route["run"](Request(handler, parsed))
+    except Refusal as refusal:
+        return write_json(handler, refusal.status, refusal.payload, allow)
+    except Exception as error:  # noqa: BLE001
+        status = status_for(error)
+        if status is None:
+            log(f"{route['method']} {route['path']} failed: {error!r}")
+            status = HTTPStatus.INTERNAL_SERVER_ERROR
+        return write_json(handler, status, {"message": str(error) if status != HTTPStatus.INTERNAL_SERVER_ERROR else "Server error"}, allow)
+    # Raw lines ended by closing the connection, as the event stream does: under
+    # HTTP/1.0 chunked encoding is invalid and nginx mangles it. No buffering.
+    handler.send_response(HTTPStatus.OK)
+    send_cors(handler, allow)
+    handler.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+    handler.send_header("Cache-Control", "no-cache")
+    handler.send_header("X-Accel-Buffering", "no")
+    handler.send_header("Connection", "close")
+    handler.end_headers()
+    handler.close_connection = True
+    lock, closed = threading.Lock(), threading.Event()
+
+    def emit(event):
+        data = (json.dumps(event) + "\n").encode("utf-8")
+        with lock:
+            if closed.is_set():
+                return
+            try:
+                handler.wfile.write(data)
+                handler.wfile.flush()
+            except OSError:  # the browser went away
+                closed.set()
+
+    def heartbeat():
+        while not closed.wait(15):
+            emit({"type": "heartbeat"})
+
+    threading.Thread(target=heartbeat, daemon=True).start()
+    try:
+        emit({"type": "result", "response": produce(emit, closed.is_set)})
+    except ValueError as error:
+        emit({"type": "error", "status": 400, "message": str(error)})
+    except RuntimeError as error:
+        emit({"type": "error", "status": 502, "message": str(error)})
+    except Exception as error:  # noqa: BLE001 - the stream always ends with an answer
+        log(f"{route['method']} {route['path']} failed: {error!r}")
+        emit({"type": "error", "status": 500, "message": str(error)})
+    finally:
+        closed.set()

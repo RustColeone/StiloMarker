@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
-import mdnotes_server as server  # noqa: E402
-from stilo.modules.assistant import EditError, apply_edits, propose_edit  # noqa: E402
+from stilo.modules.assistant.service import agent as agent_module  # noqa: E402
+from stilo.modules.assistant import Agent, EditError, apply_edits, propose_edit  # noqa: E402
 
 TEXT = "# Mara\n\n## Who\nA keeper.\n\n## How they speak\nDry.\n\n## Author's notes\nGoes blind.\n"
 PROJECT = {"rootId": "root", "nodes": {
@@ -62,15 +62,15 @@ class ProposeEdit(unittest.TestCase):
 
 class InTheAgent(unittest.TestCase):
     def call(self, name, args, read_only=False):
-        proxy = server.ChatProxy()
+        proxy = Agent()
         proposals = []
         tc = {"function": {"name": name, "arguments": json.dumps(args)}}
-        with patch.object(server, "_log"):
+        with patch.object(agent_module, '_log'):
             result = proxy._execute_tool_call(tc, copy.deepcopy(PROJECT), proposals, read_only=read_only)
         return result, proposals
 
     def test_the_agent_offers_and_runs_edit_file(self):
-        names = [t["function"]["name"] for t in server.ChatProxy._get_tool_schemas()]
+        names = [t["function"]["name"] for t in Agent._get_tool_schemas()]
         self.assertIn("edit_file", names)
         result, proposals = self.call("edit_file", {"path": "mara.persona.skill", "edits": [{"find": "Dry.", "replace": "Wry."}]})
         self.assertEqual(result["status"], "proposed")
@@ -82,6 +82,53 @@ class InTheAgent(unittest.TestCase):
         result, proposals = self.call("edit_file", {"path": "mara.persona.skill", "edits": [{"find": "Dry.", "replace": "Wry."}]}, read_only=True)
         self.assertIn("cannot change", result["error"])
         self.assertEqual(proposals, [])
+
+
+class RoutesOverHttp(unittest.TestCase):
+    """The Assistant's routes on a real server: its status, the sign-in gate on
+    the server's keys, and the shared conversations refusing an old tab."""
+
+    def test_status_gate_and_shared_conversations(self):
+        import socket, tempfile, threading, urllib.error, urllib.request
+        sys.path.insert(0, str(ROOT / "server"))
+        import mdnotes_server as server
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "accounts.json").write_text(json.dumps({"users": [{"username": "amy", "password": "pw", "teams": ["red"]}]}))
+            with socket.socket() as probe:
+                probe.bind(("127.0.0.1", 0))
+                port = probe.getsockname()[1]
+            httpd = server.build_server("127.0.0.1", port, "2468", ROOT, folder / "state.json",
+                                        whitelist_file=folder / "accounts.json", data_dir=folder / "data")
+            threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
+            def call(method, path, body=None):
+                request = urllib.request.Request(f"http://127.0.0.1:{port}{path}", method=method,
+                                                 data=json.dumps(body).encode() if body is not None else None,
+                                                 headers={"content-type": "application/json"})
+                try:
+                    with urllib.request.urlopen(request, timeout=10) as response:
+                        return response.status, response.read()
+                except urllib.error.HTTPError as error:
+                    return error.code, error.read()
+            try:
+                status, body = call("GET", "/api/chat/status")
+                self.assertEqual((status, json.loads(body)["requiresAccount"]), (200, True))
+                status, body = call("POST", "/api/chat", {"messages": [{"role": "user", "content": "hi"}]})
+                self.assertEqual(status, 403, "the server's keys need a signed-in account")
+                self.assertIn("Sign in", json.loads(body)["message"])
+                session = json.loads(call("POST", "/api/session/connect", {"pin": "2468", "displayName": "Ann"})[1])["token"]
+                status, body = call("GET", f"/api/chat/workspace?token={session}")
+                self.assertEqual((status, json.loads(body)), (200, {"threads": [], "revision": 0}))
+                status, body = call("POST", f"/api/chat/workspace?token={session}", {"version": 116, "threads": [], "baseRevision": 0})
+                self.assertEqual((status, json.loads(body)["upgradeRequired"]), (426, True))
+                status, body = call("POST", f"/api/chat/workspace?token={session}", {"version": 117, "threads": [], "baseRevision": 0})
+                self.assertEqual((status, json.loads(body)["revision"]), (200, 1))
+                status, body = call("POST", f"/api/chat/workspace?token={session}", {"version": 117, "threads": [], "baseRevision": 0})
+                self.assertEqual(status, 409, "a save against an old revision is a conflict")
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
 
 
 if __name__ == "__main__":

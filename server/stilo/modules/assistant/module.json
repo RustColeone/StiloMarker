@@ -1,6 +1,11 @@
 {
   "name": "assistant",
-  "level": 6,
-  "uses": ["file_types", "workspace", "characters"],
-  "owns": { "tools": ["edit_file"] }
+  "level": 5,
+  "uses": ["transport", "file_types", "workspace", "identity", "models", "characters", "projects", "sync"],
+  "owns": {
+    "tools": ["edit_file"],
+    "names": ["agent threads file"],
+    "routes": ["/api/chat", "/api/chat/status", "/api/chat/mcp", "/api/chat/prompt", "/api/chat/workspace", "/api/generate", "/api/generated"],
+    "rules": ["the agent's turn", "a character's request"]
+  }
 }

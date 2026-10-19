@@ -10,6 +10,9 @@ API:
         PermissionError (403), LookupError (404) or ValueError (400).
     add_stream_route(method, path, run, allow_headers=())
         A server-sent event stream; see adapters/http.py run_stream_route.
+    add_line_stream_route(method, path, run, allow_headers=())
+        A long answer streamed as lines of JSON, with heartbeats; see
+        adapters/http.py run_line_stream_route.
     Refusal(status, payload)  raise from a route to answer with that status
     add_legacy_route(method, path, run, prefix=False, allow_headers=())
         Code from before the restructure: run(handler, parsed) writes its own
@@ -41,6 +44,9 @@ def start(ctx):
     def add_stream_route(method, path, run, allow_headers=()):
         return _add(method, path, "stream", run, False, allow_headers)
 
+    def add_line_stream_route(method, path, run, allow_headers=()):
+        return _add(method, path, "lines", run, False, allow_headers)
+
     def find(method, path):
         return match(routes.all(), method, path)
 
@@ -52,6 +58,8 @@ def start(ctx):
             route["run"](handler, parsed)
         elif route["kind"] == "stream":
             http.run_stream_route(handler, parsed, route, ctx.log)
+        elif route["kind"] == "lines":
+            http.run_line_stream_route(handler, parsed, route, ctx.log)
         else:
             http.run_data_route(handler, parsed, route, ctx.log)
         return True
@@ -64,6 +72,7 @@ def start(ctx):
         "add_route": staticmethod(add_route),
         "add_legacy_route": staticmethod(add_legacy_route),
         "add_stream_route": staticmethod(add_stream_route),
+        "add_line_stream_route": staticmethod(add_line_stream_route),
         "Refusal": Refusal,
         "File": File,
         "find": staticmethod(find),

@@ -213,6 +213,8 @@ test("backend exposes collaboration + OT endpoints", async () => {
     + await readFile(resolveFromRoot("server/stilo/modules/sync/model/rebase.py"), "utf8")
     + await readFile(resolveFromRoot("server/stilo/modules/sync/adapters/routes.py"), "utf8")
     + await readFile(resolveFromRoot("server/stilo/modules/sync/__init__.py"), "utf8")
+    + await readFile(resolveFromRoot("server/stilo/modules/assistant/adapters/routes.py"), "utf8")
+    + await readFile(resolveFromRoot("server/stilo/modules/assistant/service/agent.py"), "utf8")
     + await readFile(resolveFromRoot("tests/backend-selftest.py"), "utf8");
   const symbols = [
     /api\/events\/stream/,
@@ -230,7 +232,6 @@ test("backend exposes collaboration + OT endpoints", async () => {
     /role != "master"/,
     /master-pin/,
     /api\/generate/,
-    /def _handle_generate\(/,
     /def generate\(/
   ];
   symbols.forEach((pattern) => assert.match(backendSource, pattern));

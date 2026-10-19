@@ -89,7 +89,7 @@ class MoveNodeTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 self.op({'type': 'move-node', **bad})
         self.assertEqual(self.broker.revision, revision, 'a refused move must not bump the revision')
-        self.assertIsNotNone(self.reopen()._get_node_id_by_path('Note.md'))
+        self.assertIsNotNone(node_id_by_path(self.reopen().project, 'Note.md'))
 
     def test_a_stale_text_patch_cannot_cross_the_move(self):
         self.op({'type': 'create-folder', 'parentPath': '', 'name': 'A'})

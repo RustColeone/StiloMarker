@@ -181,14 +181,12 @@ test("every twin rule has a shared case table that both languages run (rule 6)",
     `spec/twins.json lists ${twins.uncovered.length} twins without a case table; it may not grow past ${baseline.uncoveredTwins}`);
 });
 
-test("the legacy contract matches the messages the code sends and handles (rule 7)", () => {
-  // Operations and events: the legacy contract's, and each module contract's.
-  const contract = json("protocol/legacy.contract.json");
-  const modules = readdirSync(join(ROOT, "protocol")).filter((f) => f.endsWith(".contract.json") && f !== "legacy.contract.json")
+test("the contracts list every message the code sends and handles (rule 7)", () => {
+  // Operations and events: each module contract's (the agent's turn streams its own, agentTurnEvents).
+  const modules = readdirSync(join(ROOT, "protocol")).filter((f) => f.endsWith(".contract.json"))
     .map((f) => json(`protocol/${f}`));
   const ops = new Set(modules.flatMap((m) => m.operations?.types ?? []));
-  const events = new Set([...contract.workspaceEvents.types, ...contract.agentTurnEvents.types,
-    ...modules.flatMap((m) => m.events?.types ?? [])]);
+  const events = new Set(modules.flatMap((m) => [...(m.events?.types ?? []), ...(m.agentTurnEvents?.types ?? [])]));
   const server = files.filter((f) => f.startsWith("server/") && f.endsWith(".py"));
 
   // Operations the server applies: exactly the contract's.
@@ -202,7 +200,7 @@ test("the legacy contract matches the messages the code sends and handles (rule 
     // Names a module spells once as constants (Workspace's PATCH_FILE = "patch-file").
     if (kind) for (const m of text.matchAll(/^[A-Z_, ]+ = ("[a-z-]+"(?:, "[a-z-]+")*)$/gm)) for (const t of m[1].matchAll(/"([a-z-]+)"/g)) handled.add(t[1]);
   }
-  assert.deepEqual([...handled].sort(), [...ops].sort(), "operation types the server applies differ from protocol/legacy.contract.json");
+  assert.deepEqual([...handled].sort(), [...ops].sort(), "operation types the server applies differ from the contracts'");
 
   // Message types the server writes: each in the contract. JSON-schema and
   // provider words are not messages.
@@ -213,7 +211,7 @@ test("the legacy contract matches the messages the code sends and handles (rule 
     for (const m of read(file).matchAll(/["']type["']\s*:\s*["']([a-z_-]+)["']/g)) if (!notMessages.has(m[1])) sent.add(m[1]);
   }
   const unknownSent = [...sent].filter((t) => !ops.has(t) && !events.has(t)).sort();
-  assert.deepEqual(unknownSent, [], "the server sends message types that protocol/legacy.contract.json does not list");
+  assert.deepEqual(unknownSent, [], "the server sends message types that no contract lists");
 
   // Types the browser checks on server messages: each in the contract.
   // These are the browser's own words, not messages.
@@ -223,7 +221,7 @@ test("the legacy contract matches the messages the code sends and handles (rule 
     for (const m of read(file).matchAll(/\.type === "([a-z-]+)"/g)) if (!local.has(m[1])) checked.add(m[1]);
   }
   const unknownChecked = [...checked].filter((t) => !ops.has(t) && !events.has(t)).sort();
-  assert.deepEqual(unknownChecked, [], "the browser handles message types that protocol/legacy.contract.json does not list");
+  assert.deepEqual(unknownChecked, [], "the browser handles message types that no contract lists");
 
   // Sync's version is read from its contract on both ends (the browser's copy is
   // checked below with the other protocol copies); nobody else writes it down.
@@ -231,7 +229,7 @@ test("the legacy contract matches the messages the code sends and handles (rule 
 });
 
 test("each module's contract lists exactly the routes it serves, and only that module calls them (rule 7)", () => {
-  const contracts = readdirSync(join(ROOT, "protocol")).filter((f) => f.endsWith(".contract.json") && f !== "legacy.contract.json");
+  const contracts = readdirSync(join(ROOT, "protocol")).filter((f) => f.endsWith(".contract.json"));
   const problems = [];
   for (const name of contracts) {
     const contract = json(`protocol/${name}`);
@@ -243,17 +241,20 @@ test("each module's contract lists exactly the routes it serves, and only that m
     const listed = new Set(contract.routes.map((r) => `${r.method} ${r.path}`));
     const served = new Set();
     for (const file of files.filter((f) => f.startsWith(`${serverDir}/`))) {
-      for (const m of codeOf(file).matchAll(/add_(?:stream_)?route\(\s*"(GET|POST)",\s*"([^"]+)"/g)) served.add(`${m[1]} ${m[2]}`);
+      for (const m of codeOf(file).matchAll(/add_(?:line_)?(?:stream_)?route\(\s*"(GET|POST)",\s*"([^"]+)"/g)) served.add(`${m[1]} ${m[2]}`);
     }
     const missing = [...listed].filter((r) => !served.has(r)), extra = [...served].filter((r) => !listed.has(r));
     if (missing.length || extra.length) problems.push(`${serverDir} serves ${[...served].join(", ") || "nothing"} but ${where} lists ${[...listed].join(", ")}`);
     for (const path of new Set(contract.routes.map((r) => r.path))) {
+      // A route may name the browser module that calls it ("caller"), else the contract's browser half.
+      const caller = contract.routes.find((r) => r.path === path && r.caller)?.caller;
+      const callerDir = caller ? `app/modules/${caller}` : browserDir;
       const quoted = new RegExp(`["'\`}]${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'\`?]`);
       const spelled = files.filter((f) => quoted.test(codeOf(f)));
-      const outside = spelled.filter((f) => !f.startsWith(`${serverDir}/`) && !f.startsWith(`${browserDir}/`));
+      const outside = spelled.filter((f) => !f.startsWith(`${serverDir}/`) && !f.startsWith(`${callerDir}/`));
       if (outside.length) problems.push(`${outside.join(", ")} call ${path}, which belongs to ${contract.module}: use its API`);
-      if (existsSync(join(ROOT, browserDir)) && !spelled.some((f) => f.startsWith(`${browserDir}/`))) {
-        problems.push(`${path} is in ${where} but ${browserDir} never calls it`);
+      if (existsSync(join(ROOT, callerDir)) && !spelled.some((f) => f.startsWith(`${callerDir}/`))) {
+        problems.push(`${path} is in ${where} but ${callerDir} never calls it`);
       }
     }
   }

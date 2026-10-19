@@ -186,6 +186,30 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(ok.json(), {"echo": 7})
         self.assertFalse(self.t.handle(FakeHandler(), "GET", urlparse("/api/echo")))
 
+    def test_a_line_stream_sends_its_progress_then_its_answer(self):
+        def run(request):
+            if request.query("fail") == "early":
+                raise PermissionError("no")
+            def produce(emit, cancelled):
+                emit({"type": "delta", "text": "Hel"})
+                if request.query("fail") == "late":
+                    raise ValueError("bad request")
+                return {"message": "Hello", "stopped": cancelled()}
+            return produce
+        self.t.add_line_stream_route("POST", "/api/turn", run)
+        handler = FakeHandler(b"{}")
+        self.t.handle(handler, "POST", urlparse("/api/turn"))
+        lines = [json.loads(line) for line in handler.wfile.getvalue().decode().splitlines()]
+        self.assertEqual((handler.status, handler.sent["Content-Type"]), (200, "application/x-ndjson; charset=utf-8"))
+        self.assertEqual(lines, [{"type": "delta", "text": "Hel"}, {"type": "result", "response": {"message": "Hello", "stopped": False}}])
+        refused = FakeHandler(b"{}")
+        self.t.handle(refused, "POST", urlparse("/api/turn?fail=early"))
+        self.assertEqual((refused.status, refused.json()), (403, {"message": "no"}), "refused before the stream: a plain answer")
+        failed = FakeHandler(b"{}")
+        self.t.handle(failed, "POST", urlparse("/api/turn?fail=late"))
+        last = json.loads(failed.wfile.getvalue().decode().splitlines()[-1])
+        self.assertEqual(last, {"type": "error", "status": 400, "message": "bad request"})
+
     def test_cors_headers_follow_the_route(self):
         self.t.add_legacy_route("POST", "/api/chat/mcp", lambda h, p: None, allow_headers=("Authorization",))
         handler = FakeHandler()
@@ -194,16 +218,22 @@ class TransportTests(unittest.TestCase):
         self.t.send_cors(handler, "/api/other")
         self.assertEqual(handler.sent["Access-Control-Allow-Headers"], "Content-Type")
 
-    def test_the_server_registers_every_route_once(self):
+    def test_every_route_is_a_module_route(self):
+        import tempfile
         spec = __import__("importlib.util").util.spec_from_file_location("mdnotes_server", ROOT / "server/mdnotes_server.py")
         server = __import__("importlib.util").util.module_from_spec(spec)
         spec.loader.exec_module(server)
-        keys = [(m, p, prefix) for m, p, prefix, _ in server.LEGACY_ROUTES]
-        self.assertEqual(len(keys), len(set(keys)))
-        self.assertIn(("POST", "/api/chat", False), keys)
-        self.assertFalse([p for _, p, _ in keys if p.startswith(("/api/chats", "/api/session", "/api/comments"))],
-                         "routes that moved into modules are no longer legacy")
-        self.assertNotIn("/api/ping", [p for _, p, _ in keys], "ping is a data route")
+        with tempfile.TemporaryDirectory() as tmp:
+            httpd = server.build_server("127.0.0.1", 0, "2468", ROOT, Path(tmp) / "state.json")
+            try:
+                routes = httpd.modules["transport"].routes()
+            finally:
+                httpd.server_close()
+        kinds = {route["kind"] for route in routes}
+        self.assertNotIn("legacy", kinds, "no route is written by hand any more")
+        paths = {(route["method"], route["path"]) for route in routes}
+        for route in (("POST", "/api/chat"), ("GET", "/api/ping"), ("POST", "/api/workspaces/create"), ("GET", "/api/events/stream")):
+            self.assertIn(route, paths)
 
 
 if __name__ == "__main__":

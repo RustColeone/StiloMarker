@@ -20,8 +20,8 @@ This file is the short reference that the structure tests enforce.
   | 2 | Workspace, Identity and access, Models |
   | 3 | Editor (browser), Sync (browser), Characters, Projects (server) |
   | 4 | History (browser), Comments (browser), Explorer (browser), Sync (server: it asks Projects who may open) |
-  | 5 | Assistant (browser), Chats (browser), Cloud (browser), History (server), Comments (server) |
-  | 6 | Chats (server), Assistant (server), Cloud (server); in the browser, extensions (`extensions/<name>/`: the URL album, diagrams, module maps), above every browser module |
+  | 5 | Assistant, Chats (browser), Cloud (browser), History (server), Comments (server) |
+  | 6 | Chats (server: a character's reply is the Assistant's agent), Cloud (server); in the browser, extensions (`extensions/<name>/`: the URL album, diagrams, module maps), above every browser module |
 
 - **Inside every module**: its definition (name, level, uses, owns: in a
   browser module the `defineModule({...})` its `index.js` exports, in a server
@@ -33,8 +33,10 @@ This file is the short reference that the structure tests enforce.
   `protocol/<module>.contract.json` with their own version (Identity's was
   the first, in v0.1.38). Sync's version is the old single sync number (117):
   both ends read it from `protocol/sync.contract.json`, and other modules'
-  events ride Sync's stream. What no module has taken yet is in
-  `protocol/legacy.contract.json`.
+  events ride Sync's stream. A route may name the browser module that calls
+  it (`"caller"`) when that is not the contract's own browser half.
+  (`protocol/legacy.contract.json` held what no module had taken yet; it
+  went in v0.1.87.)
 - **Why Identity and Models sit on level 2** (changed 2026-10-17; the design
   had them on level 1): they need the frame below them, Transport for their
   routes on the server and Shell for the server connection and dialogs in the
@@ -347,8 +349,8 @@ That is where bugs are hard to find. Steps, each its own release:
 | S4s-2 | What is open now is Sync's (v0.1.84; Sync moves to level 4 on the server): the directory of live workspaces (a team project in its folder, the PIN session from before accounts, sessions hosted for guests), session tokens, joining by PIN, hosting, leases (`service/directory.py`, `service/live.py`). Opening asks Projects (which also moves a flat workspace kept as one file into its folder, Workspace's `migrate_state_file`). What happens in a live project is told as Sync's events: `"before-destructive"` (History's safety backup), `"paths-moved"` (Chats follows characters), `"dropped"` (a deleted project's chats close). A folder workspace's images are Sync's routes (Transport gained raw bodies and `File` replies; the browser's upload moved from Cloud to Sync). The kernel gives modules the server's settings (`ctx.config`): Identity, Projects and Sync build themselves from them. `CollaborationBroker` is gone; the agent's shared conversations (`chat.json`) wait in `AgentThreads` for the Assistant. `mdnotes_server.py` 2,212 → 1,901 lines | done (v0.1.84) |
 | S4s-3 | History, Comments and Chats start themselves on the server (v0.1.85; History and Comments on level 5, Chats and Assistant on 6): each builds its service from the server's settings and asks Sync's `places` (Projects' answers about a project, and whether it is open now) instead of the registry. History takes a safety backup when Sync says a change is about to lose data; Chats follows moved characters and closes a deleted project's databases on Sync's news, and keeps its daily copies beside the project's backups through History's `also_back_up`. Comments and Chats name their files to Projects themselves. (Done before Cloud, which needs History's trash from History itself.) | done (v0.1.85) |
 | S4s-4 | Cloud on the server (v0.1.86, level 6; `protocol/cloud.contract.json`, the browser's Cloud its other half): a team's project made, deleted into History's trash (only by its owner), copied out with its images and brought in under a free name, over Sync's directory (`adopt`, `drop`, `read`). The kernel runs timers (`ctx.every(seconds, run)`) once every module has started and stops modules (`ctx.on_stop`, the highest level first; `start_modules(...)` returns the APIs and `stop()`): Sync closes quiet sessions every 15 s, Chats closes quiet replies, History sweeps backups and sweeps once more when the server stops, Chats takes the day's last copy before closing its databases. The server only calls `modules.stop()` when it closes. Export and import had no test; `tests/cloud.test.py` covers them | done (v0.1.86) |
-| S4s-5 | `ChatProxy` split: providers to Models, the agent's loop and tools to Assistant, a character's prompt to Characters and Chats | next |
-| S4s-6 | `mdnotes_server.py` only starts the modules; static files to Transport; `LEGACY_ROUTES` gone | |
+| S4s-5 | The agent is the server Assistant's (v0.1.87, level 5): `ChatProxy` became `Agent` (`service/agent.py`: a turn, Quick Generate, its status), split by job into its tools (`service/tools.py`) and a character's reply (`service/characters.py`); the agent's shared conversations (`chat.json`) are `service/threads.py`; its eight routes are `protocol/assistant.contract.json` (`/api/chat` and its status are called by the browser's Models, `/api/chat/prompt` by Chats). An agent turn streams lines with heartbeats through Transport's new line-stream routes. Chats asks the Assistant's agent for a character's reply. Which image files a picture can be saved as is File types' (`"generated"` in `protocol/file-types.json`); the agent no longer spells extensions or operation names. `protocol/legacy.contract.json` is gone, and with it the last legacy route: `mdnotes_server.py` 1,635 → 347 lines, no longer over the size budget | done (v0.1.87) |
+| S4s-6 | `mdnotes_server.py` only starts the modules; static files to Transport; the registry façade and `add_legacy_route` go | next |
 
 ### Notes for module authors
 

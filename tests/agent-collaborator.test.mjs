@@ -22,7 +22,11 @@ test("agent proposal round-trip via project model ops", () => {
 });
 
 test("backend: agentic tool loop + proposal symbols present", async () => {
-  const backendSource = await readFile(resolveFromRoot("server/mdnotes_server.py"), "utf8");
+  // The agent is the server Assistant's (step S4s-5).
+  let backendSource = "";
+  for (const file of ["agent", "tools", "characters"]) {
+    backendSource += await readFile(resolveFromRoot(`server/stilo/modules/assistant/service/${file}.py`), "utf8");
+  }
   // Phase 1: tool loop + proposals
   assert.match(backendSource, /_get_tool_schemas/);
   assert.match(backendSource, /_execute_tool_call/);

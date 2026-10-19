@@ -69,6 +69,24 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.87: the agent is the server Assistant's
+
+Step S4s-5. Nothing changes for users.
+
+- The workspace agent on the server (a turn of the assistant, a character's
+  reply in Chats, Quick Generate, generated images, connected tools, the
+  agent's shared conversations) is the Assistant module, split by job, with
+  its routes listed in its own contract. The old server file now holds only
+  the start-up and the static files (347 lines, from 2,577 at v0.1.82).
+- When the agent makes a picture, the file types it may save it as come
+  from File types, so the tool's hint to the model now lists .jpeg too.
+- A mistake of mine in the script that ran the server's tests reported
+  every Python suite as passing for v0.1.84 to v0.1.86. In fact three test
+  cases failed there, all of them in the tests themselves (leftovers of the
+  v0.1.84 test rewrite: an old name for a session's leases, and one lookup
+  the rewrite missed), not in the server. They are fixed, and the runner
+  now reports real results.
+
 ### v0.1.86: the server's Cloud module
 
 Step S4s-4. Nothing changes for users.

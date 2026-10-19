@@ -14,8 +14,8 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
-from mdnotes_server import EDIT_SESSION_GAP_SECONDS, SYNC_LEVEL, AccountStore, WorkspaceRegistry, build_server  # noqa: E402
-from stilo.modules.sync import open_live  # noqa: E402
+from mdnotes_server import EDIT_SESSION_GAP_SECONDS, AccountStore, WorkspaceRegistry, build_server  # noqa: E402
+from stilo.modules.sync import VERSION as SYNC_LEVEL, open_live  # noqa: E402
 from stilo.modules.workspace import bump_edit_counters, default_project, node_id_by_path  # noqa: E402
 from stilo.modules.identity import ACCESS_FILE  # noqa: E402
 

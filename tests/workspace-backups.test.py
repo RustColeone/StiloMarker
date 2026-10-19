@@ -76,9 +76,9 @@ class WorkspaceBackupTests(unittest.TestCase):
     def test_a_later_destructive_change_gets_its_own_copy(self):
         self.op({'type': 'create-file', 'parentPath': '', 'name': 'a.md', 'content': 'a'})
         self.op({'type': 'create-file', 'parentPath': '', 'name': 'b.md', 'content': 'b'})
-        with patch.object(server.time, 'time', return_value=self.t0):
+        with patch.object(time, 'time', return_value=self.t0):
             self.op({'type': 'delete-node', 'path': 'a.md'})
-        with patch.object(server.time, 'time', return_value=self.t0 + 120):  # two minutes later
+        with patch.object(time, 'time', return_value=self.t0 + 120):  # two minutes later
             self.op({'type': 'delete-node', 'path': 'b.md'})
         safety = sorted((b for b in self.backups() if b['kind'] == 'safety'), key=lambda b: b['createdAt'])
         self.assertEqual(len(safety), 2)

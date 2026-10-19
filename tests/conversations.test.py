@@ -16,6 +16,9 @@ from stilo.modules.chats.adapters import store as chats  # noqa: E402
 spec = importlib.util.spec_from_file_location('mdnotes_server', ROOT / 'server/mdnotes_server.py')
 server = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(server)
+from stilo.modules.assistant import Agent  # noqa: E402
+from stilo.modules.assistant.adapters.routes import add_routes as add_assistant_routes  # noqa: E402
+from helpers.routes import FakeRequest, FakeTransport, call  # noqa: E402
 
 ARIA = 'char:Cast/aria.persona.skill'
 LEO, AMY, BEN = 'user:leo', 'user:amy', 'user:ben'
@@ -410,7 +413,7 @@ class ReplyTests(RegistryBase):
         self.assertEqual(self.reg.chats.runner.turns, [])  # the server did not call a model
         self.assertEqual([e['state'] for e in self.events('amy', 'chat-typing')], ['queued'])
         trigger = sent['message']['id']
-        self.reg.chats.runner = server.ChatProxy()  # builds the prompt; never calls a model here
+        self.reg.chats.runner = Agent()  # builds the prompt; never calls a model here
         prompt = self.call('leo', 'prompt', group['id'], ARIA, trigger)
         self.assertIn('You are playing Captain Aria Voss', prompt['payload']['messages'][0]['content'])
         self.assertEqual(prompt['payload']['messages'][-1], {'role': 'user', 'content': 'leo: @aria hello'})
@@ -438,14 +441,11 @@ class ReplyTests(RegistryBase):
         self.assertEqual((last['author'], last['content'], last['state']), (ARIA, 'Half a th', 'interrupted'))
 
     def test_the_stateless_prompt_needs_no_key(self):
-        handler = object.__new__(server.MDNotesRequestHandler)
-        handler.chat_proxy = server.ChatProxy()
-        handler._read_json = lambda: {'persona': {'name': 'Aria', 'content': 'A smuggler.'}, 'cast': [],
-                                      'messages': [{'name': 'You', 'content': 'hi', 'self': False}], 'projectName': 'Novel'}
-        results = []
-        handler._write_json = lambda status, body: results.append((status, body))
-        handler._handle_persona_prompt()
-        status, body = results[0]
+        transport = FakeTransport()
+        add_assistant_routes(transport, agent=Agent(), threads=None, identity=None, directory=None, version=117)
+        status, body = call(transport, 'POST', '/api/chat/prompt', FakeRequest(
+            {'persona': {'name': 'Aria', 'content': 'A smuggler.'}, 'cast': [],
+             'messages': [{'name': 'You', 'content': 'hi', 'self': False}], 'projectName': 'Novel'}))
         self.assertEqual(status, 200)
         self.assertEqual(body['payload']['messages'][-1], {'role': 'user', 'content': 'You: hi'})
         self.assertNotIn('tools', body['payload'])  # no project sent, so no file tools

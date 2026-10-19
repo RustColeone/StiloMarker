@@ -13,7 +13,11 @@ server = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(server)
 from stilo.modules.sync import open_live  # noqa: E402
 from stilo.modules.workspace import default_project, node_id_by_path  # noqa: E402
-THREADS = server.AgentThreads()
+import os  # noqa: E402
+from stilo.modules.assistant import AgentThreads  # noqa: E402
+from stilo.modules.workspace import atomic_write  # noqa: E402
+from stilo.modules.assistant.service import threads as threads_module  # noqa: E402
+THREADS = AgentThreads()
 
 
 class ReliabilityTests(unittest.TestCase):
@@ -143,7 +147,7 @@ class ReliabilityTests(unittest.TestCase):
 
     def test_chat_disk_failure_does_not_confirm_or_broadcast_a_save(self):
         self.chat(['kept'])
-        with patch.object(server, '_atomic_write', side_effect=OSError('disk full')):
+        with patch.object(threads_module, 'atomic_write', side_effect=OSError('disk full')):
             with self.assertRaises(OSError):
                 self.chat(['kept', 'failed'], 1)
         self.assertEqual(THREADS.get(self.broker, self.token)['revision'], 1)
@@ -250,9 +254,9 @@ class ReliabilityTests(unittest.TestCase):
 
     def test_atomic_replace_failure_leaves_original_document_intact(self):
         path = self.directory / 'note.md'
-        with patch.object(server.os, 'replace', side_effect=OSError('interrupted')):
+        with patch.object(os, 'replace', side_effect=OSError('interrupted')):
             with self.assertRaises(OSError):
-                server._atomic_write(path, b'incomplete replacement')
+                atomic_write(path, b'incomplete replacement')
         self.assertEqual(path.read_text(), 'A😀BC')
         self.assertFalse(list(self.directory.glob('.*.tmp')))
 
@@ -288,7 +292,7 @@ class ReliabilityTests(unittest.TestCase):
         self.assertFalse(self.broker.session_should_close(self.token))
         self.broker.renew_lease(self.token)
         self.assertFalse(self.broker.session_should_close(self.token))
-        self.broker.leases[self.token] -= 76
+        self.broker.sessions.leases[self.token] -= 76
         self.assertTrue(self.broker.session_should_close(self.token))
         self.broker.unsubscribe(self.token, revoke=True)
         self.assertEqual(self.broker.get_presence(), [])
@@ -322,7 +326,7 @@ class ReliabilityTests(unittest.TestCase):
         session = registry.connect(None, '2468', 'Phone', leased=True)
         token = session['token']
         broker = registry.broker_for_token(token)
-        broker.leases[token] -= 76
+        broker.sessions.leases[token] -= 76
         self.assertEqual(registry.expire_leases(), 1)
         self.assertEqual(registry.expire_leases(), 0)
         self.assertEqual(broker.get_presence(), [])

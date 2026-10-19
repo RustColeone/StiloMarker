@@ -98,6 +98,12 @@ export default Object.freeze([
       ".webp": "image/webp",
       ".bmp": "image/bmp"
     },
+    "generated": [
+      ".png",
+      ".jpg",
+      ".jpeg",
+      ".webp"
+    ],
     "icon": "is-file",
     "filters": [
       "images"

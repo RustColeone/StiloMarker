@@ -6,7 +6,10 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'server'))
 from stilo.modules.models.adapters import mcp
-import mdnotes_server as server
+from stilo.modules.assistant.service import agent as agent_module  # noqa: E402
+from stilo.modules.assistant import Agent  # noqa: E402
+from stilo.modules.assistant.adapters.routes import add_routes as add_assistant_routes  # noqa: E402
+from helpers.routes import FakeRequest, FakeTransport, call  # noqa: E402
 
 CONFIG={'id':'library','label':'Reference library','url':'https://tools.example.invalid/mcp','allowedTools':['search'],'teams':['friends'],'tokenEnv':'TEST_MCP_KEY'}
 TOOL={'name':'search','description':'Search reference notes','inputSchema':{'type':'object','properties':{'query':{'type':'string'}}},'annotations':{'readOnlyHint':True}}
@@ -98,15 +101,15 @@ class MCPTests(unittest.TestCase):
   manager=mcp.MCPManager('/nonexistent/mcp-private.json');self.assertEqual(manager.configs,{})
   self.assertNotIn('/nonexistent',manager.error)
  def test_authenticated_metadata_hides_urls_and_credentials(self):
-  proxy=SimpleNamespace(mcp=mcp.MCPManager());proxy.mcp.configs={'library':CONFIG}
-  handler=object.__new__(server.MDNotesRequestHandler);handler.headers={'Authorization':'Bearer account-test'}
-  handler.registry=SimpleNamespace(identity=SimpleNamespace(require=lambda token:{'teams':['friends']} if token=='account-test' else (_ for _ in ()).throw(PermissionError())))
-  handler.chat_proxy=proxy;handler._read_json=lambda:{'action':'list'};results=[];handler._write_json=lambda status,body:results.append((status,body))
-  handler._handle_mcp();self.assertEqual(results[-1][1]['servers'],[{'id':'library','label':'Reference library'}])
-  self.assertNotIn('url',json.dumps(results));self.assertNotIn('secret',json.dumps(results))
-  handler.headers={};handler._handle_mcp();self.assertEqual(results[-1][0],403)
+  agent=SimpleNamespace(mcp=mcp.MCPManager());agent.mcp.configs={'library':CONFIG};transport=FakeTransport()
+  identity=SimpleNamespace(require=lambda token:{'teams':['friends']} if token=='account-test' else (_ for _ in ()).throw(PermissionError()))
+  add_assistant_routes(transport,agent=agent,threads=None,identity=identity,directory=None,version=117)
+  status,body=call(transport,'POST','/api/chat/mcp',FakeRequest({'action':'list'},headers={'Authorization':'Bearer account-test'}))
+  self.assertEqual((status,body['servers']),(200,[{'id':'library','label':'Reference library'}]))
+  self.assertNotIn('url',json.dumps(body));self.assertNotIn('secret',json.dumps(body))
+  self.assertEqual(call(transport,'POST','/api/chat/mcp',FakeRequest({'action':'list'})),(403,{'message':'Sign in with an account that can use these connections.'}))
  def test_chat_tool_loop_uses_mcp_and_retains_workspace_tools(self):
-  proxy=server.ChatProxy();seen=[];opener=Opener();provider_headers=[]
+  proxy=Agent();seen=[];opener=Opener();provider_headers=[]
   def completion(payload,emit):
    provider_headers.append(proxy._req.route.key);seen.append(copy.deepcopy(payload))
    if len(seen)==1:
@@ -116,7 +119,7 @@ class MCPTests(unittest.TestCase):
    return {'choices':[{'message':{'content':'Answer from the reference library.'}}]}
   proxy._complete=completion
   factory=lambda configs,**kw:mcp.MCPTurn(configs,**kw,factory=lambda c,**args:self.client(opener))
-  with patch.object(server,'MCPTurn',factory),patch.object(server,'_log'):
+  with patch.object(agent_module,'MCPTurn',factory),patch.object(agent_module, '_log'):
    result=proxy.chat([{'role':'user','content':'Find a dragon reference'}],[],'Test',{'rootId':'root','nodes':{'root':{'kind':'folder','children':[]}}},override={'apiKey':'model-test-key','apiUrl':'https://model.example.invalid'},mcp_configs=[CONFIG])
   self.assertEqual(result['message'],'Answer from the reference library.');self.assertEqual(result['proposedOperations'],[])
   self.assertTrue(any(t['function']['name']=='read_file' for t in seen[0]['tools']))

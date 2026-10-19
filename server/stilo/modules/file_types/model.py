@@ -58,6 +58,10 @@ class TypeTable:
         hit = self._find(name)
         return hit[0]["extensions"][hit[1]] if hit else "application/octet-stream"
 
+    def generated_extensions(self):
+        """The extensions an image model can write a picture as (the first is the usual one)."""
+        return [extension for entry in self._entries for extension in entry.get("generated", [])]
+
     def extensions_of(self, ident):
         entry = next((e for e in self._entries if e["id"] == ident), None)
         return list(entry["extensions"]) if entry else []

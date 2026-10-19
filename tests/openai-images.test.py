@@ -6,8 +6,11 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'server'))
-import mdnotes_server as server
+from stilo.modules.assistant.service import agent as agent_module  # noqa: E402
 from stilo.modules import models as oa
+from stilo.modules.assistant import Agent
+from stilo.modules.assistant.adapters.routes import add_routes as add_assistant_routes
+from helpers.routes import FakeRequest, FakeTransport, call
 from stilo.modules.models.adapters import openai as oa_adapter
 
 CATALOG = ['gpt-4o', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'gpt-5.1',
@@ -41,7 +44,7 @@ class FakeOpenAI:
 
 
 def proxy_with_openai(opener=None, env=None, store_dir=None):
-    proxy = server.ChatProxy()
+    proxy = Agent()
     openai = oa.OpenAIProvider({'OPENAI_API_KEY': 'openai-key', **(env or {})}, opener=opener or FakeOpenAI())
     proxy.providers = oa.open_providers({'MDNOTES_CHAT_API_KEY': 'deepseek-key',
                                          'MDNOTES_CHAT_API_URL': 'https://deepseek.example.invalid/chat'}, openai=openai)
@@ -134,7 +137,7 @@ class CatalogTests(unittest.TestCase):
         self.assertNotIn('k', json.dumps(failing.catalog_error).replace('key', ''))
 
     def test_no_key_means_nothing_offered(self):
-        proxy = server.ChatProxy()
+        proxy = Agent()
         proxy.providers = oa.open_providers({}, openai=oa.OpenAIProvider({}))
         proxy.openai.apply_catalog(CATALOG)
         self.assertNotIn('gpt-5.1', proxy.all_models())
@@ -152,7 +155,7 @@ class RoutingTests(unittest.TestCase):
                 seen.append({'payload': copy.deepcopy(payload), 'url': url, 'auth': headers['Authorization']})
                 yield {'choices': [{'delta': {'content': 'Done.'}, 'finish_reason': 'stop'}]}
         proxy.providers.http = FakeHTTP
-        with patch.object(server, '_log'):
+        with patch.object(agent_module, '_log'):
             result = proxy.chat([{'role': 'user', 'content': 'hi'}], [], 'Novel', PROJECT, model=model, **kwargs)
         return result, seen[0]
 
@@ -195,7 +198,7 @@ class RoutingTests(unittest.TestCase):
 
     def test_status_lists_both_providers(self):
         status = proxy_with_openai().public_status()
-        self.assertEqual(status['models'][:1], [server.ChatProxy().providers.default_model])
+        self.assertEqual(status['models'][:1], [Agent().providers.default_model])
         self.assertIn('gpt-5.1', status['models'])
         info = {row['id']: row['provider'] for row in status['modelInfo']}
         self.assertEqual(info['gpt-5.1'], 'OpenAI')
@@ -217,7 +220,7 @@ class ImageToolTests(unittest.TestCase):
             seen.append(copy.deepcopy(payload))
             return queue.pop(0)
         self.proxy._complete = completion
-        with patch.object(server, '_log'):
+        with patch.object(agent_module, '_log'):
             result = self.proxy.chat([{'role': 'user', 'content': 'Draw the lighthouse'}], [], 'Novel', PROJECT, identity=identity)
         return result, seen
 
@@ -269,7 +272,7 @@ class ImageToolTests(unittest.TestCase):
     def test_persona_turns_never_get_the_image_tool(self):
         seen = []
         self.proxy._complete = lambda p, e: seen.append(p) or reply('Aye.')
-        with patch.object(server, '_log'):
+        with patch.object(agent_module, '_log'):
             self.proxy.chat([{'name': 'Leo', 'content': 'hi', 'self': False}], [], 'Novel', PROJECT, identity=USER,
                             persona={'name': 'Mara', 'content': 'sheet'}, cast=[])
         self.assertEqual(sorted(t['function']['name'] for t in seen[0]['tools']), ['list_files', 'read_file'])
@@ -299,74 +302,60 @@ class StoreTests(unittest.TestCase):
 
 
 class GateTests(unittest.TestCase):
-    def handler(self, payload, accounts=True, store=None):
-        handler = object.__new__(server.MDNotesRequestHandler)
-        handler.registry = SimpleNamespace(identity=SimpleNamespace(
-            enabled=accounts, who=lambda token: USER if token == 'acct' else None,
-            require=lambda token: USER if token == 'acct' else (_ for _ in ()).throw(PermissionError())))
+    """The Assistant's routes: spending the server's keys needs a signed-in account."""
+
+    def routes(self, accounts=True, store=None):
+        transport = FakeTransport()
         calls = []
-        handler.chat_proxy = SimpleNamespace(authorize_client=lambda ip: None, generated=store,
-                                             chat=lambda *a, **k: calls.append(k) or {'message': 'ok', 'contextPaths': [], 'proposedOperations': []},
-                                             public_status=lambda: {'configured': True})
-        handler.client_address = ('203.0.113.9', 0)
-        handler._read_json = lambda: payload
-        handler.send_response = handler.send_header = handler.end_headers = lambda *a: None
-        handler._send_cors_headers = lambda: None
-        handler._log_request = lambda *a: None
-        handler.results, handler.written = [], []
-        handler._write_json = lambda status, body: handler.results.append((status, body))
-        handler.wfile = SimpleNamespace(write=handler.written.append, flush=lambda: None)
-        return handler, calls
+        agent = SimpleNamespace(authorize_client=lambda ip: None, generated=store,
+                                chat=lambda *a, **k: calls.append(k) or {'message': 'ok', 'contextPaths': [], 'proposedOperations': []},
+                                generate=lambda *a: calls.append(a) or {'message': 'ok'},
+                                public_status=lambda: {'configured': True})
+        identity = SimpleNamespace(enabled=accounts, who=lambda token: USER if token == 'acct' else None,
+                                   require=lambda token: USER if token == 'acct' else (_ for _ in ()).throw(PermissionError()))
+        add_assistant_routes(transport, agent=agent, threads=None, identity=identity, directory=None, version=117)
+        return transport, calls
+
+    def chat(self, payload, **options):
+        transport, calls = self.routes(**options)
+        return call(transport, 'POST', '/api/chat', FakeRequest(payload, client_ip='203.0.113.9')), calls
 
     def test_server_keys_need_a_signed_in_account(self):
-        handler, calls = self.handler({'messages': [{'role': 'user', 'content': 'hi'}]})
-        handler._handle_chat()
-        self.assertEqual(handler.results[0][0], 403)
-        self.assertIn('Sign in', handler.results[0][1]['message'])
+        (status, body), calls = self.chat({'messages': [{'role': 'user', 'content': 'hi'}]})
+        self.assertEqual(status, 403)
+        self.assertIn('Sign in', body['message'])
         self.assertEqual(calls, [])
 
     def test_signed_in_requests_pass_their_identity(self):
-        handler, calls = self.handler({'messages': [{'role': 'user', 'content': 'hi'}], 'accountToken': 'acct'})
-        handler._handle_chat()
+        _, calls = self.chat({'messages': [{'role': 'user', 'content': 'hi'}], 'accountToken': 'acct'})
         self.assertEqual(calls[0]['identity'], USER)
 
     def test_own_key_and_account_free_servers_are_unchanged(self):
-        handler, calls = self.handler({'messages': [{'role': 'user', 'content': 'hi'}], 'apiKey': 'mine'})
-        handler._handle_chat()
+        _, calls = self.chat({'messages': [{'role': 'user', 'content': 'hi'}], 'apiKey': 'mine'})
         self.assertEqual(len(calls), 1)
         self.assertIsNone(calls[0]['identity'])
-        handler, calls = self.handler({'messages': [{'role': 'user', 'content': 'hi'}]}, accounts=False)
-        handler._handle_chat()
+        _, calls = self.chat({'messages': [{'role': 'user', 'content': 'hi'}]}, accounts=False)
         self.assertEqual(len(calls), 1)
 
     def test_quick_generate_is_gated_too(self):
-        handler, _ = self.handler({'subject': 'x'})
-        handler._handle_generate()
-        self.assertEqual(handler.results[0][0], 403)
+        transport, calls = self.routes()
+        self.assertEqual(call(transport, 'POST', '/api/generate', FakeRequest({'subject': 'x'}))[0], 403)
+        self.assertEqual(calls, [])
 
     def test_status_says_an_account_is_needed(self):
-        handler, _ = self.handler({})
-        handler._handle_chat_status()
-        self.assertTrue(handler.results[0][1]['requiresAccount'])
+        transport, _ = self.routes()
+        self.assertTrue(call(transport, 'GET', '/api/chat/status', FakeRequest())[1]['requiresAccount'])
 
     def test_generated_images_are_served_to_their_owner_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = oa.GeneratedImages(Path(tmp))
             image_id = store.store(PNG, 'image/png', '.png', 'leo', 'p')
-            handler, _ = self.handler({}, store=store)
-            handler._extract_token = lambda parsed: 'acct'
-            handler._handle_generated(SimpleNamespace(query=f'id={image_id}'))
-            self.assertEqual(b''.join(handler.written), PNG)
-            other = oa.GeneratedImages(Path(tmp))
-            other_id = other.store(PNG, 'image/png', '.png', 'amy', 'p')
-            handler, _ = self.handler({}, store=store)
-            handler._extract_token = lambda parsed: 'acct'
-            handler._handle_generated(SimpleNamespace(query=f'id={other_id}'))
-            self.assertEqual(handler.results[0][0], 404)
-            handler, _ = self.handler({}, store=store)
-            handler._extract_token = lambda parsed: 'nobody'
-            handler._handle_generated(SimpleNamespace(query=f'id={image_id}'))
-            self.assertEqual(handler.results[0][0], 403)
+            other_id = oa.GeneratedImages(Path(tmp)).store(PNG, 'image/png', '.png', 'amy', 'p')
+            transport, _ = self.routes(store=store)
+            status, image = call(transport, 'GET', '/api/generated', FakeRequest(query={'token': 'acct', 'id': image_id}))
+            self.assertEqual((status, image.data, image.content_type), (200, PNG, 'image/png'))
+            self.assertEqual(call(transport, 'GET', '/api/generated', FakeRequest(query={'token': 'acct', 'id': other_id}))[0], 404)
+            self.assertEqual(call(transport, 'GET', '/api/generated', FakeRequest(query={'token': 'nobody', 'id': image_id}))[0], 403)
 
 
 if __name__ == '__main__':

@@ -14,8 +14,8 @@ routes. It follows a moved character file and closes a deleted project's
 databases (Sync's events), names its database files to Projects (never
 listed), keeps a daily copy of each database beside the project's backups
 (History's also_back_up, and once more when the server stops), and closes
-the replies of browsers that went quiet. Its `runner` (the agent) is set
-once the agent exists.
+the replies of browsers that went quiet. A character's reply on the server
+is the Assistant's agent (`runner`).
 """
 from stilo.kernel import define_module
 from .adapters.routes import add_routes
@@ -36,6 +36,7 @@ def start(ctx):
         ctx.use(used)
     sync = ctx.use("sync")
     desk = open_chats(sync.places)
+    desk.runner = ctx.use("assistant").agent
     add_routes(ctx.use("transport"), desk)
     ctx.use("projects").reserve(*DB_FILES)
     sync.events.on("paths-moved", lambda move: desk.paths_moved(move["workspace"], move["old"], move["new"]))
