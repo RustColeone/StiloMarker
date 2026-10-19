@@ -6350,6 +6350,25 @@ pre.proposal-diff-block {
 }
 
 /* The "all open tabs" popover: reuses the context-menu shell. */
+.tab-context-menu {
+  min-width: 200px;
+}
+.tab-context-menu button:disabled {
+  color: var(--text-dim);
+  cursor: default;
+  background: transparent;
+}
+.tab-context-menu button.is-checked::after {
+  content: "✓";
+  float: right;
+  margin-left: 16px;
+  color: var(--accent);
+}
+.tab-context-separator {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border);
+}
 .tab-overflow-menu {
   max-height: min(60vh, 420px);
   overflow-y: auto;

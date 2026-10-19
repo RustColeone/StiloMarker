@@ -21,6 +21,7 @@ import { createPreview } from "./preview.js";
 import { createResume } from "./resume.js";
 import { createShowFile } from "./show-file.js";
 import { createTabs } from "./tabs.js";
+import { createTabMenu } from "./tab-menu.js";
 import { createCharCount } from "./char-count.js";
 import { createPreviewPane } from "./preview-pane.js";
 import { installFrameParts } from "./frame-parts.js";
@@ -106,6 +107,8 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
     phonePane: () => (shell.frame.isPhone() ? shell.frame.phoneView() : null),
     showPhonePane: (id) => shell.frame.showPane(id),
     togglePreview: () => shell.frame.toggle("preview"),
+    toggleArea: (area) => shell.frame.toggle(area),
+    copyText: (text) => shell.copyText(text),
     redrawRemoteCursors: () => app.renderRemoteCursors(Array.from(app.remoteCursorsByClient.values())),
     isPreviewableFileName,
     resolveProjectAssetUrl,
@@ -137,6 +140,7 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
   add(createFindReplace(app));
   add(createLinks(app));
   add({ ...createTabs(app), ...createPreview(app, previews) });
+  add(createTabMenu(app));
   add(createResume(app));
   add(createShowFile(app, composing));
   add(createCharCount(app, shell.statusBar));

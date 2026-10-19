@@ -347,6 +347,10 @@ The explorer shows the project tree as a collapsible file/folder list.
 - **Drag a URL album entry** to reorder within its album or move to another album.
 - **Drag a file from the Explorer into the Chat compose area** to attach it as context for the AI assistant.
 
+**Tabs:** the source and preview panes each have a row of tabs. Right-click a
+tab for Close, Close Others, Close to the Right, Close All, Open as Source or
+Preview (the file in the other pane), and Copy Path.
+
 **On a phone:** one file shows at a time. The top bar names it; tap the name
 for the list of open files (and Rename). The switch next to it shows the same
 file in its other view (Source ↔ Preview); it is hidden when the file has only

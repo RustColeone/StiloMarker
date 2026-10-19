@@ -44,6 +44,7 @@ export function findElements() {
     sourcePane: query("#source-pane"),
     sourceTabOverflow: query("#source-tab-overflow"),
     sourceTabStrip: query("#source-tab-strip"),
-    tabOverflowMenu: query("#tab-overflow-menu")
+    tabOverflowMenu: query("#tab-overflow-menu"),
+    tabContextMenu: query("#tab-context-menu")
   };
 }

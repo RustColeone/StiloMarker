@@ -461,6 +461,10 @@ export function createTabs(app) {
         tab.append(icon, title, dirty, close);
       }
       tab.addEventListener("click", () => onActivate(fileId));
+      tab.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        app.openTabMenu(pane, fileId, event.clientX, event.clientY);
+      });
       if (allowReorder) {
         tab.addEventListener("dragstart", (event) => {
           app.view.dragTab({ pane, fileId });
@@ -520,6 +524,10 @@ export function createTabs(app) {
 
       tab.append(icon, title, close);
       tab.addEventListener("click", () => spec.onActivate());
+      tab.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        app.openViewTabMenu(() => spec.onClose(), event.clientX, event.clientY);
+      });
       close.addEventListener("click", (event) => {
         event.stopPropagation();
         spec.onClose();

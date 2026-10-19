@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-19 · release `v0.1.91` (not deployed; v0.1.88 is live)
+Last updated: 2026-10-19 · release `v0.1.92` (not deployed; v0.1.88 is live)
 
 ---
 
@@ -68,6 +68,16 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.92: a tab's menu
+
+Step 5b. On the desktop.
+
+- Right-click a tab: Close, Close Others, Close to the Right, Close All;
+  Open as Source or Preview (the file in the other pane, which shows again
+  if it was hidden; the tab's own view is ticked); Copy Path. History's diff
+  tab offers Close.
+- New browser test: `tab-menu-browser.py`.
 
 ### v0.1.91: on the phone, Source and Preview are one file's two views
 
