@@ -4,6 +4,7 @@
 // panes, and the other pane shows when it was hidden); copying its path.
 // Part of the Editor module: `app` is its shared context (surface.js).
 import { getPath } from "../../workspace/index.js";
+import { filesIn } from "../service/view.js";
 
 export function createTabMenu(app) {
   const menu = () => app.elements.tabContextMenu;
@@ -13,7 +14,7 @@ export function createTabMenu(app) {
     if (element && !element.hidden) element.hidden = true;
   }
 
-  const tabsOf = (pane) => (pane === "source" ? app.view.get().sourceOpenTabIds : app.view.get().previewOpenTabIds);
+  const tabsOf = (pane) => filesIn(app.view.get(), pane);
   const closeIn = (pane, fileIds) => {
     for (const fileId of fileIds) (pane === "source" ? app.closeSourceTab : app.closePreviewTab)(fileId);
     app.renderTabs(app.controller.getProject());

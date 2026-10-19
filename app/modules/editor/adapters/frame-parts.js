@@ -3,6 +3,8 @@
 // or a layout change means for it, and its page-wide controls (Find, the tab
 // strips' overflow menus, Copy on code blocks, the end of a drag).
 // Part of the Editor: `app` is its shared context (surface.js).
+import { filesIn } from "../service/view.js";
+
 export function installFrameParts(app, shell) {
   const frame = shell.frame;
   shell.commands.add({ id: "editor.toggle-source", title: "Toggle Source", menu: { id: "view", group: 0, order: 2 }, run: () => frame.toggle("source") });
@@ -15,8 +17,8 @@ export function installFrameParts(app, shell) {
   const project = () => app.controller.getProject();
   const isFile = (id) => project()?.nodes?.[id]?.kind === "file";
   const openFiles = () => {
-    const { sourceOpenTabIds, previewOpenTabIds } = app.view.get();
-    return [...new Set([...sourceOpenTabIds, ...previewOpenTabIds])].filter(isFile)
+    const view = app.view.get();
+    return [...new Set([...filesIn(view, "source"), ...filesIn(view, "preview")])].filter(isFile)
       .map((id) => ({ id, name: project().nodes[id].name }));
   };
   frame.phonePanes.add({

@@ -5,6 +5,7 @@
 // what the panes show is the Editor's view (app.view, service/view.js).
 import { normalizeServerUrl } from "../../shell/index.js";
 import { getPath } from "../../workspace/index.js";
+import { filesIn } from "../service/view.js";
 
 export function createTabs(app) {
 
@@ -37,6 +38,7 @@ export function createTabs(app) {
     app.captureViewState(); // resume-position: snapshot the outgoing document first
     app.view.pick(fileId);
     openSourceTab(fileId);
+    app.view.showSource(fileId);
     app.controller.setActiveFile(fileId);
     scheduleSaveUserState();
   }
@@ -46,7 +48,7 @@ export function createTabs(app) {
   function currentWorkspaceView() {
     const project = app.controller.getProject();
     const pathFor = id => project.nodes[id]?.kind === "file" ? getPath(project, id) : null;
-    return { openFiles: app.view.get().sourceOpenTabIds.map(pathFor).filter(Boolean), activeFile: pathFor(project.activeFileId) };
+    return { openFiles: filesIn(app.view.get(), "source").map(pathFor).filter(Boolean), activeFile: pathFor(project.activeFileId) };
   }
   function cacheWorkspaceView() {
     if (app.workspaceMode !== "synced" || !app.settings.syncedProjectId) return;
@@ -81,7 +83,7 @@ export function createTabs(app) {
     saveUserStateTimer = setTimeout(() => {
       saveUserStateTimer = null;
       const project = app.controller.getProject();
-      const openFiles = app.view.get().sourceOpenTabIds
+      const openFiles = filesIn(app.view.get(), "source")
         .map((id) => (project.nodes[id]?.kind === "file" ? getPath(project, id) : null))
         .filter(Boolean);
       const activeId = project.activeFileId;
@@ -121,6 +123,7 @@ export function createTabs(app) {
   function setActiveSourcePart(fileId, partId) {
     app.view.pick(fileId, partId);
     openSourceTab(fileId);
+    app.view.showSource(fileId);
     app.controller.setActiveFile(fileId);
   }
 
@@ -286,9 +289,10 @@ export function createTabs(app) {
       return;
     }
 
-    const fallbackId = app.view.get().sourceOpenTabIds[app.view.get().sourceOpenTabIds.length - 1] ?? null;
+    const fallbackId = filesIn(app.view.get(), "source").at(-1) ?? null;
     if (fallbackId) {
       app.view.select(fallbackId);
+      app.view.showSource(fallbackId);
       app.controller.setActiveFile(fallbackId);
       return;
     }
@@ -467,7 +471,7 @@ export function createTabs(app) {
       });
       if (allowReorder) {
         tab.addEventListener("dragstart", (event) => {
-          app.view.dragTab({ pane, fileId });
+          app.view.dragTab({ group: app.view.get().hosts[pane], view: pane, fileId });
           event.dataTransfer?.setData("text/mdnotes-tab", JSON.stringify({ pane, fileId }));
           if (event.dataTransfer) {
             event.dataTransfer.effectAllowed = "move";
@@ -477,13 +481,13 @@ export function createTabs(app) {
           app.view.dragTab(null);
         });
         tab.addEventListener("dragover", (event) => {
-          if (app.view.get().draggingTabState?.pane !== pane || app.view.get().draggingTabState.fileId === fileId) {
+          if (app.view.get().draggingTabState?.view !== pane || app.view.get().draggingTabState.fileId === fileId) {
             return;
           }
           event.preventDefault();
         });
         tab.addEventListener("drop", (event) => {
-          if (app.view.get().draggingTabState?.pane !== pane || app.view.get().draggingTabState.fileId === fileId) {
+          if (app.view.get().draggingTabState?.view !== pane || app.view.get().draggingTabState.fileId === fileId) {
             return;
           }
           event.preventDefault();
@@ -554,7 +558,7 @@ export function createTabs(app) {
       strip: app.elements.sourceTabStrip,
       pane: "source",
       project,
-      tabIds: app.view.get().sourceOpenTabIds,
+      tabIds: filesIn(app.view.get(), "source"),
       activeFileId: project.activeFileId,
       emptyText: "No source file selected",
       onActivate: setActiveSourceFile,
@@ -571,7 +575,7 @@ export function createTabs(app) {
       strip: app.elements.previewTabStrip,
       pane: "preview",
       project,
-      tabIds: app.view.get().previewOpenTabIds,
+      tabIds: filesIn(app.view.get(), "preview"),
       activeFileId: app.view.get().previewFileId,
       emptyText: "No preview file selected",
       onActivate: setPreviewFile,
@@ -583,14 +587,14 @@ export function createTabs(app) {
 
   function bindTabStripReorderTarget(strip, pane) {
     strip.addEventListener("dragover", (event) => {
-      if (app.view.get().draggingTabState?.pane !== pane) {
+      if (app.view.get().draggingTabState?.view !== pane) {
         return;
       }
       event.preventDefault();
     });
 
     strip.addEventListener("drop", (event) => {
-      if (app.view.get().draggingTabState?.pane !== pane) {
+      if (app.view.get().draggingTabState?.view !== pane) {
         return;
       }
       const targetTab = event.target.closest(".editor-tab[data-file-id]");

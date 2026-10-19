@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-19 · release `v0.1.95` (deployed with v0.1.89–v0.1.94; public checks passed)
+Last updated: 2026-10-19 · release `v0.1.96` (not deployed; v0.1.95 is live)
 
 ---
 
@@ -68,6 +68,18 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.96: editor groups, the model
+
+Step 5f. Nothing on screen changed.
+
+- The editor now keeps its tabs as groups (left and right), a tab being a
+  file in a view (Source or Preview), as the first stage of editor groups.
+  Today's layout is the default: the source tabs on the left, the preview
+  tabs on the right.
+- Tests: `editor-view.test.mjs` checks the groups (the default layout, which
+  group holds each view, the active tabs after closing and after the project
+  changed).
 
 ### v0.1.95: the phone's sheet and edge swipes, as decided
 
