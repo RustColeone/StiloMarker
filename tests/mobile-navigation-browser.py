@@ -149,22 +149,18 @@ async def main():
 
         await gesture('#editor-content',[180,50])
         await assert_pane('source')
-        await page.locator('#mobile-preview-toggle').click()
+        await page.locator('#mobile-view-toggle').click()  # the same file, previewed
         for ending in ['touchcancel','multitouch']:
             await gesture('#preview-output',[180,50],ending)
             await assert_pane('preview')
         # Reversing across the starting point cannot select the wrong neighbor.
         await gesture('#preview-output',[180,350])
         await assert_pane('preview')
-        # Tapping the current pane also cancels a pending switch.
+        # A rapid switch in the top bar wins over a settling swipe's old timer.
         await gesture('#preview-output',[180,50])
-        await page.locator('#mobile-preview-toggle').click()
-        await assert_pane('preview')
-        # A rapid topbar selection wins over a settling swipe's old timer.
-        await gesture('#preview-output',[180,50])
-        await page.locator('#mobile-source-toggle').click()
+        await page.locator('#mobile-view-toggle').click()
         await assert_pane('source')
-        await page.locator('#mobile-preview-toggle').click()
+        await page.locator('#mobile-view-toggle').click()
         await gesture('#preview-output',[180,50])
         await assert_pane('chat')
         await gesture('#chat-input',[180,50])
@@ -172,7 +168,7 @@ async def main():
         await page.locator('#chat-collapse-button').click()
         await assert_pane('source')
         # Horizontal content and the diagram canvas own even edge drags.
-        await page.locator('#mobile-preview-toggle').click()
+        await page.locator('#mobile-view-toggle').click()
         await page.locator('#preview-output').evaluate('''el => {
           el.innerHTML='<div id="wide-content" style="width:200px;overflow-x:auto"><div style="width:1000px">Wide table</div></div><div class="bmap-editor" id="test-canvas">Diagram canvas</div>';
         }''')
@@ -208,7 +204,8 @@ async def main():
         assert dialog['height'] <= dialog['viewport'] and not dialog['overflow'],dialog
         await page.screenshot(path='/tmp/stilomarker-mobile-settings-v0.1.15.png')
         await page.locator('#settings-dialog .dialog-close-corner').click()
-        await page.locator('#mobile-source-toggle').click()
+        await page.locator('#mobile-view-toggle').click()  # from the chat: back to the file
+        await assert_pane('source')
         await page.set_viewport_size({'width':390,'height':844})
         await page.screenshot(path='/tmp/stilomarker-mobile-source-v0.1.15.png')
         assert not errors,errors

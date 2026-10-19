@@ -102,6 +102,9 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
     onDrop: (event) => drops.handle(event),
     // The frame (Shell's): closing the phone's explorer drawer, showing the preview pane.
     setMobileExplorerOpen: (open) => shell.frame.setExplorerOpen(open),
+    // The phone's pane on screen (source, preview, chat), or null on the desktop; and showing one.
+    phonePane: () => (shell.frame.isPhone() ? shell.frame.phoneView() : null),
+    showPhonePane: (id) => shell.frame.showPane(id),
     togglePreview: () => shell.frame.toggle("preview"),
     redrawRemoteCursors: () => app.renderRemoteCursors(Array.from(app.remoteCursorsByClient.values())),
     isPreviewableFileName,

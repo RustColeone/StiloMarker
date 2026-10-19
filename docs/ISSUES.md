@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-19 · release `v0.1.90` (not deployed; v0.1.88 is live)
+Last updated: 2026-10-19 · release `v0.1.91` (not deployed; v0.1.88 is live)
 
 ---
 
@@ -68,6 +68,19 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.91: on the phone, Source and Preview are one file's two views
+
+Step 5a. On the phone only; the desktop looks the same.
+
+- The top bar names the file on screen. Tap the name for the list of open
+  files, with Rename first (the pen is gone). One switch replaces the Source
+  and Preview buttons: it shows the same file in its other view, and hides
+  when a file has only one (a module tree has no preview).
+- Switching, or swiping between Source and Preview, keeps the file: Preview
+  of one file and Source of another can no longer be mixed up. A file picked
+  in the explorer drawer shows in the view on screen.
+- New browser test: `phone-views-browser.py`.
 
 ### v0.1.90: a first visit's preview shows the welcome file
 

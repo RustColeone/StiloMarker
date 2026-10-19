@@ -56,7 +56,7 @@ async def main():
         await context.close()
 
         context, page, errors = await visit(browser, viewport={'width': 400, 'height': 820}, has_touch=True, is_mobile=True)
-        await page.locator('#mobile-preview-toggle').click()
+        await page.locator('#mobile-view-toggle').click()
         await page.wait_for_function('document.querySelector("#preview-output")?.innerText.includes("STILO MARKER")', timeout=5000)
         assert not errors, errors
         await context.close()

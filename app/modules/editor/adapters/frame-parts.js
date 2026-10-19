@@ -9,25 +9,39 @@ export function installFrameParts(app, shell) {
   shell.commands.add({ id: "editor.toggle-preview", title: "Toggle Preview", menu: { id: "view", group: 0, order: 3 }, run: () => frame.toggle("preview") });
   shell.commands.add({ id: "editor.find-replace", title: "Find & Replace", menu: { id: "edit", group: 0, order: 1 }, run: () => app.openFindBar(true) });
 
-  // On the phone: one pane at a time, named in the top bar with its file.
+  // On the phone: one pane at a time, the top bar naming its file. Source and
+  // Preview are one file's two views: switching (or swiping) between them keeps
+  // the file, and both list the open files (the source and preview tabs).
   const project = () => app.controller.getProject();
+  const isFile = (id) => project()?.nodes?.[id]?.kind === "file";
+  const openFiles = () => {
+    const { sourceOpenTabIds, previewOpenTabIds } = app.view.get();
+    return [...new Set([...sourceOpenTabIds, ...previewOpenTabIds])].filter(isFile)
+      .map((id) => ({ id, name: project().nodes[id].name }));
+  };
   frame.phonePanes.add({
-    id: "source", order: 10, element: () => app.elements.sourcePane,
-    caption() { const name = app.controller.getActiveFile()?.name; return name ? `SOURCE — ${name}` : "SOURCE"; },
-    fileId: () => app.controller.getActiveFile()?.id ?? null
+    id: "source", order: 10, element: () => app.elements.sourcePane, alternate: "preview",
+    caption: () => app.controller.getActiveFile()?.name ?? "",
+    fileId: () => app.controller.getActiveFile()?.id ?? null,
+    canShow: (fileId) => app.canOpenFileInPane(fileId, "source"),
+    files: openFiles,
+    open: (fileId) => app.setActiveSourceFile(fileId),
+    shown({ fileId } = {}) {
+      if (fileId && fileId !== app.controller.getActiveFile()?.id && app.canOpenFileInPane(fileId, "source")) app.setActiveSourceFile(fileId);
+    }
   });
   frame.phonePanes.add({
-    id: "preview", order: 20, element: () => app.elements.previewPane,
+    id: "preview", order: 20, element: () => app.elements.previewPane, alternate: "source",
     caption() {
       const paneView = app.shownPaneView(); // a preview tab that is not a file (History's diff)
-      const name = paneView ? (paneView.tab()?.caption ?? paneView.tab()?.label ?? null) : project()?.nodes?.[app.view.get().previewFileId]?.name;
-      return name ? `PREVIEW — ${name}` : "PREVIEW";
+      return (paneView ? (paneView.tab()?.caption ?? paneView.tab()?.label) : project()?.nodes?.[app.view.get().previewFileId]?.name) ?? "";
     },
     fileId: () => (app.shownPaneView() ? null : app.view.get().previewFileId),
-    // One pane at a time: the preview mirrors the file being edited.
-    shown() {
-      const active = app.controller.getActiveFile();
-      if (active && app.isPreviewableFileName(active.name) && app.view.get().previewFileId !== active.id) app.setPreviewFile(active.id);
+    canShow: (fileId) => app.canOpenFileInPane(fileId, "preview"),
+    files: openFiles,
+    open: (fileId) => app.setPreviewFile(fileId),
+    shown({ fileId } = {}) {
+      if (fileId && fileId !== app.view.get().previewFileId && app.canOpenFileInPane(fileId, "preview")) app.setPreviewFile(fileId);
     }
   });
   shell.events.on("render", () => frame.redrawCaption());

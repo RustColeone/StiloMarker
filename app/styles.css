@@ -3394,37 +3394,113 @@ menu {
   margin-left: auto;
 }
 
-/* Mobile topbar caption: replaces the pane header on small screens, showing
-   "SOURCE — file" / "PREVIEW — file". Hidden on desktop; revealed in the media
-   query. Flexes to fill the space between the brand and the action buttons and
-   truncates the file name to the available width. */
-.mobile-pane-caption {
+/* Phone top bar: the file on screen, as a button that opens the list of open
+   files (and Rename). Hidden on desktop; revealed in the media query. It is
+   the elastic part of the bar: the name truncates before the buttons squeeze. */
+.mobile-file-button {
   display: none;
-  /* Shrink to content (not grow) so the pen button sits right after the text. */
+  align-items: center;
+  gap: 4px;
   flex: 0 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.mobile-file-button[aria-expanded="true"] {
+  background: var(--surface-1);
+  border-color: var(--border);
+}
+
+.mobile-pane-caption {
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.02em;
+}
+
+.mobile-file-caret {
+  flex: 0 0 auto;
+  font-size: 11px;
   color: var(--text-dim);
 }
 
-/* Rename pen: matches the caption's dim tone, smaller, hugging the caption.
-   (The action cluster's own margin-left:auto pushes it to the far right, so the
-   pen naturally sits right after the caption text.) */
-#mobile-rename-button {
-  width: 24px;
-  height: 24px;
-  min-height: 24px;
-  color: var(--text-dim);
+/* The list of open files, under the file name. */
+.mobile-file-list {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 48px;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  max-width: calc(100vw - 60px);
+  max-height: calc(var(--mobile-viewport-height, 100dvh) - var(--topbar-height) - 10px);
+  overflow-y: auto;
+  padding: 4px;
+  gap: 1px;
+  background: var(--menu);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.26);
+  z-index: 45;
 }
 
-#mobile-rename-button .topbar-mobile-icon {
-  width: 13px;
-  height: 13px;
+.mobile-file-list[hidden] {
+  display: none;
+}
+
+.mobile-file-item {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.mobile-file-item:hover,
+.mobile-file-item:focus-visible {
+  background: var(--surface-2);
+}
+
+.mobile-file-item[aria-checked="true"] {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.mobile-file-item.is-action {
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  border-radius: 3px 3px 0 0;
+}
+
+.mobile-file-item.is-empty {
+  color: var(--text-dim);
+  cursor: default;
+}
+
+/* The view switch shows the icon of the view it switches to. */
+#mobile-view-toggle[data-target="preview"] .view-icon-source,
+#mobile-view-toggle[data-target="source"] .view-icon-preview {
+  display: none;
+}
+
+#mobile-view-toggle[hidden] {
+  display: none;
 }
 
 /* Corner close (×) shared by settings/browse/tool dialogs. Hugs the top-right of
@@ -3494,8 +3570,8 @@ menu {
     display: flex;
   }
 
-  .mobile-pane-caption {
-    display: block;
+  .mobile-file-button {
+    display: inline-flex;
   }
 
   /* ── Topbar: ≡ + brand on the left, pane/chat/⋮ actions on the right ── */
@@ -3507,11 +3583,12 @@ menu {
     grid-template-columns: none;
   }
 
-  /* The caption is the only elastic thing up here: let it shrink to nothing
+  /* The file name is the only elastic thing up here: let it shrink to nothing
      before the buttons are squeezed or pushed off the edge. */
-  .mobile-pane-caption {
+  .mobile-file-button {
     min-width: 0;
     flex: 1 1 auto;
+    justify-content: flex-start;
   }
 
   .topbar-mobile-actions {
@@ -6519,8 +6596,7 @@ pre.proposal-diff-block {
    formatting strip on one scrollable row so it does not crowd out the editor. */
 @media (max-width: 900px) {
   .topbar { gap: 2px; padding-inline: 4px; }
-  .topbar-mobile-btn,
-  #mobile-rename-button { flex: 0 0 44px; width: 44px; height: 44px; min-height: 44px; }
+  .topbar-mobile-btn { flex: 0 0 44px; width: 44px; height: 44px; min-height: 44px; }
   .topbar-mobile-actions { gap: 0; }
   .sidebar-icon-button, .sidebar-add-button { min-width: 44px; min-height: 44px; }
   .tree-row { min-height: 44px; }

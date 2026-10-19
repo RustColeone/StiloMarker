@@ -347,6 +347,12 @@ The explorer shows the project tree as a collapsible file/folder list.
 - **Drag a URL album entry** to reorder within its album or move to another album.
 - **Drag a file from the Explorer into the Chat compose area** to attach it as context for the AI assistant.
 
+**On a phone:** one file shows at a time. The top bar names it; tap the name
+for the list of open files (and Rename). The switch next to it shows the same
+file in its other view (Source ↔ Preview); it is hidden when the file has only
+one. The explorer is a drawer (≡); a file picked there shows in the view on
+screen.
+
 **Copy/paste rules:**
 - Files and folders can be copied/pasted into any folder or the root.
 - URL album entries can only be pasted into a `.urldb` file.

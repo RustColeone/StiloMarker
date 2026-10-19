@@ -151,6 +151,10 @@ export function createTabs(app) {
       return;
     }
     app.logDebug("action", "File opened", getPath(project, fileId));
+    // On the phone the file shows in the view on screen: in Preview its preview,
+    // else Source (switched to first, so the file on screen does not follow over).
+    const phonePane = app.phonePane();
+    if (phonePane && phonePane !== "source" && !(phonePane === "preview" && app.isPreviewableFileName(node.name))) app.showPhonePane("source");
     setActiveSourceFile(fileId);
     app.showToast(`Opened ${node.name}`);
     // On mobile the explorer is a flyout overlay — close it so the opened file
@@ -165,6 +169,7 @@ export function createTabs(app) {
     } else if (app.view.get().previewFileId === null && app.isPreviewableFileName(node.name)) {
       setPreviewFile(fileId);
     }
+    if (phonePane === "preview" && app.isPreviewableFileName(node.name)) setPreviewFile(fileId);
   }
 
   function canOpenFileInPane(fileId, pane) {
