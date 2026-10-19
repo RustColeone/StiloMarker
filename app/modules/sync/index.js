@@ -32,6 +32,8 @@
 // mode, whether this tab works on a shared workspace or its own local
 // project (service/mode.js): get() -> { workspaceMode, privateProject },
 // share(currentProject), leave() -> the kept project, forgetKept(), restore(saved).
+// connectionInfo() -> this tab's connection while on the shared workspace, or null.
+// It tells Workspace where the open project lives (workspace.location).
 // cloudWorkspace() -> { serverUrl, token, team, path } | null: the cloud
 // workspace on screen (signed in, and the open project is it).
 //   transformTextPatch   sanitizeProjectForSync
@@ -44,6 +46,8 @@ import { LOCAL_MODE, createMode } from "./service/mode.js";
 import { SESSION_STATUS, statusFromSession } from "./service/status.js";
 import { addSessionView } from "./adapters/session-view.js";
 import { createConnection } from "./adapters/connection.js";
+import { normalizeServerUrl } from "../shell/index.js";
+import { getPath } from "../workspace/index.js";
 
 export { transformTextPatch } from "./model/rebase.js";
 export { sanitizeProjectForSync } from "./model/paths.js";
@@ -114,10 +118,31 @@ export default defineModule({
       if (syncedProjectId !== `${ws.team}/${ws.path}`) return null;
       return { serverUrl, token, team: ws.team, path: ws.path };
     }
+    // This tab's connection while it works on the shared workspace (else null).
+    const connectionInfo = () => (mode.get().workspaceMode === "synced" ? session?.getConnectionInfo?.() ?? null : null);
+    // Where the open project lives (Workspace's location): a shared session's
+    // key, kept while its stream reconnects; and an image's address, the
+    // server's while connected (the bytes are on disk there, not in the operation).
+    workspace.location.configure({
+      key(project) {
+        const connection = connectionInfo();
+        if (connection?.sessionId) return `cloud:${normalizeServerUrl(connection.serverUrl)}/${connection.sessionId}`;
+        if (mode.get().workspaceMode === "synced" && shell.settings.syncedProjectId) {
+          return `cloud:${normalizeServerUrl(shell.settings.serverUrl)}/${shell.settings.syncedProjectId}`;
+        }
+        return project?.id ?? "local";
+      },
+      assetSrc(project, node) {
+        const content = typeof node.content === "string" ? node.content : "";
+        const connection = connectionInfo();
+        if (content.startsWith("data:") || !connection) return content;
+        return `${normalizeServerUrl(connection.serverUrl)}/api/workspaces/asset?token=${encodeURIComponent(connection.token)}&path=${encodeURIComponent(getPath(project, node.id))}`;
+      }
+    });
     // The session on the page: the status bar's collaborators and the Session panel.
     addSessionView({ shell: ctx.use("shell"), status, mode });
     return { createCollaborationRuntime, syncVersion, mode, status, attach, session: () => session, events: { on: events.on },
-      cloudWorkspace, publish: connected("publish"), publishSnapshot: connected("publishSnapshot"), switchMode: connected("switchMode"),
+      cloudWorkspace, connectionInfo, publish: connected("publish"), publishSnapshot: connected("publishSnapshot"), switchMode: connected("switchMode"),
       connectSaved: connected("connectSaved"), reconnectLater: connected("reconnectLater") };
   }
 });

@@ -33,6 +33,9 @@
 //         linkText?(part) -> what a part dropped into Markdown becomes
 //         add?: { label, run(file) -> Promise<part | null> }   (a menu item that asks for a new part)
 //   parts.of(name) -> the provider for a file name, or null
+//   location: where the open project lives (Sync configures it): key(project),
+//     assetSrc(project, node) (an image's address), resolveAsset(project, fromNodeId, url)
+//   events "saved": the user saved (Save, Ctrl+S); History takes a snapshot
 //   saving: schedule(project) after a change (this browser's copy, a local
 //       project's folder, auto-save), saveActiveFile() (Save), runAutoSave(why),
 //       scheduleAutoSave(), flush() (the browser copy, now), and
@@ -62,6 +65,7 @@ function checkParts(provider) {
 }
 
 export * from "./model/project.js";
+export { getRelativePath, getRelativeProjectPath, normalizePath } from "./model/paths.js";
 export { seedDefaultProject } from "./service/project-store.js";
 export { buildTextPatch, isTextPatch } from "./model/text-patch.js";
 export { bytesToDataUrl, dataUrlToBlob, dataUrlToBytes, decodeTextBytes, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent } from "./adapters/file-content.js";
@@ -72,6 +76,7 @@ export { createProjectOpfs, deleteOpfsEntry, exportProjectModelOpfs, getOpfsDire
 export { createProjectSaveQueue, savedFileIds, snapshotProject } from "./adapters/save-queue.js";
 import { createSaving } from "./adapters/saving.js";
 import { addStatusItems } from "./adapters/status-items.js";
+import { createLocation } from "./adapters/location.js";
 import { addWorkspaceCommands, reattachDeviceFolder, watchPage } from "./adapters/page-life.js";
 
 export default defineModule({
@@ -101,6 +106,17 @@ export default defineModule({
     // This browser's copy when the page hides, and a warning before leaving unsaved changes.
     watchPage({ store: () => store, log: (...parts) => ctx.log(parts.join(" ")) });
     addWorkspaceCommands({ shell, log: (...parts) => ctx.log(parts.join(" ")) });
+    // Save (Ctrl+S): auto-save keeps the work, so Save also marks a point to
+    // compare against later; it says "saved" and History takes a snapshot.
+    shell.commands.add({ id: "workspace.save", title: "Save", menu: { id: "file", group: 0, order: 6 }, keys: ["Mod+S"], async run() {
+      try {
+        ctx.log("Workspace save requested");
+        await saving.saveActiveFile();
+      } catch (error) {
+        shell.notify(error.message);
+      }
+      events.emit("saved", {});
+    } });
     function openProject(project) {
       if (store) throw new Error("The workspace already has a project open; use project().replaceProject()");
       store = createProjectController(project);
@@ -121,7 +137,8 @@ export default defineModule({
       isStale: (error) => error instanceof StaleWriteError,
       events: { on: events.on },
       parts: { add: parts.add, of: (name) => parts.get(types.typeOf(name)?.id ?? "") ?? null },
-      saving
+      saving,
+      location: createLocation()
     };
   }
 });

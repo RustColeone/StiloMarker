@@ -22,7 +22,7 @@ import { createExplorerView } from "./tree.js";
 // owner, or become an extension point, and leave this list.
 export const PORT = [
   "settings", "persistSettings",
-  "elements", "logDebug", "imageSrcFor", "canManagePreview", "openAccessEditor", "openMtreeToolsDialog",
+  "elements", "logDebug", "canManagePreview", "openAccessEditor", "openMtreeToolsDialog",
   "remapPersonaPaths"
 ];
 
@@ -48,6 +48,7 @@ export function createSurface({ port, workspace, editor, shell, sync, types, fil
     // A file type's own context-menu entries, and a new file's first content (extension points).
     fileMenuOf: (name) => fileMenus.get(types.typeOf(name)?.id ?? "") ?? null,
     newFileContent: (kind, name) => newFiles.get(kind)?.content(name) ?? "",
+    imageSrcFor: (project, node) => workspace.location.assetSrc(project, node), // an image's address (Workspace's location)
     // Changes made here reach the shared workspace through Sync.
     publishOperation: (operation) => sync.publish(operation),
     publishSnapshot: () => sync.publishSnapshot(),
@@ -171,6 +172,10 @@ export function createSurface({ port, workspace, editor, shell, sync, types, fil
   // A mark put on a file or taken off shows on its row at once.
   editor.marks.on(() => app.tree.render(app.controller.getProject()));
   installExplorerEvents(app);
+  shell.commands.add({ id: "explorer.export", title: "Export Project Zipped", menu: { id: "file", group: 0, order: 8 },
+    run: () => app.exportNode(app.controller.getProject().rootId) });
+  shell.commands.add({ id: "explorer.export-selected", title: "Export Selected", menu: { id: "file", group: 0, order: 9 },
+    run: () => app.exportNode(app.getSelectedNode(app.controller.getProject())?.id ?? app.controller.getProject().rootId) });
   // The welcome page's "New file".
   document.getElementById("welcome-new-file")?.addEventListener("click", () => app.openNewFileDialog());
 

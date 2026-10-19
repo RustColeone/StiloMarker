@@ -22,7 +22,17 @@ export default defineModule({
   level: 3,
   uses: ["file-types", "workspace"],
   owns: { rules: ["character sheet", "author's notes", "hidden from characters"] },
-  start() {
-    return { ...persona, projectSnapshot, contextFiles };
+  start(ctx) {
+    const workspace = ctx.use("workspace");
+    // A character's avatar as an address: a web or data address as written, else
+    // the project image it names (relative to the sheet), or nothing.
+    function avatarSrc(project, personaNodeId, avatar) {
+      const value = String(avatar ?? "").trim();
+      if (!value) return "";
+      if (/^(https?:\/\/|data:image\/)/i.test(value)) return value;
+      const resolved = workspace.location.resolveAsset(project, personaNodeId, value);
+      return resolved && resolved !== value ? resolved : "";
+    }
+    return { ...persona, projectSnapshot, contextFiles, avatarSrc };
   }
 });

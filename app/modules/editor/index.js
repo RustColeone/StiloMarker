@@ -34,7 +34,7 @@ import { addEditorSettings, applyEditorFont } from "./adapters/settings-fields.j
 export { TOOLBAR_SPECS, buildTableSnippet, getEditorToolbarFormat, renderEditorFormatToolbar } from "./adapters/format-toolbar.js";
 export { collectMarkdownReferences, extractMarkdownLinks, parseMarkdownInlineElements, renderMarkdown } from "./model/markdown.js";
 export { escapeHtmlAttribute } from "./model/html.js";
-export { getRelativePath, getRelativeProjectPath, normalizePath } from "./model/paths.js";
+export { getRelativePath, getRelativeProjectPath, normalizePath } from "../workspace/index.js";
 export { forgetViewStates } from "./adapters/resume.js";
 export { clampSourceFontSize, cssFontFamily } from "./model/font.js";
 

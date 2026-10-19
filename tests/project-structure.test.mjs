@@ -87,7 +87,7 @@ test("main.js wires core feature symbols", async () => {
     /generate-module-map/,
     /editorView\.reset/,
     /text\/mdnotes-file-id/,
-    /handleSaveCommand/,
+    /cloud\.import-file/,
     /openAddFileDialog/,
     /renderPreviewContent/,
     /isImageFileName/,

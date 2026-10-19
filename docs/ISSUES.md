@@ -69,6 +69,17 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.76: the File menu and the project's location belong to their modules
+
+Step S4e-1. Nothing changes for users.
+
+- Each File menu command is now registered by the module that does it (the
+  menu looks and works the same); Save announces itself and History takes the
+  snapshot it always took.
+- Where the open project lives (its key, and where its images are served
+  from) is answered by Workspace, as Sync configures it, instead of by
+  `main.js`; avatars by Characters.
+
 ### v0.1.75: the welcome page and maintenance belong to their modules
 
 Step S4d-3b. One fix for users:

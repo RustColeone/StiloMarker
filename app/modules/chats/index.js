@@ -28,7 +28,7 @@ export function createLocalChats(options) {
 export const loadChatsView = () => import("./adapters/view.js");
 
 // What main.js attaches (chats.attach(port)); each entry should find an owner.
-const PORT = ["cloudWorkspaceTarget", "chatWorkspaceKey", "personaAvatarSrc", "isMobileLayout", "logDebug"];
+const PORT = ["isMobileLayout", "logDebug"];
 
 export default defineModule({
   name: "chats",
@@ -49,7 +49,11 @@ export default defineModule({
         showToast: (message, options) => shell.toast(message, options),
         showConfirmDialog: (options) => shell.confirm(options),
         openFileFromExplorer: (nodeId) => editor.parts().openFileFromExplorer(nodeId),
-        collaboration: () => sync.session()
+        collaboration: () => sync.session(),
+        cloudWorkspaceTarget: () => sync.cloudWorkspace(),
+        // The key the open project's chats are kept under (Workspace's location, which Sync tells).
+        chatWorkspaceKey: (project = workspace.project().getProject()) => workspace.location.key(project),
+        personaAvatarSrc: (...args) => ctx.use("characters").avatarSrc(...args)
       };
       Object.defineProperty(app, "controller", { get: () => workspace.project(), enumerable: true });
       page = createChatsPage(app);

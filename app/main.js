@@ -9,7 +9,7 @@ import { createWorkspacePorts } from "./features/workspace-ports.js";
 import { installMobileViewport } from "./services/chat-ui-service.js";
 import { APP_VERSION } from "./version.js";
 import { seedDefaultProject, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isImageFileName, isTextFileName } from "./domain/project-model.js";
-import { importDirectory, importOsFolderIntoOpfs, importSingleFile, importZipArchive, loadProject, saveProject, supportsDirectoryAccess, supportsOpfs } from "./modules/workspace/index.js";
+import { loadProject } from "./modules/workspace/index.js";
 import syncModule from "./modules/sync/index.js";
 import { parsePersona, personaTemplate } from "./services/persona-service.js";
 import { signInSettings } from "./services/settings-service.js";
@@ -162,7 +162,6 @@ const elements = {
   mobileMenuButton: query("#mobile-menu-button"),
   menuBar: query(".menu-bar"),
   openServerDialog: query("#open-server-dialog"),
-  importFileInput: query("#import-file-input"),
   previewCollapseButton: query("#preview-collapse-button"),
   sourceCollapseButton: query("#source-collapse-button"),
   sourceToggleActivityButton: query("#source-toggle-activity-button"),
@@ -231,13 +230,12 @@ var editorParts = modules.editor.attach({
   settings, elements, identity,
   saveUserState: (ws, openFiles, activeFile) => saveUserState(settings.serverUrl, identity.token(), ws.team, ws.path, openFiles, activeFile),
   logDebug, traceEditorEvent, formatEditorDebugValue,
-  imageSrcFor,
   setMobileExplorerOpen, togglePreview,
-  scope: () => chatWorkspaceKey(), isReadOnly: () => isReadOnlyWorkspace(), onDrop: (event) => handleEditorDrop(event)
+  isReadOnly: () => isReadOnlyWorkspace(), onDrop: (event) => handleEditorDrop(event)
 });
 // The explorer and file actions, given what no module owns yet (modules/explorer/adapters/surface.js).
 var explorerParts = modules.explorer.attach({
-  settings, persistSettings, elements, logDebug, imageSrcFor,
+  settings, persistSettings, elements, logDebug,
   canManagePreview: () => Boolean(identity.account()) && syncMode.get().workspaceMode === "synced"
     && collaboration.isConnected() && Boolean(settings.lastWorkspace?.team),
   openAccessEditor, openMtreeToolsDialog, remapPersonaPaths
@@ -254,11 +252,11 @@ var cloudParts = modules.cloud.attach({
   elements, logDebug, flashStatusPanel, openSettingsDialog, refreshChatStatus,
   setMobileExplorerOpen
 });
-var chatsPage = modules.chats.attach({ cloudWorkspaceTarget, chatWorkspaceKey, personaAvatarSrc, isMobileLayout, logDebug }); // the side panel's Chats page
+var chatsPage = modules.chats.attach({ isMobileLayout, logDebug }); // the side panel's Chats page
 // Diagrams and character sheets add their previews to the Editor's extension point.
 registerPreviews(modules.editor.previews, {
   view: editorView, settings, escapeHtmlAttribute, normalizePath, getRelativeProjectPath,
-  personaAvatarSrc,
+  personaAvatarSrc: modules.characters.avatarSrc,
   get controller() { return controller; }
 });
 // Total source characters of the active file, cached for the footer counter by
@@ -276,7 +274,6 @@ function applyEditorEdit(...args) { return editorParts.applyEditorEdit(...args);
 function getViewState(...args) { return editorParts.getViewState(...args); }
 function isPreviewableFileName(...args) { return editorParts.isPreviewableFileName(...args); }
 function redrawRemoteCursors(...args) { return editorParts.redrawRemoteCursors(...args); }
-function resolveProjectAssetUrl(...args) { return editorParts.resolveProjectAssetUrl(...args); }
 function showActiveFile(...args) { return editorParts.showActiveFile(...args); }
 function attachSelectionChangeListener(...args) { return editorParts.attachSelectionChangeListener(...args); }
 function clamp(...args) { return editorParts.clamp(...args); }
@@ -326,8 +323,7 @@ function chatNeeded() {
 
 function loadChat() {
   chatLoading ??= modules.assistant.load({
-    cloudWorkspaceTarget, chatConnectionInfo, chatWorkspaceKey, elements, isMobileLayout, logDebug, openSettingsDialog,
-    personaAvatarSrc, storedProject, chatsPage
+    elements, isMobileLayout, logDebug, openSettingsDialog, storedProject, chatsPage
   }).then((loaded) => {
     chat = loaded;
     chat.chatState.shouldScrollToBottom = true;
@@ -357,28 +353,9 @@ async function refreshChatStatus(options) {
  *  character file, or of a folder holding one. */
 function remapPersonaPaths(oldPath, newPath) { chatsPage.remapPersonaPaths(oldPath, newPath); } // Chats follows renamed characters
 
-function chatConnectionInfo() {
-  return syncMode.get().workspaceMode === "synced" ? collaboration.getConnectionInfo?.() : null;
-}
 
-function chatWorkspaceKey(project = controller.getProject()) {
-  const connection = chatConnectionInfo();
-  if (connection?.sessionId) return `cloud:${normalizeServerUrl(connection.serverUrl)}/${connection.sessionId}`;
-  // Keep cloud drafts scoped while its transport reconnects.
-  if (syncMode.get().workspaceMode === "synced" && settings.syncedProjectId) {
-    return `cloud:${normalizeServerUrl(settings.serverUrl)}/${settings.syncedProjectId}`;
-  }
-  return project.id;
-}
 
 /** A persona's avatar as an <img> src, or "" when it doesn't resolve. */
-function personaAvatarSrc(project, personaNodeId, avatar) {
-  const value = String(avatar ?? "").trim();
-  if (!value) return "";
-  if (/^(https?:\/\/|data:image\/)/i.test(value)) return value;
-  const resolved = resolveProjectAssetUrl(project, personaNodeId, value);
-  return resolved && resolved !== value ? resolved : "";
-}
 
 
 // ---- Dialogs, toasts and the debug log (./ui/dialogs.js) ----
@@ -418,20 +395,6 @@ function traceEditorEvent(...args) { return dialogs().traceEditorEvent(...args);
 /** Resolve an image node to a usable <img> src. Local/PIN workspaces inline the
  *  bytes as a data: URL in content; directory-backed cloud workspaces keep the
  *  bytes on the server and serve them by the file's workspace path. */
-function imageSrcFor(project, node) {
-  if (!node) return "";
-  const content = typeof node.content === "string" ? node.content : "";
-  if (content.startsWith("data:")) {
-    return content;
-  }
-  const conn = collaboration.getConnectionInfo?.();
-  if (conn && syncMode.get().workspaceMode === "synced") {
-    const base = normalizeServerUrl(conn.serverUrl);
-    const path = getPath(project, node.id);
-    return `${base}/api/workspaces/asset?token=${encodeURIComponent(conn.token)}&path=${encodeURIComponent(path)}`;
-  }
-  return content;
-}
 
 function getEditorLineIndexAtOffset(textOffset) {
   const lineEls = Array.from(elements.editorContent.children);
@@ -460,10 +423,6 @@ function isReadOnlyWorkspace() {
 
 
 
-// The cloud workspace on screen (Sync's), for the code that still asks main.js.
-function cloudWorkspaceTarget() { return modules.sync.cloudWorkspace(); }
-// Snapshots, the version label, the diff tab and History's dialogs (the History module).
-function createSnapshotNow(...args) { return historyParts.createSnapshotNow(...args); }
 
 // The live session is Sync's; it is given what only the app can do, and
 // tells its news through events (modules/sync/index.js).
@@ -604,7 +563,6 @@ function currentWorkspaceView(...args) { return editorParts.currentWorkspaceView
 function ensureOpenTabs(...args) { return editorParts.ensureOpenTabs(...args); }
 function openFileFromExplorer(...args) { return editorParts.openFileFromExplorer(...args); }
 function openTabOverflowMenu(...args) { return editorParts.openTabOverflowMenu(...args); }
-function printPreviewAsPdf(...args) { return editorParts.printPreviewAsPdf(...args); }
 function renderPreviewContent(...args) { return editorParts.renderPreviewContent(...args); }
 function renderTabs(...args) { return editorParts.renderTabs(...args); }
 function restoreResumeState(...args) { return editorParts.restoreResumeState(...args); }
@@ -618,8 +576,6 @@ async function typesetPreview(...args) { return editorParts.typesetPreview(...ar
 function suggestUniqueFileName(...args) { return explorerParts.suggestUniqueFileName(...args); }
 function clearExplorerDropState(...args) { return explorerParts.clearExplorerDropState(...args); }
 function createFileInFolder(...args) { return explorerParts.createFileInFolder(...args); }
-function exportNode(...args) { return explorerParts.exportNode(...args); }
-function getSelectedNode(...args) { return explorerParts.getSelectedNode(...args); }
 function getSelectedParent(...args) { return explorerParts.getSelectedParent(...args); }
 async function handleEditorDrop(...args) { return explorerParts.handleEditorDrop(...args); }
 function moveExplorerNode(...args) { return explorerParts.moveExplorerNode(...args); }
@@ -627,24 +583,16 @@ function openNewFileDialog(...args) { return explorerParts.openNewFileDialog(...
 async function renameFileById(...args) { return explorerParts.renameFileById(...args); }
 
 
-async function handleSaveCommand() {
-  if (moduleMapTools?.isOpen() && moduleMapTools.contains(document.activeElement)) {
-    logDebug("action", "Module map written to target");
-    moduleMapTools.write();
-    return;
-  }
-
-  try {
-    logDebug("action", "Workspace save requested");
-    await workspace.saving.saveActiveFile();
-    logDebug("response", "Workspace saved");
-  } catch (error) {
-    notify(error.message);
-  }
-  // Auto-save handles persistence now, so Ctrl+S doubles as "commit a snapshot":
-  // a manual save point the user can later compare against.
-  await createSnapshotNow();
-}
+// While the module map tools are open and focused, Ctrl+S writes the map
+// (before Shell's shortcut saves the file).
+document.addEventListener("keydown", (event) => {
+  if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") return;
+  if (!moduleMapTools?.isOpen() || !moduleMapTools.contains(document.activeElement)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  logDebug("action", "Module map written to target");
+  moduleMapTools.write();
+}, true);
 
 for (const pane of ["source", "preview"]) {
   tabOverflowButton(pane)?.addEventListener("click", (event) => {
@@ -950,7 +898,6 @@ if (!storedProject) {
 logDebug("response", "Debug log initialized", `panel=${settings.debugPanel ? "visible" : "hidden"}`);
 
 // Sending a change is Sync's (adapters/connection.js).
-function publishSnapshot() { modules.sync.publishSnapshot(); }
 function publishOperation(operation) { return modules.sync.publish(operation); }
 
 function updateFileContentFromPreview(...args) { return editorParts.updateFileContentFromPreview(...args); }
@@ -966,86 +913,8 @@ function currentMobileFileId() {
 }
 
 
-shell.commands.add({ id: "workspace.save", title: "Save", menu: { id: "file", group: 0, order: 6 }, keys: ["Mod+S"], run: async () => {
-  await handleSaveCommand();
-} });
 
-shell.commands.add({ id: "preview.save-pdf", title: "Save as PDF", menu: { id: "file", group: 0, order: 7 }, run: printPreviewAsPdf });
-shell.commands.add({ id: "workspace.export", title: "Export Project Zipped", menu: { id: "file", group: 0, order: 8 }, run: () => exportNode(controller.getProject().rootId) });
-shell.commands.add({ id: "workspace.export-selected", title: "Export Selected", menu: { id: "file", group: 0, order: 9 }, run: () => exportNode(getSelectedNode(controller.getProject())?.id ?? controller.getProject().rootId) });
 
-shell.commands.add({ id: "workspace.new-project", title: "New Project", menu: { id: "file", group: 0, order: 1 }, run: async () => {
-  logDebug("action", "New project requested");
-  closeMenus();
-  // No local store and no server account: keep the legacy in-browser workspace.
-  if (!supportsOpfs() && !identity.account()) {
-    controller.replaceProject(seedDefaultProject());
-    editorView.reset(controller.getProject());
-    publishSnapshot();
-    logDebug("action", "New in-browser project created");
-    return;
-  }
-  // Otherwise open the unified browser so the user can pick where it lives
-  // (this device or a team folder) and create it there.
-  openFileBrowser({ side: supportsOpfs() ? "local" : "server", intent: "create" });
-} });
-
-shell.commands.add({ id: "workspace.import-folder", title: "Import Local Folder", menu: { id: "file", group: 0, order: 4 }, run: async () => {
-  if (!supportsDirectoryAccess()) {
-    notify("Folder import is only available in Chromium-based browsers.");
-    return;
-  }
-  try {
-    logDebug("action", "Import folder requested");
-    // Copy a real OS folder into the persistent local store, then open it from
-    // there. Without OPFS, fall back to a live (session-only) directory link.
-    const project = supportsOpfs()
-      ? await importOsFolderIntoOpfs("")
-      : await importDirectory();
-    controller.replaceProject(project);
-    if (project.sourceMode === "opfs" && project.localPath) {
-      settings.change({ lastLocalProject: { path: project.localPath } });
-    }
-    editorView.reset(project);
-    publishSnapshot();
-    logDebug("action", "Imported folder", project.localPath ?? project.name);
-  } catch (error) {
-    if (error?.name === "AbortError") return; // user dismissed the picker
-    notify(error.message);
-  }
-} });
-
-shell.commands.add({ id: "cloud.open-project", title: "Open Project…", menu: { id: "file", group: 0, order: 2 }, run: () => {
-  closeMenus();
-  logDebug("action", "Open project browser");
-  // Default to the server side when signed in (it replaces the old "Open Server
-  // Directory"), else start on this device. The in-dialog toggle switches sides.
-  openFileBrowser({ side: identity.account() ? "server" : "local", intent: "open" });
-} });
-
-shell.commands.add({ id: "cloud.file-manager", title: "File Manager", menu: { id: "file", group: 0, order: 3 }, run: () => {
-  closeMenus();
-  logDebug("action", "Open file manager");
-  openFileBrowser({ side: identity.account() ? "server" : "local", mode: "manage" });
-} });
-
-shell.commands.add({ id: "workspace.import-file", title: "Import File or Zip", menu: { id: "file", group: 0, order: 5 }, run: () => elements.importFileInput.click() });
-
-elements.importFileInput.addEventListener("change", async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  try {
-    logDebug("action", "Import requested", file.name);
-    const project = file.name.toLowerCase().endsWith(".zip") ? await importZipArchive(file) : await importSingleFile(file);
-    controller.replaceProject(project);
-    editorView.reset(project);
-    publishSnapshot();
-  } catch (error) {
-    notify(error.message);
-  } finally {
-    event.target.value = "";
-  }
-});
 
 
 
@@ -1273,7 +1142,6 @@ window.matchMedia(`(max-width: ${MOBILE_MAX_WIDTH}px)`)
 function handleAccountLogout(...args) { return cloudParts.handleAccountLogout(...args); }
 async function handleOpenWorkspace(...args) { return cloudParts.handleOpenWorkspace(...args); }
 async function openAccessEditor(...args) { return cloudParts.openAccessEditor(...args); }
-function openFileBrowser(...args) { return cloudParts.openFileBrowser(...args); }
 async function performLogin(...args) { return cloudParts.performLogin(...args); }
 async function pingCurrentServer(...args) { return cloudParts.pingCurrentServer(...args); }
 function renderHostTargets(...args) { return cloudParts.renderHostTargets(...args); }

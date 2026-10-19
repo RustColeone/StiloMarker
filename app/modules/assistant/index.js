@@ -34,7 +34,8 @@ export default defineModule({
     function load(port) {
       loading ??= import("./adapters/panel.js").then(({ createAgentPanel }) => {
         panel = createAgentPanel({ port, shell: ctx.use("shell"), workspace: ctx.use("workspace"), identity: ctx.use("identity"),
-          sync: ctx.use("sync"), editor: ctx.use("editor"), explorer: ctx.use("explorer"), models: ctx.use("models") });
+          sync: ctx.use("sync"), editor: ctx.use("editor"), explorer: ctx.use("explorer"), models: ctx.use("models"),
+          characters: ctx.use("characters") });
         return panel;
       }).catch((error) => { loading = null; throw error; });
       return loading;

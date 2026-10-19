@@ -40,7 +40,7 @@ export function watchPage({ store, log, win = globalThis.window, doc = globalThi
 
 // Empty Everything (Settings menu): everything the app keeps in this browser
 // cleared, and an empty project saved so the next start does not fall back to
-// the welcome workspace. And the welcome page's "Open a local folder".
+// the welcome workspace.
 export function addWorkspaceCommands({ shell, log, doc = globalThis.document }) {
   shell.commands.add({ id: "workspace.empty-everything", title: "Empty Everything", menu: { id: "settings", group: 0, order: 4 }, danger: true, async run() {
     const confirmed = await shell.confirm({ title: "Empty Everything",
@@ -53,5 +53,4 @@ export function addWorkspaceCommands({ shell, log, doc = globalThis.document }) 
     log("Workspace emptied");
     globalThis.location.reload();
   } });
-  doc?.getElementById("welcome-open-local")?.addEventListener("click", () => void shell.run("workspace.import-folder"));
 }

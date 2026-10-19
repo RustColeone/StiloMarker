@@ -333,7 +333,10 @@ That is where bugs are hard to find. Steps, each its own release:
 | S4d-2c | The `.bmap` file type itself into the extension's manifest, with its styles. Waits on two things: extension settings (Shell's settings refuse keys they do not know, so `bmapGenerateScope` and `bmapAutoPan` have core defaults) and a generic overview in the server's generate endpoint (`bmap_overview`) | later |
 | S4d-3a | Comments starts itself (v0.1.74; it was only used for its functions): its comments are notes on lines through a new Editor extension point, `editor.lineNotes` (the gutter mark and the overview ruler tick; a line number's click goes to the provider), they follow the text as the project changes (this tab's typing or a collaborator's), its popover's controls and its events on Sync's stream are its own, and Cloud asks it to load (`comments.load`). `commentsForActiveFile` and `scheduleCommentReanchor` left the Editor's port; `main.js` hands out 26 getters | done (v0.1.74) |
 | S4d-3b | The welcome page and the maintenance commands (v0.1.75). The Editor shows the welcome page and offers `editor.welcome` (`{ id, draw() }`, called when it is shown): Cloud draws Resume and Open a workspace, the Explorer binds New file, Workspace Open a local folder. Shell owns the app's data in this browser (`clearAppStorage`), its offline files (`registerOffline`, moved from `app/services`) and Reset and Clear All Cache (announcing `"clearing-caches"` so the Editor drops its positions); Workspace owns Empty Everything | done (v0.1.75) |
-| S4e | Layout and gestures (Shell, the groundwork for step 5's areas), the `elements` table; then `main.js` only starts the kernel | |
+| S4e-1 | Owners for what `main.js` still answered (v0.1.76). Where the open project lives is Workspace's `location` (a key naming it, an image's address, resolving a link to an image), which Sync configures; paths inside a project moved from the Editor to Workspace. Sync answers `connectionInfo()`; Characters `avatarSrc()`. The File menu's commands are their owners': Save (Workspace, which says `"saved"`; History snapshots), New Project, Open Project, File Manager and the two imports (Cloud, now `cloud.*`), Export (Explorer, `explorer.*`), Save as PDF (Editor). The Editor's port lost `imageSrcFor` and `scope`, Explorer's `imageSrcFor`, Chats' and the Assistant's four workspace names | done (v0.1.76) |
+| S4e-2 | The redraw: the Editor, the Explorer and the Agent page draw themselves on Shell's render event, so `main.js` no longer draws them by name | next |
+| S4e-3 | The frame (layout, splitters, phone panes, gestures, sidebar sections, the log panel) into Shell, as step 5's areas begin | |
+| S4e-4 | The `elements` table; then `main.js` only starts the kernel | |
 | S4 | `main.js` only starts the kernel; then the server's `WorkspaceRegistry` the same way | |
 
 ### Notes for module authors
@@ -440,6 +443,10 @@ That is where bugs are hard to find. Steps, each its own release:
   `explorer.fileMenus.add({ id: type, entries: [[label, action] | [label,
   null, [[label, action]]]], run(action, nodeId) })`; a new file's first
   content: `explorer.newFiles.add({ id: type, content(name) })`.
+- Where the open project lives: `workspace.location.key(project)`,
+  `assetSrc(project, node)` (an image's address), `resolveAsset(project,
+  fromNodeId, url)`; Sync sets it with `workspace.location.configure({ key,
+  assetSrc })`.
 - An item in the status bar: `shell.statusBar.add({ id, order, title?,
   action?, dot?, grow?, hidden? })` returns `{ set({ text, tone, title,
   hidden }), element, extra }`; draw it from your own state when that changes.

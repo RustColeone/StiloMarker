@@ -5,7 +5,7 @@ import { supportsDirectoryAccess } from "./disk-folders.js";
 
 export function addStatusItems({ shell, log }) {
   const source = shell.statusBar.add({ id: "source", order: 10, dot: true, title: "Open a local directory", text: "In Browser",
-    action() { log("Status bar: open directory"); void shell.run("workspace.import-folder"); } });
+    action() { log("Status bar: open directory"); void shell.run("cloud.import-folder"); } });
   const browser = shell.statusBar.add({ id: "browser", order: 20, dot: true, title: "Browser capability details", text: "Checking browser support",
     action() {
       shell.notice(supportsDirectoryAccess()

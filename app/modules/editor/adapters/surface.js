@@ -9,7 +9,7 @@
 //   - PORT: what main.js still provides, because no module owns it yet.
 // What other code may call is FUNCTIONS below (editor.parts()).
 import { escapeHtmlAttribute } from "../model/html.js";
-import { getRelativePath, getRelativeProjectPath, normalizePath } from "../model/paths.js";
+import { getRelativePath, getRelativeProjectPath, normalizePath } from "../../workspace/index.js";
 import { getNodeIdByPath, getPath, isImageFileName, isMarkdownFileName } from "../../workspace/index.js";
 import { createAutocomplete } from "./autocomplete.js";
 import { createEditorCore } from "./editor-core.js";
@@ -29,9 +29,8 @@ import { createPreviewPane } from "./preview-pane.js";
 export const PORT = [
   "collaboration", "workspaceMode", "settings", "elements", "identity", "saveUserState",
   "logDebug", "traceEditorEvent", "formatEditorDebugValue",
-  "imageSrcFor",
   "setMobileExplorerOpen", "togglePreview",
-  "scope", "isReadOnly", "onDrop"
+  "isReadOnly", "onDrop"
 ];
 
 export function createSurface({ port, view, marks, paneViews, completions, lineNotes, welcome, previews, highlighters, toolbars, workspace, shell }) {
@@ -97,7 +96,10 @@ export function createSurface({ port, view, marks, paneViews, completions, lineN
     // Drawing the app again is asked of Shell; the app listens.
     render: (project) => shell.render(project),
     updateStatus: (project) => shell.render(project, { only: "status" }),
-    scope: () => port.scope(),
+    // Where the open project lives (Workspace's location, which Sync tells): the
+    // key the saved positions are kept under, and an image's address.
+    scope: () => workspace.location.key(workspace.project()?.getProject()),
+    imageSrcFor: (project, node) => workspace.location.assetSrc(project, node),
     redrawRemoteCursors: () => app.renderRemoteCursors(Array.from(app.remoteCursorsByClient.values())),
     isPreviewableFileName,
     resolveProjectAssetUrl,
@@ -108,7 +110,7 @@ export function createSurface({ port, view, marks, paneViews, completions, lineN
   };
   Object.defineProperty(app, "controller", { get: () => workspace.project(), enumerable: true });
   Object.defineProperty(app, "editorIsComposing", { get: () => composing.now, enumerable: true });
-  for (const name of PORT.filter((name) => name !== "scope")) {
+  for (const name of PORT) {
     Object.defineProperty(app, name, { get: () => port[name], enumerable: true });
   }
 
@@ -155,6 +157,7 @@ export function createSurface({ port, view, marks, paneViews, completions, lineN
     }
     if (changed.includes("showFormatToolbar")) app.refreshFormatToolbar();
   });
+  shell.commands.add({ id: "preview.save-pdf", title: "Save as PDF", menu: { id: "file", group: 0, order: 7 }, run: () => app.printPreviewAsPdf() });
   // Where the reader was, kept when the page hides or goes (resume.js, tabs.js).
   const keepView = () => { app.captureViewState(); app.cacheWorkspaceView(); };
   window.addEventListener("pagehide", keepView);
@@ -174,15 +177,9 @@ export function createSurface({ port, view, marks, paneViews, completions, lineN
   }
 
   function resolveProjectAssetUrl(project, sourceFileId, url) {
-    const trimmed = String(url ?? "").trim();
-    if (!trimmed || /^(https?:\/\/|data:|blob:|#|\/)/i.test(trimmed)) return trimmed;
-    const basePath = sourceFileId ? getPath(project, sourceFileId) : "";
-    const baseSegments = basePath.split("/").filter(Boolean);
-    baseSegments.pop();
-    const nodeId = getNodeIdByPath(project, normalizePath([...baseSegments, trimmed].join("/")));
-    const node = nodeId ? project.nodes[nodeId] : null;
-    return node?.kind === "file" && isImageFileName(node.name) ? app.imageSrcFor(project, node) : trimmed;
+    return workspace.location.resolveAsset(project, sourceFileId, url);
   }
+
 
   // What other code calls: the parts' functions, and a few questions about the
   // editor's own state (never the state itself).

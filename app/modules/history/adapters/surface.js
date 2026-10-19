@@ -111,6 +111,8 @@ export function createSurface({ port, shell, workspace, editor, sync }) {
   shell.commands.add({ id: "history.create-snapshot", title: "Create Snapshot", menu: { id: "create", group: 1, order: 1 }, run: () => void snapshots.createSnapshotNow() });
   shell.commands.add({ id: "history.snapshots", title: "Snapshots…", menu: { id: "edit", group: 0, order: 2 }, run: () => void openSnapshotsDialog() });
   shell.commands.add({ id: "history.workspace-history", title: "Workspace History…", menu: { id: "edit", group: 0, order: 3 }, run: () => void openWorkspaceHistory() });
+  // Save (Workspace's) marks a point to compare against later: a snapshot.
+  workspace.events.on("saved", () => void snapshots.createSnapshotNow());
   // A project without a server never opens a cloud workspace (which counts them),
   // so the version label's baselines are counted here too.
   void snapshots.refreshSnapshotBaselines();

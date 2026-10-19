@@ -22,11 +22,10 @@ import { createTurns } from "./turns.js";
 // What main.js attaches (assistant.load(port)); each entry should move to an
 // owner, or become an extension point, and leave this list.
 export const PORT = [
-  "cloudWorkspaceTarget", "chatConnectionInfo", "chatWorkspaceKey", "elements", "isMobileLayout",
-  "logDebug", "openSettingsDialog", "personaAvatarSrc", "storedProject", "chatsPage"
+  "elements", "isMobileLayout", "logDebug", "openSettingsDialog", "storedProject", "chatsPage"
 ];
 
-export function createAgentPanel({ port, shell, workspace, identity, sync, editor, explorer, models }) {
+export function createAgentPanel({ port, shell, workspace, identity, sync, editor, explorer, models, characters }) {
   const missing = PORT.filter((name) => !(name in port));
   if (missing.length) throw new Error(`assistant.load: the port lacks ${missing.join(", ")}`);
   const { settings, pages } = shell;
@@ -35,6 +34,11 @@ export function createAgentPanel({ port, shell, workspace, identity, sync, edito
     settings, pages, identity, models, workspace, escapeHtmlAttribute,
     controller: workspace.project(),
     collaboration: sync.session(),
+    // The open cloud workspace, this tab's connection, the key its conversations are kept under (Sync's, Workspace's).
+    cloudWorkspaceTarget: () => sync.cloudWorkspace(),
+    chatConnectionInfo: () => sync.connectionInfo(),
+    chatWorkspaceKey: (project = workspace.project().getProject()) => workspace.location.key(project),
+    personaAvatarSrc: (...args) => characters.avatarSrc(...args),
     workspaceMode: () => sync.mode.get().workspaceMode,
     notify: (message) => shell.notify(message),
     showToast: (message, options) => shell.toast(message, options),

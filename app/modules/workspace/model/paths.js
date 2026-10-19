@@ -1,4 +1,4 @@
-// Paths inside a project, as links between notes spell them.
+// Paths inside a project, as links between notes spell them (Workspace's; the Editor re-exports them).
 
 // "a/./b/../c" -> "a/c"
 export function normalizePath(path) {

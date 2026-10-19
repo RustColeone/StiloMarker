@@ -11,6 +11,7 @@ import { installCloudEvents } from "./events.js";
 import { createManage } from "./manage.js";
 import { createOpening } from "./opening.js";
 import { createResume } from "./resume.js";
+import { addProjectCommands } from "./projects.js";
 import { createProviders } from "./providers.js";
 
 // What main.js attaches (cloud.attach(port)); each entry should move to an
@@ -67,6 +68,7 @@ export function createSurface({ port, shell, workspace, identity, sync, editor, 
   // provider's opaque location, `selection` the highlighted entry (or null).
   app.browserState = { provider: opfsProvider, intent: "open", mode: "open", multiSelect: false, checked: new Set(), pendingTransfer: null, path: "", entries: [], atRoot: true, selection: null };
   installCloudEvents(app);
+  addProjectCommands(app, { shell, editor, sync });
   // The welcome page (no file open): Resume the last cloud workspace, and open
   // one from the server when signed in.
   const welcomeResume = document.getElementById("welcome-resume");
