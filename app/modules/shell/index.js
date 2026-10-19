@@ -26,6 +26,9 @@
 //   render(project, { only? })  ask for the app to be drawn again (only: "status"
 //                            for the panes and status without the tree); the
 //                            app listens: events.on("render", ({ project, only }) => …)
+//   clearAppStorage()        remove every key the app keeps in this browser
+//   registerOffline()        keep the app's files for offline use (the service worker)
+//   events "clearing-caches" before Clear All Cache reloads: drop what you cache
 //   pages                    features as pages in tab hosts, like a browser's tabs:
 //                            pages.add({ host, id, label, body, newItem?, shown? }),
 //                            show(host, id), active(host), badge(host, id, n) (adapters/pages.js)
@@ -50,6 +53,8 @@ import { createPages } from "./adapters/pages.js";
 import { createSettingsDialog } from "./adapters/settings-dialog.js";
 import { createStatusBar } from "./adapters/status-bar.js";
 import { applyTheme } from "./adapters/theme.js";
+import { addMaintenanceCommands, clearAppStorage } from "./adapters/maintenance.js";
+import { registerOfflineShell } from "./adapters/offline.js";
 import { loadSettings, patchStoredSettings } from "./adapters/settings-store.js";
 import { SECRET_SETTINGS, keysToSave } from "./service/settings.js";
 
@@ -65,7 +70,7 @@ export default defineModule({
     registries: ["commands", "menus", "pages", "settings fields", "status bar items"],
     elements: ["menu bar", "the Settings dialog", "the status bar", "notice dialog", "confirm dialog", "input dialog", "form dialog", "toasts"],
     connection: ["the server address"],
-    events: ["render"],
+    events: ["render", "clearing-caches"],
     diagnostics: ["uncaught errors", "stiloTrace()"],
     state: ["the app's settings"]
   },
@@ -130,6 +135,9 @@ export default defineModule({
       return values;
     }
 
+    addMaintenanceCommands({ commands, confirm, notify: (message) => notice(message), closeMenus: () => menuBar.close(), events,
+      log: (message) => ctx.log(message) });
+
     return {
       commands: { add: commands.add, get: commands.get, all: commands.all, onChange: commands.onChange },
       menus: { add: menus.add, all: menus.all },
@@ -148,6 +156,8 @@ export default defineModule({
       settingsDialog,
       statusBar: createStatusBar({ registry: ctx.registry() }),
       render: (project, { only } = {}) => events.emit("render", { project, only }),
+      clearAppStorage,
+      registerOffline: () => registerOfflineShell(),
       events: { on: events.on }
     };
   }

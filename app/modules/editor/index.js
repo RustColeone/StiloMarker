@@ -9,7 +9,8 @@
 // links, the tab strips and the preview, given what main.js still provides
 // (adapters/surface.js lists it: PORT); parts() -> the same functions.
 // previews, highlighters, toolbars, completions (autocomplete for a format),
-// lineNotes (notes on lines in the gutter: comments),
+// lineNotes (notes on lines in the gutter: comments), welcome (parts of the
+// page shown when no file is open),
 // paneViews (tabs in the preview pane that
 // are not files, such as History's diff) and marks (extension points; marks are
 // what other modules put on files' lines, service/marks.js) and view: what the
@@ -27,6 +28,7 @@ import { defineModule } from "../../kernel/index.js";
 import { EMPTY_VIEW, createView } from "./service/view.js";
 import { EMPTY_MARKS, createMarks } from "./service/marks.js";
 import { createSurface } from "./adapters/surface.js";
+import { forgetViewStates } from "./adapters/resume.js";
 import { addEditorSettings, applyEditorFont } from "./adapters/settings-fields.js";
 
 export { TOOLBAR_SPECS, buildTableSnippet, getEditorToolbarFormat, renderEditorFormatToolbar } from "./adapters/format-toolbar.js";
@@ -44,7 +46,7 @@ export default defineModule({
   uses: ["shell", "file-types", "workspace", "identity"],
   owns: { elements: ["the source editor", "the formatting toolbar", "the find bar", "the tab strips", "the preview pane"],
     state: ["the open tabs", "what each pane shows", "the explorer selection"],
-    registries: ["previews", "highlighters", "toolbars", "completions", "line notes", "marks", "pane views"], rules: ["Markdown rendering"] },
+    registries: ["previews", "highlighters", "toolbars", "completions", "line notes", "marks", "pane views", "the welcome page"], rules: ["Markdown rendering"] },
   start(ctx) {
     // Previews of other kinds of file: { id, matches(file), render(target, project, file, tools), cacheable?, printHtml? }
     const previews = ctx.registry();
@@ -59,6 +61,8 @@ export default defineModule({
     // Notes on a file's lines, shown in the gutter and on the overview ruler: { id, kind,
     // notes(file) -> [{ line, title }], click?(line) } (Comments; a line number's click goes to it).
     const lineNotes = ctx.registry({ validate: (entry) => { if (typeof entry.notes !== "function" || !entry.kind) throw new Error(`line notes ${entry.id} need kind and notes()`); } });
+    // The welcome page (no file open): { id, draw() } for whoever keeps one of its parts current (Cloud's Resume).
+    const welcome = ctx.registry({ validate: (entry) => { if (typeof entry.draw !== "function") throw new Error(`welcome ${entry.id} needs draw()`); } });
     // Tabs in the preview pane that are not files: { id, element, tab() -> { label, title, iconText, iconClass } | null
     // (null while closed), show({ fresh }), close() } (History's diff).
     const paneViews = ctx.registry({ validate: (entry) => { for (const key of ["tab", "show", "close"]) if (typeof entry[key] !== "function") throw new Error(`pane view ${entry.id} needs ${key}()`); } });
@@ -69,6 +73,8 @@ export default defineModule({
     const marks = createMarks(ctx.state(EMPTY_MARKS));
     // Its settings in Settings → Appearance; the font follows them from the start.
     const shell = ctx.use("shell");
+    // Clear All Cache (Shell) also drops the saved resume positions.
+    shell.events.on("clearing-caches", () => forgetViewStates());
     addEditorSettings({ dialog: shell.settingsDialog, settings: shell.settings });
     applyEditorFont(shell.settings);
     shell.settings.on((view, changed) => { if (changed.some((key) => FONT_KEYS.includes(key))) applyEditorFont(view); });
@@ -77,10 +83,10 @@ export default defineModule({
     let parts = null;
     function attach(port) {
       if (parts) throw new Error("editor: already attached");
-      parts = createSurface({ port, view, marks, paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars),
+      parts = createSurface({ port, view, marks, paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), welcome: open(welcome), previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars),
         workspace: ctx.use("workspace"), shell: ctx.use("shell") });
       return parts;
     }
-    return { previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars), paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), marks, view, attach, parts: () => parts };
+    return { previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars), paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), welcome: open(welcome), marks, view, attach, parts: () => parts };
   }
 });

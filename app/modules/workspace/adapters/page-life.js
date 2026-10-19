@@ -4,7 +4,7 @@
 // leaving with a file that has unsaved changes.
 import { getOpfsDirectoryHandle, supportsOpfs } from "./device-folders.js";
 import { saveProject } from "./browser-copy.js";
-import { ROOT_ID } from "../model/project.js";
+import { ROOT_ID, createProject } from "../model/project.js";
 
 export async function reattachDeviceFolder({ store, settings, log }) {
   const path = store.getProject()?.localPath ?? settings.lastLocalProject?.path;
@@ -36,4 +36,22 @@ export function watchPage({ store, log, win = globalThis.window, doc = globalThi
     event.preventDefault();
     event.returnValue = "";
   });
+}
+
+// Empty Everything (Settings menu): everything the app keeps in this browser
+// cleared, and an empty project saved so the next start does not fall back to
+// the welcome workspace. And the welcome page's "Open a local folder".
+export function addWorkspaceCommands({ shell, log, doc = globalThis.document }) {
+  shell.commands.add({ id: "workspace.empty-everything", title: "Empty Everything", menu: { id: "settings", group: 0, order: 4 }, danger: true, async run() {
+    const confirmed = await shell.confirm({ title: "Empty Everything",
+      message: "This deletes your workspace, chat history, and settings, then reloads into a completely empty workspace (no welcome files). This cannot be undone.",
+      acceptLabel: "Empty Everything" });
+    if (!confirmed) return;
+    shell.closeMenus();
+    shell.clearAppStorage();
+    saveProject(createProject("Workspace"));
+    log("Workspace emptied");
+    globalThis.location.reload();
+  } });
+  doc?.getElementById("welcome-open-local")?.addEventListener("click", () => void shell.run("workspace.import-folder"));
 }

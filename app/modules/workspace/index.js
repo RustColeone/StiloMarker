@@ -72,7 +72,7 @@ export { createProjectOpfs, deleteOpfsEntry, exportProjectModelOpfs, getOpfsDire
 export { createProjectSaveQueue, savedFileIds, snapshotProject } from "./adapters/save-queue.js";
 import { createSaving } from "./adapters/saving.js";
 import { addStatusItems } from "./adapters/status-items.js";
-import { reattachDeviceFolder, watchPage } from "./adapters/page-life.js";
+import { addWorkspaceCommands, reattachDeviceFolder, watchPage } from "./adapters/page-life.js";
 
 export default defineModule({
   name: "workspace",
@@ -100,6 +100,7 @@ export default defineModule({
     const drawStatus = addStatusItems({ shell, log: (message) => ctx.log(message) });
     // This browser's copy when the page hides, and a warning before leaving unsaved changes.
     watchPage({ store: () => store, log: (...parts) => ctx.log(parts.join(" ")) });
+    addWorkspaceCommands({ shell, log: (...parts) => ctx.log(parts.join(" ")) });
     function openProject(project) {
       if (store) throw new Error("The workspace already has a project open; use project().replaceProject()");
       store = createProjectController(project);

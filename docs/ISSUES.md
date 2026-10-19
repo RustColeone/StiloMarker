@@ -69,6 +69,18 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.75: the welcome page and maintenance belong to their modules
+
+Step S4d-3b. One fix for users:
+
+- **"Open a workspace" on the welcome page did nothing** (since the unified
+  file browser replaced the server directory button it clicked). It now opens
+  the file browser on the server's side. `identity-browser.py` checks it.
+- The welcome page's buttons are drawn and bound by the modules they belong
+  to; Reset, Clear All Cache and Empty Everything moved into Shell and
+  Workspace with the app's offline files. `shell-browser.py` checks the
+  welcome page.
+
 ### v0.1.74: Comments runs itself
 
 Step S4d-3a. Nothing changes for users.

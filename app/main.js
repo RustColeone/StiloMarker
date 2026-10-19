@@ -12,7 +12,6 @@ import { seedDefaultProject, applyHostCounters, createProject, findChildByName, 
 import { importDirectory, importOsFolderIntoOpfs, importSingleFile, importZipArchive, loadProject, saveProject, supportsDirectoryAccess, supportsOpfs } from "./modules/workspace/index.js";
 import syncModule from "./modules/sync/index.js";
 import { parsePersona, personaTemplate } from "./services/persona-service.js";
-import { clearOfflineShellData, registerOfflineShell } from "./services/offline-service.js";
 import { signInSettings } from "./services/settings-service.js";
 import cloudModule, { saveUserState, uploadAsset } from "./modules/cloud/index.js";
 import modelsModule from "./modules/models/index.js";
@@ -92,10 +91,6 @@ const elements = {
   addFileSubmitButton: query("#add-file-submit-button"),
   replaceFileInput: query("#replace-file-input"),
   editorEmptyState: query("#editor-empty-state"),
-  welcomeResume: query("#welcome-resume"),
-  welcomeNewFile: query("#welcome-new-file"),
-  welcomeOpenServer: query("#welcome-open-server"),
-  welcomeOpenLocal: query("#welcome-open-local"),
   newFileDialog: query("#new-file-dialog"),
   newFileType: query("#new-file-type"),
   newFileFolder: query("#new-file-folder"),
@@ -237,7 +232,7 @@ var editorParts = modules.editor.attach({
   saveUserState: (ws, openFiles, activeFile) => saveUserState(settings.serverUrl, identity.token(), ws.team, ws.path, openFiles, activeFile),
   logDebug, traceEditorEvent, formatEditorDebugValue,
   imageSrcFor,
-  renderWelcomeState, setMobileExplorerOpen, togglePreview,
+  setMobileExplorerOpen, togglePreview,
   scope: () => chatWorkspaceKey(), isReadOnly: () => isReadOnlyWorkspace(), onDrop: (event) => handleEditorDrop(event)
 });
 // The explorer and file actions, given what no module owns yet (modules/explorer/adapters/surface.js).
@@ -1136,88 +1131,6 @@ function isMobileLayout() {
   logDebug("action", settings.debugPanel ? "Log panel enabled" : "Log panel disabled");
 }
 
-/** Remove every persisted localStorage key this app owns (project, settings,
- *  chat, and any future "mdnotes.*" keys). Returns the count removed. */
-function clearAllAppStorage() {
-  const store = globalThis.localStorage;
-  if (!store) return 0;
-  const keys = [];
-  for (let i = 0; i < store.length; i += 1) {
-    const key = store.key(i);
-    if (key && key.startsWith("mdnotes.")) keys.push(key);
-  }
-  keys.forEach((key) => store.removeItem(key));
-  return keys.length;
-}
-
-/** Wipe all saved data and reload into the default welcome workspace
- *  (loaded fresh from the Template on next boot). */
-async function resetToDefaultWorkspace() {
-  const confirmed = await showConfirmDialog({
-    title: "Reset to Default Workspace",
-    message: "This deletes your current workspace, chat history, and settings, then reloads the default welcome workspace. This cannot be undone.",
-    acceptLabel: "Reset"
-  });
-  if (!confirmed) {
-    logDebug("response", "Workspace reset cancelled");
-    return;
-  }
-  closeMenus();
-  const removed = clearAllAppStorage();
-  logDebug("action", "Workspace reset to default", `keysRemoved=${removed}`);
-  window.location.reload();
-}
-
-/** Wipe all saved data AND seed an empty project so even the default welcome
- *  workspace is gone on reload — a blank slate for quick tests. */
-async function emptyEverything() {
-  const confirmed = await showConfirmDialog({
-    title: "Empty Everything",
-    message: "This deletes your workspace, chat history, and settings, then reloads into a completely empty workspace (no welcome files). This cannot be undone.",
-    acceptLabel: "Empty Everything"
-  });
-  if (!confirmed) {
-    logDebug("response", "Empty everything cancelled");
-    return;
-  }
-  closeMenus();
-  clearAllAppStorage();
-  // Persist an empty project so the boot path doesn't fall back to loading the
-  // default Template welcome workspace.
-  saveProject(createProject("Workspace"));
-  forgetViewStates();
-  logDebug("action", "Workspace emptied");
-  window.location.reload();
-}
-
-async function clearAllCache() {
-  const confirmed = await showConfirmDialog({
-    title: "Clear Cached App Data",
-    message: "This clears the app's cached shell files and unregisters its service worker, then reloads the page. Your workspace content and settings will stay intact.",
-    acceptLabel: "Clear Cache"
-  });
-  if (!confirmed) {
-    logDebug("response", "Cache clear cancelled");
-    return;
-  }
-
-  closeMenus();
-  forgetViewStates(); // also drop cached resume positions
-  try {
-    const result = await clearOfflineShellData();
-    logDebug(
-      "action",
-      "App cache cleared",
-      `caches=${result.deletedCacheKeys.length} ; registrations=${result.unregisteredScopes.length}`
-    );
-    window.location.reload();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logDebug("response", "Cache clear failed", message);
-    notify(`Failed to clear cache: ${message}`);
-  }
-}
-
 shell.commands.add({ id: "shell.toggle-explorer", title: "Toggle Explorer", menu: { id: "view", group: 0, order: 1 }, run: toggleExplorer });
 shell.commands.add({ id: "editor.toggle-preview", title: "Toggle Preview", menu: { id: "view", group: 0, order: 3 }, run: togglePreview });
 shell.commands.add({ id: "editor.toggle-source", title: "Toggle Source", menu: { id: "view", group: 0, order: 2 }, run: toggleSource });
@@ -1258,22 +1171,6 @@ elements.mobileRenameButton?.addEventListener("click", () => {
   if (!id) { showToast("No file to rename"); return; }
   void renameFileById(id);
 });
-// Update the welcome (no-file) page's contextual actions: a Resume button for
-// the last cloud workspace, and Open-a-workspace only when signed in.
-function renderWelcomeState() {
-  const resume = cloudParts?.resumeTarget() ?? null; // the last cloud workspace, unless it is open (Cloud's)
-  if (elements.welcomeResume) {
-    elements.welcomeResume.hidden = !resume;
-    if (resume) elements.welcomeResume.textContent = `Resume ${resume}`;
-  }
-  if (elements.welcomeOpenServer) {
-    elements.welcomeOpenServer.hidden = !identity.account();
-  }
-}
-
-elements.welcomeNewFile?.addEventListener("click", openNewFileDialog);
-elements.welcomeOpenLocal?.addEventListener("click", () => void shell.run("workspace.import-folder"));
-elements.welcomeOpenServer?.addEventListener("click", () => elements.openServerDirectoryButton?.click());
 elements.mobileMenuButton?.addEventListener("click", (event) => {
   event.stopPropagation();
   toggleMobileMenu();
@@ -1340,15 +1237,6 @@ shell.commands.add({ id: "layout.show-session", title: "Show the Session Panel",
 } });
 
 shell.commands.add({ id: "shell.log-panel", title: () => (settings.debugPanel ? "Hide Log Panel" : "Show Log Panel"), menu: { id: "settings", group: 0, order: 2 }, run: toggleLogPanel });
-shell.commands.add({ id: "workspace.reset", title: "Reset to Default Workspace", menu: { id: "settings", group: 0, order: 3 }, run: () => {
-  void resetToDefaultWorkspace();
-} });
-shell.commands.add({ id: "workspace.empty-everything", title: "Empty Everything", menu: { id: "settings", group: 0, order: 4 }, danger: true, run: () => {
-  void emptyEverything();
-} });
-shell.commands.add({ id: "shell.clear-cache", title: "Clear All Cache", menu: { id: "settings", group: 0, order: 5 }, danger: true, run: () => {
-  void clearAllCache();
-} });
 
 debugTabs.forEach((tab) => {
   tab.element.addEventListener("click", () => {
@@ -1396,7 +1284,7 @@ function renderHostTargets(...args) { return cloudParts.renderHostTargets(...arg
 
 renderHostTargets(); // needs the live session, which exists from here on
 
-registerOfflineShell();
+void shell.registerOffline();
 void refreshChatStatus({ silent: true });
 
 // Resume the last session (Cloud's), so a reload is not a fresh start.

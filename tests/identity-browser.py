@@ -46,7 +46,7 @@ def api(method, path, body=None):
 checks = []
 def ok(name): checks.append(name); print("  ok ", name)
 
-HOOK = b"\nwindow.__id = { identity, openAccessEditor };\n"
+HOOK = b"\nwindow.__id = { identity, openAccessEditor, controller, render: (p) => shell.render(p) };\n"
 
 
 async def open_page(b, settings=None):
@@ -109,6 +109,16 @@ async def main():
         await page.reload(wait_until="networkidle")
         await page.wait_for_function("Boolean(window.__id) && window.__id.identity.account()?.username === 'amy'", timeout=15000)
         ok("a reload signs in again by itself")
+
+        # Signed in, the welcome page offers to open a workspace from the server
+        # (the button did nothing from the unified file browser until v0.1.75).
+        await page.keyboard.press("Escape")
+        await page.evaluate("() => { const c = window.__id.controller; c.getProject().activeFileId = null; window.__id.render(c.getProject()); }")
+        await page.wait_for_selector("#welcome-open-server", state="visible")
+        await page.click("#welcome-open-server")
+        await page.wait_for_function("document.querySelector('#open-server-dialog')?.open")
+        await page.keyboard.press("Escape")
+        ok("signed in, the welcome page opens a workspace from the server")
 
         await page.keyboard.press("Escape")
         await page.evaluate(f"window.__id.openAccessEditor('red', {json.dumps(path)}, 'Novel')")

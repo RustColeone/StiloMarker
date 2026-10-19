@@ -67,6 +67,19 @@ export function createSurface({ port, shell, workspace, identity, sync, editor, 
   // provider's opaque location, `selection` the highlighted entry (or null).
   app.browserState = { provider: opfsProvider, intent: "open", mode: "open", multiSelect: false, checked: new Set(), pendingTransfer: null, path: "", entries: [], atRoot: true, selection: null };
   installCloudEvents(app);
+  // The welcome page (no file open): Resume the last cloud workspace, and open
+  // one from the server when signed in.
+  const welcomeResume = document.getElementById("welcome-resume");
+  const welcomeOpenServer = document.getElementById("welcome-open-server");
+  welcomeOpenServer?.addEventListener("click", () => app.openFileBrowser({ side: "server", intent: "open" }));
+  editor.welcome.add({ id: "cloud", draw() {
+    const resume = app.resumeTarget(); // unless that workspace is open or opening
+    if (welcomeResume) {
+      welcomeResume.hidden = !resume;
+      if (resume) welcomeResume.textContent = `Resume ${resume}`;
+    }
+    if (welcomeOpenServer) welcomeOpenServer.hidden = !identity.account();
+  } });
 
   return Object.freeze(Object.fromEntries(Object.entries(Object.getOwnPropertyDescriptors(app))
     .filter(([name, d]) => typeof d.value === "function" && !EDITOR.includes(name)

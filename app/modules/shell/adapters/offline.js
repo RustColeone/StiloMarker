@@ -1,6 +1,6 @@
-import { APP_VERSION } from "../version.js";
-
-const CACHE_NAME = `mdnotes-shell-v${APP_VERSION}`;
+// The app's files kept for offline use (the service worker and its caches):
+// registering it, and clearing them. Every version's cache is named
+// "mdnotes-shell-v<version>" (service-worker.js).
 const CACHE_PREFIX = "mdnotes-shell-";
 
 async function registerOfflineShell() {
@@ -24,7 +24,7 @@ async function clearOfflineShellData() {
   if ("caches" in globalThis) {
     const cacheKeys = await caches.keys();
     for (const key of cacheKeys) {
-      if (key !== CACHE_NAME && !key.startsWith(CACHE_PREFIX)) {
+      if (!key.startsWith(CACHE_PREFIX)) {
         continue;
       }
       if (await caches.delete(key)) {
@@ -49,4 +49,4 @@ async function clearOfflineShellData() {
   return { deletedCacheKeys, unregisteredScopes };
 }
 
-export { CACHE_NAME, clearOfflineShellData, registerOfflineShell };
+export { CACHE_PREFIX, clearOfflineShellData, registerOfflineShell };

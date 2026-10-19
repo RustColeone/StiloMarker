@@ -171,6 +171,8 @@ export function createSurface({ port, workspace, editor, shell, sync, types, fil
   // A mark put on a file or taken off shows on its row at once.
   editor.marks.on(() => app.tree.render(app.controller.getProject()));
   installExplorerEvents(app);
+  // The welcome page's "New file".
+  document.getElementById("welcome-new-file")?.addEventListener("click", () => app.openNewFileDialog());
 
   // The explorer's target: the part open in the source editor, else the selected node.
   function getSelectedTarget() {

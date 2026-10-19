@@ -30,11 +30,11 @@ export const PORT = [
   "collaboration", "workspaceMode", "settings", "elements", "identity", "saveUserState",
   "logDebug", "traceEditorEvent", "formatEditorDebugValue",
   "imageSrcFor",
-  "renderWelcomeState", "setMobileExplorerOpen", "togglePreview",
+  "setMobileExplorerOpen", "togglePreview",
   "scope", "isReadOnly", "onDrop"
 ];
 
-export function createSurface({ port, view, marks, paneViews, completions, lineNotes, previews, highlighters, toolbars, workspace, shell }) {
+export function createSurface({ port, view, marks, paneViews, completions, lineNotes, welcome, previews, highlighters, toolbars, workspace, shell }) {
   const missing = PORT.filter((name) => !(name in port));
   if (missing.length) throw new Error(`editor.attach: the port lacks ${missing.join(", ")}`);
   const composing = { now: false }; // an IME composition is under way
@@ -88,7 +88,7 @@ export function createSurface({ port, view, marks, paneViews, completions, lineN
     // The file the editor's text is (what its DOM shows), or null.
     shown: { fileId: null },
 
-    view, marks, paneViews, completions, lineNotes, previews, highlighters,
+    view, marks, paneViews, completions, lineNotes, welcome, previews, highlighters,
     // The notes on a file's lines from every provider: [{ kind, line, title }].
     lineNotesOf: (file) => (file ? lineNotes.all().flatMap((provider) => provider.notes(file).map((note) => ({ kind: provider.kind, ...note }))) : []), toolbars, workspace, parts: workspace.parts,
     escapeHtmlAttribute, normalizePath, getRelativePath, getRelativeProjectPath,

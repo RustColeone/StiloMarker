@@ -154,6 +154,16 @@ async def main():
         await page.wait_for_function('(replaced) => window.__shellTest.controller.getProject().nodes.p.content === replaced', arg=replaced)
         assert not errors, errors
 
+        # The welcome page (no file open): its parts are their owners' (New file:
+        # the Explorer; Open a workspace: Cloud, only when signed in).
+        await page.evaluate('() => { const c = window.__shellTest.controller; c.getProject().activeFileId = null; window.__shellTest.shell.render(c.getProject()); }')
+        await page.wait_for_selector('#welcome-new-file', state='visible')
+        assert await page.locator('#welcome-open-server').is_hidden()
+        await page.click('#welcome-new-file')
+        await page.wait_for_function('document.querySelector("#new-file-dialog").open')
+        await page.keyboard.press('Escape')
+        await page.evaluate('window.__shellTest.openFileFromExplorer("a")')
+
         # The status bar: each item added by its owner, in order; the count
         # follows the selection; the server item opens Settings → Collaboration.
         items = await page.evaluate('[...document.querySelectorAll(".status-bar > *")].map((e) => e.id)')
@@ -262,7 +272,7 @@ async def main():
         await browser.close()
         print(json.dumps({'checks': ['file-type lists from File types', 'five menus with their items', 'one menu open at a time', 'live titles',
                                      'menu item runs its command', 'Ctrl+S runs Save', 'a snapshot compared in the diff tab', 'rename keeps the extension',
-                                     'late menus and commands appear', 'Replace File replaces an image', 'status bar items from their owners', 'Settings sections and fields', 'the trace and its tab', 'a diagram previews as a diagram', 'diagram source: highlighting, toolbar, autocomplete (extension)', 'diagram Export As and new diagram (extension)', 'phone menu panel'], 'runtimeErrors': 0}))
+                                     'late menus and commands appear', 'Replace File replaces an image', 'the welcome page from its owners', 'status bar items from their owners', 'Settings sections and fields', 'the trace and its tab', 'a diagram previews as a diagram', 'diagram source: highlighting, toolbar, autocomplete (extension)', 'diagram Export As and new diagram (extension)', 'phone menu panel'], 'runtimeErrors': 0}))
 
 
 asyncio.run(main())

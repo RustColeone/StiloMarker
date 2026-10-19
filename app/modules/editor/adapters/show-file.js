@@ -38,7 +38,7 @@ export function createShowFile(app, composing) {
       elements.editorContent.contentEditable = "false";
       elements.editorContent.dataset.noFile = "true";
       if (elements.editorEmptyState) elements.editorEmptyState.hidden = false;
-      app.renderWelcomeState();
+      for (const entry of app.welcome.all()) entry.draw(); // the welcome page's owners keep their parts current
       if (app.shown.fileId !== null) {
         app.shown.fileId = null;
         app.loadEditorContent("");

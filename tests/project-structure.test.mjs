@@ -14,7 +14,7 @@ test("required workspace files exist", () => {
     "app/services/mtree-module-map-service.js",
     "app/domain/project-model.js",
     "app/modules/workspace/adapters/zip.js",
-    "app/services/offline-service.js",
+    "app/modules/shell/adapters/offline.js",
     "app/modules/cloud/adapters/api.js",
     "server/mdnotes_server.py",
     "service-worker.js",
@@ -80,7 +80,7 @@ test("main.js wires core feature symbols", async () => {
   const mainSource = [await readFile(resolveFromRoot("app/main.js"), "utf8"),
     ...await Promise.all(split.map((file) => readFile(resolveFromRoot(file), "utf8")))].join("\n");
   const symbols = [
-    /registerOfflineShell\(\)/,
+    /shell\.registerOffline\(\)/,
     /modules\.sync\.attach\(/,
     /scheduleTextPatch/,
     /layout\.show-session/,
