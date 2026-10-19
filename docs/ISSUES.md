@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-19 · release `v0.1.96` (not deployed; v0.1.95 is live)
+Last updated: 2026-10-19 · release `v0.1.97` (not deployed; v0.1.95 is live)
 
 ---
 
@@ -68,6 +68,24 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.97: editor groups: Open as in the same group
+
+Step 5g. On the desktop; the default layout looks the same.
+
+- The source and preview panes are now two groups of tabs. "Open as Source"
+  or "Open as Preview" in a tab's menu opens the file that way in the same
+  group: the source editor or the preview moves there, and the group's tabs
+  say which view each is when it holds both.
+- There is still one source editor and one preview. When the other group was
+  showing the one that moved, it keeps its tab and says where it went, with
+  **Show here** to take it back.
+- Each group's label (SOURCE, PREVIEW) names what it shows.
+- A file dropped on a group opens in the view that group shows.
+- On the phone nothing changes: Source and Preview still show one at a time.
+- Tests: `tab-menu-browser.py` checks Open as in the same group, the
+  placeholder, Show here, and the phone with a mixed group;
+  `editor-view.test.mjs` checks `activate` and moving tabs of both views.
 
 ### v0.1.96: editor groups, the model
 

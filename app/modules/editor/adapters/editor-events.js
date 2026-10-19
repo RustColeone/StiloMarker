@@ -356,7 +356,7 @@ export function installEditorEvents(app, composing) {
     : null;
 
   editorResizeObserver?.observe(app.elements.editorScroll);
-  editorResizeObserver?.observe(app.elements.sourcePane);
+  editorResizeObserver?.observe(app.elements.sourceBody);
 
   // Glyph metrics change when a web font finishes loading: measure again.
   document.fonts?.addEventListener?.("loadingdone", () => {

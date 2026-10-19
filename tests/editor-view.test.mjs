@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createState, createTrace } from "../app/kernel/index.js";
-import { EMPTY_VIEW, createView, filesIn, groupOf, hostOf, moveTabWithinList } from "../app/modules/editor/service/view.js";
+import { EMPTY_VIEW, createView, filesIn, groupOf, hostOf } from "../app/modules/editor/service/view.js";
 
 const project = (active, ...files) => ({
   rootId: "root", activeFileId: active,
@@ -67,11 +67,12 @@ test("tabs open once, in the group holding their view; close (the preview falls 
   assert.deepEqual(filesIn(view.get(), "preview"), ["a", "c"]);
   assert.equal(view.get().previewFileId, "c");
   assert.deepEqual(plain(groupOf(view.get(), "right").active), preview("c"), "the group shows its last tab");
-  view.moveTab("preview", "c", "a");
+  view.moveTab("right", preview("c"), preview("a"));
   assert.deepEqual(filesIn(view.get(), "preview"), ["c", "a"]);
-  view.moveTab("preview", "c", null);
+  view.moveTab("right", preview("c"), null);
   assert.deepEqual(filesIn(view.get(), "preview"), ["a", "c"], "no target: to the end");
-  assert.deepEqual(moveTabWithinList(["a", "b", "c"], "a", "b", true), ["b", "a", "c"]);
+  view.moveTab("right", preview("a"), preview("c"), true);
+  assert.deepEqual(filesIn(view.get(), "preview"), ["c", "a"], "after the target");
   assert.throws(() => view.get().groups[0].tabs.push(source("x")), TypeError, "only actions change the tabs");
   assert.throws(() => { view.get().groups[0].active.fileId = "x"; }, TypeError);
 });
@@ -122,4 +123,27 @@ test("keepTabs: tabs only for files that still exist, the active file among them
   assert.deepEqual(filesIn(view.get(), "source"), [], "no active file: no source tabs");
   assert.equal(groupOf(view.get(), "left").active, null);
   assert.equal(view.get().previewFileId, "a");
+});
+
+test("activate: a tab comes on screen in its group, and its view's body moves there", () => {
+  const { view } = fresh();
+  view.reset(project("a", "a", "b"));
+  view.activate("left", preview("b"));
+  let state = view.get();
+  assert.deepEqual(plain(groupOf(state, "left")), { id: "left", tabs: [source("a"), preview("b")], active: preview("b") });
+  assert.deepEqual({ ...state.hosts }, { source: "left", preview: "left" }, "the preview's body is now in the left group");
+  assert.equal(state.previewFileId, "b");
+  assert.equal(state.focus, "left");
+  assert.deepEqual(plain(groupOf(state, "right").active), preview("a"), "the right group keeps its tab (it shows a placeholder)");
+  view.activate("right", preview("a"));
+  state = view.get();
+  assert.equal(state.hosts.preview, "right", "Show here: the body comes back");
+  assert.equal(state.previewFileId, "a");
+  assert.deepEqual(plain(groupOf(state, "left").active), preview("b"), "and the left group keeps its tab");
+  view.activate("left", source("a"));
+  view.moveTab("left", preview("b"), source("a"));
+  assert.deepEqual(plain(groupOf(view.get(), "left").tabs), [preview("b"), source("a")], "tabs of both views move among each other");
+  view.closeTab("preview", "b", "left");
+  assert.deepEqual(plain(groupOf(view.get(), "left").tabs), [source("a")]);
+  assert.equal(view.get().previewFileId, "a", "closing a tab elsewhere leaves the preview alone");
 });

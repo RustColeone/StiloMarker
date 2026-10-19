@@ -1235,17 +1235,78 @@ p {
   position: relative;
 }
 
-/* The source pane has three stacked regions when the toolbar is on: header,
-   toolbar, editor surface. The base .editor-pane grid only defines two rows, so
-   use a flex column here — the toolbar takes its natural height and the editor
-   surface fills the rest (and collapses to nothing when the toolbar is hidden). */
-#source-pane {
+/* A group (the left #source-pane, the right #preview-pane): its header, then
+   the body its active tab shows (the source editor or the preview, which move
+   between the groups) or a placeholder. The source body stacks the toolbar
+   (its natural height) over the editor surface (the rest). */
+.editor-group > .pane-header {
+  flex: none;
+}
+.editor-group > .source-body,
+.editor-group > .preview-body,
+.editor-group > .group-placeholder {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.source-body {
   display: flex;
   flex-direction: column;
 }
-#source-pane > .editor-surface {
+.source-body > .editor-surface {
   flex: 1 1 auto;
   min-height: 0;
+}
+.preview-body {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* A body the group holds but does not show (its active tab is the other view). */
+@media not all and (max-width: 900px) {
+  .editor-group > [data-shown="false"] {
+    display: none;
+  }
+}
+
+/* The group whose active tab's body is in the other group. */
+.group-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  color: var(--text-dim);
+  text-align: center;
+  background: var(--editor);
+}
+.group-placeholder-text {
+  margin: 0;
+  max-width: 28em;
+  font-size: 13px;
+}
+.group-placeholder-button {
+  min-height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface-1);
+  color: var(--text);
+  font-size: 12px;
+}
+.group-placeholder-button:hover {
+  background: var(--surface-2, var(--surface-1));
+  border-color: var(--accent);
+}
+
+/* A tab's view, named when its group holds both. */
+.tab-view-mark {
+  flex: none;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
 }
 
 /* Optional Overleaf-style markdown insert toolbar above the editor surface. */
@@ -1423,20 +1484,24 @@ p {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.app-shell[data-preview="hidden"] #preview-pane {
-  display: none;
-}
+/* A group hidden from the View menu or its ×: the desktop only (on the phone
+   the views show one at a time). */
+@media not all and (max-width: 900px) {
+  .app-shell[data-preview="hidden"] #preview-pane {
+    display: none;
+  }
 
-.app-shell[data-source="hidden"] #source-pane {
-  display: none;
+  .app-shell[data-source="hidden"] #source-pane {
+    display: none;
+  }
 }
 
 .editor-pane,
 .preview-pane {
   min-width: 0;
   min-height: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 0;
   background: var(--editor);
   overflow: hidden;
@@ -2114,7 +2179,7 @@ p {
    row as #preview-output), toggled with it — so it never disturbs the normal
    preview DOM. Its own toolbar + scrollable body + change-overview ruler. */
 .preview-diff-view {
-  grid-row: 2;
+  grid-row: 1;
   grid-column: 1;
   min-height: 0;
   flex: 1 1 auto; /* fill the pane in the mobile flex-column layout (ignored in the desktop grid) */
@@ -2128,7 +2193,7 @@ p {
 }
 
 /* When the diff is open, hide the normal preview so only the diff shows. */
-.preview-pane:has(.preview-diff-view:not([hidden])) > #preview-output {
+.preview-body:has(.preview-diff-view:not([hidden])) > #preview-output {
   display: none;
 }
 
@@ -3772,18 +3837,27 @@ menu {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .app-shell[data-mobile-view="preview"] #source-pane {
+  /* The groups draw nothing of their own on the phone: the view on screen
+     shows its body, wherever it is, in the one cell of the grid. */
+  .editor-grid > .editor-group {
+    display: contents;
+  }
+
+  .editor-group > .group-placeholder {
     display: none;
   }
 
-  .app-shell[data-mobile-view="source"] .preview-pane {
-    display: none;
-  }
-
-  /* Preview must show on mobile when selected (desktop hides it here). */
-  .app-shell[data-mobile-view="preview"] .preview-pane {
+  .editor-group > .source-body,
+  .editor-group > .preview-body {
+    grid-area: 1 / 1;
     display: flex;
     flex-direction: column;
+    min-width: 0;
+  }
+
+  .app-shell[data-mobile-view="preview"] .editor-group > .source-body,
+  .app-shell[data-mobile-view="source"] .editor-group > .preview-body {
+    display: none;
   }
 
   /* ── The right area (Agent, Chats): a drawer from the right edge, driven by

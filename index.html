@@ -104,7 +104,7 @@
 
         <main class="workspace">
           <section id="editor-grid" class="editor-grid">
-            <div id="source-pane" class="editor-pane">
+            <div id="source-pane" class="editor-pane editor-group" data-group="left">
                 <div class="pane-header">
                   <div class="pane-label" id="source-pane-label">Source</div>
                   <div class="tab-strip-wrap">
@@ -114,6 +114,11 @@
                   <button id="preview-toggle-activity-button" class="pane-action source-preview-toggle" type="button" aria-label="Show preview" title="Show preview">◫</button>
                   <button id="source-collapse-button" class="pane-action" type="button" aria-label="Collapse source" title="Collapse source (reading mode)">×</button>
                 </div>
+                <div id="left-group-placeholder" class="group-placeholder" hidden>
+                  <p class="group-placeholder-text"></p>
+                  <button type="button" class="group-placeholder-button">Show here</button>
+                </div>
+              <div id="source-body" class="source-body">
               <div id="editor-format-toolbar" class="editor-format-toolbar" role="toolbar" aria-label="Editor formatting" hidden></div>
               <div class="editor-surface">
                 <div id="editor-find-bar" class="editor-find-bar" hidden>
@@ -166,9 +171,10 @@
                   <div id="editor-autocomplete-list" class="editor-autocomplete-list"></div>
                 </div>
               </div>
+              </div>
             </div>
             <div id="editor-splitter" class="panel-splitter editor-splitter" role="separator" aria-orientation="vertical" aria-label="Resize preview"></div>
-            <div id="preview-pane" class="preview-pane">
+            <div id="preview-pane" class="preview-pane editor-group" data-group="right">
                 <div class="pane-header">
                   <div class="pane-label">Preview</div>
                   <div class="tab-strip-wrap">
@@ -178,6 +184,11 @@
                   <button id="source-toggle-activity-button" class="pane-action preview-source-toggle" type="button" aria-label="Show source" title="Show source">◫</button>
                   <button id="preview-collapse-button" class="pane-action" type="button" aria-label="Collapse preview" title="Collapse preview">×</button>
                 </div>
+                <div id="right-group-placeholder" class="group-placeholder" hidden>
+                  <p class="group-placeholder-text"></p>
+                  <button type="button" class="group-placeholder-button">Show here</button>
+                </div>
+              <div id="preview-body" class="preview-body">
               <article id="preview-output" class="preview-output"></article>
               <div id="preview-diff-view" class="preview-diff-view" hidden>
                 <div class="diff-toolbar">
@@ -190,6 +201,7 @@
                   <div id="diff-body" class="diff-body"></div>
                   <div id="diff-ruler" class="diff-ruler" aria-hidden="true"></div>
                 </div>
+              </div>
               </div>
             </div>
           </section>

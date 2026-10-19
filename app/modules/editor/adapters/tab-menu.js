@@ -1,10 +1,10 @@
-// A tab's menu (right-click on a tab): closing it, the others, those to its
-// right or all of them; opening the file as Source or Preview (a tab is a file
-// and a view: step 5 of docs/ARCHITECTURE.md; today the two views are the two
-// panes, and the other pane shows when it was hidden); copying its path.
+// A tab's menu (right-click on a tab): closing it, the others in its group,
+// those to its right or all of them; opening the file as Source or Preview in
+// the same group (a tab is a file in a view: step 5 of docs/ARCHITECTURE.md);
+// copying its path.
 // Part of the Editor module: `app` is its shared context (surface.js).
 import { getPath } from "../../workspace/index.js";
-import { filesIn } from "../service/view.js";
+import { sameTab } from "../service/view.js";
 
 export function createTabMenu(app) {
   const menu = () => app.elements.tabContextMenu;
@@ -14,18 +14,11 @@ export function createTabMenu(app) {
     if (element && !element.hidden) element.hidden = true;
   }
 
-  const tabsOf = (pane) => filesIn(app.view.get(), pane);
-  const closeIn = (pane, fileIds) => {
-    for (const fileId of fileIds) (pane === "source" ? app.closeSourceTab : app.closePreviewTab)(fileId);
+  const tabsOf = (group) => app.view.get().groups.find((g) => g.id === group)?.tabs ?? [];
+  const closeIn = (group, tabs) => {
+    for (const tab of tabs) app.closeTab(group, tab);
     app.renderTabs(app.controller.getProject());
   };
-
-  // Shows the file in the other pane, showing that pane when it was hidden.
-  function openAs(view, fileId) {
-    if (view === "source") app.setActiveSourceFile(fileId);
-    else app.setPreviewFile(fileId);
-    if (app.settings[view] === "hidden") app.toggleArea(view);
-  }
 
   // entries: [label, run, { checked, disabled }] or null for a separator.
   function draw(entries, x, y) {
@@ -60,25 +53,28 @@ export function createTabMenu(app) {
     element.querySelector("button:not(:disabled)")?.focus({ preventScroll: true });
   }
 
-  // A file's tab.
-  function openTabMenu(pane, fileId, x, y) {
+  // A file's tab ({ fileId, view }) in a group. Open as: the file in the
+  // other view, in the same group (its body moves here).
+  function openTabMenu(group, tab, x, y) {
     app.closeTabOverflowMenu();
     const project = app.controller.getProject();
-    if (project.nodes[fileId]?.kind !== "file") return;
-    const tabs = tabsOf(pane);
-    const index = tabs.indexOf(fileId);
-    const others = tabs.filter((id) => id !== fileId);
+    if (project.nodes[tab.fileId]?.kind !== "file") return;
+    const tabs = tabsOf(group);
+    const index = tabs.findIndex((t) => sameTab(t, tab));
+    const others = tabs.filter((t) => !sameTab(t, tab));
     const right = index < 0 ? [] : tabs.slice(index + 1);
+    const openAs = (view) => [`Open as ${view === "source" ? "Source" : "Preview"}`, () => app.activateTab(group, { fileId: tab.fileId, view }),
+      { checked: tab.view === view, disabled: tab.view === view || !app.canOpenFileInPane(tab.fileId, view) }];
     draw([
-      ["Close", () => closeIn(pane, [fileId])],
-      ["Close Others", () => closeIn(pane, others), { disabled: !others.length }],
-      ["Close to the Right", () => closeIn(pane, right), { disabled: !right.length }],
-      ["Close All", () => closeIn(pane, [...tabs])],
+      ["Close", () => closeIn(group, [tab])],
+      ["Close Others", () => closeIn(group, others), { disabled: !others.length }],
+      ["Close to the Right", () => closeIn(group, right), { disabled: !right.length }],
+      ["Close All", () => closeIn(group, [...tabs])],
       null,
-      ["Open as Source", () => openAs("source", fileId), { checked: pane === "source", disabled: pane === "source" || !app.canOpenFileInPane(fileId, "source") }],
-      ["Open as Preview", () => openAs("preview", fileId), { checked: pane === "preview", disabled: pane === "preview" || !app.canOpenFileInPane(fileId, "preview") }],
+      openAs("source"),
+      openAs("preview"),
       null,
-      ["Copy Path", () => void app.copyText(getPath(project, fileId))]
+      ["Copy Path", () => void app.copyText(getPath(project, tab.fileId))]
     ], x, y);
   }
 

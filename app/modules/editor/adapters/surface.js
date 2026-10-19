@@ -22,6 +22,7 @@ import { createResume } from "./resume.js";
 import { createShowFile } from "./show-file.js";
 import { createTabs } from "./tabs.js";
 import { createTabMenu } from "./tab-menu.js";
+import { createGroups } from "./groups.js";
 import { createCharCount } from "./char-count.js";
 import { createPreviewPane } from "./preview-pane.js";
 import { installFrameParts } from "./frame-parts.js";
@@ -107,7 +108,6 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
     phonePane: () => (shell.frame.isPhone() ? shell.frame.phoneView() : null),
     showPhonePane: (id) => shell.frame.showPane(id),
     togglePreview: () => shell.frame.toggle("preview"),
-    toggleArea: (area) => shell.frame.toggle(area),
     copyText: (text) => shell.copyText(text),
     redrawRemoteCursors: () => app.renderRemoteCursors(Array.from(app.remoteCursorsByClient.values())),
     isPreviewableFileName,
@@ -141,6 +141,7 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
   add(createLinks(app));
   add({ ...createTabs(app), ...createPreview(app, previews) });
   add(createTabMenu(app));
+  add(createGroups(app));
   add(createResume(app));
   add(createShowFile(app, composing));
   add(createCharCount(app, shell.statusBar));
@@ -172,12 +173,14 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
   shell.commands.add({ id: "preview.save-pdf", title: "Save as PDF", menu: { id: "file", group: 0, order: 7 }, run: () => app.printPreviewAsPdf() });
   // Drawing: while a keystroke is applied the editor has drawn it, and the rest
   // of the app waits (Shell). On each redraw its own parts: the tabs, the shown
-  // file, the preview pane (a file's preview or a pane view) and the links.
+  // file, the groups (where the bodies are), the preview pane (a file's preview
+  // or a pane view) and the links.
   shell.holdRendering(() => app.isTyping());
   shell.events.on("render", ({ project }) => {
     if (!project) return;
     app.ensureOpenTabs(project);
     app.renderTabs(project);
+    app.drawGroups(project);
     const activeFile = project.activeFileId ? project.nodes[project.activeFileId] : null;
     const previewFileId = app.view.get().previewFileId;
     app.showActiveFile(project);
@@ -219,13 +222,13 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
   });
   app.attachSelectionChangeListener();
   window.addEventListener("resize", app.scheduleOverviewRuler);
-  // Files and tabs dropped on the panes and their tab strips; tabs reordered on a strip.
-  app.bindPaneDropTarget(app.elements.sourcePane, "source");
-  app.bindPaneDropTarget(app.elements.sourceTabStrip, "source");
-  app.bindPaneDropTarget(app.elements.previewPane, "preview");
-  app.bindPaneDropTarget(app.elements.previewTabStrip, "preview");
-  app.bindTabStripReorderTarget(app.elements.sourceTabStrip, "source");
-  app.bindTabStripReorderTarget(app.elements.previewTabStrip, "preview");
+  // Files dropped on the groups and their tab strips; tabs reordered on a strip.
+  app.bindPaneDropTarget(app.elements.sourcePane, "left");
+  app.bindPaneDropTarget(app.elements.sourceTabStrip, "left");
+  app.bindPaneDropTarget(app.elements.previewPane, "right");
+  app.bindPaneDropTarget(app.elements.previewTabStrip, "right");
+  app.bindTabStripReorderTarget(app.elements.sourceTabStrip, "left");
+  app.bindTabStripReorderTarget(app.elements.previewTabStrip, "right");
 
   // What other code calls: the parts' functions, and a few questions about the
   // editor's own state (never the state itself).

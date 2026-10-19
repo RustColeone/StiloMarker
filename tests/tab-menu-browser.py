@@ -1,9 +1,10 @@
 """Browser regression: a tab's menu (right-click on a tab).
 
 Close, Close Others, Close to the Right, Close All; Open as Source / Preview
-(the view the tab is in is ticked; opening as the other shows that pane when
-it was hidden); Copy Path; History's diff tab only closes. Escape and a press
-outside close the menu. Isolated: every API is mocked; the welcome template
+(the view the tab is in is ticked; opening as the other opens it in the same
+group, whose tabs then name their views, while the other group keeps its tab
+behind a placeholder with Show here); Copy Path; History's diff tab only
+closes. Escape and a press outside close the menu. Isolated: every API is mocked; the welcome template
 is this checkout's Template folder.
 """
 import asyncio
@@ -18,6 +19,20 @@ ROOT = Path(os.environ.get('STILO_ASSET_ROOT', Path(__file__).resolve().parents[
 BASE = os.environ.get('STILO_TEST_URL', 'https://stilomarker.ngantech.net')
 
 TABS = '''(pane) => [...document.querySelectorAll(`#${pane}-tab-strip .editor-tab[data-file-id]`)].map(t => t.querySelector(".tab-title").textContent)'''
+GROUPS = '''() => Object.fromEntries([...document.querySelectorAll(".editor-group")].map((g) => {
+  const shown = [...g.querySelectorAll(":scope > .source-body, :scope > .preview-body")].filter((b) => b.dataset.shown !== "false");
+  const placeholder = g.querySelector(".group-placeholder");
+  const tabs = [...g.querySelectorAll(".editor-tab[data-file-id]")];
+  const active = g.querySelector(".editor-tab.is-active[data-file-id]");
+  return [g.dataset.group, {
+    label: g.querySelector(".pane-label").textContent,
+    body: shown.length ? (shown[0].classList.contains("source-body") ? "source" : "preview") : null,
+    placeholder: placeholder.hidden ? null : placeholder.querySelector(".group-placeholder-text").textContent,
+    tabs: tabs.map((t) => [t.querySelector(".tab-title").textContent, t.dataset.view]),
+    marks: tabs.map((t) => t.querySelector(".tab-view-mark")?.textContent ?? null),
+    active: active ? [active.querySelector(".tab-title").textContent, active.dataset.view] : null
+  }];
+}))'''
 MENU = '''() => { const m = document.querySelector("#tab-context-menu"); return m.hidden ? null : [...m.querySelectorAll("button")].map(b => [b.textContent, b.disabled, b.getAttribute("aria-checked") === "true"]); }'''
 
 
@@ -72,15 +87,65 @@ async def main():
         await page.keyboard.press('Escape')
         assert await page.evaluate(MENU) is None, 'Escape closes the menu'
 
-        # Open as Preview: the album shows in the preview, which was hidden.
-        await page.locator('#preview-collapse-button').click()
-        assert await page.locator('#app').get_attribute('data-preview') == 'hidden'
+        # Today's layout: Source on the left, Preview on the right, no marks.
+        groups = await page.evaluate(GROUPS)
+        assert (groups['left']['label'], groups['left']['body'], groups['right']['label'], groups['right']['body']) == ('Source', 'source', 'Preview', 'preview'), groups
+        assert set(groups['left']['marks']) == {None}, groups
+
+        # Open as Preview: in the same group. The preview moves to the left
+        # group, whose tabs name their views; the right group keeps its tab
+        # behind a placeholder.
         await tab_menu('source', 'LULUKA.urldb')
         await choose('Open as Preview')
-        assert await page.locator('#app').get_attribute('data-preview') == 'shown', 'the preview pane shows again'
-        assert 'LULUKA.urldb' in await page.evaluate(TABS, 'preview')
-        active = await page.evaluate('document.querySelector("#preview-tab-strip .editor-tab.is-active .tab-title")?.textContent')
-        assert active == 'LULUKA.urldb', active
+        groups = await page.evaluate(GROUPS)
+        left, right = groups['left'], groups['right']
+        assert (left['label'], left['body'], left['placeholder']) == ('Preview', 'preview', None), left
+        assert left['tabs'] == [['welcome.md', 'source'], ['MeitanteiCure.mtree', 'source'], ['LULUKA.urldb', 'source'], ['LULUKA.urldb', 'preview']], left
+        assert left['active'] == ['LULUKA.urldb', 'preview'], left
+        assert left['marks'] == ['Source', 'Source', 'Source', 'Preview'], left
+        assert (right['body'], right['placeholder']) == (None, 'welcome.md is open as Preview in the other group.'), right
+        assert right['active'] == ['welcome.md', 'preview'], right
+        await page.locator('#source-tab-strip .editor-tab[data-view="preview"]', has_text='LULUKA.urldb').click(button='right')
+        await page.wait_for_timeout(150)
+        entries = await page.evaluate(MENU)
+        assert entries[4][2] is False and entries[5][2] is True, f'the preview tab is ticked as Preview: {entries}'
+        await page.keyboard.press('Escape')
+
+        # Show here: the right group takes the preview back, and the left waits.
+        await page.locator('#preview-pane .group-placeholder-button').click()
+        await page.wait_for_timeout(300)
+        groups = await page.evaluate(GROUPS)
+        assert (groups['right']['body'], groups['right']['placeholder']) == ('preview', None), groups['right']
+        assert 'STILO MARKER' in await page.locator('#preview-output').inner_text()
+        assert groups['left']['placeholder'] == 'LULUKA.urldb is open as Preview in the other group.', groups['left']
+
+        # A source tab there brings the source editor back to the left group.
+        await page.locator('#source-tab-strip .editor-tab[data-view="source"]', has_text='welcome.md').click()
+        await page.wait_for_timeout(300)
+        groups = await page.evaluate(GROUPS)
+        assert (groups['left']['label'], groups['left']['body'], groups['left']['placeholder']) == ('Source', 'source', None), groups['left']
+        assert (await page.locator('#editor-content').inner_text()).startswith('# STILO MARKER')
+
+        # Narrowed to a phone with the preview in the left group: the groups
+        # draw nothing of their own, and each view shows its body.
+        await tab_menu('source', 'LULUKA.urldb')
+        await choose('Open as Preview')
+        await page.set_viewport_size({'width': 400, 'height': 820})
+        await page.wait_for_timeout(400)
+        phone = '''() => ({ view: document.querySelector("#app").dataset.mobileView,
+          source: document.querySelector("#source-body").getBoundingClientRect().width,
+          preview: document.querySelector("#preview-body").getBoundingClientRect().width,
+          placeholder: [...document.querySelectorAll(".group-placeholder")].some((p) => p.getBoundingClientRect().width > 0) })'''
+        now = await page.evaluate(phone)
+        assert now['view'] == 'source' and now['source'] > 300 and now['preview'] == 0 and not now['placeholder'], now
+        await page.locator('#mobile-view-toggle').click()
+        await page.wait_for_timeout(400)
+        now = await page.evaluate(phone)
+        assert now['view'] == 'preview' and now['preview'] > 300 and now['source'] == 0, now
+        await page.set_viewport_size({'width': 1400, 'height': 900})
+        await page.wait_for_timeout(400)
+        await page.locator('#source-tab-strip .editor-tab[data-view="source"]', has_text='welcome.md').click()
+        await page.wait_for_timeout(300)
 
         # Copy Path.
         await tab_menu('source', 'LULUKA.urldb')
@@ -107,7 +172,7 @@ async def main():
 
         assert not errors, errors
         await browser.close()
-        print(json.dumps({'checks': ['menu entries', 'escape', 'open as preview shows the pane', 'copy path',
+        print(json.dumps({'checks': ['menu entries', 'escape', 'default layout', 'open as preview in the same group', 'placeholder', 'show here', 'source back', 'phone with a mixed group', 'copy path',
                                      'close to the right', 'close others', 'press outside', 'close all']}))
 
 

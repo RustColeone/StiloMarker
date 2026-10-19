@@ -20,7 +20,7 @@
 //
 // Today's layout is the default: the source tabs on the left, the preview tabs
 // on the right. The actions that take a view work in the group holding that
-// view's body unless given a group.
+// view's body unless given a group; activate moves a body to another group.
 
 const seal = (groups) => Object.freeze(groups.map((group) => Object.freeze({
   ...group, tabs: Object.freeze(group.tabs.map((tab) => Object.freeze({ ...tab }))), active: group.active ? Object.freeze({ ...group.active }) : null
@@ -40,18 +40,6 @@ const isFile = (project, id) => project.nodes[id]?.kind === "file";
 export const groupOf = (state, id) => state.groups.find((group) => group.id === id) ?? null;
 export const hostOf = (state, view) => groupOf(state, state.hosts[view]);
 export const filesIn = (state, view) => (hostOf(state, view)?.tabs ?? []).filter((tab) => tab.view === view).map((tab) => tab.fileId);
-
-// Moves a tab before (or after) another; to the end when the other is not there.
-export function moveTabWithinList(tabIds, draggedFileId, targetFileId, placeAfter = false) {
-  const next = tabIds.filter((tabId) => tabId !== draggedFileId);
-  const targetIndex = next.indexOf(targetFileId);
-  if (targetIndex < 0) {
-    next.push(draggedFileId);
-    return next;
-  }
-  next.splice(targetIndex + (placeAfter ? 1 : 0), 0, draggedFileId);
-  return next;
-}
 
 const sameGroups = (a, b) => a.length === b.length && a.every((group, i) => group.id === b[i].id
   && ((!group.active && !b[i].active) || sameTab(group.active, b[i].active))
@@ -117,11 +105,28 @@ export function createView(state) {
       change(`close ${view} tab`, group, (g) => ({ ...g, tabs, active: sameTab(g.active, tab) ? tabs.at(-1) ?? null : g.active }), patch);
     },
 
-    // targetFileId null: to the end.
-    moveTab(view, draggedFileId, targetFileId, placeAfter = false, group = get().hosts[view]) {
-      change(`move ${view} tab`, group, (g) => {
-        const ids = moveTabWithinList(g.tabs.filter((t) => t.view === view).map((t) => t.fileId), draggedFileId, targetFileId, placeAfter);
-        return { ...g, tabs: [...ids.map((fileId) => ({ fileId, view })), ...g.tabs.filter((t) => t.view !== view)] };
+    // A tab in a group comes on screen (clicked, Show here, Open as): it is
+    // that group's active tab, and the body of its view moves to that group
+    // (the other group, if its active tab wants the same body, then shows a
+    // placeholder). A preview tab is what the preview shows.
+    activate(group, tab) {
+      const next = { fileId: tab.fileId, view: tab.view };
+      const patch = { hosts: Object.freeze({ ...get().hosts, [next.view]: group }), focus: group };
+      if (next.view === "preview") Object.assign(patch, { previewFileId: next.fileId, previewPart: null });
+      change(`show ${next.view} tab`, group, (g) => ({
+        ...g, tabs: g.tabs.some((t) => sameTab(t, next)) ? g.tabs : [...g.tabs, next], active: next
+      }), patch);
+    },
+
+    // A tab moved within its group, before (or after) another; to the end when target is null.
+    moveTab(group, dragged, target, placeAfter = false) {
+      change("move tab", group, (g) => {
+        const rest = g.tabs.filter((t) => !sameTab(t, dragged));
+        const at = target ? rest.findIndex((t) => sameTab(t, target)) : -1;
+        const tabs = [...rest];
+        if (at < 0) tabs.push({ ...dragged });
+        else tabs.splice(at + (placeAfter ? 1 : 0), 0, { ...dragged });
+        return { ...g, tabs };
       });
     },
 

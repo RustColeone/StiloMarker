@@ -1,11 +1,11 @@
-// Tabs and panes: the source and preview tab strips (overflow menu, reorder,
-// drag files in), which file each pane shows, and resuming the last view
+// Tabs and groups: each group's tab strip (a tab is a file in a view; overflow
+// menu, reorder, drag files in), a tab coming on screen in its group (its
+// view's body moves there: groups.js draws that), and resuming the last view
 // (the open tabs per workspace, kept on the server through app.saveUserState).
-// main.js creates this through createPanes and passes its shared values in `app`;
-// what the panes show is the Editor's view (app.view, service/view.js).
+// What the groups show is the Editor's view (app.view, service/view.js).
 import { normalizeServerUrl } from "../../shell/index.js";
 import { getPath } from "../../workspace/index.js";
-import { filesIn } from "../service/view.js";
+import { filesIn, sameTab } from "../service/view.js";
 
 export function createTabs(app) {
 
@@ -34,13 +34,32 @@ export function createTabs(app) {
     app.view.openTab("preview", fileId);
   }
 
-  function setActiveSourceFile(fileId) {
+  // A tab in a group comes on screen (its click, Show here, Open as): its
+  // view's body moves to that group. A source tab's file becomes the project's
+  // active file, a preview tab's what the preview shows; a pane view (History's
+  // diff) stays in the group holding the preview.
+  function activateTab(group, tab) {
+    const project = app.controller.getProject();
+    const paneView = tab.view === "preview" ? app.paneViews.get(tab.fileId) : null;
+    if (paneView) {
+      if (!paneView.tab()) return;
+      app.captureViewState();
+      app.view.showView(tab.fileId);
+      app.updateStatus(project);
+      return;
+    }
+    if (project.nodes[tab.fileId]?.kind !== "file") return;
     app.captureViewState(); // resume-position: snapshot the outgoing document first
-    app.view.pick(fileId);
-    openSourceTab(fileId);
-    app.view.showSource(fileId);
-    app.controller.setActiveFile(fileId);
-    scheduleSaveUserState();
+    if (tab.view === "source") app.view.pick(tab.fileId);
+    app.view.activate(group, { fileId: tab.fileId, view: tab.view });
+    // Drawn again: by the project changing, or here when only the view did.
+    if (tab.view === "source" && project.activeFileId !== tab.fileId) app.controller.setActiveFile(tab.fileId);
+    else app.updateStatus(project);
+    if (tab.view === "source") scheduleSaveUserState();
+  }
+
+  function setActiveSourceFile(fileId) {
+    activateTab(app.view.get().hosts.source, { fileId, view: "source" });
   }
 
   // ---- Per-user resume: persist which files are open in a cloud workspace so
@@ -128,23 +147,7 @@ export function createTabs(app) {
   }
 
   function setPreviewFile(fileId) {
-    const project = app.controller.getProject();
-    const paneView = app.paneViews.get(fileId); // a tab that is not a file (History's diff)
-    if (paneView) {
-      if (!paneView.tab()) return;
-      app.captureViewState();
-      app.view.showView(fileId);
-      app.updateStatus(project);
-      return;
-    }
-    const node = project.nodes[fileId];
-    if (!node || node.kind !== "file") {
-      return;
-    }
-    app.captureViewState(); // resume-position: snapshot the outgoing preview first
-    openPreviewTab(fileId);
-    app.view.showPreview(fileId);
-    app.updateStatus(project);
+    activateTab(app.view.get().hosts.preview, { fileId, view: "preview" });
   }
 
   function openFileFromExplorer(fileId) {
@@ -189,27 +192,34 @@ export function createTabs(app) {
     return true;
   }
 
-  function setPaneDropActive(pane, isActive) {
-    const target = pane === "preview" ? app.elements.previewPane : app.elements.sourcePane;
-    target.classList.toggle("is-drop-active", isActive);
+  // A group's element, and the view a file dropped on it opens in: the view
+  // its active tab shows, else the body it holds, else its default.
+  const groupElement = (group) => document.querySelector(`.editor-group[data-group="${group}"]`);
+  function dropViewOf(group) {
+    const state = app.view.get();
+    const active = state.groups.find((g) => g.id === group)?.active;
+    if (active) return active.view;
+    if (state.hosts.source === group) return "source";
+    if (state.hosts.preview === group) return "preview";
+    return group === "left" ? "source" : "preview";
+  }
+
+  function setPaneDropActive(group, isActive) {
+    groupElement(group)?.classList.toggle("is-drop-active", isActive);
   }
 
   function clearPaneDropState() {
-    app.elements.sourcePane.classList.remove("is-drop-active");
-    app.elements.previewPane.classList.remove("is-drop-active");
+    for (const element of document.querySelectorAll(".editor-group.is-drop-active")) element.classList.remove("is-drop-active");
   }
 
-  function openDroppedFileInPane(fileId, pane) {
-    if (!canOpenFileInPane(fileId, pane)) {
+  // A file dropped (or dragged into the editor): shown in that view, in the
+  // group given or the one holding that view's body.
+  function openDroppedFileInPane(fileId, view, group = app.view.get().hosts[view]) {
+    if (!canOpenFileInPane(fileId, view)) {
       return;
     }
-    if (pane === "preview") {
-      setPreviewFile(fileId);
-      app.logDebug("action", "File dropped into preview pane", getPath(app.controller.getProject(), fileId));
-      return;
-    }
-    setActiveSourceFile(fileId);
-    app.logDebug("action", "File dropped into source pane", getPath(app.controller.getProject(), fileId));
+    activateTab(group, { fileId, view });
+    app.logDebug("action", `File dropped into ${view}`, getPath(app.controller.getProject(), fileId));
   }
 
   function openPartInPane(fileId, partId, pane) {
@@ -230,42 +240,43 @@ export function createTabs(app) {
     app.logDebug("action", "Part dropped into source pane", `${getPath(project, fileId)} :: ${partId}`);
   }
 
-  function bindPaneDropTarget(target, pane) {
+  function bindPaneDropTarget(target, group) {
     // dragover: getData() is blocked by spec during dragover for security — use types instead.
     target.addEventListener("dragover", (event) => {
       const types = event.dataTransfer?.types ?? [];
       const hasFile = types.includes("text/mdnotes-file-id");
       const hasEntry = types.includes("text/stilo-file-part");
       if (!hasFile && !hasEntry) {
-        setPaneDropActive(pane, false);
+        setPaneDropActive(group, false);
         return;
       }
       event.preventDefault();
       if (event.dataTransfer) {
         event.dataTransfer.dropEffect = "copy";
       }
-      setPaneDropActive(pane, true);
+      setPaneDropActive(group, true);
     });
 
     target.addEventListener("dragleave", (event) => {
       if (event.currentTarget?.contains(event.relatedTarget)) {
         return;
       }
-      setPaneDropActive(pane, false);
+      setPaneDropActive(group, false);
     });
 
     target.addEventListener("drop", (event) => {
-      setPaneDropActive(pane, false);
+      setPaneDropActive(group, false);
+      const pane = dropViewOf(group);
       const fileId = event.dataTransfer?.getData("text/mdnotes-file-id");
       const partPayload = event.dataTransfer?.getData("text/stilo-file-part");
-      app.logDebug("action", `Drop on ${pane} pane`, fileId ? `file=${fileId}` : `part=${partPayload}`);
+      app.logDebug("action", `Drop on the ${group} group (${pane})`, fileId ? `file=${fileId}` : `part=${partPayload}`);
       if ((!fileId || !canOpenFileInPane(fileId, pane)) && !partPayload) {
-        app.logDebug("response", `Drop on ${pane} pane rejected`, fileId ? `canOpen=${canOpenFileInPane(fileId, pane)}` : "no payload");
+        app.logDebug("response", `Drop on the ${group} group rejected`, fileId ? `canOpen=${canOpenFileInPane(fileId, pane)}` : "no payload");
         return;
       }
       event.preventDefault();
       if (fileId && canOpenFileInPane(fileId, pane)) {
-        openDroppedFileInPane(fileId, pane);
+        openDroppedFileInPane(fileId, pane, group);
         return;
       }
 
@@ -273,18 +284,25 @@ export function createTabs(app) {
         const parsed = JSON.parse(partPayload);
         openPartInPane(parsed.fileId, parsed.partId, pane);
       } catch {
-        app.logDebug("response", `Drop on ${pane} pane: malformed part payload`);
+        app.logDebug("response", `Drop on the ${group} group: malformed part payload`);
       }
     });
   }
 
-  function closeSourceTab(fileId) {
+  // Closing a tab, in its group. When it was the source editor's file, the last
+  // source tab left there is shown (or no file).
+  function closeTab(group, tab) {
     const project = app.controller.getProject();
-    const wasActive = project.activeFileId === fileId;
-    app.view.closeTab("source", fileId);
+    if (tab.view === "preview") {
+      app.view.closeTab("preview", tab.fileId, group);
+      app.updateStatus(project);
+      return;
+    }
+    const wasShown = project.activeFileId === tab.fileId && app.view.get().hosts.source === group;
+    app.view.closeTab("source", tab.fileId, group);
     scheduleSaveUserState();
 
-    if (!wasActive) {
+    if (!wasShown) {
       app.updateStatus(project);
       return;
     }
@@ -301,61 +319,58 @@ export function createTabs(app) {
     nextProject.activeFileId = null;
     app.controller.replaceProject(nextProject);
   }
+  const closeSourceTab = (fileId) => closeTab(app.view.get().hosts.source, { fileId, view: "source" });
+  const closePreviewTab = (fileId) => closeTab(app.view.get().hosts.preview, { fileId, view: "preview" });
 
-  function closePreviewTab(fileId) {
-    app.view.closeTab("preview", fileId);
-    app.updateStatus(app.controller.getProject());
-  }
-
-  function reorderPaneTabs(pane, draggedFileId, targetFileId, placeAfter = false) {
-    app.view.moveTab(pane, draggedFileId, targetFileId, placeAfter);
-
+  function reorderTabs(group, dragged, target, placeAfter = false) {
+    app.view.moveTab(group, dragged, target, placeAfter);
     renderTabs(app.controller.getProject());
   }
 
   // The tab strips scroll instead of squeezing tabs down to unreadable slivers, so
   // a "⋯" button at the end lists EVERY open tab (activate or close from there).
   // renderTabStrip records what it drew here so the menu can rebuild the same list.
-  const tabStripState = { source: null, preview: null };
+  const tabStripState = { left: null, right: null };
+  const VIEW_NAMES = { source: "Source", preview: "Preview" };
 
-  function tabOverflowButton(pane) {
-    return pane === "source" ? app.elements.sourceTabOverflow : app.elements.previewTabOverflow;
+  function tabOverflowButton(group) {
+    return group === "left" ? app.elements.sourceTabOverflow : app.elements.previewTabOverflow;
   }
 
   function closeTabOverflowMenu() {
     const menu = app.elements.tabOverflowMenu;
     if (menu) menu.hidden = true;
-    for (const pane of ["source", "preview"]) {
-      const btn = tabOverflowButton(pane);
+    for (const group of ["left", "right"]) {
+      const btn = tabOverflowButton(group);
       btn?.classList.remove("is-open");
       btn?.setAttribute("aria-expanded", "false");
     }
   }
 
-  // Build the "all open tabs" list for one pane from the last render's descriptor.
-  function openTabOverflowMenu(pane) {
+  // Build the "all open tabs" list for one group from the last render's descriptor.
+  function openTabOverflowMenu(group) {
     const menu = app.elements.tabOverflowMenu;
-    const button = tabOverflowButton(pane);
-    const state = tabStripState[pane];
+    const button = tabOverflowButton(group);
+    const state = tabStripState[group];
     if (!menu || !button || !state) return;
 
     const rows = [];
-    for (const fileId of state.tabIds) {
-      const node = state.project?.nodes?.[fileId];
+    for (const tab of state.tabs) {
+      const node = state.project?.nodes?.[tab.fileId];
       if (!node || node.kind !== "file") continue;
       rows.push({
-        label: node.name,
-        title: getPath(state.project, fileId),
-        active: state.activeFileId === fileId,
-        activate: () => state.onActivate(fileId),
-        close: () => state.onClose(fileId)
+        label: state.mixed ? `${node.name} · ${VIEW_NAMES[tab.view]}` : node.name,
+        title: getPath(state.project, tab.fileId),
+        active: sameTab(state.active, tab),
+        activate: () => state.onActivate(tab),
+        close: () => state.onClose(tab)
       });
     }
     for (const spec of state.extraTabs ?? []) {
       rows.push({
         label: spec.label,
         title: spec.title || spec.label,
-        active: state.activeFileId === spec.id,
+        active: state.active?.fileId === spec.id,
         activate: () => spec.onActivate(),
         close: () => spec.onClose()
       });
@@ -378,7 +393,7 @@ export function createTabs(app) {
 
       const close = document.createElement("span");
       close.className = "tab-overflow-close";
-      close.textContent = "\u00d7";
+      close.textContent = "×";
       close.setAttribute("aria-hidden", "true");
 
       item.append(name, close);
@@ -387,7 +402,7 @@ export function createTabs(app) {
           event.stopPropagation();
           row.close();
           renderTabs(app.controller.getProject());
-          openTabOverflowMenu(pane); // keep the list open so several can be closed
+          openTabOverflowMenu(group); // keep the list open so several can be closed
           return;
         }
         row.activate();
@@ -407,16 +422,19 @@ export function createTabs(app) {
     button.setAttribute("aria-expanded", "true");
   }
 
-  function renderTabStrip({ strip, pane, project, tabIds, activeFileId, emptyText, onActivate, onClose, allowReorder = false, extraTabs = [] }) {
+  // One group's strip: its tabs ({ fileId, view }), each marked with its view
+  // when the group holds both; then the pane views' tabs (History's diff).
+  function renderTabStrip({ strip, group, project, tabs, active, emptyText, onActivate, onClose, extraTabs = [] }) {
     strip.replaceChildren();
+    const mixed = new Set(tabs.map((tab) => tab.view)).size > 1;
 
     // Record what we're drawing so the "⋯" overflow menu can list the same tabs,
-    // and show that button only when this pane actually has tabs.
-    tabStripState[pane] = { project, tabIds, activeFileId, onActivate, onClose, extraTabs };
-    const overflowBtn = tabOverflowButton(pane);
-    if (overflowBtn) overflowBtn.hidden = (tabIds.length + extraTabs.length) === 0;
+    // and show that button only when this group actually has tabs.
+    tabStripState[group] = { project, tabs, active, mixed, onActivate, onClose, extraTabs };
+    const overflowBtn = tabOverflowButton(group);
+    if (overflowBtn) overflowBtn.hidden = (tabs.length + extraTabs.length) === 0;
 
-    if (tabIds.length === 0 && extraTabs.length === 0) {
+    if (tabs.length === 0 && extraTabs.length === 0) {
       const empty = document.createElement("div");
       empty.className = "editor-tab is-empty";
       empty.textContent = emptyText;
@@ -424,7 +442,8 @@ export function createTabs(app) {
       return;
     }
 
-    tabIds.forEach((fileId) => {
+    tabs.forEach((entry) => {
+      const { fileId, view } = entry;
       const file = project.nodes[fileId];
       if (!file || file.kind !== "file") {
         return;
@@ -432,10 +451,11 @@ export function createTabs(app) {
 
       const tab = document.createElement("button");
       tab.type = "button";
-      tab.className = `editor-tab${activeFileId === fileId ? " is-active" : ""}`;
+      tab.className = `editor-tab${sameTab(active, entry) ? " is-active" : ""}`;
       tab.dataset.fileId = fileId;
-      tab.title = getPath(project, fileId);
-      tab.draggable = allowReorder;
+      tab.dataset.view = view;
+      tab.title = `${getPath(project, fileId)} (${VIEW_NAMES[view]})`;
+      tab.draggable = true;
 
       const icon = document.createElement("span");
       icon.className = "tab-file-icon";
@@ -444,6 +464,14 @@ export function createTabs(app) {
       const title = document.createElement("span");
       title.className = "tab-title";
       title.textContent = file.name;
+
+      const parts = [icon, title];
+      if (mixed) {
+        const mark = document.createElement("span");
+        mark.className = `tab-view-mark is-${view}`;
+        mark.textContent = VIEW_NAMES[view];
+        parts.push(mark);
+      }
 
       const dirty = document.createElement("span");
       dirty.className = `tab-dirty${file.dirty ? " is-dirty" : ""}`;
@@ -454,51 +482,46 @@ export function createTabs(app) {
       close.textContent = "×";
       close.setAttribute("aria-hidden", "true");
 
-      const filePath = getPath(project, fileId);
-      const mark = app.marks.get(filePath);
+      const mark = app.marks.get(getPath(project, fileId));
       if (mark) {
         const badge = document.createElement("span");
         badge.className = `tab-mark-badge is-${mark.kind}`;
         badge.title = mark.title ?? "";
-        tab.append(icon, title, badge, dirty, close);
-      } else {
-        tab.append(icon, title, dirty, close);
+        parts.push(badge);
       }
-      tab.addEventListener("click", () => onActivate(fileId));
+      tab.append(...parts, dirty, close);
+      tab.addEventListener("click", () => onActivate(entry));
       tab.addEventListener("contextmenu", (event) => {
         event.preventDefault();
-        app.openTabMenu(pane, fileId, event.clientX, event.clientY);
+        app.openTabMenu(group, entry, event.clientX, event.clientY);
       });
-      if (allowReorder) {
-        tab.addEventListener("dragstart", (event) => {
-          app.view.dragTab({ group: app.view.get().hosts[pane], view: pane, fileId });
-          event.dataTransfer?.setData("text/mdnotes-tab", JSON.stringify({ pane, fileId }));
-          if (event.dataTransfer) {
-            event.dataTransfer.effectAllowed = "move";
-          }
-        });
-        tab.addEventListener("dragend", () => {
-          app.view.dragTab(null);
-        });
-        tab.addEventListener("dragover", (event) => {
-          if (app.view.get().draggingTabState?.view !== pane || app.view.get().draggingTabState.fileId === fileId) {
-            return;
-          }
-          event.preventDefault();
-        });
-        tab.addEventListener("drop", (event) => {
-          if (app.view.get().draggingTabState?.view !== pane || app.view.get().draggingTabState.fileId === fileId) {
-            return;
-          }
-          event.preventDefault();
-          const rect = tab.getBoundingClientRect();
-          const placeAfter = event.clientX > rect.left + (rect.width / 2);
-          reorderPaneTabs(pane, app.view.get().draggingTabState.fileId, fileId, placeAfter);
-        });
-      }
+      // Reordered within the group by dragging.
+      const dragging = () => app.view.get().draggingTabState;
+      const reorders = () => dragging()?.group === group && !sameTab(dragging(), entry);
+      tab.addEventListener("dragstart", (event) => {
+        app.view.dragTab({ group, fileId, view });
+        event.dataTransfer?.setData("text/mdnotes-tab", JSON.stringify({ group, fileId, view }));
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = "move";
+        }
+      });
+      tab.addEventListener("dragend", () => {
+        app.view.dragTab(null);
+      });
+      tab.addEventListener("dragover", (event) => {
+        if (reorders()) event.preventDefault();
+      });
+      tab.addEventListener("drop", (event) => {
+        if (!reorders()) return;
+        event.preventDefault();
+        const rect = tab.getBoundingClientRect();
+        const placeAfter = event.clientX > rect.left + (rect.width / 2);
+        const { fileId: draggedId, view: draggedView } = dragging();
+        reorderTabs(group, { fileId: draggedId, view: draggedView }, entry, placeAfter);
+      });
       close.addEventListener("click", (event) => {
         event.stopPropagation();
-        onClose(fileId);
+        onClose(entry);
       });
       strip.append(tab);
     });
@@ -508,7 +531,7 @@ export function createTabs(app) {
     extraTabs.forEach((spec) => {
       const tab = document.createElement("button");
       tab.type = "button";
-      tab.className = `editor-tab${activeFileId === spec.id ? " is-active" : ""}`;
+      tab.className = `editor-tab${active?.fileId === spec.id ? " is-active" : ""}`;
       tab.dataset.tabId = spec.id;
       tab.title = spec.title || spec.label;
 
@@ -553,48 +576,43 @@ export function createTabs(app) {
     }
   }
 
-  function renderTabs(project) {
-    renderTabStrip({
-      strip: app.elements.sourceTabStrip,
-      pane: "source",
-      project,
-      tabIds: filesIn(app.view.get(), "source"),
-      activeFileId: project.activeFileId,
-      emptyText: "No source file selected",
-      onActivate: setActiveSourceFile,
-      onClose: closeSourceTab,
-      allowReorder: true
-    });
+  const stripOf = (group) => (group === "left" ? app.elements.sourceTabStrip : app.elements.previewTabStrip);
 
-    // Open pane views get tabs after the files' (History's diff).
-    const previewExtraTabs = app.paneViews.all().flatMap((paneView) => {
+  function renderTabs(project) {
+    const state = app.view.get();
+    // Open pane views get tabs after the files', in the group holding the preview (History's diff).
+    const paneViewTabs = app.paneViews.all().flatMap((paneView) => {
       const tab = paneView.tab();
       return tab ? [{ id: paneView.id, ...tab, onActivate: () => setPreviewFile(paneView.id), onClose: () => paneView.close() }] : [];
     });
-    renderTabStrip({
-      strip: app.elements.previewTabStrip,
-      pane: "preview",
-      project,
-      tabIds: filesIn(app.view.get(), "preview"),
-      activeFileId: app.view.get().previewFileId,
-      emptyText: "No preview file selected",
-      onActivate: setPreviewFile,
-      onClose: closePreviewTab,
-      allowReorder: true,
-      extraTabs: previewExtraTabs
-    });
+    for (const group of state.groups) {
+      const strip = stripOf(group.id);
+      if (!strip) continue;
+      renderTabStrip({
+        strip,
+        group: group.id,
+        project,
+        tabs: group.tabs,
+        active: group.active,
+        emptyText: group.id === "left" ? "No source file selected" : "No preview file selected",
+        onActivate: (tab) => activateTab(group.id, tab),
+        onClose: (tab) => closeTab(group.id, tab),
+        extraTabs: state.hosts.preview === group.id ? paneViewTabs : []
+      });
+    }
   }
 
-  function bindTabStripReorderTarget(strip, pane) {
+  function bindTabStripReorderTarget(strip, group) {
     strip.addEventListener("dragover", (event) => {
-      if (app.view.get().draggingTabState?.view !== pane) {
+      if (app.view.get().draggingTabState?.group !== group) {
         return;
       }
       event.preventDefault();
     });
 
     strip.addEventListener("drop", (event) => {
-      if (app.view.get().draggingTabState?.view !== pane) {
+      const dragging = app.view.get().draggingTabState;
+      if (dragging?.group !== group) {
         return;
       }
       const targetTab = event.target.closest(".editor-tab[data-file-id]");
@@ -603,10 +621,9 @@ export function createTabs(app) {
       }
 
       event.preventDefault();
-      app.view.moveTab(pane, app.view.get().draggingTabState.fileId, null);
-      renderTabs(app.controller.getProject());
+      reorderTabs(group, { fileId: dragging.fileId, view: dragging.view }, null);
     });
   }
 
-  return { ensureOpenTabs, openSourceTab, openPreviewTab, setActiveSourceFile, currentWorkspaceView, cacheWorkspaceView, cachedWorkspaceView, showResumedFile, scheduleSaveUserState, restoreResumeState, setActiveSourcePart, setPreviewFile, openFileFromExplorer, canOpenFileInPane, setPaneDropActive, clearPaneDropState, openDroppedFileInPane, openPartInPane, bindPaneDropTarget, closeSourceTab, closePreviewTab, reorderPaneTabs, tabOverflowButton, closeTabOverflowMenu, openTabOverflowMenu, renderTabStrip, renderTabs, bindTabStripReorderTarget };
+  return { ensureOpenTabs, openSourceTab, openPreviewTab, activateTab, setActiveSourceFile, currentWorkspaceView, cacheWorkspaceView, cachedWorkspaceView, showResumedFile, scheduleSaveUserState, restoreResumeState, setActiveSourcePart, setPreviewFile, openFileFromExplorer, canOpenFileInPane, setPaneDropActive, clearPaneDropState, openDroppedFileInPane, openPartInPane, bindPaneDropTarget, closeTab, closeSourceTab, closePreviewTab, reorderTabs, tabOverflowButton, closeTabOverflowMenu, openTabOverflowMenu, renderTabStrip, renderTabs, bindTabStripReorderTarget };
 }

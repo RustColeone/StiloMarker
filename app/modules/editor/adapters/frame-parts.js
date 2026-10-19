@@ -3,8 +3,6 @@
 // or a layout change means for it, and its page-wide controls (Find, the tab
 // strips' overflow menus, Copy on code blocks, the end of a drag).
 // Part of the Editor: `app` is its shared context (surface.js).
-import { filesIn } from "../service/view.js";
-
 export function installFrameParts(app, shell) {
   const frame = shell.frame;
   shell.commands.add({ id: "editor.toggle-source", title: "Toggle Source", menu: { id: "view", group: 0, order: 2 }, run: () => frame.toggle("source") });
@@ -13,16 +11,16 @@ export function installFrameParts(app, shell) {
 
   // On the phone: one pane at a time, the top bar naming its file. Source and
   // Preview are one file's two views: switching (or swiping) between them keeps
-  // the file, and both list the open files (the source and preview tabs).
+  // the file, and both list the open files (the tabs of both groups).
   const project = () => app.controller.getProject();
   const isFile = (id) => project()?.nodes?.[id]?.kind === "file";
   const openFiles = () => {
-    const view = app.view.get();
-    return [...new Set([...filesIn(view, "source"), ...filesIn(view, "preview")])].filter(isFile)
+    const files = app.view.get().groups.flatMap((group) => group.tabs.map((tab) => tab.fileId));
+    return [...new Set(files)].filter(isFile)
       .map((id) => ({ id, name: project().nodes[id].name }));
   };
   frame.phonePanes.add({
-    id: "source", order: 10, element: () => app.elements.sourcePane, alternate: "preview",
+    id: "source", order: 10, element: () => app.elements.sourceBody, alternate: "preview",
     caption: () => app.controller.getActiveFile()?.name ?? "",
     fileId: () => app.controller.getActiveFile()?.id ?? null,
     canShow: (fileId) => app.canOpenFileInPane(fileId, "source"),
@@ -33,7 +31,7 @@ export function installFrameParts(app, shell) {
     }
   });
   frame.phonePanes.add({
-    id: "preview", order: 20, element: () => app.elements.previewPane, alternate: "source",
+    id: "preview", order: 20, element: () => app.elements.previewBody, alternate: "source",
     caption() {
       const paneView = app.shownPaneView(); // a preview tab that is not a file (History's diff)
       return (paneView ? (paneView.tab()?.caption ?? paneView.tab()?.label) : project()?.nodes?.[app.view.get().previewFileId]?.name) ?? "";
@@ -57,13 +55,13 @@ export function installFrameParts(app, shell) {
   app.elements.app.dataset.wordWrap = app.settings.wordWrap ? "on" : "off";
   app.elements.app.style.setProperty("--indent-tab-size", "4");
 
-  // The tab strips' overflow menus.
-  for (const pane of ["source", "preview"]) {
-    app.tabOverflowButton(pane)?.addEventListener("click", (event) => {
+  // The groups' tab strips' overflow menus.
+  for (const group of ["left", "right"]) {
+    app.tabOverflowButton(group)?.addEventListener("click", (event) => {
       event.stopPropagation();
-      const isOpen = app.tabOverflowButton(pane)?.classList.contains("is-open");
+      const isOpen = app.tabOverflowButton(group)?.classList.contains("is-open");
       app.closeTabOverflowMenu();
-      if (!isOpen) app.openTabOverflowMenu(pane);
+      if (!isOpen) app.openTabOverflowMenu(group);
     });
   }
   document.addEventListener("click", (event) => {
