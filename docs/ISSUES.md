@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-19 · release `v0.1.99` (deployed with v0.1.96–v0.1.98; public checks passed)
+Last updated: 2026-10-19 · release `v0.1.100` (not deployed; v0.1.99 is live)
 
 ---
 
@@ -68,6 +68,18 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.100: the areas are hosts
+
+Step 5j. Groundwork for moving pages between areas; one visible change.
+
+- The bottom area's header is one row now: the LOG tab, the Log's filters,
+  Copy and Clear, and the area's ×. It was two rows (a LOG title over the
+  filters). On the phone the Log's toolbar sits on a second row of the sheet.
+- Linked Notes and Session are now pages of the left area, drawn by the app
+  as sections; they look and behave as before (collapsed per section, kept).
+- New pages can be added to the left area (as sections), the side panel and
+  the bottom area (as tabs) the same way.
 
 ### v0.1.99: the editor groups are kept
 

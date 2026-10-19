@@ -169,12 +169,11 @@ export function createLinks(app) {
   }
 
   function renderLinksPanel(project, activeFile) {
-    if (!app.linksPanelEl) return;
     if (!activeFile || !isMarkdownFileName(activeFile.name)) {
-      app.linksPanelEl.hidden = true;
+      app.showLinksPanel(false);
       return;
     }
-    app.linksPanelEl.hidden = false;
+    app.showLinksPanel(true);
 
     const activePath = getPath(project, activeFile.id);
     const activeSegments = activePath.split("/").filter(Boolean);

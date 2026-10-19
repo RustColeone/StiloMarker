@@ -115,7 +115,8 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
     isPreviewableFileName,
     resolveProjectAssetUrl,
     editorLinkTooltip: createLinkTooltip(),
-    linksPanelEl: document.getElementById("links-panel"),
+    // The left area's Linked Notes section (Shell's pages): shown while the open file is a note.
+    showLinksPanel: (shown) => shell.pages.available("left", "links", shown),
     outgoingLinksListEl: document.getElementById("outgoing-links-list"),
     backlinksListEl: document.getElementById("backlinks-list")
   };
@@ -189,6 +190,9 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
     app.drawPreviewPane(project, previewFileId ? project.nodes[previewFileId] : null);
     app.renderLinksPanel(project, activeFile);
   });
+  // The left area's Linked Notes section (Shell's pages), shown while a note is open.
+  shell.pages.add({ host: "left", id: "links", order: 10, label: "Linked Notes", title: "Linked notes",
+    body: document.getElementById("links-panel-body"), className: "links-sidebar-panel", headerClass: "links-panel-header", available: false });
   installFrameParts(app, shell);
   installTogether(app, workspace, composing);
   // Where the reader was, kept when the page hides or goes (resume.js, tabs.js).

@@ -10,8 +10,8 @@
 import { createAreas } from "./areas.js";
 import { createPhone } from "./phone.js";
 
-export function createFrame({ settings, events, registry, commands, run, closeMenus, openSettings, log }) {
-  const areas = createAreas({ settings, events, log });
+export function createFrame({ settings, events, registry, pages, commands, run, closeMenus, openSettings, log }) {
+  const areas = createAreas({ settings, events, pages, log });
   const panes = { add: registry.add, all: registry.all };
   const phone = createPhone({ panes, isPhone: areas.isPhone, closeMenus, events, run });
   areas.usePhone(phone);

@@ -1,6 +1,6 @@
 // The desktop frame (Shell's): the areas around the editor and whether they
 // show: the left area (the explorer sidebar, docked or floating over the
-// editor, with its collapsible sections), the right area (the side panel), the
+// editor, with its sections: pages.js draws them), the right area (the side panel), the
 // bottom area (the log), and the middle's source and preview panes; their
 // sizes (the splitters), all kept in the settings. Showing an area is
 // announced ("area" { area, shown }) so its owner can draw or load it; a
@@ -8,14 +8,13 @@
 // of layout ("layout").
 const PHONE_MAX_WIDTH = 900; // must match the CSS breakpoint
 const LAYOUT_KEYS = ["explorer", "explorerAnchor", "preview", "source", "chatPanel", "debugPanel", "sidebarWidth",
-  "previewWidth", "previewWidthCustomized", "chatWidth", "debugPanelHeight", "sidebarPanels"];
-const SECTIONS = ["links", "session"]; // the left area's collapsible sections
+  "previewWidth", "previewWidthCustomized", "chatWidth", "debugPanelHeight"];
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 const NAMES = { left: "Explorer", right: "Chat", bottom: "Log", source: "Source", preview: "Preview" };
 
-export function createAreas({ settings, events, log = () => {}, doc = globalThis.document, win = globalThis.window }) {
+export function createAreas({ settings, events, pages, log = () => {}, doc = globalThis.document, win = globalThis.window }) {
   const $ = (id) => doc.getElementById(id);
   const appEl = $("app"), shellEl = $("workspace-shell"), editorGrid = $("editor-grid");
   const explorerPanel = $("explorer-panel"), rightPanel = $("chat-panel"), logPanel = $("debug-panel");
@@ -66,37 +65,11 @@ export function createAreas({ settings, events, log = () => {}, doc = globalThis
     settings.change({ explorer: "collapsed" }, "pressed outside the floating explorer");
   }, true);
 
-  // ── The left area's sections (Linked Notes, Session) ──
-  // Collapsed per section and kept; never chosen, they start collapsed on a
-  // phone, where they pushed the file tree (the reason for the sidebar) off screen.
-  function sectionCollapsed(id) {
-    const stored = settings.sidebarPanels;
-    if (stored && typeof stored === "object" && id in stored) return Boolean(stored[id]);
-    return isPhone();
-  }
-  function drawSections() {
-    for (const toggleEl of doc.querySelectorAll(".sidebar-panel-toggle")) {
-      const id = toggleEl.dataset.panel;
-      if (!id) continue;
-      const collapsed = sectionCollapsed(id);
-      toggleEl.closest(".sidebar-panel")?.setAttribute("data-collapsed", String(collapsed));
-      toggleEl.setAttribute("aria-expanded", String(!collapsed));
-    }
-  }
-  function toggleSection(id) {
-    if (!SECTIONS.includes(id)) return;
-    // Both written the first time, so flipping one doesn't leave the other
-    // following the viewport and collapsing again on the next resize.
-    const next = { ...(settings.sidebarPanels ?? {}) };
-    for (const key of SECTIONS) if (!(key in next)) next[key] = sectionCollapsed(key);
-    next[id] = !next[id];
-    settings.change({ sidebarPanels: next }, `${id} section ${next[id] ? "collapsed" : "expanded"}`);
-  }
-  // Show a section: the explorer opened, the section expanded, scrolled to.
+  // Show one of the left area's sections (pages.js draws them): the explorer
+  // opened, the section expanded, scrolled to.
   function revealSection(id) {
     if (settings.explorer !== "expanded") settings.change({ explorer: "expanded" }, `show the ${id} section`);
-    if (sectionCollapsed(id)) toggleSection(id);
-    doc.querySelector(`.sidebar-panel-toggle[data-panel="${id}"]`)?.closest(".sidebar-panel")?.scrollIntoView({ block: "nearest" });
+    pages?.reveal("left", id);
   }
 
   // ── Applying the settings to the page ──
@@ -111,7 +84,6 @@ export function createAreas({ settings, events, log = () => {}, doc = globalThis
     // page there (its desktop rule outweighs the phone's and pinned the editor to
     // the 48px activity bar). The desktop choice is kept for the trip back.
     appEl.dataset.explorerAnchor = isPhone() ? "docked" : settings.explorerAnchor;
-    drawSections();
     appEl.dataset.preview = settings.preview;
     appEl.dataset.source = settings.source;
     appEl.dataset.chat = settings.chatPanel;
@@ -183,10 +155,6 @@ export function createAreas({ settings, events, log = () => {}, doc = globalThis
   bind("chat-collapse-button", "right");
   bind("log-collapse-button", "bottom");
   $("explorer-anchor-button")?.addEventListener("click", () => setExplorerAnchor(settings.explorerAnchor === "floating" ? "docked" : "floating"));
-  doc.addEventListener("click", (event) => {
-    const toggleEl = event.target.closest?.(".sidebar-panel-toggle");
-    if (toggleEl?.dataset.panel) toggleSection(toggleEl.dataset.panel);
-  });
 
   // The window resized (keyboard, browser chrome): announced. Crossing the
   // phone breakpoint (rotation, a resized window) decides the layout again.

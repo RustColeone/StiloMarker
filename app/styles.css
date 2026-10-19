@@ -914,6 +914,21 @@ p {
   font-size: 12px;
 }
 
+/* The left area's section host (Shell's pages) draws nothing of its own: its
+   sections are the sidebar's rows; a body not yet claimed by its page stays out. */
+.sidebar-sections {
+  display: contents;
+}
+
+.sidebar-sections > :not(.sidebar-panel) {
+  display: none;
+}
+
+/* The side panel's slot for its open page's toolbar (the Agent's history). */
+.tab-host-toolbar {
+  display: contents;
+}
+
 .sidebar-panel {
   display: grid;
   gap: 6px;
@@ -3261,29 +3276,76 @@ menu {
   overflow: hidden;
 }
 
+/* The bottom area's header (a tab host): its tabs, the open page's toolbar,
+   and the area's ×. */
 .debug-panel-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 5px 10px 0;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 10px 0 4px;
   border-bottom: 1px solid var(--border);
 }
 
-.debug-panel-heading {
+.area-tabs {
+  display: flex;
+  align-self: stretch;
+  flex: none;
   min-width: 0;
-  display: grid;
-  gap: 4px;
 }
 
-.debug-panel-actions {
+.area-tab {
+  padding: 0 10px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.area-tab:hover {
+  color: var(--text);
+}
+
+.area-tab[aria-selected="true"] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.area-toolbar {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.area-pages,
+.log-page {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+/* The Log's toolbar: its filters, then Copy and Clear at the end. */
+.log-toolbar {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding-bottom: 5px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 0;
 }
 
-.debug-panel-header button {
+.log-toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+.log-toolbar button,
+.debug-panel-header > .debug-collapse-button {
   min-height: 24px;
   padding: 0 8px;
   border: 1px solid var(--border-strong);
@@ -3961,7 +4023,27 @@ menu {
     height: var(--sheet-drag-height);
   }
 
-  .app-shell[data-mobile-bottom] .debug-panel-actions button {
+  /* The open page's toolbar on a row of its own under the tabs and the ×. */
+  .app-shell[data-mobile-bottom] .debug-panel-header {
+    flex-wrap: wrap;
+    padding-bottom: 4px;
+  }
+
+  .app-shell[data-mobile-bottom] .area-toolbar {
+    order: 3;
+    flex-basis: 100%;
+  }
+
+  .app-shell[data-mobile-bottom] .area-tabs {
+    min-height: 36px;
+  }
+
+  .app-shell[data-mobile-bottom] .debug-panel-header > .debug-collapse-button {
+    margin-left: auto;
+  }
+
+  .app-shell[data-mobile-bottom] .log-toolbar > button,
+  .app-shell[data-mobile-bottom] .debug-panel-header > .debug-collapse-button {
     min-height: 36px;
     min-width: 36px;
   }

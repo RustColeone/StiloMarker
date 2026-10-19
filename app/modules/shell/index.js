@@ -100,7 +100,10 @@ export default defineModule({
     const events = ctx.emitter();
     const { commands, menus, run } = createCommands(ctx);
     const dialogs = createDialogs();
-    const pages = createPages({ registry: ctx.registry({ key: "key" }), settings });
+    // The pages in the areas' hosts; the left's sections start collapsed on a
+    // phone, which the frame (made below) tells.
+    let frame = null;
+    const pages = createPages({ registry: ctx.registry({ key: "key" }), settings, events, isPhone: () => frame?.isPhone() ?? false });
     const settingsDialog = createSettingsDialog({ pages, settings, registry: ctx.registry() });
     // The theme follows its setting, and the system's when it is "system".
     applyTheme(settings.theme);
@@ -161,7 +164,7 @@ export default defineModule({
       log: (message) => ctx.log(message) });
 
     // The frame: the areas around the editor and what shows in them (desktop and phone).
-    const frame = createFrame({ settings, events, registry: ctx.registry(), commands, run, closeMenus: () => menuBar.close(),
+    frame = createFrame({ settings, events, registry: ctx.registry(), pages, commands, run, closeMenus: () => menuBar.close(),
       openSettings: (page) => settingsDialog.open(page), log: (message) => ctx.log(message) });
     frame.apply();
     // The log panel (the bottom area): drawn when the layout changes or the
@@ -169,6 +172,12 @@ export default defineModule({
     const logPanel = createLogPanel({ shown: () => frame.shown("bottom"), copyText: dialogs.copyText, notify: (message) => notice(message) });
     events.on("layout", () => logPanel.render());
     events.on("area", ({ area }) => { if (area === "bottom") logPanel.render(); });
+    // The bottom area's page: its filters, Copy and Clear beside its tab.
+    const doc = globalThis.document;
+    if (doc) {
+      pages.add({ host: "bottom", id: "log", order: 10, label: "Log", title: "What the app did, and the kernel's trace",
+        body: doc.getElementById("log-page"), toolbar: doc.getElementById("log-toolbar"), shown: (visible) => { if (visible) logPanel.render(); } });
+    }
     logPanel.render();
     // The server is where the settings say.
     const server = createServer();

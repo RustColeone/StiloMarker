@@ -104,9 +104,8 @@ export function installEvents(app) {
   // The two pages of the side panel (Shell's pages): each draws only while open.
   pages.add({
     host: "side", id: "agent", order: 1, label: "Agent", title: "The workspace agent: asks, edits and organizes files",
-    body: document.querySelector("#agent-page"), newItem: app.createNewChatConversation,
+    body: document.querySelector("#agent-page"), toolbar: elements.chatHistoryToggleButton, newItem: app.createNewChatConversation,
     shown(visible) {
-      if (elements.chatHistoryToggleButton) elements.chatHistoryToggleButton.hidden = !visible;
       if (!visible) {
         const current = app.getActiveChatThread();
         if (current) current.draft = elements.chatInput.value;

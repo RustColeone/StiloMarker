@@ -123,7 +123,7 @@ async def main():
 
         # Its header drags it: a flick goes one step (half → full → half →
         # closed); a slow drag settles at the nearest of closed, half and full.
-        header = '#debug-panel .debug-panel-heading .eyebrow'
+        header = '#debug-panel .area-tabs'
         topbar = await page.evaluate('Math.round(document.querySelector(".topbar").getBoundingClientRect().bottom)')
 
         async def flick(dy):

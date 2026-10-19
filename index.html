@@ -62,12 +62,9 @@
 
           <div id="explorer-tree" class="explorer-tree" role="tree" aria-label="Project files"></div>
 
-          <section id="links-panel" class="sidebar-panel links-sidebar-panel" aria-label="Linked notes" hidden>
-            <button class="sidebar-panel-header links-panel-header sidebar-panel-toggle" type="button"
-              data-panel="links" aria-expanded="true" aria-controls="links-panel-body">
-              <span class="sidebar-panel-caret" aria-hidden="true"></span>
-              <span class="sidebar-panel-title">Linked Notes</span>
-            </button>
+          <!-- The left area's sections (Shell's pages: Linked Notes, Session): each
+               owner adds its page and Shell draws its section around the body. -->
+          <div class="sidebar-sections" data-section-host="left">
             <div id="links-panel-body" class="sidebar-panel-body">
             <div class="links-section">
               <div class="links-section-label">Outgoing Links</div>
@@ -78,17 +75,9 @@
               <div id="backlinks-list" class="links-list"></div>
             </div>
             </div>
-          </section>
-
-          <section class="sidebar-panel collaboration-sidebar-panel" aria-label="Collaboration panel">
-            <button class="sidebar-panel-header sidebar-panel-toggle" type="button"
-              data-panel="session" aria-expanded="true" aria-controls="session-panel-body">
-              <span class="sidebar-panel-caret" aria-hidden="true"></span>
-              <span class="sidebar-panel-title">Session</span>
-              <!-- Stays in the header so the connection state is readable while
-                   the section is collapsed. -->
-              <span id="session-id-label" class="subtle-label">Offline</span>
-            </button>
+            <!-- Stays in the Session's header so the connection state is readable
+                 while the section is collapsed. -->
+            <span id="session-id-label" class="subtle-label">Offline</span>
             <div id="session-panel-body" class="sidebar-panel-body">
               <p id="session-detail-text" class="subtle-label">Not connected to a shared session.</p>
               <div id="presence-strip" class="presence-strip"></div>
@@ -97,7 +86,7 @@
                 <button id="workspace-mode-toggle" class="workspace-mode-toggle" type="button">⟳ Synced</button>
               </div>
             </div>
-          </section>
+          </div>
         </aside>
 
         <div id="workspace-splitter" class="panel-splitter workspace-splitter" role="separator" aria-orientation="vertical" aria-label="Resize explorer"></div>
@@ -208,24 +197,30 @@
 
           <div id="debug-splitter" class="panel-splitter debug-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize debug panel"></div>
 
-          <section id="debug-panel" class="debug-panel" aria-label="Log panel" hidden>
-            <div class="debug-panel-header">
-              <div class="debug-panel-heading">
-                <div class="eyebrow">Log</div>
+          <section id="debug-panel" class="debug-panel" aria-label="Bottom area" hidden>
+            <!-- A tab host (Shell's pages): the open page's toolbar beside its tabs. -->
+            <div class="debug-panel-header area-header">
+              <div class="area-tabs" role="tablist" aria-label="Bottom area" data-tab-host="bottom" data-tab-class="area-tab"></div>
+              <div class="area-toolbar" data-tab-host-toolbar="bottom">
+              <div id="log-toolbar" class="log-toolbar">
                 <div id="debug-tab-strip" class="debug-tab-strip" role="tablist" aria-label="Log tabs">
                   <button id="debug-tab-all" class="debug-tab is-active" data-tab="all" type="button" role="tab" aria-selected="true">All</button>
                   <button id="debug-tab-actions" class="debug-tab" data-tab="actions" type="button" role="tab" aria-selected="false">Actions</button>
                   <button id="debug-tab-responses" class="debug-tab" data-tab="responses" type="button" role="tab" aria-selected="false">Responses</button>
                   <button id="debug-tab-trace" class="debug-tab" data-tab="trace" type="button" role="tab" aria-selected="false" title="What the app did lately, and who did it: events, ignored and uncaught errors">Trace</button>
                 </div>
-              </div>
-              <div class="debug-panel-actions">
+                <span class="log-toolbar-spacer"></span>
                 <button id="debug-copy-button" type="button">Copy</button>
                 <button id="debug-clear-button" type="button">Clear</button>
-                <button id="log-collapse-button" class="debug-collapse-button" type="button" aria-label="Collapse log" title="Collapse log">×</button>
+              </div>
+              </div>
+              <button id="log-collapse-button" class="debug-collapse-button" type="button" aria-label="Close the bottom area" title="Close the bottom area">×</button>
+            </div>
+            <div class="area-pages">
+              <div id="log-page" class="log-page">
+                <div id="debug-log-list" class="debug-log-list"></div>
               </div>
             </div>
-            <div id="debug-log-list" class="debug-log-list"></div>
           </section>
         </main>
 
@@ -238,7 +233,7 @@
             <div id="chat-tabs" class="chat-tabs" role="tablist" aria-label="Side panel" data-tab-host="side"></div>
             <div class="chat-toolbar-actions">
               <button id="chat-new-thread-button" class="chat-toolbar-icon-btn" type="button" aria-label="New chat" title="New chat" data-tab-host-new="side">&#43;</button>
-              <button id="chat-history-toggle-button" class="chat-toolbar-icon-btn" type="button" aria-label="Chat history" title="Chat history" aria-pressed="false">&#9776;</button>
+              <span class="tab-host-toolbar" data-tab-host-toolbar="side"><button id="chat-history-toggle-button" class="chat-toolbar-icon-btn" type="button" aria-label="Chat history" title="Chat history" aria-pressed="false">&#9776;</button></span>
               <button id="chat-collapse-button" class="chat-toolbar-icon-btn" type="button" aria-label="Collapse chat" title="Collapse chat" aria-expanded="true">&#8250;</button>
             </div>
           </header>
