@@ -1,0 +1,11 @@
+{
+  "about": "Cloud's network messages (rule 7): a team's project made, deleted (into History's trash), copied out and brought in whole. The server half serves exactly these routes (server/stilo/modules/cloud/adapters/routes.py); only the browser half (app/modules/cloud/adapters/api.js) calls them.",
+  "module": "cloud",
+  "version": 1,
+  "routes": [
+    { "method": "POST", "path": "/api/workspaces/create", "query": ["token"], "body": ["team", "path", "name"], "reply": ["team", "path", "name", "kind", "id", "createdBy"] },
+    { "method": "POST", "path": "/api/workspaces/delete", "query": ["token"], "body": ["team", "path"], "reply": ["team", "path", "deleted", "trashDays"] },
+    { "method": "GET", "path": "/api/workspaces/export", "query": ["token", "team", "path"], "reply": ["team", "path", "name", "project"] },
+    { "method": "POST", "path": "/api/workspaces/import", "query": ["token"], "body": ["team", "path", "name", "project"], "reply": ["team", "path", "name", "kind", "id", "createdBy"] }
+  ]
+}

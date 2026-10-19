@@ -160,7 +160,7 @@ class WorkspaceBackupTests(unittest.TestCase):
         30 days; its owner restores it as it was; then the sweep removes it."""
         self.op({'type': 'create-file', 'parentPath': '', 'name': 'a.md', 'content': 'kept text'})
         self.reg.backup_sweep(now=self.t0)
-        self.assertEqual(self.reg.delete_entry(self.alice, 'qa', self.path)['trashDays'], 30)
+        self.assertEqual(self.reg.cloud.delete_entry(self.alice, 'qa', self.path)['trashDays'], 30)
         data = Path(self.tmp.name) / 'data'
         self.assertFalse((data / 'team_qa' / self.path).exists())
         self.assertFalse((data / '_backups' / 'qa' / self.path).exists())
@@ -180,7 +180,7 @@ class WorkspaceBackupTests(unittest.TestCase):
         self.assertIn('kept text', [n.get('content') for n in broker.project['nodes'].values()])
         self.assertTrue(self.backups(), 'its backups came back with it')
         self.reg.close_session(session)
-        self.reg.delete_entry(self.alice, 'qa', self.path)
+        self.reg.cloud.delete_entry(self.alice, 'qa', self.path)
         self.reg.backup_sweep(now=time.time() + 31 * DAY)
         self.assertEqual(self.reg.history.trash.list(self.alice, 'qa')['entries'], [])
         self.assertEqual(list((data / '_trash' / 'qa').iterdir()), [])

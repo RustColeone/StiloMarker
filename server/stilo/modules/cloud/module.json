@@ -1,0 +1,9 @@
+{
+  "name": "cloud",
+  "level": 6,
+  "uses": ["transport", "file_types", "workspace", "identity", "projects", "sync", "history"],
+  "owns": {
+    "routes": ["/api/workspaces/create", "/api/workspaces/delete", "/api/workspaces/export", "/api/workspaces/import"],
+    "rules": ["a project made, brought in, copied out or deleted whole"]
+  }
+}

@@ -1,7 +1,8 @@
 // The server's routes for cloud workspaces: browsing, making a folder, the
 // resume state and who may open a project are the server's Projects
-// (protocol/projects.contract.json); ping, create, delete, export and import
-// are still the legacy routes. (Images upload through Sync's routes.)
+// (protocol/projects.contract.json); create, delete, export and import are
+// the server's Cloud (protocol/cloud.contract.json); ping is the server's own.
+// (Images upload through Sync's routes.)
 import { normalizeServerUrl, parseResponse, throwForResponse } from "../../shell/index.js";
 
 async function pingServer(serverUrl) {

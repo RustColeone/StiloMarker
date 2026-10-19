@@ -13,12 +13,16 @@ A module is a package under stilo/modules with a module.json manifest
         return api           # what other modules may call
 
 ctx.config is what the server was started with (read-only; each module reads
-its own keys, and a missing one means "not set").
+its own keys, and a missing one means "not set"). ctx.every(seconds, run)
+runs run() again and again, that many seconds apart, once every module has
+started; ctx.on_stop(run) runs when the modules stop (the highest level
+first). start_modules returns the APIs by name, and stop().
 """
 import json
 import re
 import threading
 import types
+from collections.abc import Mapping
 from pathlib import Path
 
 _NAME = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -59,12 +63,19 @@ def define_module(init_path, start) -> Module:
 
 
 class _Context:
-    def __init__(self, module, apis, log, config):
+    def __init__(self, module, apis, log, config, timers, stops):
         self._module = module
         self._apis = apis
         self._log = log
+        self._timers, self._stops = timers, stops
         self.name = module.name
         self.config = config
+
+    def every(self, seconds, run):
+        self._timers.append((self._module.name, float(seconds), run))
+
+    def on_stop(self, run):
+        self._stops.append((self._module.name, run))
 
     def use(self, name):
         if name not in self._module.uses:
@@ -98,11 +109,52 @@ def start_modules(modules, log=lambda *parts: None, config=None):
                 raise LookupError(f"{module.name} uses {used}, which is not being started")
             if target.level >= module.level:
                 raise ValueError(f"{module.name} (level {module.level}) may not use {used} (level {target.level})")
-    apis = {}
+    apis, timers, stops = {}, [], []
     for module in sorted(modules, key=lambda m: (m.level, m.name)):
-        apis[module.name] = module.start(_Context(module, apis, log, config))
+        apis[module.name] = module.start(_Context(module, apis, log, config, timers, stops))
         log("kernel", f"started {module.name}")
-    return types.MappingProxyType(dict(apis))
+    return Started(apis, timers, stops, log)
+
+
+class Started(Mapping):
+    """The started modules' APIs by name (read-only), their timers running, and
+    stop(): the timers end and each module's on_stop runs, the highest level
+    first (a module stops before the ones it uses). A failing one is logged
+    and the others still run."""
+
+    def __init__(self, apis, timers, stops, log):
+        self._apis = dict(apis)
+        self._stops = stops
+        self._log = log
+        self._stopped = threading.Event()
+        for owner, seconds, run in timers:
+            threading.Thread(target=self._repeat, args=(owner, seconds, run), daemon=True, name=f"{owner}-every-{seconds:g}s").start()
+
+    def _repeat(self, owner, seconds, run):
+        while not self._stopped.wait(seconds):
+            try:
+                run()
+            except Exception as error:  # noqa: BLE001 - one failed round never stops the timer
+                self._log(owner, f"a timer failed: {error}")
+
+    def __getitem__(self, name):
+        return self._apis[name]
+
+    def __iter__(self):
+        return iter(self._apis)
+
+    def __len__(self):
+        return len(self._apis)
+
+    def stop(self):
+        if self._stopped.is_set():
+            return
+        self._stopped.set()
+        for owner, run in reversed(self._stops):
+            try:
+                run()
+            except Exception as error:  # noqa: BLE001 - every module gets to stop
+                self._log(owner, f"stopping failed: {error}")
 
 
 class Registry:

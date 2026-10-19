@@ -13,7 +13,8 @@ Static, for code from before the restructure:
     VERSION      the sync compatibility level (protocol/sync.contract.json)
     announce()   what the server's ping says about sync
 
-API (started by the kernel; config: pin, master_pin, state_file, edit_gap):
+API (started by the kernel; config: pin, master_pin, state_file, edit_gap;
+every 15 seconds the sessions whose lease ran out are closed):
     directory    service/directory.py: open workspaces by id, by session token,
                  by place; adopt(...) a project made whole, drop(team, relpath)
     places       service/places.py: where a team's project is and who may see
@@ -38,6 +39,7 @@ from .service.sessions import Sessions  # noqa: F401
 from .service.shared import SharedWorkspace  # noqa: F401
 
 VERSION = load_version()
+LEASE_SWEEP_SECONDS = 15
 PARTS = {"workspace": SimpleNamespace(apply_operation=apply_operation, touched_paths=touched_paths, utf16_length=utf16_length), "types": FILE_TYPES}
 
 
@@ -61,6 +63,7 @@ def start(ctx):
     directory = Directory(pin=ctx.config.get("pin"), state_file=ctx.config.get("state_file"), master_pin=ctx.config.get("master_pin"),
                           projects=ctx.use("projects"), identity=ctx.use("identity"), make=make, emit=events.emit)
     add_routes(transport, directory, VERSION)
+    ctx.every(LEASE_SWEEP_SECONDS, directory.expire_leases)
     return SimpleNamespace(directory=directory, places=Places(ctx.use("projects"), directory),
                            events=SimpleNamespace(on=events.on), open_live=make)
 

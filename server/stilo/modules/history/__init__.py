@@ -10,10 +10,13 @@ Static, for code from before the restructure:
         (data/_trash) for trash_days, at most TRASH_DAYS
     POLICY, MAX_PER_FILE (snapshot retention)
 
-API (started by the kernel; config: data_dir, trash_days): the HistoryDesk
-(service/desk.py), serving History's routes; it takes a safety backup when
-Sync says a change is about to lose data. also_back_up(back_up): another
-module's daily copies, kept beside the backups (Chats' databases).
+API (started by the kernel; config: data_dir, trash_days,
+backup_sweep_seconds): the HistoryDesk (service/desk.py), serving History's
+routes; it takes a safety backup when Sync says a change is about to lose
+data, sweeps (daily backups of the open projects that changed, then the
+trash) every backup_sweep_seconds and once more when the server stops.
+also_back_up(back_up(now)): another module's daily copies, kept in
+backup_folder(team, relpath, name) (Chats' databases).
 """
 from pathlib import Path
 
@@ -30,6 +33,10 @@ from .service.backups import Backups
 from .service.desk import HistoryDesk
 from .service.snapshots import MAX_PER_FILE, Snapshots  # noqa: F401
 from .service.trash import Trash
+
+# How often the open projects that changed are backed up (one daily backup
+# per active day, refreshed on each sweep).
+BACKUP_SWEEP_SECONDS = 15 * 60
 
 
 def _folder(root: Path, team: str, relpath: str) -> Path:
@@ -86,6 +93,14 @@ def start(ctx):
     desk = open_history(ctx.config.get("data_dir"), sync.places, ctx.use("identity"), ctx.config.get("trash_days", TRASH_DAYS))
     add_routes(ctx.use("transport"), desk)
     sync.events.on("before-destructive", lambda change: desk.before_destructive(change["workspace"], change["reason"]))
+    if ctx.config.get("data_dir") is not None:
+        def sweep():
+            made = desk.sweep()
+            if made:
+                ctx.log(f"daily backup refreshed for {made} workspace(s)")
+        ctx.every(ctx.config.get("backup_sweep_seconds", BACKUP_SWEEP_SECONDS), sweep)
+        # Keep the day's last state: a restart (a deploy) must not lose it.
+        ctx.on_stop(desk.sweep)
     return desk
 
 

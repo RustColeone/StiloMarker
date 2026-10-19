@@ -20,9 +20,12 @@ class HistoryDesk:
         self._also = []   # other modules' daily copies, kept beside the backups (also_back_up)
 
     def also_back_up(self, back_up) -> None:
-        """back_up(folder_of, now) runs on each sweep; folder_of(team, relpath, name)
-        is a folder of that name beside the project's backups (Chats' databases)."""
+        """back_up(now) runs on each sweep (Chats' daily copies, kept in backup_folder)."""
         self._also.append(back_up)
+
+    def backup_folder(self, team, relpath, name):
+        """A folder of that name beside the project's backups."""
+        return self.backups.store(team, relpath).folder / name
 
     def _project(self, token, team, path):
         return self._places.authorize_project(token, team, path)
@@ -89,7 +92,7 @@ class HistoryDesk:
     def sweep(self, now=None) -> int:
         made = self.backups.sweep(self._places.live_workspaces(), now)
         for back_up in self._also:
-            back_up(lambda team, relpath, name: self.backups.store(team, relpath).folder / name, now)
+            back_up(now)
         if self.trash is not None:
             self.trash.sweep(now)
         return made

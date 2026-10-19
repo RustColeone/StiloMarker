@@ -25,7 +25,7 @@ _mcp_module_dir = str(Path(__file__).resolve().parent)
 if _mcp_module_dir not in sys.path:
     sys.path.insert(0, _mcp_module_dir)
 from stilo.kernel import start_modules
-from stilo.modules import (assistant as assistant_module, characters as characters_module, file_types as file_types_module,
+from stilo.modules import (assistant as assistant_module, characters as characters_module, cloud as cloud_module, file_types as file_types_module,
                            identity as identity_module, models as models_module, projects as projects_module, sync as sync_module, history as history_module, comments as comments_module, chats as chats_module, transport as transport_module, workspace as workspace_module)
 from stilo.modules.file_types import BUILTIN as FILE_TYPES
 from stilo.kernel.log import log as _log, ignore as _ignore, best_effort as _best_effort
@@ -42,7 +42,7 @@ from stilo.modules.models import IMAGE_SIZES, GeneratedImages, MCPManager, MCPTu
 def start_server_modules(config=None):
     """The server's modules (docs/ARCHITECTURE.md), started with the server's
     settings (config); more join as the restructure moves code."""
-    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE, identity_module.MODULE, models_module.MODULE, projects_module.MODULE, sync_module.MODULE, characters_module.MODULE, history_module.MODULE, comments_module.MODULE, chats_module.MODULE, assistant_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"), config=config)
+    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE, identity_module.MODULE, models_module.MODULE, projects_module.MODULE, sync_module.MODULE, characters_module.MODULE, history_module.MODULE, comments_module.MODULE, chats_module.MODULE, assistant_module.MODULE, cloud_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"), config=config)
 
 
 def _truthy(value: str | None) -> bool:
@@ -1030,20 +1030,20 @@ class AgentThreads:
 class WorkspaceRegistry:
     """The server's modules, started together (with the server's settings), and
     what is still done here until a module does it itself: the agent's shared
-    conversations, and creating, deleting, exporting and importing projects.
-    Shrinks to nothing in step S4s (docs/ARCHITECTURE.md)."""
+    conversations. Shrinks to nothing in step S4s (docs/ARCHITECTURE.md)."""
 
     def __init__(self, pin: str, legacy_state_file: Path, master_pin: str | None = None,
                  accounts: "AccountStore | None" = None, data_dir: Path | None = None, trash_days: int = 30):
         self.modules = start_server_modules({"pin": pin, "master_pin": master_pin, "state_file": legacy_state_file,
                                              "accounts": accounts, "data_dir": data_dir, "trash_days": trash_days,
-                                             "edit_gap": EDIT_SESSION_GAP_SECONDS})
+                                             "edit_gap": EDIT_SESSION_GAP_SECONDS, "backup_sweep_seconds": BACKUP_SWEEP_SECONDS})
         self.identity = self.modules["identity"]
         self.projects = self.modules["projects"]
         self.directory = self.modules["sync"].directory
         self.history = self.modules["history"]
         self.comments = self.modules["comments"]
         self.chats = self.modules["chats"]  # its runner (the agent) is set by build_server
+        self.cloud = self.modules["cloud"]
         self.agent_threads = AgentThreads()
         self.projects.reserve("chat.json")  # the agent's conversations, never listed as an entry
         self.data_dir = data_dir
@@ -1072,132 +1072,6 @@ class WorkspaceRegistry:
     def broker_for_token(self, token: str):
         return self.directory.broker_for_token(token)
 
-    # ---- Creating, deleting, exporting and importing projects ----------------
-    def create_project(self, token: str, team: str, path: str, name: str) -> dict:
-        """Create an empty project directory (with manifest.json) at path. A
-        publish-to-cloud seeds content afterwards via the normal op stream."""
-        identity = self.identity.require(token)
-        team = self.identity.require_team(identity, team)
-        relpath = safe_relpath(path)
-        name = safe_component(name)
-        parent = self.projects.folders.under_team(team, relpath)
-        if relpath and parent.exists() and self.projects.folders.is_project(parent):
-            raise ValueError("Cannot nest a project inside another project")
-        parent.mkdir(parents=True, exist_ok=True)  # segments are all sandboxed
-        project_dir = parent / name
-        if project_dir.exists():
-            raise ValueError("A file or folder with that name already exists")
-        new_rel = f"{relpath}/{name}" if relpath else name
-        workspace_id = f"{team}/{new_rel}"
-        self.directory.adopt(team, new_rel, project_dir, default_project())
-        self.identity.claim(identity, project_dir)
-        _log("WORKSPACE", f"{identity['username']} created project {workspace_id}")
-        return {
-            "team": team, "path": new_rel, "name": name, "kind": "project",
-            "id": workspace_id, "createdBy": identity["username"],
-        }
-
-    def delete_entry(self, token: str, team: str, path: str) -> dict:
-        """Delete a project or folder at ``path``. A project may only be removed
-        by its recorded owner (createdBy); a folder may be removed by any team
-        member, but only if it holds no projects owned by someone else (so a
-        folder delete can't bypass the per-project owner rule). The team root
-        itself can never be deleted."""
-        identity = self.identity.require(token)
-        team = self.identity.require_team(identity, team)
-        relpath = safe_relpath(path)
-        if not relpath:
-            raise ValueError("Cannot delete the team root")
-        target = self.projects.folders.under_team(team, relpath)
-        if not target.is_dir():
-            raise ValueError("No such folder or project")
-        if self.projects.is_reserved(target.name):
-            raise ValueError("Cannot delete a reserved entry")
-        self.identity.may_delete(identity, team, target, lambda: self.projects.legacy_meta(team, relpath))
-        workspace_id = f"{team}/{relpath}"
-        # Its live workspaces (and nested projects') close first, so an open
-        # session can't write files again after the tree is gone.
-        self.directory.drop(team, relpath)
-        kind = "project" if self.projects.folders.is_project(target) else "folder"
-        self.history.trash.put(identity["username"], team, relpath, target, kind)
-        _log("WORKSPACE", f"{identity['username']} deleted {workspace_id} (kept in the trash)")
-        return {"team": team, "path": relpath, "deleted": True, "trashDays": self.history.trash.days}
-
-    def export_project(self, token: str, team: str, path: str) -> dict:
-        """Return a portable copy of a project as ``{name, project}`` where
-        ``project`` is the full model with text hydrated inline and image bytes
-        inlined as data: URLs. Any team member with access may export (to copy
-        or duplicate a project)."""
-        identity = self.identity.require(token)
-        team = self.identity.require_team(identity, team)
-        relpath = safe_relpath(path)
-        if not relpath:
-            raise ValueError("Not a project")
-        proj = self.projects.folders.under_team(team, relpath)
-        if not self.projects.folders.is_project(proj):
-            raise ValueError("Not a project directory")
-        if not self.projects.can_access(identity, team, relpath):
-            raise PermissionError("You do not have access to that project")
-        # A live workspace is fresher than its folder.
-        workspace = self.directory.read(team, relpath, proj)
-        with workspace.lock:
-            project = copy.deepcopy(workspace.project)
-        # Inline image bytes as data: URLs so the payload is self-contained.
-        for node_id, node in project.get("nodes", {}).items():
-            if node.get("kind") == "file" and FILE_TYPES.is_image(node.get("name", "")):
-                rel = path_of(project, node_id)
-                fpath = (proj / rel) if rel else None
-                if fpath and fpath.is_file():
-                    raw = fpath.read_bytes()
-                    mime = mimetypes.guess_type(node.get("name", ""))[0] or "application/octet-stream"
-                    node["content"] = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
-                else:
-                    node["content"] = ""
-        return {"team": team, "path": relpath, "name": proj.name, "project": project}
-
-    def import_project(self, token: str, team: str, path: str, name: str, project: dict) -> dict:
-        """Create a new project at ``path`` from a portable ``{name, project}``
-        payload (see export_project). Image nodes carrying data: URLs are
-        externalized to files; the importer is recorded as its owner.
-        Node names are validated so a crafted payload cannot escape the project
-        directory."""
-        identity = self.identity.require(token)
-        team = self.identity.require_team(identity, team)
-        relpath = safe_relpath(path)
-        name = safe_component(name)
-        if not isinstance(project, dict) or not isinstance(project.get("nodes"), dict):
-            raise ValueError("Invalid project payload")
-        root_id = project.get("rootId")
-        for node in project["nodes"].values():
-            if node.get("id") == root_id:
-                continue
-            nm = str(node.get("name", ""))
-            if "/" in nm or "\\" in nm or nm in ("", ".", ".."):
-                raise ValueError("Invalid file or folder name in payload")
-        parent = self.projects.folders.under_team(team, relpath)
-        if relpath and parent.exists() and self.projects.folders.is_project(parent):
-            raise ValueError("Cannot nest a project inside another project")
-        parent.mkdir(parents=True, exist_ok=True)
-        final = name
-        counter = 2
-        while (parent / final).exists():
-            final = f"{name}-{counter}"
-            counter += 1
-        project_dir = parent / final
-        new_rel = f"{relpath}/{final}" if relpath else final
-        workspace_id = f"{team}/{new_rel}"
-        model = copy.deepcopy(project)
-        model["sourceMode"] = "memory"
-        if root_id and root_id in model.get("nodes", {}):
-            model["nodes"][root_id]["name"] = final
-        model["name"] = final
-        self.directory.adopt(team, new_rel, project_dir, model)
-        self.identity.claim(identity, project_dir)
-        _log("WORKSPACE", f"{identity['username']} imported project {workspace_id}")
-        return {
-            "team": team, "path": new_rel, "name": final, "kind": "project",
-            "id": workspace_id, "createdBy": identity["username"],
-        }
 
 
 # Compressed static files, keyed by path and invalidated when the file changes
@@ -1343,78 +1217,6 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             raise PermissionError("Sign in to use the agent (Settings → Collaboration → Account). "
                                   "If you are signed in, reload the page.")
         return identity
-
-    def _handle_create_project(self, parsed):
-        try:
-            token = self._extract_token(parsed)
-            payload = self._read_json()
-            result = self.registry.create_project(
-                token,
-                str(payload.get("team", "")),
-                str(payload.get("path", "")),
-                str(payload.get("name", "")),
-            )
-            self._write_json(HTTPStatus.OK, result)
-            self._log_request(200, f"created project {result['id']}")
-        except PermissionError as error:
-            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
-            self._log_request(403, str(error))
-        except ValueError as error:
-            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
-            self._log_request(400, str(error))
-
-    def _handle_delete(self, parsed):
-        try:
-            token = self._extract_token(parsed)
-            payload = self._read_json()
-            result = self.registry.delete_entry(
-                token,
-                str(payload.get("team", "")),
-                str(payload.get("path", "")),
-            )
-            self._write_json(HTTPStatus.OK, result)
-            self._log_request(200, f"deleted {result['team']}/{result['path']}")
-        except PermissionError as error:
-            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
-            self._log_request(403, str(error))
-        except ValueError as error:
-            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
-            self._log_request(400, str(error))
-
-    def _handle_export_project(self, parsed):
-        try:
-            token = self._extract_token(parsed)
-            query = parse_qs(parsed.query)
-            team = query.get("team", [""])[0]
-            path = query.get("path", [""])[0]
-            self._write_json(HTTPStatus.OK, self.registry.export_project(token, team, path))
-            self._log_request(200, f"exported {team}/{path}")
-        except PermissionError as error:
-            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
-            self._log_request(403, str(error))
-        except ValueError as error:
-            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
-            self._log_request(400, str(error))
-
-    def _handle_import_project(self, parsed):
-        try:
-            token = self._extract_token(parsed)
-            payload = self._read_json()
-            result = self.registry.import_project(
-                token,
-                str(payload.get("team", "")),
-                str(payload.get("path", "")),
-                str(payload.get("name", "")),
-                payload.get("project") or {},
-            )
-            self._write_json(HTTPStatus.OK, result)
-            self._log_request(200, f"imported project {result['id']}")
-        except PermissionError as error:
-            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
-            self._log_request(403, str(error))
-        except ValueError as error:
-            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
-            self._log_request(400, str(error))
 
     def _handle_chat_status(self):
         # Status is public info (no key leaves the server). Report it even to
@@ -1720,16 +1522,12 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
 LEGACY_ROUTES = [
     ("GET", "/api/chat/status", False, lambda h, parsed: h._handle_chat_status()),
     ("GET", "/api/chat/workspace", False, lambda h, parsed: h._handle_get_chat_workspace(parsed)),
-    ("GET", "/api/workspaces/export", False, lambda h, parsed: h._handle_export_project(parsed)),
     ("GET", "/api/generated", False, lambda h, parsed: h._handle_generated(parsed)),
     ("POST", "/api/chat/mcp", False, lambda h, parsed: h._handle_mcp()),
     ("POST", "/api/chat", False, lambda h, parsed: h._handle_chat()),
     ("POST", "/api/chat/prompt", False, lambda h, parsed: h._handle_persona_prompt()),
     ("POST", "/api/generate", False, lambda h, parsed: h._handle_generate()),
     ("POST", "/api/chat/workspace", False, lambda h, parsed: h._handle_post_chat_workspace(parsed)),
-    ("POST", "/api/workspaces/create", False, lambda h, parsed: h._handle_create_project(parsed)),
-    ("POST", "/api/workspaces/delete", False, lambda h, parsed: h._handle_delete(parsed)),
-    ("POST", "/api/workspaces/import", False, lambda h, parsed: h._handle_import_project(parsed)),
 ]
 
 
@@ -1768,31 +1566,14 @@ def build_server(host: str, port: int, pin: str, static_root: Path, state_file: 
                 return
             super().handle_error(request, client_address)
 
-    class ServerWithPresenceSweep(QuietThreadingHTTPServer):
+    class ServerWithModules(QuietThreadingHTTPServer):
         def server_close(self):
-            self.presence_stop.set()
-            # Keep the day's last state: a restart (deploy) must not lose it.
-            try:
-                registry.backup_sweep()
-            except Exception as error:  # noqa: BLE001
-                _log("BACKUP", f"shutdown backup sweep failed: {error}")
-            registry.chats.shutdown()
+            # The modules stop: the last backups (a restart must not lose the
+            # day's state), Chats' last copies, their timers.
+            registry.modules.stop()
             super().server_close()
 
-    server = ServerWithPresenceSweep((host, port), handler)
-    server.presence_stop = threading.Event()
-    def sweep_presence():
-        while not server.presence_stop.wait(15):
-            registry.expire_leases()
-            registry.chats.expire_claims()
-    threading.Thread(target=sweep_presence, daemon=True, name="presence-lease-sweep").start()
-    def sweep_backups():
-        while not server.presence_stop.wait(BACKUP_SWEEP_SECONDS):
-            made = registry.backup_sweep()
-            if made:
-                _log("BACKUP", f"daily backup refreshed for {made} workspace(s)")
-    if data_dir is not None:
-        threading.Thread(target=sweep_backups, daemon=True, name="workspace-backup-sweep").start()
+    server = ServerWithModules((host, port), handler)
     return server
 
 

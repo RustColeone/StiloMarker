@@ -18,6 +18,37 @@ def mod(name, level, uses, start=lambda ctx: {}):
 
 
 class KernelTests(unittest.TestCase):
+    def test_timers_run_until_stop_and_modules_stop_highest_first(self):
+        import threading, time
+        ticks, stopped = [], []
+        ticked = threading.Event()
+        def low(ctx):
+            ctx.every(0.01, lambda: (ticks.append("low"), ticked.set()))
+            ctx.every(0.01, lambda: 1 / 0)  # a failing round is logged, the timer goes on
+            ctx.on_stop(lambda: stopped.append("low"))
+            return {}
+        def high(ctx):
+            ctx.on_stop(lambda: 1 / 0)  # a failing stop is logged, the others still stop
+            ctx.on_stop(lambda: stopped.append("high"))
+            return {}
+        logged, failed = [], threading.Event()
+        def log(*parts):
+            logged.append(parts)
+            if "timer failed" in str(parts):
+                failed.set()
+        started = start_modules([mod("low", 1, [], low), mod("high", 2, ["low"], high)], log=log)
+        self.assertTrue(ticked.wait(2), "the timer ran")
+        self.assertTrue(failed.wait(2), "the failing timer ran and was logged")
+        started.stop()
+        time.sleep(0.05)  # a round already under way finishes
+        count = len(ticks)
+        time.sleep(0.05)
+        self.assertEqual(len(ticks), count, "no more rounds once stopped")
+        self.assertEqual(stopped, ["high", "low"])
+        started.stop()
+        self.assertEqual(stopped, ["high", "low"], "stopping twice stops once")
+        self.assertTrue(any("stopping failed" in str(parts) for parts in logged))
+
     def test_every_module_reads_the_same_config_and_cannot_change_it(self):
         seen = []
         def start(ctx):

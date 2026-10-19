@@ -69,6 +69,18 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.86: the server's Cloud module
+
+Step S4s-4. Nothing changes for users.
+
+- Making, deleting (into the trash), exporting and importing a project on
+  the server are a module of their own (Cloud), the server half of the
+  browser's file browser. Exporting and importing now have a test, with an
+  image travelling inside the copy.
+- What the server does now and then (closing quiet sessions and replies,
+  the backup sweep) and the last backup when it stops are each module's
+  own, run by the kernel.
+
 ### v0.1.85: History, Comments and Chats start themselves on the server
 
 Step S4s-3. Nothing changes for users.

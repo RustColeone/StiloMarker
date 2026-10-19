@@ -236,7 +236,7 @@ def run_broker_selftest(state_file):
 
     # Create a normal folder, then a project inside it.
     _reg.projects.make_folder(_alice, "qa", "", "workspaces")
-    _created = _reg.create_project(_alice, "qa", "workspaces", "Alpha")
+    _created = _reg.cloud.create_project(_alice, "qa", "workspaces", "Alpha")
     assert _created["id"] == "qa/workspaces/Alpha"
     _alpha_dir = _data / "team_qa" / "workspaces" / "Alpha"
     assert (_alpha_dir / "manifest.json").is_file(), "project must carry a manifest.json"

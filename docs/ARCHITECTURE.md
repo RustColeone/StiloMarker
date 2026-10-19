@@ -21,7 +21,7 @@ This file is the short reference that the structure tests enforce.
   | 3 | Editor (browser), Sync (browser), Characters, Projects (server) |
   | 4 | History (browser), Comments (browser), Explorer (browser), Sync (server: it asks Projects who may open) |
   | 5 | Assistant (browser), Chats (browser), Cloud (browser), History (server), Comments (server) |
-  | 6 | Chats (server), Assistant (server); in the browser, extensions (`extensions/<name>/`: the URL album, diagrams, module maps), above every browser module |
+  | 6 | Chats (server), Assistant (server), Cloud (server); in the browser, extensions (`extensions/<name>/`: the URL album, diagrams, module maps), above every browser module |
 
 - **Inside every module**: its definition (name, level, uses, owns: in a
   browser module the `defineModule({...})` its `index.js` exports, in a server
@@ -346,8 +346,8 @@ That is where bugs are hard to find. Steps, each its own release:
 | S4s-1 | Projects, a server module on level 3 (v0.1.83): where the teams' projects are kept (`data/team_<team>/`, folders at any depth, a project marked by Workspace's manifest), safe names and paths, who may open or edit a project (Identity's rules over its access file), each account's open files, the file browser's listing and new folder, and the flat workspaces from before folders. Its routes (`protocol/projects.contract.json`; a contract may name its browser half, here the browser's Cloud) took over browse, mkdir, user-state and the access routes (from Identity, whose browser half no longer calls them: Cloud's access dialog does). Bookkeeping files other modules keep in a project are never listed: their owners name them (`projects.reserve`). The registry asks Projects; the two routes for listing and making flat workspaces, unused by the app since v0.1.60, are gone. `mdnotes_server.py` 2,577 → 2,212 lines | done (v0.1.83) |
 | S4s-2 | What is open now is Sync's (v0.1.84; Sync moves to level 4 on the server): the directory of live workspaces (a team project in its folder, the PIN session from before accounts, sessions hosted for guests), session tokens, joining by PIN, hosting, leases (`service/directory.py`, `service/live.py`). Opening asks Projects (which also moves a flat workspace kept as one file into its folder, Workspace's `migrate_state_file`). What happens in a live project is told as Sync's events: `"before-destructive"` (History's safety backup), `"paths-moved"` (Chats follows characters), `"dropped"` (a deleted project's chats close). A folder workspace's images are Sync's routes (Transport gained raw bodies and `File` replies; the browser's upload moved from Cloud to Sync). The kernel gives modules the server's settings (`ctx.config`): Identity, Projects and Sync build themselves from them. `CollaborationBroker` is gone; the agent's shared conversations (`chat.json`) wait in `AgentThreads` for the Assistant. `mdnotes_server.py` 2,212 → 1,901 lines | done (v0.1.84) |
 | S4s-3 | History, Comments and Chats start themselves on the server (v0.1.85; History and Comments on level 5, Chats and Assistant on 6): each builds its service from the server's settings and asks Sync's `places` (Projects' answers about a project, and whether it is open now) instead of the registry. History takes a safety backup when Sync says a change is about to lose data; Chats follows moved characters and closes a deleted project's databases on Sync's news, and keeps its daily copies beside the project's backups through History's `also_back_up`. Comments and Chats name their files to Projects themselves. (Done before Cloud, which needs History's trash from History itself.) | done (v0.1.85) |
-| S4s-4 | Cloud on the server (level 6): creating, importing, exporting and deleting projects (to History's trash); the timers (the lease sweep, the daily backup) and the last backup at shutdown to their owners, with the kernel's "every N seconds" and "on stop" | next |
-| S4s-5 | `ChatProxy` split: providers to Models, the agent's loop and tools to Assistant, a character's prompt to Characters and Chats | |
+| S4s-4 | Cloud on the server (v0.1.86, level 6; `protocol/cloud.contract.json`, the browser's Cloud its other half): a team's project made, deleted into History's trash (only by its owner), copied out with its images and brought in under a free name, over Sync's directory (`adopt`, `drop`, `read`). The kernel runs timers (`ctx.every(seconds, run)`) once every module has started and stops modules (`ctx.on_stop`, the highest level first; `start_modules(...)` returns the APIs and `stop()`): Sync closes quiet sessions every 15 s, Chats closes quiet replies, History sweeps backups and sweeps once more when the server stops, Chats takes the day's last copy before closing its databases. The server only calls `modules.stop()` when it closes. Export and import had no test; `tests/cloud.test.py` covers them | done (v0.1.86) |
+| S4s-5 | `ChatProxy` split: providers to Models, the agent's loop and tools to Assistant, a character's prompt to Characters and Chats | next |
 | S4s-6 | `mdnotes_server.py` only starts the modules; static files to Transport; `LEGACY_ROUTES` gone | |
 
 ### Notes for module authors
@@ -410,6 +410,10 @@ That is where bugs are hard to find. Steps, each its own release:
 - Browser: a command id is `<owner>.<action>`; add it with
   `shell.commands.add({ id, title, run, keys?, menu? })`. Menus are drawn
   from commands, so `index.html` holds no menu items.
+- Server: a module that does something now and then asks the kernel:
+  `ctx.every(seconds, run)` (it starts once every module has), and cleans
+  up in `ctx.on_stop(run)` (higher levels stop first). Never start a thread
+  for it.
 - Server: a module reads the server's settings from `ctx.config` (`data_dir`,
   `pin`, `accounts`...; a missing key means not set) and builds its own
   service in `start()`. What is open now is Sync's `directory` (`live(team,

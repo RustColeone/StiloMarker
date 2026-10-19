@@ -12,9 +12,10 @@ Static, for code from before the restructure:
 API (started by the kernel): the ChatsDesk (service/desk.py), serving the chat
 routes. It follows a moved character file and closes a deleted project's
 databases (Sync's events), names its database files to Projects (never
-listed), and keeps a daily copy of each database beside the project's
-backups (History's also_back_up). Its `runner` (the agent) is set once the
-agent exists.
+listed), keeps a daily copy of each database beside the project's backups
+(History's also_back_up, and once more when the server stops), and closes
+the replies of browsers that went quiet. Its `runner` (the agent) is set
+once the agent exists.
 """
 from stilo.kernel import define_module
 from .adapters.routes import add_routes
@@ -22,6 +23,8 @@ from .adapters.store import SIDE_FILES as DB_FILES, ProjectChats  # noqa: F401
 from .model.members import char_key, responders, user_key  # noqa: F401
 from .service.desk import ChatsDesk
 from .service.replies import ReplyQueue  # noqa: F401
+
+CLAIM_SWEEP_SECONDS = 15  # how often replies whose browser went quiet are closed
 
 
 def open_chats(places) -> ChatsDesk:
@@ -37,7 +40,15 @@ def start(ctx):
     ctx.use("projects").reserve(*DB_FILES)
     sync.events.on("paths-moved", lambda move: desk.paths_moved(move["workspace"], move["old"], move["new"]))
     sync.events.on("dropped", lambda gone: desk.close(gone["workspace_id"]))
-    ctx.use("history").also_back_up(lambda folder_of, now: desk.backup(lambda team, relpath: folder_of(team, relpath, "chats"), now))
+    history = ctx.use("history")
+    def back_up(now=None):
+        desk.backup(lambda team, relpath: history.backup_folder(team, relpath, "chats"), now)
+    history.also_back_up(back_up)
+    ctx.every(CLAIM_SWEEP_SECONDS, desk.expire_claims)
+    def stop():
+        back_up()          # the day's last copy, while the databases are open
+        desk.shutdown()
+    ctx.on_stop(stop)
     return desk
 
 
