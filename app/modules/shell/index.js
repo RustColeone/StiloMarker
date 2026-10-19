@@ -164,9 +164,11 @@ export default defineModule({
     const frame = createFrame({ settings, events, registry: ctx.registry(), commands, run, closeMenus: () => menuBar.close(),
       openSettings: (page) => settingsDialog.open(page), log: (message) => ctx.log(message) });
     frame.apply();
-    // The log panel (the bottom area): drawn when the layout changes (shown, hidden).
-    const logPanel = createLogPanel({ settings, copyText: dialogs.copyText, notify: (message) => notice(message) });
+    // The log panel (the bottom area): drawn when the layout changes or the
+    // bottom area shows or hides (on the phone, a sheet).
+    const logPanel = createLogPanel({ shown: () => frame.shown("bottom"), copyText: dialogs.copyText, notify: (message) => notice(message) });
     events.on("layout", () => logPanel.render());
+    events.on("area", ({ area }) => { if (area === "bottom") logPanel.render(); });
     logPanel.render();
     // The server is where the settings say.
     const server = createServer();

@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-19 · release `v0.1.93` (not deployed; v0.1.88 is live)
+Last updated: 2026-10-19 · release `v0.1.94` (not deployed; v0.1.88 is live)
 
 ---
 
@@ -68,6 +68,20 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.94: on the phone, the Log is a sheet from the bottom
+
+Step 5d. On the phone only; the desktop looks the same.
+
+- View → Toggle Log opens the Log as a sheet from the bottom, over the note.
+  Its ×, a tap above it, or a drag down on its header closes it, as does
+  opening the explorer, the chat or a menu.
+- The Log no longer squeezes the note on the phone when the desktop shows it,
+  and opening it on the phone leaves the desktop's setting alone. It shows
+  the log even when the desktop hides it (it drew only while that setting
+  was on).
+- The explorer, chat and Log drawers share one piece of code.
+- New browser test: `phone-log-sheet-browser.py`.
 
 ### v0.1.93: on the phone, the chat is a drawer from the right
 

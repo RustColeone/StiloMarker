@@ -44,7 +44,7 @@ export function createDebugTrace(app, shell) {
 
   // Called for every space and Enter, twice: only built when someone can see it.
   function traceEditorEvent(message, extra = {}) {
-    if (!shell.settings.debugPanel) return;
+    if (!shell.frame.shown("bottom")) return;
     shell.log("editor", message, detail(extra));
   }
 

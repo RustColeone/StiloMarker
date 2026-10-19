@@ -1,12 +1,13 @@
 // The log panel (the frame's bottom area): what the app did, kept in this tab
 // (log(kind, message, detail) from any module), and the kernel's trace in its
-// own tab; filtered by tab, copied, cleared. It draws only while shown.
+// own tab; filtered by tab, copied, cleared. It draws only while shown:
+// shown() is the frame's (the setting on the desktop, the sheet on the phone).
 import { trace } from "../../../kernel/index.js";
 
 const MAX_ENTRIES = 300;
 const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 
-export function createLogPanel({ settings, copyText, notify, doc = globalThis.document }) {
+export function createLogPanel({ shown, copyText, notify, doc = globalThis.document }) {
   const $ = (id) => doc?.getElementById(id);
   const list = $("debug-log-list");
   const tabs = [...($("debug-tab-strip")?.querySelectorAll(".debug-tab") ?? [])].map((element) => ({ id: element.dataset.tab, element }));
@@ -39,16 +40,16 @@ export function createLogPanel({ settings, copyText, notify, doc = globalThis.do
     }
     if (!list) return;
     list.replaceChildren();
-    if (!settings.debugPanel) return;
-    const shown = visible();
-    if (!shown.length) {
+    if (!shown()) return;
+    const rows = visible();
+    if (!rows.length) {
       const empty = doc.createElement("div");
       empty.className = "debug-log-entry is-empty";
       empty.textContent = "Log capture is enabled. Matching interactions will appear here.";
       list.append(empty);
       return;
     }
-    for (const entry of shown) {
+    for (const entry of rows) {
       const row = doc.createElement("div");
       row.className = `debug-log-entry is-${entry.kind}`;
       row.innerHTML = `<span class="debug-log-time">${escapeHtml(entry.timestamp)}</span><span class="debug-log-kind">${escapeHtml(entry.kind)}</span><span class="debug-log-message">${escapeHtml(entry.message)}</span>${entry.detail ? `<span class="debug-log-detail">${escapeHtml(entry.detail)}</span>` : ""}`;
@@ -65,7 +66,7 @@ export function createLogPanel({ settings, copyText, notify, doc = globalThis.do
   // The Trace tab follows the trace, at most once a frame.
   let frame = 0;
   trace.onRecord(() => {
-    if (frame || activeTab !== "trace" || !settings.debugPanel) return;
+    if (frame || activeTab !== "trace" || !shown()) return;
     frame = requestAnimationFrame(() => { frame = 0; render(); });
   });
   for (const tab of tabs) tab.element.addEventListener("click", () => { activeTab = tab.id; render(); });

@@ -31,6 +31,7 @@ export function createAreas({ settings, events, log = () => {}, doc = globalThis
       if (isPhone()) { phone.toggleRight(); return; }
       settings.change({ chatPanel: settings.chatPanel === "hidden" ? "shown" : "hidden" }, "Toggle Chat");
     } else if (area === "bottom") {
+      if (isPhone()) { phone.toggleBottom(); return; }
       settings.change({ debugPanel: !settings.debugPanel }, "Toggle Log");
     } else if (area === "preview" || area === "source") {
       const other = area === "preview" ? "source" : "preview";
@@ -48,7 +49,7 @@ export function createAreas({ settings, events, log = () => {}, doc = globalThis
   function shown(area) {
     if (area === "left") return settings.explorer !== "collapsed";
     if (area === "right") return isPhone() && phone ? phone.rightOpen() : settings.chatPanel === "shown";
-    if (area === "bottom") return Boolean(settings.debugPanel);
+    if (area === "bottom") return isPhone() && phone ? phone.bottomOpen() : Boolean(settings.debugPanel);
     return settings[area] !== "hidden";
   }
 
@@ -121,7 +122,7 @@ export function createAreas({ settings, events, log = () => {}, doc = globalThis
     appEl.style.setProperty("--debug-height", `${settings.debugPanelHeight}px`);
     $("preview-collapse-button")?.setAttribute("aria-expanded", String(settings.preview === "shown"));
     $("chat-collapse-button")?.setAttribute("aria-expanded", String(settings.chatPanel === "shown"));
-    if (logPanel) logPanel.hidden = !settings.debugPanel;
+    showsDrawers();
     $("chat-toggle-activity-button")?.classList.toggle("is-active", settings.chatPanel === "shown");
     const anchorButton = $("explorer-anchor-button");
     if (anchorButton) {
@@ -133,10 +134,12 @@ export function createAreas({ settings, events, log = () => {}, doc = globalThis
     phone?.applyView();
     events.emit("layout", {});
   }
-  // The right area shows by its setting, or on the phone, where it is a drawer
-  // (that must win over the global [hidden] rule, so the attribute goes).
-  function showsRight(phoneDrawer) {
-    if (rightPanel) rightPanel.hidden = settings.chatPanel === "hidden" && !(phoneDrawer && phoneDrawer === rightPanel);
+  // The right and bottom areas show by their settings; on the phone they are
+  // drawers the CSS slides, never [hidden] (that would win over the CSS).
+  function showsDrawers() {
+    const phoneLayout = isPhone();
+    if (rightPanel) rightPanel.hidden = settings.chatPanel === "hidden" && !phoneLayout;
+    if (logPanel) logPanel.hidden = !settings.debugPanel && !phoneLayout;
   }
   settings.on((view, changed) => { if (changed.some((key) => LAYOUT_KEYS.includes(key))) apply(); });
 
@@ -192,12 +195,9 @@ export function createAreas({ settings, events, log = () => {}, doc = globalThis
     events.emit("resized", { by: "window" });
   });
   win.matchMedia(`(max-width: ${PHONE_MAX_WIDTH}px)`).addEventListener("change", () => {
-    phone?.cancelGesture();
-    phone?.setExplorerOpen(false);
-    phone?.setMenuOpen(false);
-    phone?.setRightOpen(false);
+    phone?.closeAll();
     apply();
   });
 
-  return { toggle, shown, apply, isPhone, revealSection, showsRight, setExplorerAnchor, usePhone: (next) => { phone = next; } };
+  return { toggle, shown, apply, isPhone, revealSection, setExplorerAnchor, usePhone: (next) => { phone = next; } };
 }

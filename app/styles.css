@@ -3826,6 +3826,77 @@ menu {
     pointer-events: auto;
   }
 
+  /* ── The bottom area (the Log): a sheet from the bottom, driven by
+     data-mobile-bottom; never a row of the workspace on the phone. A tap
+     above it closes it; its header drags down to close it. */
+  .app-shell[data-debug="on"] .workspace {
+    grid-template-rows: minmax(0, 1fr) 0 0;
+  }
+
+  .app-shell[data-debug] .debug-splitter {
+    display: none;
+  }
+
+  .app-shell[data-mobile-bottom] .workspace-shell .debug-panel {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: min(60vh, calc(var(--mobile-viewport-height, 100vh) * 0.6));
+    z-index: 36;
+    padding-top: 14px;
+    border: 1px solid var(--border);
+    border-bottom: 0;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -6px 22px rgba(0, 0, 0, 0.32);
+    transform: translateY(102%);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.26s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.2s ease;
+  }
+
+  /* The grab handle. */
+  .app-shell[data-mobile-bottom] .workspace-shell .debug-panel::before {
+    content: "";
+    position: absolute;
+    top: 5px;
+    left: 50%;
+    width: 36px;
+    height: 4px;
+    margin-left: -18px;
+    border-radius: 2px;
+    background: var(--border-strong);
+  }
+
+  .app-shell[data-mobile-bottom="open"] .workspace-shell .debug-panel {
+    transform: translateY(0);
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .app-shell[data-bottom-drag="1"] .workspace-shell .debug-panel {
+    transition: none;
+    transform: translateY(calc((1 - var(--bottom-sheet-progress, 0)) * 100%));
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .app-shell[data-mobile-bottom] .debug-panel-actions button {
+    min-height: 36px;
+    min-width: 36px;
+  }
+
+  /* The tabs as narrow as their names; a strip too wide scrolls. */
+  .app-shell[data-mobile-bottom] .debug-tab-strip {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .app-shell[data-mobile-bottom] .debug-tab {
+    min-width: 0;
+    flex: none;
+  }
+
   /* ── Pane headers removed: the topbar caption carries SOURCE/PREVIEW + file.
      This also reclaims the vertical space for the editor format toolbar. ── */
   .pane-header {
