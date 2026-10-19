@@ -69,6 +69,15 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.85: History, Comments and Chats start themselves on the server
+
+Step S4s-3. Nothing changes for users.
+
+- On the server, snapshots and backups, line comments and chats each set
+  themselves up when the server starts, and hear about changes in a live
+  project from the Sync module, instead of being wired together by hand in
+  the old server file.
+
 ### v0.1.84: what is open now is the server's Sync
 
 Step S4s-2. Nothing changes for users.

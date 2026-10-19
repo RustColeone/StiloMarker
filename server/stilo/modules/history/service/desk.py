@@ -2,7 +2,8 @@
 token) and the project, and is answered only if that account may open it.
 Also the hooks the server calls: a safety backup before a destructive
 change, a deleted project put in the trash, and the daily sweep (backups,
-then the trash). `trash` is service/trash.py.
+then what other modules back up beside them, then the trash). `trash` is
+service/trash.py.
 
 places (today the server's WorkspaceRegistry):
     authorize_project(token, team, path) -> (identity, team, relpath)
@@ -16,6 +17,12 @@ places (today the server's WorkspaceRegistry):
 class HistoryDesk:
     def __init__(self, snapshots, backups, places, trash=None):
         self.snapshots, self.backups, self._places, self.trash = snapshots, backups, places, trash
+        self._also = []   # other modules' daily copies, kept beside the backups (also_back_up)
+
+    def also_back_up(self, back_up) -> None:
+        """back_up(folder_of, now) runs on each sweep; folder_of(team, relpath, name)
+        is a folder of that name beside the project's backups (Chats' databases)."""
+        self._also.append(back_up)
 
     def _project(self, token, team, path):
         return self._places.authorize_project(token, team, path)
@@ -81,6 +88,8 @@ class HistoryDesk:
 
     def sweep(self, now=None) -> int:
         made = self.backups.sweep(self._places.live_workspaces(), now)
+        for back_up in self._also:
+            back_up(lambda team, relpath, name: self.backups.store(team, relpath).folder / name, now)
         if self.trash is not None:
             self.trash.sweep(now)
         return made

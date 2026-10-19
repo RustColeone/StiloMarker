@@ -1,7 +1,7 @@
 {
   "name": "comments",
-  "level": 4,
-  "uses": ["transport", "workspace"],
+  "level": 5,
+  "uses": ["transport", "workspace", "projects", "sync"],
   "owns": {
     "names": ["comments file"],
     "events": ["comments"],

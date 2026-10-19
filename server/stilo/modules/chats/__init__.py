@@ -9,11 +9,13 @@ Static, for code from before the restructure:
     DB_FILES     the database and its write-ahead files, kept in the project folder
     ProjectChats, ReplyQueue, user_key, char_key, responders
 
-API (started by the kernel):
-    serve(desk)   adds the chat routes
+API (started by the kernel): the ChatsDesk (service/desk.py), serving the chat
+routes. It follows a moved character file and closes a deleted project's
+databases (Sync's events), names its database files to Projects (never
+listed), and keeps a daily copy of each database beside the project's
+backups (History's also_back_up). Its `runner` (the agent) is set once the
+agent exists.
 """
-from types import SimpleNamespace
-
 from stilo.kernel import define_module
 from .adapters.routes import add_routes
 from .adapters.store import SIDE_FILES as DB_FILES, ProjectChats  # noqa: F401
@@ -27,10 +29,16 @@ def open_chats(places) -> ChatsDesk:
 
 
 def start(ctx):
-    transport = ctx.use("transport")
     for used in ("file_types", "workspace", "characters"):
         ctx.use(used)
-    return SimpleNamespace(serve=lambda desk: add_routes(transport, desk))
+    sync = ctx.use("sync")
+    desk = open_chats(sync.places)
+    add_routes(ctx.use("transport"), desk)
+    ctx.use("projects").reserve(*DB_FILES)
+    sync.events.on("paths-moved", lambda move: desk.paths_moved(move["workspace"], move["old"], move["new"]))
+    sync.events.on("dropped", lambda gone: desk.close(gone["workspace_id"]))
+    ctx.use("history").also_back_up(lambda folder_of, now: desk.backup(lambda team, relpath: folder_of(team, relpath, "chats"), now))
+    return desk
 
 
 MODULE = define_module(__file__, start)

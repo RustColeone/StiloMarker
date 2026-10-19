@@ -24,7 +24,6 @@ import sys
 _mcp_module_dir = str(Path(__file__).resolve().parent)
 if _mcp_module_dir not in sys.path:
     sys.path.insert(0, _mcp_module_dir)
-from stilo.modules.chats import DB_FILES as CHAT_DB_FILES, open_chats
 from stilo.kernel import start_modules
 from stilo.modules import (assistant as assistant_module, characters as characters_module, file_types as file_types_module,
                            identity as identity_module, models as models_module, projects as projects_module, sync as sync_module, history as history_module, comments as comments_module, chats as chats_module, transport as transport_module, workspace as workspace_module)
@@ -35,8 +34,6 @@ from stilo.modules.sync import VERSION as SYNC_LEVEL, announce as sync_announce
 from stilo.modules.characters import (character_instructions, characters_view, notes_mode, persona_header,
                                      split_author_notes)
 from stilo.modules.assistant import AGENT_TOOLS, propose_edit
-from stilo.modules.comments import COMMENTS_FILE, open_comments
-from stilo.modules.history import open_history
 from stilo.modules.identity import ACCOUNT_FILE, AccountStore
 from stilo.modules.projects import safe_component, safe_relpath
 from stilo.modules.models import IMAGE_SIZES, GeneratedImages, MCPManager, MCPTurn, open_providers
@@ -1032,69 +1029,28 @@ class AgentThreads:
 
 class WorkspaceRegistry:
     """The server's modules, started together (with the server's settings), and
-    what is still put together here until a module does it itself: History,
-    Comments and Chats with their `places`, the agent's shared conversations,
-    and creating, deleting, exporting and importing projects. Shrinks to
-    nothing in step S4s (docs/ARCHITECTURE.md)."""
+    what is still done here until a module does it itself: the agent's shared
+    conversations, and creating, deleting, exporting and importing projects.
+    Shrinks to nothing in step S4s (docs/ARCHITECTURE.md)."""
 
     def __init__(self, pin: str, legacy_state_file: Path, master_pin: str | None = None,
                  accounts: "AccountStore | None" = None, data_dir: Path | None = None, trash_days: int = 30):
         self.modules = start_server_modules({"pin": pin, "master_pin": master_pin, "state_file": legacy_state_file,
-                                             "accounts": accounts, "data_dir": data_dir, "edit_gap": EDIT_SESSION_GAP_SECONDS})
+                                             "accounts": accounts, "data_dir": data_dir, "trash_days": trash_days,
+                                             "edit_gap": EDIT_SESSION_GAP_SECONDS})
         self.identity = self.modules["identity"]
         self.projects = self.modules["projects"]
         self.directory = self.modules["sync"].directory
-        # Bookkeeping files these keep in a project folder, never listed as entries.
-        self.projects.reserve(COMMENTS_FILE, "chat.json", *CHAT_DB_FILES)
-        self.history = open_history(data_dir, self, self.identity, trash_days)
-        self.comments = open_comments(self)
-        self.chats = open_chats(self)  # its runner (the agent) is set by build_server
+        self.history = self.modules["history"]
+        self.comments = self.modules["comments"]
+        self.chats = self.modules["chats"]  # its runner (the agent) is set by build_server
         self.agent_threads = AgentThreads()
+        self.projects.reserve("chat.json")  # the agent's conversations, never listed as an entry
         self.data_dir = data_dir
-        # What happens in a live team project: a safety backup before a change that
-        # loses data, characters followed when files move, a deleted project's chats closed.
-        events = self.modules["sync"].events
-        events.on("before-destructive", lambda change: self.history.before_destructive(change["workspace"], change["reason"]))
-        events.on("paths-moved", lambda move: self.chats.paths_moved(move["workspace"], move["old"], move["new"]))
-        events.on("dropped", lambda gone: self.chats.close(gone["workspace_id"]))
-
-    # ---- The places port of History, Comments and Chats: where a project is and
-    # who may see it (Projects'), and what is open now (Sync's) ---------------
-    def project_dir(self, team, relpath):
-        return self.projects.project_dir(team, relpath)
-
-    def authorize_project(self, token, team, path):
-        return self.projects.authorize_project(token, team, path)
-
-    def may_edit(self, identity, team, relpath):
-        return self.projects.may_edit(identity, team, relpath)
-
-    def folder(self, team: str, relpath: str) -> Path:  # History's trash port
-        return self.projects.folder(team, relpath)
-
-    def people(self, team: str, relpath: str) -> list[str]:
-        return self.projects.people(team, relpath)
-
-    def live(self, team, relpath):
-        return self.directory.live(team, relpath)
-
-    def live_workspaces(self):
-        return self.directory.live_workspaces()
-
-    def place_of(self, workspace):
-        return self.directory.place_of(workspace)
-
-    def project_copy(self, team: str, relpath: str) -> dict:
-        """A copy of the project: the live one, or read from its folder."""
-        workspace = self.directory.read(team, relpath, self.projects.folders.under_team(team, relpath))
-        with workspace.lock:
-            return copy.deepcopy(workspace.project)
 
     def backup_sweep(self, now=None):
-        """Daily backups for every live workspace that changed since its last one."""
-        made = self.history.sweep(now)
-        self.chats.backup(lambda team, relpath: self.history.backups.store(team, relpath).folder / "chats", now)
-        return made
+        """Daily backups for every live workspace that changed since its last one (History's)."""
+        return self.history.sweep(now)
 
     # ---- Sync's directory, as code and tests from before the move call it ------
     brokers = property(lambda self: self.directory.workspaces)
@@ -1789,9 +1745,6 @@ def build_server(host: str, port: int, pin: str, static_root: Path, state_file: 
         chat_proxy.generated = GeneratedImages(Path(data_dir) / "_generated")
     modules = registry.modules
     transport = modules["transport"]
-    modules["history"].serve(registry.history)
-    modules["comments"].serve(registry.comments)
-    modules["chats"].serve(registry.chats)
     transport.add_route("GET", "/api/ping", lambda request: {
             "message": "pong",
             "server": "mdnotes",

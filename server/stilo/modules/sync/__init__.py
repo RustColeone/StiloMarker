@@ -16,6 +16,9 @@ Static, for code from before the restructure:
 API (started by the kernel; config: pin, master_pin, state_file, edit_gap):
     directory    service/directory.py: open workspaces by id, by session token,
                  by place; adopt(...) a project made whole, drop(team, relpath)
+    places       service/places.py: where a team's project is and who may see
+                 it (Projects'), and whether it is open now: what History,
+                 Comments and Chats ask about a project
     events.on(name, listener): "before-destructive" {workspace, reason} (just
                  before a change that loses data), "paths-moved" {workspace,
                  old, new}, "dropped" {workspace_id} (a project closed for good)
@@ -30,6 +33,7 @@ from .adapters.routes import add_routes, load_version
 from .model.rebase import RebaseLog, transform_range  # noqa: F401
 from .service.directory import DEFAULT_TEAM, DEFAULT_WORKSPACE_ID, Directory  # noqa: F401
 from .service.live import LiveWorkspace
+from .service.places import Places
 from .service.sessions import Sessions  # noqa: F401
 from .service.shared import SharedWorkspace  # noqa: F401
 
@@ -57,7 +61,8 @@ def start(ctx):
     directory = Directory(pin=ctx.config.get("pin"), state_file=ctx.config.get("state_file"), master_pin=ctx.config.get("master_pin"),
                           projects=ctx.use("projects"), identity=ctx.use("identity"), make=make, emit=events.emit)
     add_routes(transport, directory, VERSION)
-    return SimpleNamespace(directory=directory, events=SimpleNamespace(on=events.on), open_live=make)
+    return SimpleNamespace(directory=directory, places=Places(ctx.use("projects"), directory),
+                           events=SimpleNamespace(on=events.on), open_live=make)
 
 
 MODULE = define_module(__file__, start)

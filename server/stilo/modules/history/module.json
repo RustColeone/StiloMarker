@@ -1,7 +1,7 @@
 {
   "name": "history",
-  "level": 4,
-  "uses": ["transport", "file_types", "workspace", "identity"],
+  "level": 5,
+  "uses": ["transport", "file_types", "workspace", "identity", "sync"],
   "owns": {
     "data": ["data/_snapshots", "data/_backups", "data/_trash"],
     "rules": ["snapshot retention", "backup retention", "trash retention"],

@@ -8,8 +8,8 @@ Static, for code from before the restructure:
     open_comments(places) -> Comments (see service/comments.py for `places`)
     COMMENTS_FILE
 
-API (started by the kernel):
-    serve(comments)   adds the comment routes
+API (started by the kernel): the Comments (service/comments.py), serving the
+comment routes; it names its file to Projects (never listed as an entry).
 """
 from types import SimpleNamespace
 
@@ -25,9 +25,11 @@ def open_comments(places) -> Comments:
 
 
 def start(ctx):
-    transport = ctx.use("transport")
     ctx.use("workspace")
-    return SimpleNamespace(serve=lambda comments: add_routes(transport, comments))
+    comments = open_comments(ctx.use("sync").places)
+    add_routes(ctx.use("transport"), comments)
+    ctx.use("projects").reserve(COMMENTS_FILE)
+    return comments
 
 
 MODULE = define_module(__file__, start)

@@ -10,11 +10,12 @@ Static, for code from before the restructure:
         (data/_trash) for trash_days, at most TRASH_DAYS
     POLICY, MAX_PER_FILE (snapshot retention)
 
-API (started by the kernel):
-    serve(desk)   adds History's routes for that desk
+API (started by the kernel; config: data_dir, trash_days): the HistoryDesk
+(service/desk.py), serving History's routes; it takes a safety backup when
+Sync says a change is about to lose data. also_back_up(back_up): another
+module's daily copies, kept beside the backups (Chats' databases).
 """
 from pathlib import Path
-from types import SimpleNamespace
 
 from stilo.kernel import define_module
 from stilo.modules.file_types import BUILTIN as FILE_TYPES
@@ -80,9 +81,12 @@ def open_history(data_dir, places, identity=None, trash_days=TRASH_DAYS) -> Hist
 
 
 def start(ctx):
-    transport = ctx.use("transport")
     ctx.use("workspace")
-    return SimpleNamespace(serve=lambda desk: add_routes(transport, desk))
+    sync = ctx.use("sync")
+    desk = open_history(ctx.config.get("data_dir"), sync.places, ctx.use("identity"), ctx.config.get("trash_days", TRASH_DAYS))
+    add_routes(ctx.use("transport"), desk)
+    sync.events.on("before-destructive", lambda change: desk.before_destructive(change["workspace"], change["reason"]))
+    return desk
 
 
 MODULE = define_module(__file__, start)

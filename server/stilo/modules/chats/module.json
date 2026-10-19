@@ -1,7 +1,7 @@
 {
   "name": "chats",
-  "level": 5,
-  "uses": ["transport", "file_types", "workspace", "characters"],
+  "level": 6,
+  "uses": ["transport", "file_types", "workspace", "characters", "projects", "sync", "history"],
   "owns": {
     "names": ["chat database"],
     "events": ["chat-message", "chat-typing", "chat-update"],
