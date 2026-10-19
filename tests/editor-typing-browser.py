@@ -15,7 +15,7 @@ that make that safe, against a novel-length chapter:
 
 Isolated: APIs are mocked and static files come from this checkout.
 """
-import asyncio
+import asyncio, time
 import json
 import mimetypes
 import os
@@ -162,6 +162,20 @@ async def main():
         end = await page.evaluate("() => document.querySelector('#explorer-tree').scrollTop")
         assert abs(end - start) < 1, f'explorer drifted from {start} to {end} while typing'
         checks.append('explorer does not drift while typing')
+
+        # While a keystroke is applied the rest of the app waits (Shell holds full
+        # redraws while the Editor types): 30 keys bring a few redraws, not 30.
+        count = '() => stiloTrace().filter((e) => e.kind === "event" && e.message === "render").reduce((n, e) => n + (e.count ?? 1), 0)'
+        before = await page.evaluate(count)
+        await caret_at(20, 2)
+        started = time.monotonic()
+        await page.keyboard.type('abcdefghijklmnopqrstuvwxyz0123', delay=15)
+        seconds = time.monotonic() - started
+        await page.wait_for_timeout(800)
+        redraws = await page.evaluate(count) - before
+        # A long burst still redraws every 1.5 s, and once when typing pauses.
+        assert 1 <= redraws <= seconds / 1.5 + 2, f'{redraws} full redraws for 30 keys in {seconds:.1f} s'
+        checks.append(f'typing holds the redraws ({redraws} for 30 keys)')
 
         print(json.dumps({'checks': checks, 'runtimeErrors': len(errors)}, ensure_ascii=False))
         assert not errors, errors

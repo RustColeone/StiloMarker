@@ -135,6 +135,8 @@ export function createAgentPanel({ port, shell, workspace, identity, sync, edito
   sync.events.on("event", ({ event, ownClientId }) => {
     if (event.type === "chat-workspace-update" && event.clientId !== ownClientId) receiveChatWorkspace(app.controller.getProject(), event.workspace);
   });
+  // Drawn on each redraw (Shell's), once loaded.
+  shell.events.on("render", ({ project }) => { if (project) app.renderChatPanel(project); });
   // The page follows the agent's status (Models'), whoever asked the server.
   models.agent.on(() => app.renderChatPanel(app.controller.getProject()));
   // Settings → Agent's connected tools are this page's: drawn when Settings opens.

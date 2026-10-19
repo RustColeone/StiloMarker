@@ -169,6 +169,8 @@ export function createSurface({ port, workspace, editor, shell, sync, types, fil
       return getSelectedTarget();
     }
   });
+  // The tree, on each full redraw (Shell's).
+  shell.events.on("render", ({ project, only }) => { if (project && only !== "status") app.tree.render(project); });
   // A mark put on a file or taken off shows on its row at once.
   editor.marks.on(() => app.tree.render(app.controller.getProject()));
   installExplorerEvents(app);

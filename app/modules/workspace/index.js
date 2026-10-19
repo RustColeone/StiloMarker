@@ -121,6 +121,12 @@ export default defineModule({
       if (store) throw new Error("The workspace already has a project open; use project().replaceProject()");
       store = createProjectController(project);
       store.subscribe(drawStatus);
+      // Each change is saved (this browser's copy, a local project's folder,
+      // auto-save) and the app asked to draw it (Shell holds that while typing).
+      store.subscribe((next) => {
+        saving.schedule(next);
+        shell.render(next);
+      });
       drawStatus(store.getProject());
       // A project opened from a folder on this device keeps saving to it after a reload.
       void reattachDeviceFolder({ store, settings: shell.settings, log: (...parts) => ctx.log(parts.join(" ")) });

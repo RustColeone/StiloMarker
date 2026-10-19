@@ -69,6 +69,16 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.77: each module draws itself
+
+Step S4e-2. Nothing changes for users.
+
+- Redrawing the app is asked of Shell, and each module draws its own part
+  when it hears it, instead of `main.js` drawing the editor, the tree and the
+  Agent page by name. While you type, full redraws still wait until you pause
+  (or every 1.5 s in a long burst); `editor-typing-browser.py` now checks
+  that 30 keystrokes bring only a few redraws.
+
 ### v0.1.76: the File menu and the project's location belong to their modules
 
 Step S4e-1. Nothing changes for users.

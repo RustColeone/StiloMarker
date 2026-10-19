@@ -259,22 +259,12 @@ registerPreviews(modules.editor.previews, {
   personaAvatarSrc: modules.characters.avatarSrc,
   get controller() { return controller; }
 });
-// Total source characters of the active file, cached for the footer counter by
-// updateStatus. null → no text file open (the counter hides). Declared up here so
-// the hoisted updateStatus can never touch it inside its temporal dead zone.
-// Typing fast path + deferred/debounced work (see render()); whether a keystroke
-// is being applied is the Editor's (editorParts?.isTyping()).
-const DEFERRED_RENDER_IDLE_MS = 250;
-const DEFERRED_RENDER_MAX_MS = 1500;
-let deferredRenderTimer = null;
-let deferredRenderDeadline = 0;
 // ---- The Editor's parts (the Editor module: adapters/surface.js) ----
 // Forwarders: code here still calls the editor's functions by name.
 function applyEditorEdit(...args) { return editorParts.applyEditorEdit(...args); }
 function getViewState(...args) { return editorParts.getViewState(...args); }
 function isPreviewableFileName(...args) { return editorParts.isPreviewableFileName(...args); }
 function redrawRemoteCursors(...args) { return editorParts.redrawRemoteCursors(...args); }
-function showActiveFile(...args) { return editorParts.showActiveFile(...args); }
 function attachSelectionChangeListener(...args) { return editorParts.attachSelectionChangeListener(...args); }
 function clamp(...args) { return editorParts.clamp(...args); }
 function clearEditorDropCaret(...args) { return editorParts.clearEditorDropCaret(...args); }
@@ -550,7 +540,6 @@ async function openMtreeToolsDialog(fileId) {
 function escapeEditorHtml(...args) { return editorParts.escapeEditorHtml(...args); }
 function highlightMarkdownSource(...args) { return editorParts.highlightMarkdownSource(...args); }
 
-function renderLinksPanel(...args) { return editorParts.renderLinksPanel(...args); }
 
 
 // ---- Tabs, panes and preview (the Editor module) ----
@@ -560,11 +549,8 @@ function cachedWorkspaceView(...args) { return editorParts.cachedWorkspaceView(.
 function clearPaneDropState(...args) { return editorParts.clearPaneDropState(...args); }
 function closeTabOverflowMenu(...args) { return editorParts.closeTabOverflowMenu(...args); }
 function currentWorkspaceView(...args) { return editorParts.currentWorkspaceView(...args); }
-function ensureOpenTabs(...args) { return editorParts.ensureOpenTabs(...args); }
 function openFileFromExplorer(...args) { return editorParts.openFileFromExplorer(...args); }
 function openTabOverflowMenu(...args) { return editorParts.openTabOverflowMenu(...args); }
-function renderPreviewContent(...args) { return editorParts.renderPreviewContent(...args); }
-function renderTabs(...args) { return editorParts.renderTabs(...args); }
 function restoreResumeState(...args) { return editorParts.restoreResumeState(...args); }
 function setActiveSourceFile(...args) { return editorParts.setActiveSourceFile(...args); }
 function setPreviewFile(...args) { return editorParts.setPreviewFile(...args); }
@@ -815,60 +801,15 @@ function persistSettings() { applyWorkspaceSettings(); } // the settings save th
 
 applyWorkspaceSettings();
 
-// The editor's side of a redraw: the tabs, the shown file, the preview, links,
-// chat. (The status bar's items, the snapshot version among them, draw themselves.)
-function updateStatus(project) {
-  ensureOpenTabs(project);
-  renderTabs(project);
+// What main.js still draws on each redraw (Shell's): the project's name and
+// the phone's pane caption (the frame's, S4e-3); and the Agent page is loaded
+// once it is needed (it then draws itself).
+shell.events.on("render", ({ project }) => {
+  if (!project) return;
   elements.projectNameLabel.textContent = project.name;
-  renderMobilePaneCaption(); // tracks the active/preview file, not just the view
-
-  const activeFile = project.activeFileId ? project.nodes[project.activeFileId] : null;
-  const previewFile = editorView.get().previewFileId ? project.nodes[editorView.get().previewFileId] : null;
-  showActiveFile(project); // the source editor shows the active file (the Editor)
-  editorParts.drawPreviewPane(project, previewFile); // a file's preview, or a pane view such as History's diff
-  renderLinksPanel(project, activeFile);
-  renderChatPanel(project);
-}
-
-
-function render(project) {
-  if (editorParts?.isTyping()) {
-    // A keystroke. The editor has already drawn it; the explorer, tabs, preview,
-    // links, chat and status follow once typing pauses (or every
-    // DEFERRED_RENDER_MAX_MS during a long burst). Doing them synchronously here
-    // cost a full app render plus a whole-project localStorage write per key.
-    scheduleDeferredRender();
-    workspace.saving.schedule(project);
-    return;
-  }
-  cancelDeferredRender(); // this full render covers whatever was pending
-  explorerParts.renderTree(project);
-  updateStatus(project);
-  workspace.saving.schedule(project); // this browser's copy, a local project's folder, auto-save (Workspace)
-}
-
-function scheduleDeferredRender() {
-  const now = performance.now();
-  if (!deferredRenderDeadline) deferredRenderDeadline = now + DEFERRED_RENDER_MAX_MS;
-  if (deferredRenderTimer) clearTimeout(deferredRenderTimer);
-  const delay = Math.max(0, Math.min(DEFERRED_RENDER_IDLE_MS, deferredRenderDeadline - now));
-  deferredRenderTimer = setTimeout(() => {
-    deferredRenderTimer = null;
-    deferredRenderDeadline = 0;
-    render(controller.getProject());
-  }, delay);
-}
-
-function cancelDeferredRender() {
-  if (deferredRenderTimer) clearTimeout(deferredRenderTimer);
-  deferredRenderTimer = null;
-  deferredRenderDeadline = 0;
-}
-
-controller.subscribe(render);
-// Modules ask Shell to draw the app again; this is where it happens.
-shell.events.on("render", ({ project, only }) => (only === "status" ? updateStatus(project) : render(project)));
+  renderMobilePaneCaption();
+  if (!chat && chatNeeded()) void loadChat();
+});
 
 if (!storedProject) {
   const placeholder = controller.getProject();

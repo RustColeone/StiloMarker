@@ -158,6 +158,20 @@ export function createSurface({ port, view, marks, paneViews, completions, lineN
     if (changed.includes("showFormatToolbar")) app.refreshFormatToolbar();
   });
   shell.commands.add({ id: "preview.save-pdf", title: "Save as PDF", menu: { id: "file", group: 0, order: 7 }, run: () => app.printPreviewAsPdf() });
+  // Drawing: while a keystroke is applied the editor has drawn it, and the rest
+  // of the app waits (Shell). On each redraw its own parts: the tabs, the shown
+  // file, the preview pane (a file's preview or a pane view) and the links.
+  shell.holdRendering(() => app.isTyping());
+  shell.events.on("render", ({ project }) => {
+    if (!project) return;
+    app.ensureOpenTabs(project);
+    app.renderTabs(project);
+    const activeFile = project.activeFileId ? project.nodes[project.activeFileId] : null;
+    const previewFileId = app.view.get().previewFileId;
+    app.showActiveFile(project);
+    app.drawPreviewPane(project, previewFileId ? project.nodes[previewFileId] : null);
+    app.renderLinksPanel(project, activeFile);
+  });
   // Where the reader was, kept when the page hides or goes (resume.js, tabs.js).
   const keepView = () => { app.captureViewState(); app.cacheWorkspaceView(); };
   window.addEventListener("pagehide", keepView);

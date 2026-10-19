@@ -24,8 +24,10 @@
 // conversation: shouldSubmitChat, isChatNearBottom, paintConversation,
 // contextChipsHtml (adapters/conversation.js).
 //   render(project, { only? })  ask for the app to be drawn again (only: "status"
-//                            for the panes and status without the tree); the
-//                            app listens: events.on("render", ({ project, only }) => …)
+//                            for the panes and status without the tree); each module
+//                            draws its part: events.on("render", ({ project, only }) => …).
+//                            A full redraw waits while a module is busy (adapters/render.js)
+//   holdRendering(busyNow)   a module busy in a way a redraw would disturb (the Editor typing)
 //   clearAppStorage()        remove every key the app keeps in this browser
 //   registerOffline()        keep the app's files for offline use (the service worker)
 //   events "clearing-caches" before Clear All Cache reloads: drop what you cache
@@ -54,6 +56,7 @@ import { createSettingsDialog } from "./adapters/settings-dialog.js";
 import { createStatusBar } from "./adapters/status-bar.js";
 import { applyTheme } from "./adapters/theme.js";
 import { addMaintenanceCommands, clearAppStorage } from "./adapters/maintenance.js";
+import { createRender } from "./adapters/render.js";
 import { registerOfflineShell } from "./adapters/offline.js";
 import { loadSettings, patchStoredSettings } from "./adapters/settings-store.js";
 import { SECRET_SETTINGS, keysToSave } from "./service/settings.js";
@@ -135,6 +138,7 @@ export default defineModule({
       return values;
     }
 
+    const redraw = createRender(events);
     addMaintenanceCommands({ commands, confirm, notify: (message) => notice(message), closeMenus: () => menuBar.close(), events,
       log: (message) => ctx.log(message) });
 
@@ -155,7 +159,8 @@ export default defineModule({
       pages,
       settingsDialog,
       statusBar: createStatusBar({ registry: ctx.registry() }),
-      render: (project, { only } = {}) => events.emit("render", { project, only }),
+      render: redraw.render,
+      holdRendering: redraw.holdWhile,
       clearAppStorage,
       registerOffline: () => registerOfflineShell(),
       events: { on: events.on }
