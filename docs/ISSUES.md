@@ -69,6 +69,18 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.78: Shell owns the frame
+
+Step S4e-3. Nothing changes for users.
+
+- Showing, hiding and sizing the explorer, the side panel, the log and the
+  source and preview panes, the phone's single pane, its swipes, drawer and
+  menus moved from `main.js` and `ui/layout.js` into Shell; the modules say
+  what they put in it (the phone's panes) and react when it changes. The
+  Agent page loads itself the first time it is needed.
+- The page looks the same: whole-page screenshots before and after match
+  pixel for pixel, at desktop and phone width and after toggling areas.
+
 ### v0.1.77: each module draws itself
 
 Step S4e-2. Nothing changes for users.

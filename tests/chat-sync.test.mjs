@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createChatSynchronizer, mergeChatWorkspace, sharedChat } from '../app/modules/assistant/adapters/workspace-sync.js';
-import { installMobileViewport } from '../app/services/chat-ui-service.js';
+import { installMobileViewport } from '../app/modules/shell/adapters/frame/phone.js';
 import { shouldSubmitChat, isChatNearBottom } from '../app/modules/shell/index.js';
 import { saveChatWorkspace, loadChatWorkspace } from '../app/modules/assistant/adapters/store.js';
 const copy = value => structuredClone(value);

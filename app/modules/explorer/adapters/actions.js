@@ -24,7 +24,6 @@ export function createActions(app) {
     }
     if (action.startsWith("filter-")) {
       app.settings.change({ explorerFilter: action.replace("filter-", "") });
-      app.persistSettings();
       app.render(app.controller.getProject());
       return;
     }

@@ -1,7 +1,6 @@
 {
   "about": "Structure violations that existed when the rules were introduced (2026-10-16). They may only shrink; see tools/structure-baseline.mjs.",
   "oversized": {
-    "app/main.js": 1100,
     "extensions/bmap-diagram/browser/adapters/view.js": 4025,
     "server/mdnotes_server.py": 2577
   },
@@ -28,5 +27,5 @@
     "sync protocol number": []
   },
   "uncoveredTwins": 0,
-  "mainGetters": 26
+  "mainGetters": 13
 }

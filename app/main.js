@@ -6,7 +6,6 @@ import identityModule from "./modules/identity/index.js";
 import historyModule from "./modules/history/index.js";
 import extensionModules from "./extensions.js";
 import { createWorkspacePorts } from "./features/workspace-ports.js";
-import { installMobileViewport } from "./services/chat-ui-service.js";
 import { APP_VERSION } from "./version.js";
 import { seedDefaultProject, applyHostCounters, createProject, findChildByName, getNode, getNodeIdByPath, getPath, isImageFileName, isTextFileName } from "./domain/project-model.js";
 import { loadProject } from "./modules/workspace/index.js";
@@ -23,7 +22,6 @@ import { loadTemplateProject } from "./services/template-service.js";
 import { query } from "./ui/dom.js";
 import explorerModule from "./modules/explorer/index.js";
 import { registerPreviews } from "./features/previews.js";
-import { createLayout } from "./ui/layout.js";
 import editorModule, { escapeHtmlAttribute, forgetViewStates, getRelativeProjectPath, normalizePath, renderMarkdown } from "./modules/editor/index.js";
 import { createDialogs } from "./ui/dialogs.js";
 
@@ -230,12 +228,11 @@ var editorParts = modules.editor.attach({
   settings, elements, identity,
   saveUserState: (ws, openFiles, activeFile) => saveUserState(settings.serverUrl, identity.token(), ws.team, ws.path, openFiles, activeFile),
   logDebug, traceEditorEvent, formatEditorDebugValue,
-  setMobileExplorerOpen, togglePreview,
   isReadOnly: () => isReadOnlyWorkspace(), onDrop: (event) => handleEditorDrop(event)
 });
 // The explorer and file actions, given what no module owns yet (modules/explorer/adapters/surface.js).
 var explorerParts = modules.explorer.attach({
-  settings, persistSettings, elements, logDebug,
+  settings, elements, logDebug,
   canManagePreview: () => Boolean(identity.account()) && syncMode.get().workspaceMode === "synced"
     && collaboration.isConnected() && Boolean(settings.lastWorkspace?.team),
   openAccessEditor, openMtreeToolsDialog, remapPersonaPaths
@@ -246,13 +243,14 @@ modules.explorer.newFiles.add({ id: "persona", content(name) {
   return personaTemplate(/^new character( \d+)?$/i.test(base) ? "New Character" : base);
 } });
 // Snapshots, the version label, the diff tab and History's dialogs (modules/history/adapters/surface.js).
-var historyParts = modules.history.attach({ togglePreview, logDebug });
+var historyParts = modules.history.attach({ logDebug });
 // The cloud file browser, accounts and hosting (modules/cloud/adapters/surface.js).
 var cloudParts = modules.cloud.attach({
-  elements, logDebug, flashStatusPanel, openSettingsDialog, refreshChatStatus,
-  setMobileExplorerOpen
+  elements, logDebug, flashStatusPanel, openSettingsDialog, refreshChatStatus
 });
-var chatsPage = modules.chats.attach({ isMobileLayout, logDebug }); // the side panel's Chats page
+var chatsPage = modules.chats.attach({ logDebug });
+// The Agent page (the Assistant's), which loads itself the first time it is needed.
+modules.assistant.attach({ elements, logDebug, storedProject, chatsPage }); // the side panel's Chats page
 // Diagrams and character sheets add their previews to the Editor's extension point.
 registerPreviews(modules.editor.previews, {
   view: editorView, settings, escapeHtmlAttribute, normalizePath, getRelativeProjectPath,
@@ -283,9 +281,6 @@ function setEditorSelection(...args) { return editorParts.setEditorSelection(...
 function syncEditorScroll(...args) { return editorParts.syncEditorScroll(...args); }
 function transformEditorSelection(...args) { return editorParts.transformEditorSelection(...args); }
 
-// Declared up here because the hoisted mobile render helpers reach it during
-// the first render, which would otherwise be inside its temporal dead zone.
-const MOBILE_MAX_WIDTH = 900;    // must match the CSS breakpoint
 
 const debugState = {
   entries: [],
@@ -300,44 +295,8 @@ const debugTabs = [...elements.debugTabStrip.querySelectorAll(".debug-tab")].map
 
 
 
-// ---- Chat panel ------------------------------------------------------------
-// The Agent page is the Assistant module's. It loads the first time it is
-// needed — the panel shown or Settings open (Agent status) — so sessions that
-// never open it don't download it.
-let chat = null;
-let chatLoading = null;
-
-function chatNeeded() {
-  return settings.chatPanel === "shown" || layout().mobileView() === "chat" || Boolean(elements.settingsDialog?.open);
-}
-
-function loadChat() {
-  chatLoading ??= modules.assistant.load({
-    elements, isMobileLayout, logDebug, openSettingsDialog, storedProject, chatsPage
-  }).then((loaded) => {
-    chat = loaded;
-    chat.chatState.shouldScrollToBottom = true;
-    chat.renderChatPanel(controller.getProject());
-    void chat.refreshChatStatus({ silent: true });
-    return chat;
-  }).catch((error) => {
-    chatLoading = null;
-    logDebug("error", "Chat panel failed to load", error.message);
-    showToast("The chat panel could not load. Check your connection and try again.");
-    return null;
-  });
-  return chatLoading;
-}
-
-function renderChatPanel(project) {
-  if (chat) chat.renderChatPanel(project);
-  else if (chatNeeded()) void loadChat();
-}
-
-async function refreshChatStatus(options) {
-  if (chat) return chat.refreshChatStatus(options);
-  if (chatNeeded()) await loadChat(); // loading checks the status itself
-}
+// The agent's status, asked again (Models'; the Agent page redraws as it changes).
+function refreshChatStatus(options = {}) { return modules.models.agent.refresh({ signedIn: Boolean(identity.account()), ...options }); }
 
 /** Group chats name their characters by path; follow a rename or move of a
  *  character file, or of a folder holding one. */
@@ -580,235 +539,14 @@ document.addEventListener("keydown", (event) => {
   moduleMapTools.write();
 }, true);
 
-for (const pane of ["source", "preview"]) {
-  tabOverflowButton(pane)?.addEventListener("click", (event) => {
-    event.stopPropagation();
-    const isOpen = tabOverflowButton(pane)?.classList.contains("is-open");
-    closeTabOverflowMenu();
-    if (!isOpen) openTabOverflowMenu(pane);
-  });
-}
-
-document.addEventListener("click", (event) => {
-  if (elements.tabOverflowMenu?.hidden) return;
-  if (event.target.closest?.("#tab-overflow-menu, .tab-overflow-btn")) return;
-  closeTabOverflowMenu();
-});
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !elements.tabOverflowMenu?.hidden) closeTabOverflowMenu();
-});
-
-// ── Collapsible sidebar sections (Linked Notes / Session) ───────────────────
-// Collapsed state is per-panel and persisted. Until the user has touched one,
-// the phone layout starts them collapsed — on a 390px screen those two blocks
-// pushed the file tree, which is the reason the sidebar exists, off-screen.
-
-const SIDEBAR_PANEL_IDS = ["links", "session"];
-
-function sidebarPanelCollapsed(id) {
-  const stored = settings.sidebarPanels;
-  if (stored && typeof stored === "object" && id in stored) return Boolean(stored[id]);
-  return isMobileLayout();  // never chosen → collapsed on a phone, open on desktop
-}
-
-function renderSidebarPanels() {
-  for (const toggle of document.querySelectorAll(".sidebar-panel-toggle")) {
-    const id = toggle.dataset.panel;
-    if (!id) continue;
-    const collapsed = sidebarPanelCollapsed(id);
-    toggle.closest(".sidebar-panel")?.setAttribute("data-collapsed", String(collapsed));
-    toggle.setAttribute("aria-expanded", String(!collapsed));
-  }
-}
-
-function toggleSidebarPanel(id) {
-  if (!SIDEBAR_PANEL_IDS.includes(id)) return;
-  const next = { ...(settings.sidebarPanels ?? {}) };
-  // Write BOTH panels on first use, so flipping one doesn't leave the other
-  // silently following the viewport and re-collapsing on the next resize.
-  for (const key of SIDEBAR_PANEL_IDS) {
-    if (!(key in next)) next[key] = sidebarPanelCollapsed(key);
-  }
-  next[id] = !next[id];
-  settings.change({ sidebarPanels: next });
-  persistSettings();  // -> applyWorkspaceSettings -> renderSidebarPanels
-  logDebug("action", "Sidebar section toggled", `${id} ${next[id] ? "collapsed" : "expanded"}`);
-}
-
-function applyWorkspaceSettings() {
-  const computedStyles = globalThis.getComputedStyle?.(elements.app);
-  const splitterSize = Number.parseFloat(computedStyles?.getPropertyValue("--splitter-size") ?? "4") || 4;
-  const editorGridWidth = elements.editorGrid.getBoundingClientRect().width;
-  const hasEditorGridWidth = Number.isFinite(editorGridWidth) && editorGridWidth > 0;
-  const defaultSplitPreviewWidth = hasEditorGridWidth
-    ? Math.round(clamp((editorGridWidth - splitterSize) / 2, 280, Math.max(320, editorGridWidth - 280)))
-    : 420;
-  const previewWidth = settings.previewWidthCustomized
-    ? settings.previewWidth
-    : defaultSplitPreviewWidth;
-
-  elements.app.dataset.explorer = settings.explorer;
-  // The explorer is always an overlay flyout on the phone layout, so "floating"
-  // must never reach the DOM there. The desktop rule
-  //   [data-explorer-anchor="floating"][data-chat="hidden"] .workspace-shell
-  // carries more specificity than the mobile single-column override (media
-  // queries add none), so it won for anyone who had toggled dock/float: the
-  // workspace was pinned to grid-column 1, which under that rule is the 48px
-  // activity-bar track — a 32px-wide editor. settings.explorerAnchor is left
-  // alone so the desktop preference survives the trip through a phone.
-  elements.app.dataset.explorerAnchor = isMobileLayout() ? "docked" : settings.explorerAnchor;
-  renderSidebarPanels();
-  elements.app.dataset.preview = settings.preview;
-  elements.app.dataset.source = settings.source;
-  elements.app.dataset.chat = settings.chatPanel;
-  elements.app.dataset.wordWrap = settings.wordWrap ? "on" : "off";
-  elements.app.dataset.debug = settings.debugPanel ? "on" : "off";
-  elements.app.style.setProperty("--sidebar-width", `${settings.sidebarWidth}px`);
-  elements.app.style.setProperty("--preview-width", `${previewWidth}px`);
-  elements.app.style.setProperty("--chat-width", `${settings.chatWidth}px`);
-  elements.app.style.setProperty("--debug-height", `${settings.debugPanelHeight}px`);
-  elements.app.style.setProperty("--indent-tab-size", "4");
-  // Word-wrap is CSS-driven via data-word-wrap; no textarea.wrap needed.
-  elements.previewCollapseButton.setAttribute("aria-expanded", settings.preview === "shown" ? "true" : "false");
-  elements.chatCollapseButton.setAttribute("aria-expanded", settings.chatPanel === "shown" ? "true" : "false");
-  elements.debugPanel.hidden = !settings.debugPanel;
-  refreshFormatToolbar();
-  elements.chatPanel.hidden = settings.chatPanel === "hidden";
-  elements.chatToggleActivityButton.classList.toggle("is-active", settings.chatPanel === "shown");
-  elements.explorerFilterButton.classList.toggle("is-active", settings.explorerFilter !== "all");
-  if (elements.explorerAnchorButton) {
-    const floating = settings.explorerAnchor === "floating";
-    elements.explorerAnchorButton.classList.toggle("is-active", floating);
-    elements.explorerAnchorButton.setAttribute("aria-pressed", String(floating));
-    elements.explorerAnchorButton.title = floating
-      ? "Dock the explorer (fixed panel)"
-      : "Float the explorer (overlay)";
-  }
-  if (!elements.app.dataset.mobileExplorer) elements.app.dataset.mobileExplorer = "closed";
-  if (!elements.app.dataset.mobileMenu) elements.app.dataset.mobileMenu = "closed";
-  applyMobileViewState();
-  renderDebugPanel();
-}
-
-
-function startPointerResize(event, onMove) {
-  event.preventDefault();
-
-  function handleMove(moveEvent) {
-    onMove(moveEvent);
-  }
-
-  function handleUp() {
-    document.removeEventListener("pointermove", handleMove);
-    document.removeEventListener("pointerup", handleUp);
-  }
-
-  document.addEventListener("pointermove", handleMove);
-  document.addEventListener("pointerup", handleUp);
-}
-
-elements.workspaceSplitter.addEventListener("pointerdown", (event) => {
-  if (settings.explorer === "collapsed") {
-    return;
-  }
-
-  startPointerResize(event, (moveEvent) => {
-    const shellRect = elements.workspaceShell.getBoundingClientRect();
-    const activityWidth = 48;
-    const nextWidth = clamp(moveEvent.clientX - shellRect.left - activityWidth, 180, Math.max(240, shellRect.width - 320));
-    settings.change({ sidebarWidth: Math.round(nextWidth) });
-    persistSettings();
-    renderEditorContent(getEditorText());
-    syncEditorScroll();
-  });
-});
-
-elements.editorSplitter.addEventListener("pointerdown", (event) => {
-  if (settings.preview === "hidden") {
-    return;
-  }
-
-  startPointerResize(event, (moveEvent) => {
-    const gridRect = elements.editorGrid.getBoundingClientRect();
-    const nextWidth = clamp(gridRect.right - moveEvent.clientX, 280, Math.max(320, gridRect.width - 280));
-    settings.change({ previewWidthCustomized: true, previewWidth: Math.round(nextWidth) });
-    persistSettings();
-    renderEditorContent(getEditorText());
-    syncEditorScroll();
-  });
-});
-
-elements.chatSplitter.addEventListener("pointerdown", (event) => {
-  if (settings.chatPanel === "hidden") {
-    return;
-  }
-
-  startPointerResize(event, (moveEvent) => {
-    const shellRect = elements.workspaceShell.getBoundingClientRect();
-    const nextWidth = clamp(shellRect.right - moveEvent.clientX, 300, Math.max(340, shellRect.width - 360));
-    settings.change({ chatWidth: Math.round(nextWidth) });
-    persistSettings();
-    renderEditorContent(getEditorText());
-    syncEditorScroll();
-  });
-});
-
-elements.debugSplitter.addEventListener("pointerdown", (event) => {
-  if (!settings.debugPanel) {
-    return;
-  }
-
-  startPointerResize(event, (moveEvent) => {
-    const workspaceRect = elements.workspaceShell.getBoundingClientRect();
-    const footerHeight = 24;
-    const bottom = workspaceRect.bottom - footerHeight;
-    const nextHeight = clamp(bottom - moveEvent.clientY, 120, Math.max(180, workspaceRect.height - 220));
-    settings.change({ debugPanelHeight: Math.round(nextHeight) });
-    persistSettings();
-    renderEditorContent(getEditorText());
-    syncEditorScroll();
-  });
-});
-
 function closeMenus() { shell.closeMenus(); }
 
-document.addEventListener("click", async (event) => {
-  const copyButton = event.target.closest("[data-copy-code]");
-  if (!copyButton) {
-    return;
-  }
-  const codeEl = copyButton.closest(".md-code-block")?.querySelector("pre > code");
-  const codeText = codeEl?.textContent ?? "";
-  if (!codeText) {
-    return;
-  }
-  event.preventDefault();
-  try {
-    await copyTextToClipboard(codeText);
-    const originalText = copyButton.textContent || "Copy";
-    copyButton.textContent = "Copied";
-    copyButton.classList.add("is-copied");
-    window.setTimeout(() => {
-      copyButton.textContent = originalText;
-      copyButton.classList.remove("is-copied");
-    }, 1200);
-  } catch {
-    notify("Could not copy code block.");
-  }
-});
 
-function persistSettings() { applyWorkspaceSettings(); } // the settings save themselves (Shell); this applies them
 
-applyWorkspaceSettings();
-
-// What main.js still draws on each redraw (Shell's): the project's name and
-// the phone's pane caption (the frame's, S4e-3); and the Agent page is loaded
-// once it is needed (it then draws itself).
+// What main.js still draws on each redraw (Shell's): the project's name.
 shell.events.on("render", ({ project }) => {
   if (!project) return;
   elements.projectNameLabel.textContent = project.name;
-  renderMobilePaneCaption();
-  if (!chat && chatNeeded()) void loadChat();
 });
 
 if (!storedProject) {
@@ -845,21 +583,6 @@ function updateFileContentFromPreview(...args) { return editorParts.updateFileCo
 
 
 
-// The file the mobile pane's pen button should act on: the previewed file in
-// preview view, otherwise the active source file. Null in chat view.
-function currentMobileFileId() {
-  if (layout().mobileView() === "chat") return null;
-  if (layout().mobileView() === "preview") return editorParts.shownPaneView() ? null : editorView.get().previewFileId;
-  return controller.getActiveFile()?.id ?? null;
-}
-
-
-
-
-
-
-
-shell.commands.add({ id: "editor.find-replace", title: "Find & Replace", menu: { id: "edit", group: 0, order: 1 }, run: () => openFindBar(true) });
 window.addEventListener("resize", scheduleOverviewRuler);
 bindPaneDropTarget(elements.sourcePane, "source");
 bindPaneDropTarget(elements.sourceTabStrip, "source");
@@ -868,185 +591,10 @@ bindPaneDropTarget(elements.previewTabStrip, "preview");
 bindTabStripReorderTarget(elements.sourceTabStrip, "source");
 bindTabStripReorderTarget(elements.previewTabStrip, "preview");
 
-document.addEventListener("dragend", () => {
-  clearPaneDropState();
-  clearExplorerDropState();
-  clearEditorDropCaret();
-});
-document.addEventListener("drop", () => {
-  clearPaneDropState();
-  clearExplorerDropState();
-  clearEditorDropCaret();
-});
-// ---- Layout: panels, mobile panes and touch gestures (./ui/layout.js) ----
-// Created on first use. The module reads main's shared values through this
-// context, so it always sees their current values. `var`: a forwarding
-// function can run during startup, before this line is reached.
-var layoutInstance;
-function layout() {
-  return (layoutInstance ??= createLayout({
-    view: editorView,
-    shownPaneView: () => editorParts.shownPaneView(),
-    get chat() { return chat; },
-    get closeMenus() { return closeMenus; },
-    get controller() { return controller; },
-    get currentMobileFileId() { return currentMobileFileId; },
-    get elements() { return elements; },
-    get isMobileLayout() { return isMobileLayout; },
-    get isPreviewableFileName() { return isPreviewableFileName; },
-    get logDebug() { return logDebug; },
-    get persistSettings() { return persistSettings; },
-    get refreshChatStatus() { return refreshChatStatus; },
-    get renderChatPanel() { return renderChatPanel; },
-    get setPreviewFile() { return setPreviewFile; },
-    get settings() { return settings; }
-  }));
-}
-function applyMobileViewState(...args) { return layout().applyMobileViewState(...args); }
-function cancelMobileGesture(...args) { return layout().cancelMobileGesture(...args); }
-function handleFloatingExplorerOutsidePress(...args) { return layout().handleFloatingExplorerOutsidePress(...args); }
-function onGestureEnd(...args) { return layout().onGestureEnd(...args); }
-function onGestureMove(...args) { return layout().onGestureMove(...args); }
-function onGestureStart(...args) { return layout().onGestureStart(...args); }
-function renderMobilePaneCaption(...args) { return layout().renderMobilePaneCaption(...args); }
-function selectMobilePane(...args) { return layout().selectMobilePane(...args); }
-function setExplorerAnchor(...args) { return layout().setExplorerAnchor(...args); }
-function setMobileExplorerOpen(...args) { return layout().setMobileExplorerOpen(...args); }
-function setMobileMenuOpen(...args) { return layout().setMobileMenuOpen(...args); }
-function toggleChat(...args) { return layout().toggleChat(...args); }
-function toggleExplorer(...args) { return layout().toggleExplorer(...args); }
-function toggleExplorerAnchor(...args) { return layout().toggleExplorerAnchor(...args); }
-function toggleMobileExplorer(...args) { return layout().toggleMobileExplorer(...args); }
-function toggleMobileMenu(...args) { return layout().toggleMobileMenu(...args); }
-function togglePreview(...args) { return layout().togglePreview(...args); }
-function toggleSource(...args) { return layout().toggleSource(...args); }
-
-// ── Touch gestures: explorer drawer + pane carousel ─────────────────────────
-// One dispatcher owns every horizontal drag so the two gestures can never fight
-// over the same finger. At gesture start it decides who gets it:
-//
-//   drawer open                  → drag to close (anywhere)
-//   touch within EDGE_ZONE left  → drag to open the drawer
-//   otherwise                    → drag to switch panes
-//
-// Nothing is claimed until the finger has moved SLOP px and is clearly more
-// horizontal than vertical, so vertical scrolling, caret placement and
-// long-press text selection in the editor all behave as before.
-
-function isMobileLayout() {
-  return window.matchMedia(`(max-width: ${MOBILE_MAX_WIDTH}px)`).matches;
-}function toggleLogPanel() {
-  settings.change({ debugPanel: !settings.debugPanel });
-  persistSettings();
-  logDebug("action", settings.debugPanel ? "Log panel enabled" : "Log panel disabled");
-}
-
-shell.commands.add({ id: "shell.toggle-explorer", title: "Toggle Explorer", menu: { id: "view", group: 0, order: 1 }, run: toggleExplorer });
-shell.commands.add({ id: "editor.toggle-preview", title: "Toggle Preview", menu: { id: "view", group: 0, order: 3 }, run: togglePreview });
-shell.commands.add({ id: "editor.toggle-source", title: "Toggle Source", menu: { id: "view", group: 0, order: 2 }, run: toggleSource });
-shell.commands.add({ id: "assistant.toggle-chat", title: () => (settings.chatPanel === "shown" ? "Hide Chat" : "Show Chat"), menu: { id: "view", group: 0, order: 4 }, run: toggleChat });
-shell.commands.add({ id: "shell.toggle-log", title: "Toggle Log", menu: { id: "view", group: 0, order: 5 }, run: toggleLogPanel });
-elements.explorerToggleButton.addEventListener("click", toggleExplorer);
-// Touch gestures. touchmove must be non-passive: once a drag is claimed we
-// preventDefault it to suppress the scroll/selection the browser would
-// otherwise run alongside. touchstart stays passive — it never blocks.
-document.addEventListener("touchstart", onGestureStart, { passive: true });
-document.addEventListener("touchmove", onGestureMove, { passive: false });
-document.addEventListener("touchend", onGestureEnd, { passive: true });
-document.addEventListener("touchcancel", onGestureEnd, { passive: true });
-
-document.addEventListener("click", (event) => {
-  const toggle = event.target.closest?.(".sidebar-panel-toggle");
-  if (toggle?.dataset.panel) toggleSidebarPanel(toggle.dataset.panel);
-});
-
-elements.explorerAnchorButton?.addEventListener("click", toggleExplorerAnchor);
-// Capture phase so the outside-press check runs before in-tree click handlers.
-document.addEventListener("pointerdown", handleFloatingExplorerOutsidePress, true);
-elements.previewToggleActivityButton.addEventListener("click", togglePreview);
-elements.sourceToggleActivityButton?.addEventListener("click", toggleSource);
-elements.chatToggleActivityButton.addEventListener("click", toggleChat);
-elements.previewCollapseButton.addEventListener("click", togglePreview);
-elements.sourceCollapseButton?.addEventListener("click", toggleSource);
-elements.chatCollapseButton.addEventListener("click", toggleChat);
-elements.logCollapseButton.addEventListener("click", toggleLogPanel);
-
-// Mobile topbar controls (inert on desktop where the buttons are hidden).
-elements.mobileExplorerButton?.addEventListener("click", toggleMobileExplorer);
-for (const button of [elements.mobileSourceToggle, elements.mobilePreviewToggle, elements.mobileChatToggle]) {
-  button?.addEventListener("click", () => selectMobilePane(button.dataset.pane));
-}
-elements.mobileRenameButton?.addEventListener("click", () => {
-  const id = currentMobileFileId();
-  if (!id) { showToast("No file to rename"); return; }
-  void renameFileById(id);
-});
-elements.mobileMenuButton?.addEventListener("click", (event) => {
-  event.stopPropagation();
-  toggleMobileMenu();
-});
-// Choosing a command from the ⋮ dropdown dismisses it (menu triggers, which only
-// open sub-popovers, are left alone). Inert on desktop.
-elements.menuBar?.addEventListener("click", (event) => {
-  const button = event.target.closest("button");
-  if (button && !button.classList.contains("menu-trigger")) {
-    setMobileMenuOpen(false);
-  }
-});
-
-// Dismiss the mobile flyouts when tapping outside them.
-document.addEventListener("pointerdown", (event) => {
-  const target = event.target;
-  if (elements.app.dataset.mobileMenu === "open"
-    && !elements.menuBar?.contains(target)
-    && !elements.mobileMenuButton?.contains(target)) {
-    setMobileMenuOpen(false);
-  }
-  if (elements.app.dataset.mobileExplorer === "open"
-    && !elements.explorerPanel?.contains(target)
-    && !elements.mobileExplorerButton?.contains(target)
-    // The quick-add / context / filter menu lives outside the panel; interacting
-    // with it must not dismiss the explorer the user is still managing.
-    && !elements.explorerContextMenu?.contains(target)) {
-    setMobileExplorerOpen(false);
-  }
-}, true);
-installMobileViewport(window, document.documentElement);
-
-elements.settingsButton.addEventListener("click", () => {
-  logDebug("action", "Settings dialog opened");
-  openSettingsDialog("appearance");
-});
-
-shell.commands.add({ id: "shell.open-settings", title: "Open Settings", menu: { id: "settings", group: 0, order: 1 }, run: () => {
-  logDebug("action", "Settings dialog opened from menu");
-  openSettingsDialog("appearance");
-} });
-
-// Status-bar footer items double as shortcuts to their related menus/panels.
 // ── Settings (Shell's dialog; its sections and fields are their owners') ──
 function openSettingsDialog(tab = "appearance") { shell.settingsDialog.open(tab); }
-// The Agent page draws Settings → Agent's connected tools: load it with Settings.
-shell.settingsDialog.onOpen(() => { if (!chat) void loadChat(); });
-// The frame's layout follows its settings, whoever changed them.
-settings.on((view, changed) => {
-  if (changed.some((key) => ["explorer", "explorerAnchor", "preview"].includes(key))) persistSettings();
-});
-
-// The status bar's collaborators (Sync's) reveal the Session panel in the explorer sidebar.
-shell.commands.add({ id: "layout.show-session", title: "Show the Session Panel", run() {
-  // The session/presence panel lives in the explorer sidebar — reveal it.
-  if (settings.explorer !== "expanded") {
-    settings.change({ explorer: "expanded" });
-    persistSettings();
-  }
-  // Revealing a collapsed section would show only its header, so open it.
-  if (sidebarPanelCollapsed("session")) toggleSidebarPanel("session");
-  document.querySelector(".collaboration-sidebar-panel")?.scrollIntoView({ block: "nearest" });
-  logDebug("action", "Status bar: reveal session panel");
-} });
-
-shell.commands.add({ id: "shell.log-panel", title: () => (settings.debugPanel ? "Hide Log Panel" : "Show Log Panel"), menu: { id: "settings", group: 0, order: 2 }, run: toggleLogPanel });
+// The log panel (main.js's until it is Shell's) draws when the frame's layout changes.
+shell.events.on("layout", () => renderDebugPanel());
 
 debugTabs.forEach((tab) => {
   tab.element.addEventListener("click", () => {
@@ -1060,24 +608,6 @@ elements.debugCopyButton.addEventListener("click", () => {
 });
 
 elements.debugClearButton.addEventListener("click", () => dialogs().clearDebugLog());
-
-window.addEventListener("resize", () => {
-  cancelMobileGesture();
-  // The width observer above owns editor rendering and preserves the caret.
-  // Keyboard / browser chrome height changes need only scroll alignment.
-  syncEditorScroll();
-});
-
-// Crossing the phone breakpoint (rotation, or a resized desktop window) has to
-// re-decide the explorer anchor — see applyWorkspaceSettings.
-window.matchMedia(`(max-width: ${MOBILE_MAX_WIDTH}px)`)
-  .addEventListener("change", () => {
-    cancelMobileGesture();
-    setMobileExplorerOpen(false);
-    setMobileMenuOpen(false);
-    applyWorkspaceSettings();
-    applyMobileViewState();
-  });
 
 // ---- The cloud file browser, accounts and hosting (the Cloud module) ----
 function handleAccountLogout(...args) { return cloudParts.handleAccountLogout(...args); }

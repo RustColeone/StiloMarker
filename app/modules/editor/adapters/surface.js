@@ -23,13 +23,13 @@ import { createShowFile } from "./show-file.js";
 import { createTabs } from "./tabs.js";
 import { createCharCount } from "./char-count.js";
 import { createPreviewPane } from "./preview-pane.js";
+import { installFrameParts } from "./frame-parts.js";
 
 // What main.js attaches (editor.attach(port)); each entry should move to an
 // owner, or become an extension point, and leave this list.
 export const PORT = [
   "collaboration", "workspaceMode", "settings", "elements", "identity", "saveUserState",
   "logDebug", "traceEditorEvent", "formatEditorDebugValue",
-  "setMobileExplorerOpen", "togglePreview",
   "isReadOnly", "onDrop"
 ];
 
@@ -100,6 +100,9 @@ export function createSurface({ port, view, marks, paneViews, completions, lineN
     // key the saved positions are kept under, and an image's address.
     scope: () => workspace.location.key(workspace.project()?.getProject()),
     imageSrcFor: (project, node) => workspace.location.assetSrc(project, node),
+    // The frame (Shell's): closing the phone's explorer drawer, showing the preview pane.
+    setMobileExplorerOpen: (open) => shell.frame.setExplorerOpen(open),
+    togglePreview: () => shell.frame.toggle("preview"),
     redrawRemoteCursors: () => app.renderRemoteCursors(Array.from(app.remoteCursorsByClient.values())),
     isPreviewableFileName,
     resolveProjectAssetUrl,
@@ -172,6 +175,7 @@ export function createSurface({ port, view, marks, paneViews, completions, lineN
     app.drawPreviewPane(project, previewFileId ? project.nodes[previewFileId] : null);
     app.renderLinksPanel(project, activeFile);
   });
+  installFrameParts(app, shell);
   // Where the reader was, kept when the page hides or goes (resume.js, tabs.js).
   const keepView = () => { app.captureViewState(); app.cacheWorkspaceView(); };
   window.addEventListener("pagehide", keepView);

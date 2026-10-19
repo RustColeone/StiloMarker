@@ -335,7 +335,7 @@ That is where bugs are hard to find. Steps, each its own release:
 | S4d-3b | The welcome page and the maintenance commands (v0.1.75). The Editor shows the welcome page and offers `editor.welcome` (`{ id, draw() }`, called when it is shown): Cloud draws Resume and Open a workspace, the Explorer binds New file, Workspace Open a local folder. Shell owns the app's data in this browser (`clearAppStorage`), its offline files (`registerOffline`, moved from `app/services`) and Reset and Clear All Cache (announcing `"clearing-caches"` so the Editor drops its positions); Workspace owns Empty Everything | done (v0.1.75) |
 | S4e-1 | Owners for what `main.js` still answered (v0.1.76). Where the open project lives is Workspace's `location` (a key naming it, an image's address, resolving a link to an image), which Sync configures; paths inside a project moved from the Editor to Workspace. Sync answers `connectionInfo()`; Characters `avatarSrc()`. The File menu's commands are their owners': Save (Workspace, which says `"saved"`; History snapshots), New Project, Open Project, File Manager and the two imports (Cloud, now `cloud.*`), Export (Explorer, `explorer.*`), Save as PDF (Editor). The Editor's port lost `imageSrcFor` and `scope`, Explorer's `imageSrcFor`, Chats' and the Assistant's four workspace names | done (v0.1.76) |
 | S4e-2 | The redraw is Shell's (v0.1.77, `adapters/render.js`): every redraw goes through `shell.render`, and each module draws its own part on the `render` event (the Editor its tabs, file, preview pane and links; the Explorer the tree; the Agent page itself). A full redraw waits while a module says it is busy (`shell.holdRendering`: the Editor while typing; at most every 1.5 s in a long burst), as `main.js` used to do. Workspace saves and asks for a redraw on each change of the project | done (v0.1.77) |
-| S4e-3 | The frame (layout, splitters, phone panes, gestures, sidebar sections, the log panel) into Shell, as step 5's areas begin | |
+| S4e-3 | The frame is Shell's (v0.1.78, `adapters/frame/`), and step 5's areas begin: the left (explorer sidebar, docked or floating, its sections), right (side panel), bottom (log) areas and the middle's source and preview panes, shown, hidden and sized by Shell (`frame.toggle(area)`, the splitters), announced as `"area"`, `"resized"`, `"layout"`. On the phone, panes come from their owners (`frame.phonePanes.add`: the Editor's source and preview with their captions and files, the Assistant's chat); Shell owns the carousel, the drawer, the flyouts and the ⋮ menu. The Assistant loads its page itself when the side panel shows; the Editor and Explorer took Find, tab overflow, Copy on code blocks and drop cleanup. `ui/layout.js` and `services/chat-ui-service.js` are gone; the page looks the same (compared pixel for pixel) | done (v0.1.78) |
 | S4e-4 | The `elements` table; then `main.js` only starts the kernel | |
 | S4 | `main.js` only starts the kernel; then the server's `WorkspaceRegistry` the same way | |
 
@@ -451,6 +451,12 @@ That is where bugs are hard to find. Steps, each its own release:
   (`only: "status"` skips heavy parts such as the tree); ask for a redraw with
   `shell.render(project)`. Busy in a way a redraw would disturb:
   `shell.holdRendering(() => busyNow)`.
+- The frame: `shell.frame.toggle("left" | "right" | "bottom" | "source" |
+  "preview")`, `shown(area)`, `isPhone()`, `revealSection(id)`; hear
+  `shell.events.on("area", ({ area, shown }) => …)`, `"resized"` (`by:
+  "splitter" | "window"`), `"layout"`. A pane on the phone:
+  `shell.frame.phonePanes.add({ id, order, element(), caption(), fileId(),
+  shown?() })`.
 - An item in the status bar: `shell.statusBar.add({ id, order, title?,
   action?, dot?, grow?, hidden? })` returns `{ set({ text, tone, title,
   hidden }), element, extra }`; draw it from your own state when that changes.

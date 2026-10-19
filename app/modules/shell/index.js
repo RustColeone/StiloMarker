@@ -39,6 +39,9 @@
 //                            render(box) }), open(page?), onOpen(listener) (adapters/settings-dialog.js)
 //   statusBar                the status bar: add({ id, order, title?, action?, dot?, grow?, hidden? })
 //                            -> { set({ text, tone, title, hidden }), element, extra } (adapters/status-bar.js)
+//   frame                    the areas around the editor: toggle(area), shown(area), isPhone(),
+//                            revealSection(id), phonePanes.add(pane), showPane(id)…; events "area",
+//                            "resized", "layout" (adapters/frame/index.js)
 //   settings                 the app's settings, read-only (settings.theme);
 //                            settings.change({ key: value }, why?) saves a change,
 //                            settings.on(listener) hears them (service/settings.js)
@@ -57,6 +60,7 @@ import { createStatusBar } from "./adapters/status-bar.js";
 import { applyTheme } from "./adapters/theme.js";
 import { addMaintenanceCommands, clearAppStorage } from "./adapters/maintenance.js";
 import { createRender } from "./adapters/render.js";
+import { createFrame } from "./adapters/frame/index.js";
 import { registerOfflineShell } from "./adapters/offline.js";
 import { loadSettings, patchStoredSettings } from "./adapters/settings-store.js";
 import { SECRET_SETTINGS, keysToSave } from "./service/settings.js";
@@ -70,10 +74,10 @@ export default defineModule({
   level: 1,
   uses: [],
   owns: {
-    registries: ["commands", "menus", "pages", "settings fields", "status bar items"],
-    elements: ["menu bar", "the Settings dialog", "the status bar", "notice dialog", "confirm dialog", "input dialog", "form dialog", "toasts"],
+    registries: ["commands", "menus", "pages", "settings fields", "status bar items", "phone panes"],
+    elements: ["menu bar", "the Settings dialog", "the status bar", "the frame: areas, splitters, phone panes and gestures", "notice dialog", "confirm dialog", "input dialog", "form dialog", "toasts"],
     connection: ["the server address"],
-    events: ["render", "clearing-caches"],
+    events: ["render", "clearing-caches", "area", "resized", "layout"],
     diagnostics: ["uncaught errors", "stiloTrace()"],
     state: ["the app's settings"]
   },
@@ -142,6 +146,11 @@ export default defineModule({
     addMaintenanceCommands({ commands, confirm, notify: (message) => notice(message), closeMenus: () => menuBar.close(), events,
       log: (message) => ctx.log(message) });
 
+    // The frame: the areas around the editor and what shows in them (desktop and phone).
+    const frame = createFrame({ settings, events, registry: ctx.registry(), commands, run, closeMenus: () => menuBar.close(),
+      openSettings: (page) => settingsDialog.open(page), log: (message) => ctx.log(message) });
+    frame.apply();
+
     return {
       commands: { add: commands.add, get: commands.get, all: commands.all, onChange: commands.onChange },
       menus: { add: menus.add, all: menus.all },
@@ -159,6 +168,7 @@ export default defineModule({
       pages,
       settingsDialog,
       statusBar: createStatusBar({ registry: ctx.registry() }),
+      frame,
       render: redraw.render,
       holdRendering: redraw.holdWhile,
       clearAppStorage,

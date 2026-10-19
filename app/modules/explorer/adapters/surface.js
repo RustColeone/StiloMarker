@@ -21,7 +21,7 @@ import { createExplorerView } from "./tree.js";
 // What main.js attaches (explorer.attach(port)); each entry should move to an
 // owner, or become an extension point, and leave this list.
 export const PORT = [
-  "settings", "persistSettings",
+  "settings",
   "elements", "logDebug", "canManagePreview", "openAccessEditor", "openMtreeToolsDialog",
   "remapPersonaPaths"
 ];
@@ -178,6 +178,15 @@ export function createSurface({ port, workspace, editor, shell, sync, types, fil
     run: () => app.exportNode(app.controller.getProject().rootId) });
   shell.commands.add({ id: "explorer.export-selected", title: "Export Selected", menu: { id: "file", group: 0, order: 9 },
     run: () => app.exportNode(app.getSelectedNode(app.controller.getProject())?.id ?? app.controller.getProject().rootId) });
+  // The phone's pen renames the file on screen (Shell's frame asks with its id).
+  shell.commands.add({ id: "explorer.rename-file", title: "Rename File", run: (nodeId) => app.renameFileById(nodeId) });
+  // A drag that ended anywhere leaves no drop marks on the tree.
+  document.addEventListener("dragend", () => app.clearExplorerDropState());
+  document.addEventListener("drop", () => app.clearExplorerDropState());
+  // The filter button shows when a filter is on.
+  const drawFilter = () => app.elements.explorerFilterButton?.classList.toggle("is-active", app.settings.explorerFilter !== "all");
+  app.settings.on((view, changed) => { if (changed.includes("explorerFilter")) drawFilter(); });
+  drawFilter();
   // The welcome page's "New file".
   document.getElementById("welcome-new-file")?.addEventListener("click", () => app.openNewFileDialog());
 

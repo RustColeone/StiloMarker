@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v0.1.77";
+const CACHE_NAME = "mdnotes-shell-v0.1.78";
 // The extensions' files (EXTENSION_FILES), written by tools/protocol-sync.mjs.
 importScripts("./extensions/offline.js");
 const APP_SHELL = [
@@ -9,7 +9,6 @@ const APP_SHELL = [
   "./app/version.js",
   "./app/styles.css",
   "./app/domain/project-model.js",
-  "./app/services/chat-ui-service.js",
   "./app/services/mtree-module-map-service.js",
   "./app/services/persona-service.js",
   "./app/services/settings-service.js",
@@ -60,6 +59,10 @@ const APP_SHELL = [
   "./app/modules/shell/adapters/offline.js",
   "./app/modules/shell/adapters/maintenance.js",
   "./app/modules/shell/adapters/render.js",
+  "./app/modules/shell/adapters/frame/index.js",
+  "./app/modules/shell/adapters/frame/areas.js",
+  "./app/modules/shell/adapters/frame/phone.js",
+  "./app/modules/editor/adapters/frame-parts.js",
   "./app/modules/shell/adapters/theme.js",
   "./app/modules/shell/adapters/conversation.js",
   "./app/modules/shell/adapters/settings-store.js",
@@ -177,7 +180,6 @@ const APP_SHELL = [
   "./app/features/previews.js",
   "./app/modules/editor/adapters/tabs.js",
   "./app/modules/editor/adapters/preview.js",
-  "./app/ui/layout.js",
   "./app/ui/dialogs.js"
 ];
 
