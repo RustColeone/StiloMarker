@@ -16,7 +16,7 @@
 // reconnect...), created at start. It reaches the project and the Editor
 // through Workspace (applyRemote, replace, "text-changed", presence…);
 // keepers.add(async (files) => …) keeps local edits before a reload (History);
-// configure({ reauthenticate, uploadAsset }) (Cloud). The connection's life (adapters/connection.js): publish(op)
+// configure({ reauthenticate }) (Cloud). The connection's life (adapters/connection.js): publish(op)
 // sends a change (stamped, an image's bytes uploaded first, a refused write
 // reloaded), publishSnapshot(), switchMode("synced" | "private"),
 // connectSaved({ auto }), reconnectLater(); Join, the shared/own switch and
@@ -78,9 +78,9 @@ export default defineModule({
 
     // What higher modules supply: keeping local edits before a reload replaces
     // them (History: keepers), signing in again when the account's token died
-    // and uploading an image's bytes (Cloud: configure).
+    // (Cloud: configure).
     const keepers = new Set();
-    let supplied = { reauthenticate: async () => null, uploadAsset: async () => { throw new Error("Uploading needs the Cloud module."); } };
+    let supplied = { reauthenticate: async () => null };
     session = createCollaborationRuntime({
       getProject: () => workspace.project().getProject(),
       // Through Workspace, which the Editor hears (adapters/shared.js there).
@@ -95,7 +95,7 @@ export default defineModule({
       },
       async preserveLocalFiles(files) { for (const keep of keepers) await keep(files); },
       reauthenticate: () => supplied.reauthenticate(),
-      uploadAsset: (...args) => supplied.uploadAsset(...args),
+      uploadAsset: (...args) => api.uploadAsset(...args),
       onStatusChange(next) {
         const previous = statusState.get();
         statusState.set("the session", statusFromSession(next));

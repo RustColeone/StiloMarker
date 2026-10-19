@@ -8,14 +8,14 @@
 // openFileBrowser({ side }), performLogin, openAccessEditor...), created when
 // it starts in a page (adapters/surface.js). Once the whole app has started
 // it asks for the agent's status and resumes the last session.
-// Static, for code from before the restructure: saveUserState, uploadAsset,
+// Static, for code from before the restructure: saveUserState,
 // pingServer (the server's routes, adapters/api.js).
 import { defineModule } from "../../kernel/index.js";
 import { createSurface } from "./adapters/surface.js";
 import { addCollaborationSettings } from "./adapters/settings-section.js";
 import { addServerItem } from "./adapters/server-item.js";
 
-export { pingServer, saveUserState, uploadAsset } from "./adapters/api.js";
+export { pingServer, saveUserState } from "./adapters/api.js";
 
 export default defineModule({
   name: "cloud",

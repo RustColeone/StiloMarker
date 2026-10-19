@@ -2,7 +2,7 @@
   "about": "Structure violations that existed when the rules were introduced (2026-10-16). They may only shrink; see tools/structure-baseline.mjs.",
   "oversized": {
     "extensions/bmap-diagram/browser/adapters/view.js": 4025,
-    "server/mdnotes_server.py": 2213
+    "server/mdnotes_server.py": 1902
   },
   "spellings": {
     "access file": [],

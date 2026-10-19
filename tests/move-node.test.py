@@ -16,6 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('mdnotes_server', ROOT / 'server/mdnotes_server.py')
 server = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(server)
+from stilo.modules.sync import open_live  # noqa: E402
+from stilo.modules.workspace import node_id_by_path  # noqa: E402
 CASES = json.loads((ROOT / 'spec/workspace/move-node.cases.json').read_text(encoding='utf-8'))
 
 
@@ -24,17 +26,17 @@ class MoveNodeTests(unittest.TestCase):
         self.logs = patch.object(server, '_log'); self.logs.start(); self.addCleanup(self.logs.stop)
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
         self.directory = Path(self.tmp.name) / 'workspace'
-        self.broker = server.CollaborationBroker('2468', None, workspace_dir=self.directory)
+        self.broker = open_live('2468', folder=self.directory)
         self.token = self.broker.connect('2468', 'Tester')['token']
 
     def op(self, operation):
         return self.broker.apply_operation(self.token, operation)
 
     def reopen(self):
-        return server.CollaborationBroker('2468', None, workspace_dir=self.directory)
+        return open_live('2468', folder=self.directory)
 
     def names(self, broker, folder_path=''):
-        folder = broker._get_node_id_by_path(folder_path) if folder_path else broker.project['rootId']
+        folder = node_id_by_path(broker.project, folder_path) if folder_path else broker.project['rootId']
         return [broker.project['nodes'][c]['name'] for c in broker.project['nodes'][folder]['children']]
 
     def test_file_moves_on_disk_without_leaving_a_copy(self):
@@ -42,8 +44,8 @@ class MoveNodeTests(unittest.TestCase):
         self.op({'type': 'create-file', 'parentPath': '', 'name': '第七回试写.md', 'content': '正文'})
         self.op({'type': 'move-node', 'path': '第七回试写.md', 'parentPath': '第一卷'})
         reopened = self.reopen()
-        self.assertIsNotNone(reopened._get_node_id_by_path('第一卷/第七回试写.md'))
-        self.assertIsNone(reopened._get_node_id_by_path('第七回试写.md'), 'old path must be gone')
+        self.assertIsNotNone(node_id_by_path(reopened.project, '第一卷/第七回试写.md'))
+        self.assertIsNone(node_id_by_path(reopened.project, '第七回试写.md'), 'old path must be gone')
         self.assertFalse((self.directory / '第七回试写.md').exists(), 'old file must be removed from disk')
         self.assertEqual((self.directory / '第一卷' / '第七回试写.md').read_text(encoding='utf-8'), '正文')
 
@@ -53,8 +55,8 @@ class MoveNodeTests(unittest.TestCase):
         self.op({'type': 'create-file', 'parentPath': 'A/inner', 'name': 'deep.md', 'content': 'deep'})
         self.op({'type': 'move-node', 'path': 'A', 'parentPath': 'B'})
         reopened = self.reopen()
-        self.assertIsNotNone(reopened._get_node_id_by_path('B/A/inner/deep.md'))
-        self.assertIsNone(reopened._get_node_id_by_path('A'))
+        self.assertIsNotNone(node_id_by_path(reopened.project, 'B/A/inner/deep.md'))
+        self.assertIsNone(node_id_by_path(reopened.project, 'A'))
         self.assertFalse((self.directory / 'A').exists())
         self.assertEqual((self.directory / 'B/A/inner/deep.md').read_text(encoding='utf-8'), 'deep')
 

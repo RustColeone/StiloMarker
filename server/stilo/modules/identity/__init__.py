@@ -8,9 +8,11 @@ Static, for code from before the restructure:
     ACCOUNT_FILE, ACCESS_FILE, PREFS_FILE
     ROLES, can(role, action)
 
-API (started by the kernel):
-    serve(identity)   adds the sign-in route for that Identity (who may open a
-                      project is read and set through Projects' routes)
+API (started by the kernel; config: accounts (an AccountStore), data_dir):
+    the Identity (service/identity.py): require(token), require_team(...),
+    access(...), may_open(...), role(...), can(...), claim(...), team_members(team)...
+    It serves the sign-in route; who may open a project is read and set
+    through Projects' routes.
 """
 from types import SimpleNamespace
 
@@ -33,8 +35,9 @@ def open_identity(accounts: AccountStore | None = None, data_dir=None) -> Identi
 
 
 def start(ctx):
-    transport = ctx.use("transport")
-    return SimpleNamespace(serve=lambda identity: add_routes(transport, identity))
+    identity = open_identity(ctx.config.get("accounts"), ctx.config.get("data_dir"))
+    add_routes(ctx.use("transport"), identity)
+    return identity
 
 
 MODULE = define_module(__file__, start)

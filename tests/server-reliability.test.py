@@ -11,6 +11,9 @@ from unittest.mock import patch
 spec = importlib.util.spec_from_file_location('mdnotes_server', Path(__file__).resolve().parents[1] / 'server/mdnotes_server.py')
 server = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(server)
+from stilo.modules.sync import open_live  # noqa: E402
+from stilo.modules.workspace import default_project, node_id_by_path  # noqa: E402
+THREADS = server.AgentThreads()
 
 
 class ReliabilityTests(unittest.TestCase):
@@ -21,7 +24,7 @@ class ReliabilityTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.directory = Path(self.tmp.name) / 'workspace'
-        self.broker = server.CollaborationBroker('2468', None, workspace_dir=self.directory)
+        self.broker = open_live('2468', folder=self.directory)
         self.token = self.broker.connect('2468', 'Tester')['token']
         self.op({'type': 'create-file', 'parentPath': '', 'name': 'note.md', 'content': 'A😀BC'})
 
@@ -30,10 +33,10 @@ class ReliabilityTests(unittest.TestCase):
 
     def content(self, broker=None, path='note.md'):
         broker = broker or self.broker
-        return broker.project['nodes'][broker._get_node_id_by_path(path)]['content']
+        return broker.project['nodes'][node_id_by_path(broker.project, path)]['content']
 
     def reopen(self):
-        return server.CollaborationBroker('2468', None, workspace_dir=self.directory)
+        return open_live('2468', folder=self.directory)
 
     def test_concurrent_create_cannot_overwrite_an_existing_path(self):
         revision = self.broker.revision
@@ -115,7 +118,7 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(self.content(), 'A😀BC')
 
     def chat(self, messages, revision=0):
-        return self.broker.set_chat_workspace(self.token, {'baseRevision': revision, 'threads': [
+        return THREADS.set(self.broker, self.token, {'baseRevision': revision, 'threads': [
             {'id': 'thread', 'messages': [{'id': text, 'role': 'user', 'content': text} for text in messages]}
         ]})
 
@@ -124,7 +127,7 @@ class ReliabilityTests(unittest.TestCase):
         self.chat(['original', 'new'], saved['revision'])
         with self.assertRaisesRegex(ValueError, 'conflict'):
             self.chat(['original'], saved['revision'])
-        self.assertEqual([m['id'] for m in self.broker.get_chat_workspace(self.token)['threads'][0]['messages']], ['original', 'new'])
+        self.assertEqual([m['id'] for m in THREADS.get(self.broker, self.token)['threads'][0]['messages']], ['original', 'new'])
         self.assertEqual(self.broker.revision, 1, 'chat has an independent revision')
 
     def test_chat_persists_across_restart_and_returns_detached_copies(self):
@@ -132,20 +135,20 @@ class ReliabilityTests(unittest.TestCase):
         result['threads'].clear()
         loaded = self.reopen()
         token = loaded.connect('2468', 'reopened')['token']
-        chat = loaded.get_chat_workspace(token)
+        chat = THREADS.get(loaded, token)
         self.assertEqual(chat['revision'], 1)
         self.assertEqual(chat['threads'][0]['messages'][0]['content'], 'kept')
         chat['threads'].clear()
-        self.assertEqual(len(loaded.get_chat_workspace(token)['threads']), 1)
+        self.assertEqual(len(THREADS.get(loaded, token)['threads']), 1)
 
     def test_chat_disk_failure_does_not_confirm_or_broadcast_a_save(self):
         self.chat(['kept'])
         with patch.object(server, '_atomic_write', side_effect=OSError('disk full')):
             with self.assertRaises(OSError):
                 self.chat(['kept', 'failed'], 1)
-        self.assertEqual(self.broker.get_chat_workspace(self.token)['revision'], 1)
+        self.assertEqual(THREADS.get(self.broker, self.token)['revision'], 1)
         loaded = self.reopen()
-        self.assertEqual(loaded.chat_workspace['threads'][0]['messages'][0]['content'], 'kept')
+        self.assertEqual(THREADS.current(loaded)['threads'][0]['messages'][0]['content'], 'kept')
 
     def test_concurrent_chat_saves_have_one_winner_and_one_conflict(self):
         barrier = threading.Barrier(2)
@@ -158,12 +161,12 @@ class ReliabilityTests(unittest.TestCase):
         for worker in workers: worker.start()
         for worker in workers: worker.join()
         self.assertCountEqual(outcomes, ['saved', 'conflict'])
-        self.assertEqual(self.broker.chat_workspace['revision'], 1)
+        self.assertEqual(THREADS.current(self.broker)['revision'], 1)
 
     def test_chat_save_requires_revision_and_unique_merge_ids(self):
         for payload in ({'threads': []}, {'baseRevision': 0, 'threads': [{'id': 't', 'messages': [{'id': 'a'}, {'id': 'a'}]}]}):
-            with self.assertRaises(ValueError): self.broker.set_chat_workspace(self.token, payload)
-        self.assertEqual(self.broker.chat_workspace['revision'], 0)
+            with self.assertRaises(ValueError): THREADS.set(self.broker, self.token, payload)
+        self.assertEqual(THREADS.current(self.broker)['revision'], 0)
 
     def test_stale_agent_structural_edits_are_refused(self):
         for op in ({'type': 'delete-node', 'path': 'note.md'}, {'type': 'rename-node', 'path': 'note.md', 'name': 'wrong.md'}):
@@ -302,8 +305,8 @@ class ReliabilityTests(unittest.TestCase):
         self.assertTrue(self.broker.session_should_close(self.token))
 
     def test_a_role_outlives_a_dropped_stream(self):
-        reader = self.broker._admit('Rita', 'reader', identity='rita')['token']
-        master = self.broker._admit('Olga', 'master', identity='olga')['token']
+        reader = self.broker.admit('Rita', 'reader', identity='rita')['token']
+        master = self.broker.admit('Olga', 'master', identity='olga')['token']
         for token in (reader, master):
             events = self.broker.subscribe(token)
             self.broker.unsubscribe(token, expected_queue=events)  # the stream dropped; the token lives on
@@ -346,7 +349,7 @@ class ReliabilityTests(unittest.TestCase):
         self.op({'type': 'update-file', 'path': 'note.md', 'content': 'next', 'baseRevision': revision})
         self.assertEqual(queue.get_nowait()['type'], 'ready')
         self.assertEqual(queue.get_nowait()['revision'], revision + 1)
-        self.assertEqual(snapshot['project']['nodes'][self.broker._get_node_id_by_path('note.md')]['content'], 'A😀BC')
+        self.assertEqual(snapshot['project']['nodes'][node_id_by_path(self.broker.project, 'note.md')]['content'], 'A😀BC')
 
     def test_concurrent_broadcasts_follow_committed_revision_order(self):
         events = self.broker.subscribe(self.token)

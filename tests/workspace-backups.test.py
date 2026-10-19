@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('mdnotes_server', ROOT / 'server/mdnotes_server.py')
 server = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(server)
+from stilo.modules.workspace import default_project  # noqa: E402
 DAY = 86400
 PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
@@ -86,7 +87,7 @@ class WorkspaceBackupTests(unittest.TestCase):
 
     def test_replacing_the_whole_project_takes_a_safety_copy(self):
         self.op({'type': 'create-file', 'parentPath': '', 'name': 'keep.md', 'content': 'precious'})
-        self.broker.set_state(self.session, self.broker._default_project(), base_revision=self.broker.revision)
+        self.broker.set_state(self.session, default_project(), base_revision=self.broker.revision)
         safety = [b for b in self.backups() if b['kind'] == 'safety']
         self.assertEqual(len(safety), 1)
         self.assertEqual(self.content(safety[0]['id'], 'keep.md'), 'precious')
@@ -138,7 +139,7 @@ class WorkspaceBackupTests(unittest.TestCase):
     def test_backups_live_outside_the_project_folder(self):
         self.op({'type': 'create-file', 'parentPath': '', 'name': 'a.md', 'content': 'x'})
         self.reg.backup_sweep(now=self.t0)
-        project_dir = self.broker.workspace_dir
+        project_dir = self.broker.folder
         self.assertFalse(any('_backups' in str(p) for p in project_dir.rglob('*')))
 
     def test_shutdown_takes_a_final_backup(self):

@@ -12,7 +12,7 @@ import { createManage } from "./manage.js";
 import { createOpening } from "./opening.js";
 import { createResume } from "./resume.js";
 import { addProjectCommands } from "./projects.js";
-import { saveUserState, uploadAsset } from "./api.js";
+import { saveUserState } from "./api.js";
 import { createProviders } from "./providers.js";
 import { findElements } from "./elements.js";
 
@@ -70,8 +70,8 @@ export function createSurface({ shell, workspace, identity, sync, editor, histor
   addProjectCommands(app, { shell, editor, sync });
   // What Sync and the Editor need from the server's accounts and workspaces:
   // signing in again when the account's token died (a server restart; only
-  // with a sign-in proven before, and null to let Sync stop retrying), an
-  // image's bytes uploaded, and the open tabs kept for this workspace.
+  // with a sign-in proven before, and null to let Sync stop retrying), and the
+  // open tabs kept for this workspace.
   sync.configure({
     async reauthenticate() {
       if (!identity.canRestore()) return null;
@@ -87,8 +87,7 @@ export function createSurface({ shell, workspace, identity, sync, editor, histor
         if (![401, 403].includes(error.status)) throw error;
         return null;
       }
-    },
-    uploadAsset
+    }
   });
   // "Manage Preview" on the project's root (the Explorer's menu): who may open the
   // open cloud workspace's preview, while signed in and connected to it.

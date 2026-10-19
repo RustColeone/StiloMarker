@@ -18,6 +18,18 @@ def mod(name, level, uses, start=lambda ctx: {}):
 
 
 class KernelTests(unittest.TestCase):
+    def test_every_module_reads_the_same_config_and_cannot_change_it(self):
+        seen = []
+        def start(ctx):
+            seen.append((ctx.name, ctx.config.get("data_dir"), ctx.config.get("missing")))
+            with self.assertRaises(TypeError):
+                ctx.config["data_dir"] = "elsewhere"
+            return {}
+        start_modules([mod("a", 1, [], start), mod("b", 2, ["a"], start)], config={"data_dir": "/srv"})
+        self.assertEqual(seen, [("a", "/srv", None), ("b", "/srv", None)])
+        start_modules([mod("c", 1, [], lambda ctx: seen.append(dict(ctx.config)) or {})])
+        self.assertEqual(seen[-1], {}, "no config: an empty one")
+
     def test_lowest_level_first_and_only_declared_uses(self):
         order = []
         apis = start_modules([

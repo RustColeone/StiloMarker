@@ -43,6 +43,28 @@ class Request:
         except json.JSONDecodeError:
             raise ValueError("Invalid JSON payload")
 
+    def body(self) -> bytes:
+        """The request's body as it came (a piece of a file)."""
+        length = int(self.headers.get("content-length", "0"))
+        return self._handler.rfile.read(length) if length > 0 else b""
+
+
+class File:
+    """A data route's answer that is not JSON: bytes of a type (an image)."""
+
+    def __init__(self, data: bytes, content_type: str, cache: str = "no-cache"):
+        self.data, self.content_type, self.cache = data, content_type, cache
+
+
+def write_file(handler, reply, allow_headers=()):
+    handler.send_response(HTTPStatus.OK)
+    send_cors(handler, allow_headers)
+    handler.send_header("Content-Type", reply.content_type)
+    handler.send_header("Content-Length", str(len(reply.data)))
+    handler.send_header("Cache-Control", reply.cache)
+    handler.end_headers()
+    handler.wfile.write(reply.data)
+
 
 class Refusal(Exception):
     """A route's answer with a status of its own choosing (a conflict, an
@@ -79,6 +101,8 @@ def run_data_route(handler, parsed, route, log):
             return write_json(handler, status, {"message": str(error)}, allow)
         log(f"{route['method']} {route['path']} failed: {error!r}")
         return write_json(handler, HTTPStatus.INTERNAL_SERVER_ERROR, {"message": "Server error"}, allow)
+    if isinstance(payload, File):
+        return write_file(handler, payload, allow)
     write_json(handler, HTTPStatus.OK, payload, allow)
 
 

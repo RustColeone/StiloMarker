@@ -14,8 +14,9 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
-from mdnotes_server import (EDIT_SESSION_GAP_SECONDS, SYNC_LEVEL, AccountStore,  # noqa: E402
-                            CollaborationBroker, WorkspaceRegistry, build_server, bump_edit_counters)
+from mdnotes_server import EDIT_SESSION_GAP_SECONDS, SYNC_LEVEL, AccountStore, WorkspaceRegistry, build_server  # noqa: E402
+from stilo.modules.sync import open_live  # noqa: E402
+from stilo.modules.workspace import bump_edit_counters, default_project, node_id_by_path  # noqa: E402
 from stilo.modules.identity import ACCESS_FILE  # noqa: E402
 
 
@@ -195,21 +196,21 @@ def run_broker_selftest(state_file):
     # --- directory-backed workspace: real files + externalized image asset ---
     import base64 as _b64, tempfile as _tf, shutil as _sh
     _dir = Path(_tf.mkdtemp()) / "WorkNotes"
-    _b = CollaborationBroker("2468", None, workspace_dir=_dir)
+    _b = open_live("2468", folder=_dir)
     _png = "data:image/png;base64," + _b64.b64encode(bytes.fromhex(
         "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
         "0000000d4944415478da6360000002000154a24f5f0000000049454e44ae426082")).decode()
     _b._apply_operation({"type": "create-file", "parentPath": "", "name": "welcome.md", "content": "# Hi"})
     _img_op = {"type": "create-file", "parentPath": "", "name": "logo.png", "content": _png}
     _b._apply_operation(_img_op)
-    _b._persist_state()
+    _b.save()
     assert (_dir / "welcome.md").read_text(encoding="utf-8") == "# Hi", "text not written as a real file"
     assert (_dir / "logo.png").read_bytes()[:4] == b"\x89PNG", "image not written as real bytes"
     assert _img_op["content"] == "", "image data URL not stripped from the broadcast op"
     assert "data:image" not in (_dir / "manifest.json").read_text(encoding="utf-8"), "manifest still inlines images"
     assert _b.resolve_asset("logo.png") == (_dir / "logo.png").resolve(), "asset path not resolvable"
     assert _b.resolve_asset("../../etc/passwd") is None, "asset path traversal not blocked"
-    _b2 = CollaborationBroker("2468", None, workspace_dir=_dir)  # reload
+    _b2 = open_live("2468", folder=_dir)  # reload
     _reload = {n["name"]: n for n in _b2.project["nodes"].values() if n.get("kind") == "file"}
     assert _reload["welcome.md"]["content"] == "# Hi", "text not re-hydrated on load"
     assert _reload["logo.png"]["content"] == "", "image should stay externalized on load"
@@ -259,7 +260,7 @@ def run_broker_selftest(state_file):
     # Open-by-path admits and binds a directory-backed broker.
     _sess = _reg.open_workspace(_alice, "qa", "workspaces/Alpha")
     assert _sess["workspace"] == "qa/workspaces/Alpha"
-    assert _reg.brokers["qa/workspaces/Alpha"].workspace_dir is not None, "opened broker not directory-backed"
+    assert _reg.brokers["qa/workspaces/Alpha"].folder is not None, "opened broker not directory-backed"
 
     # Access: both lists empty ⇒ everyone in the team.
     assert _reg.projects.can_access(_bob_id, "qa", "workspaces/Alpha"), "empty access should allow team members"
@@ -281,7 +282,7 @@ def run_broker_selftest(state_file):
     # access.json survives a publish/replace-project wipe.
     _reg.projects.set_access(_alice, "qa", "workspaces/Alpha", ["alice"], [])
     _broker = _reg.brokers["qa/workspaces/Alpha"]
-    _broker._apply_operation({"type": "replace-project", "baseRevision": _broker.revision, "project": _broker._default_project()})
+    _broker._apply_operation({"type": "replace-project", "baseRevision": _broker.revision, "project": default_project()})
     assert (_alpha_dir / ACCESS_FILE).is_file(), "the access file must survive replace-project"
     assert _reg.projects.read_access("qa", "workspaces/Alpha")["whitelist"] == ["alice"], "whitelist lost on publish"
 
@@ -305,7 +306,7 @@ def run_broker_selftest(state_file):
     # Per-user resume state: save + read back is per account, and survives a
     # publish (user-state.json is preserved like access.json).
     _alpha_broker = _reg.brokers["qa/workspaces/Alpha"]
-    _alpha_broker._persist_state()  # restore manifest.json (an earlier test wiped it)
+    _alpha_broker.save()  # restore manifest.json (an earlier test wiped it)
     assert _reg.projects.read_user_state("qa", "workspaces/Alpha", "alice")["openFiles"] == [], "default resume is empty"
     _reg.projects.write_user_state(_alice, "qa", "workspaces/Alpha", ["welcome.md", "docs/spec.md"], "welcome.md")
     _rs = _reg.projects.read_user_state("qa", "workspaces/Alpha", "alice")
@@ -313,8 +314,8 @@ def run_broker_selftest(state_file):
     assert _reg.projects.read_user_state("qa", "workspaces/Alpha", "bob")["openFiles"] == [], "resume must be per-user"
     assert (_alpha_dir / "user-state.json").is_file(), "resume sidecar not written"
     # A publish (replace-project + persist) must preserve the resume sidecar.
-    _alpha_broker._apply_operation({"type": "replace-project", "baseRevision": _alpha_broker.revision, "project": _alpha_broker._default_project()})
-    _alpha_broker._persist_state()
+    _alpha_broker._apply_operation({"type": "replace-project", "baseRevision": _alpha_broker.revision, "project": default_project()})
+    _alpha_broker.save()
     assert (_alpha_dir / "user-state.json").is_file(), "user-state.json must survive replace-project"
     assert _reg.projects.read_user_state("qa", "workspaces/Alpha", "alice")["activeFile"] == "welcome.md", "resume lost on publish"
     # open_workspace hands the resume state back to the client.
@@ -350,8 +351,8 @@ def run_broker_selftest(state_file):
 
     # Comments survive a publish (replace-project wipes the project dir).
     _alpha_broker._apply_operation({"type": "replace-project", "baseRevision": _alpha_broker.revision,
-                                    "project": _alpha_broker._default_project()})
-    _alpha_broker._persist_state()
+                                    "project": default_project()})
+    _alpha_broker.save()
     assert (_alpha_dir / "comments.json").is_file(), "comments.json must survive replace-project"
     assert _reg.comments.list(_alice, "qa", _CP)["files"][_cf][0]["text"] == "revised note", "comments lost on publish"
 
@@ -377,7 +378,7 @@ def run_broker_selftest(state_file):
     _stok = _ss["token"]
     _sb = _reg.brokers["qa/workspaces/Alpha"]
     _sb.apply_operation(_stok, {"type": "create-file", "parentPath": "", "name": "race.md", "content": "v1"})
-    _nid = _sb._get_node_id_by_path("race.md")
+    _nid = node_id_by_path(_sb.project, "race.md")
     _created_at = _sb.revision  # race.md last changed here
 
     # A whole-file write that doesn't say what it is based on is refused.
@@ -416,17 +417,17 @@ def run_broker_selftest(state_file):
 
     # set_state (publish) WIPES the tree: it must be based on the current revision.
     try:
-        _sb.set_state(_stok, _sb._default_project(), base_revision=_sb.revision - 1)
+        _sb.set_state(_stok, default_project(), base_revision=_sb.revision - 1)
         assert False, "stale replace must be refused"
     except ValueError as e:
         assert "conflict" in str(e).lower()
     try:
-        _sb.set_state(_stok, _sb._default_project(), base_revision=None)
+        _sb.set_state(_stok, default_project(), base_revision=None)
         assert False, "unguarded replace must be refused"
     except ValueError as e:
         assert "conflict" in str(e).lower()
-    assert _sb._get_node_id_by_path("race.md"), "refused replace must not wipe the tree"
-    _sb.set_state(_stok, _sb._default_project(), base_revision=_sb.revision)  # current base is accepted
+    assert node_id_by_path(_sb.project, "race.md"), "refused replace must not wipe the tree"
+    _sb.set_state(_stok, default_project(), base_revision=_sb.revision)  # current base is accepted
 
     # --- Server-side snapshots ---------------------------------------------
     _P = "workspaces/Alpha"
@@ -450,8 +451,8 @@ def run_broker_selftest(state_file):
 
     # Stored OUTSIDE the project dir, so a publish (which wipes it) keeps them.
     assert not any("_snapshots" in str(x) for x in _alpha_dir.rglob("*")), "snapshots must not live in the project dir"
-    _alpha_broker._apply_operation({"type": "replace-project", "baseRevision": _alpha_broker.revision, "project": _alpha_broker._default_project()})
-    _alpha_broker._persist_state()
+    _alpha_broker._apply_operation({"type": "replace-project", "baseRevision": _alpha_broker.revision, "project": default_project()})
+    _alpha_broker.save()
     assert _reg.history.list_snapshot_paths(_alice, "qa", _P)["paths"] == ["大纲.md", _f], "snapshots lost on publish"
 
     # Per-file cap of 30; pruned blobs are actually deleted from disk.
@@ -526,16 +527,16 @@ def run_broker_selftest(state_file):
     _es = _reg.open_workspace(_bob, "qa", _RP)
     assert _es["role"] == "editor"
     _rb.apply_operation(_es["token"], {"type": "create-file", "parentPath": "", "name": "editor-ok.md", "content": "x"})
-    assert _rb._get_node_id_by_path("editor-ok.md"), "editor write should apply"
+    assert node_id_by_path(_rb.project, "editor-ok.md"), "editor write should apply"
     try:
-        _rb.set_state(_es["token"], _rb._default_project(), base_revision=_rb.revision)
+        _rb.set_state(_es["token"], default_project(), base_revision=_rb.revision)
         assert False, "an editor must not replace the whole tree"
     except PermissionError:
         pass
     # ...but the owner still can.
     _ms = _reg.open_workspace(_alice, "qa", _RP)
     assert _ms["role"] == "master", "owner should still be master"
-    _rb.set_state(_ms["token"], _rb._default_project(), base_revision=_rb.revision)
+    _rb.set_state(_ms["token"], default_project(), base_revision=_rb.revision)
 
     # --- S.E.N display counters -------------------------------------
     # E counts writing sittings, N edits within one. Both are cosmetic:
@@ -559,7 +560,7 @@ def run_broker_selftest(state_file):
     assert _node["sourceVersion"] == 5, _node
     # Counters survive a real edit path, and a second author in the same
     # room joins the SAME sitting rather than starting their own.
-    _cb = CollaborationBroker("1234", None)
+    _cb = open_live("1234")
     _m = _cb.connect("1234")
     _cb.apply_operation(_m["token"], {"type": "create-file", "parentPath": "", "name": "sen.md", "content": ""})
     _rev_before = _cb.revision
@@ -567,7 +568,7 @@ def run_broker_selftest(state_file):
                                       "baseRevision": _cb.revision})
     _cb.apply_operation(_m["token"], {"type": "update-file", "path": "sen.md", "content": "ab",
                                       "baseRevision": _cb.revision})
-    _sen = _cb.project["nodes"][_cb._get_node_id_by_path("sen.md")]
+    _sen = _cb.project["nodes"][node_id_by_path(_cb.project, "sen.md")]
     assert (_sen["editSessions"], _sen["sessionEdits"]) == (1, 2), _sen
     assert _cb.revision == _rev_before + 2, "revision must still advance once per operation"
 
@@ -581,7 +582,7 @@ def run_broker_selftest(state_file):
     for _i in range(4):
         _wb.apply_operation(_ws["token"], {"type": "update-file", "path": "sen.md",
                                            "content": "x" * (_i + 1), "baseRevision": _wb.revision})
-    _snap_node = _wb.project["nodes"][_wb._get_node_id_by_path("sen.md")]
+    _snap_node = _wb.project["nodes"][node_id_by_path(_wb.project, "sen.md")]
     assert (_snap_node["editSessions"], _snap_node["sessionEdits"]) == (1, 4), _snap_node
     _rev_at_snapshot = _wb.revision
     _changed_at = dict(_wb.rebase.changed_at)
@@ -601,7 +602,7 @@ def run_broker_selftest(state_file):
     assert "sen.md" in _listing["paths"], _listing["paths"]
     # Label maths (mirrors fileVersionLabel in main.js): same sitting, so N
     # subtracts the baseline — one edit since the snapshot reads v1.0.1.
-    _now = _wb.project["nodes"][_wb._get_node_id_by_path("sen.md")]
+    _now = _wb.project["nodes"][node_id_by_path(_wb.project, "sen.md")]
     _E = _now["editSessions"] - _base["editSessions"]
     _N = _now["sessionEdits"] if _E > 0 else _now["sessionEdits"] - _base["sessionEdits"]
     assert (_base["count"], _E, _N) == (1, 0, 1), (_base["count"], _E, _N)

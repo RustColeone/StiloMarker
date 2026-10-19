@@ -69,6 +69,19 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.84: what is open now is the server's Sync
+
+Step S4s-2. Nothing changes for users.
+
+- The server's list of open workspaces, session tokens, joining by PIN,
+  hosting for guests and closing quiet sessions are now the Sync module's.
+  A safety backup before a change that loses data, characters following a
+  moved file, and a deleted project's chats closing now hang off Sync's news
+  instead of being wired by hand.
+- Images in a cloud workspace are uploaded and served by Sync on both ends.
+- An old flat workspace kept as one file still moves into its folder the
+  first time it opens.
+
 ### v0.1.83: the server's Projects module
 
 Step S4s-1. Nothing changes for users.

@@ -1,5 +1,5 @@
 {
-  "about": "Sync's network messages (rule 7): joining a shared workspace, its state, presence, every change, and the event stream that carries changes to everyone. The server half serves exactly these routes (server/stilo/modules/sync/adapters/routes.py); only the browser half (app/modules/sync/adapters/api.js) calls them. `version` is the sync compatibility level: a browser sends it with every change (body `version`), and the server refuses an older one (426) so an out-of-date tab cannot write. Raise it only when old browsers must stop. Other modules' events ride the same stream; they are listed in their own contracts (and, until they move, in legacy.contract.json).",
+  "about": "Sync's network messages (rule 7): joining a shared workspace, its state, presence, every change, the event stream that carries changes to everyone, and a folder workspace's images (served by path, uploaded in pieces). The server half serves exactly these routes (server/stilo/modules/sync/adapters/routes.py); only the browser half (app/modules/sync/adapters/api.js) calls them. `version` is the sync compatibility level: a browser sends it with every change (body `version`), and the server refuses an older one (426) so an out-of-date tab cannot write. Raise it only when old browsers must stop. Other modules' events ride the same stream; they are listed in their own contracts (and, until they move, in legacy.contract.json).",
   "module": "sync",
   "version": 117,
   "routes": [
@@ -149,6 +149,29 @@
         "lease"
       ],
       "stream": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspaces/asset",
+      "query": [
+        "token",
+        "path"
+      ],
+      "reply": "the file's bytes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspaces/asset",
+      "query": [
+        "token",
+        "path",
+        "offset"
+      ],
+      "body": "the piece's bytes",
+      "reply": [
+        "ok",
+        "size"
+      ]
     }
   ],
   "operations": {

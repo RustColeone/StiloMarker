@@ -1,11 +1,12 @@
 {
   "name": "sync",
-  "level": 3,
-  "uses": ["transport", "file_types", "workspace"],
+  "level": 4,
+  "uses": ["transport", "file_types", "workspace", "identity", "projects"],
   "owns": {
-    "state": ["sessions", "presence", "leases", "event streams", "the rebase log"],
+    "state": ["the open workspaces", "session tokens", "sessions hosted for guests", "sessions", "presence", "leases", "event streams", "the rebase log"],
     "rules": ["rebasing a text patch", "who may send which change", "stale writes refused"],
     "names": ["sync protocol number"],
-    "routes": ["/api/session/*", "/api/workspaces/open", "/api/operations", "/api/events/stream"]
+    "events": ["before-destructive", "paths-moved", "dropped"],
+    "routes": ["/api/session/*", "/api/workspaces/open", "/api/operations", "/api/events/stream", "/api/workspaces/asset"]
   }
 }

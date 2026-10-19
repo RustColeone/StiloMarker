@@ -1,8 +1,7 @@
 // The server's routes for cloud workspaces: browsing, making a folder, the
 // resume state and who may open a project are the server's Projects
-// (protocol/projects.contract.json); ping, create, delete, export, import and
-// uploading an image are still the legacy routes.
-import { dataUrlToBytes } from "../../workspace/index.js";
+// (protocol/projects.contract.json); ping, create, delete, export and import
+// are still the legacy routes. (Images upload through Sync's routes.)
 import { normalizeServerUrl, parseResponse, throwForResponse } from "../../shell/index.js";
 
 async function pingServer(serverUrl) {
@@ -20,26 +19,6 @@ async function pingServer(serverUrl) {
   }
 
   return parseResponse(response);
-}
-
-async function uploadAsset(serverUrl, token, path, dataUrl) {
-  const { bytes } = dataUrlToBytes(dataUrl);
-  const baseUrl = normalizeServerUrl(serverUrl);
-  // Small sequential chunks keep every request well under a 1 MB proxy body
-  // limit, so large images upload without a 413 and without base64 in the ops.
-  const CHUNK = 256 * 1024;
-  let offset = 0;
-  do {
-    const chunk = bytes.subarray(offset, offset + CHUNK);
-    const response = await fetch(
-      `${baseUrl}/api/workspaces/asset?token=${encodeURIComponent(token)}&path=${encodeURIComponent(path)}&offset=${offset}`,
-      { method: "POST", headers: { "content-type": "application/octet-stream" }, body: chunk }
-    );
-    if (!response.ok) {
-      await throwForResponse("Image upload failed.", response);
-    }
-    offset += CHUNK;
-  } while (offset < bytes.length);
 }
 
 // ---- File-browser navigation (nested folders + per-project access) -----------
@@ -173,6 +152,5 @@ export {
   importProjectServer,
   mkdirServer,
   pingServer,
-  saveUserState,
-  uploadAsset
+  saveUserState
 };

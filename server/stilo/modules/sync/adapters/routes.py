@@ -1,14 +1,9 @@
 """Sync's HTTP routes (protocol/sync.contract.json): joining, state, presence,
-leases, changes and the event stream. The shared workspaces themselves are
-found through the `directory` port (today the server's WorkspaceRegistry):
-
-    directory.connect(workspace_id, pin, display_name, leased) -> session
-    directory.host_ephemeral(display_name, leased) -> session
-    directory.open_workspace(account_token, team, path, device, leased) -> session
-    directory.broker_for_token(token) -> SharedWorkspace (PermissionError if none)
-    directory.close_session(token)      directory.on_disconnect(token)
-"""
+leases, changes, the event stream, and a folder workspace's images (served
+by path, uploaded in pieces). The shared workspaces are the directory's
+(service/directory.py)."""
 import json
+import mimetypes
 import os
 import queue
 from pathlib import Path
@@ -73,7 +68,7 @@ def add_routes(transport, directory, version: int):
 
     def host(request):
         payload = request.json()
-        session = directory.host_ephemeral(str(payload.get("displayName", "")), leased=payload.get("lease") is True)
+        session = directory.host(str(payload.get("displayName", "")), leased=payload.get("lease") is True)
         _log("SYNC", f"host {session['workspace']}")
         return session
 
@@ -153,6 +148,25 @@ def add_routes(transport, directory, version: int):
             ack["path"] = event["operation"].get("path")
         return ack
 
+    def asset(request):
+        token = token_of(request)
+        workspace = directory.broker_for_token(token)
+        workspace.authorize(token)
+        path = workspace.resolve_asset(request.query("path"))
+        if path is None:
+            raise LookupError("Asset not found")
+        return transport.File(path.read_bytes(), mimetypes.guess_type(str(path))[0] or "application/octet-stream")
+
+    def upload_asset(request):
+        token = token_of(request)
+        workspace = directory.broker_for_token(token)
+        workspace.authorize(token)
+        path = request.query("path")
+        if not path:
+            raise ValueError("Asset path is required")
+        offset = int(request.query("offset", "0"))
+        return {"ok": True, "size": workspace.write_asset_chunk(path, offset, request.body())}
+
     def stream(request):
         token = token_of(request)
         workspace = directory.broker_for_token(token)
@@ -169,6 +183,8 @@ def add_routes(transport, directory, version: int):
     transport.add_route("POST", "/api/session/leave", expired(leave))
     transport.add_route("POST", "/api/operations", changing(operation))
     transport.add_stream_route("GET", "/api/events/stream", stream)
+    transport.add_route("GET", "/api/workspaces/asset", asset)
+    transport.add_route("POST", "/api/workspaces/asset", upload_asset)
 
 
 class EventStream:

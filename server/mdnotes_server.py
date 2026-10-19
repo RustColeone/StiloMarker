@@ -11,6 +11,7 @@ import secrets
 import threading
 import time
 import uuid
+import weakref
 from functools import partial
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -29,25 +30,22 @@ from stilo.modules import (assistant as assistant_module, characters as characte
                            identity as identity_module, models as models_module, projects as projects_module, sync as sync_module, history as history_module, comments as comments_module, chats as chats_module, transport as transport_module, workspace as workspace_module)
 from stilo.modules.file_types import BUILTIN as FILE_TYPES
 from stilo.kernel.log import log as _log, ignore as _ignore, best_effort as _best_effort
-from stilo.modules.workspace import (append_node, atomic_write as _atomic_write, create_id, decode_data_url, default_project,
-                                     find_child_by_name, fsync_directory as _fsync_directory, node_id_by_path, path_of,
-                                     remove_node_recursive, subtree_paths, utf16_index as _utf16_index,
-                                     utf16_length as _utf16_length)
-from stilo.modules.workspace import FolderStore, LiveProject, StateFile, bump_edit_counters
-from stilo.modules.sync import PARTS as SYNC_PARTS, VERSION as SYNC_LEVEL, SharedWorkspace, announce as sync_announce
-from stilo.modules.characters import (character_instructions, characters_view, notes_mode, persona_header, persona_summary,
+from stilo.modules.workspace import atomic_write as _atomic_write, default_project, node_id_by_path, path_of
+from stilo.modules.sync import VERSION as SYNC_LEVEL, announce as sync_announce
+from stilo.modules.characters import (character_instructions, characters_view, notes_mode, persona_header,
                                      split_author_notes)
 from stilo.modules.assistant import AGENT_TOOLS, propose_edit
 from stilo.modules.comments import COMMENTS_FILE, open_comments
 from stilo.modules.history import open_history
-from stilo.modules.identity import ACCOUNT_FILE, AccountStore, open_identity
-from stilo.modules.projects import open_projects, safe_component, safe_relpath
+from stilo.modules.identity import ACCOUNT_FILE, AccountStore
+from stilo.modules.projects import safe_component, safe_relpath
 from stilo.modules.models import IMAGE_SIZES, GeneratedImages, MCPManager, MCPTurn, open_providers
 
 
-def start_server_modules():
-    """The server's modules (docs/ARCHITECTURE.md); more join as the restructure moves code."""
-    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE, identity_module.MODULE, models_module.MODULE, projects_module.MODULE, sync_module.MODULE, characters_module.MODULE, history_module.MODULE, comments_module.MODULE, chats_module.MODULE, assistant_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"))
+def start_server_modules(config=None):
+    """The server's modules (docs/ARCHITECTURE.md), started with the server's
+    settings (config); more join as the restructure moves code."""
+    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE, identity_module.MODULE, models_module.MODULE, projects_module.MODULE, sync_module.MODULE, characters_module.MODULE, history_module.MODULE, comments_module.MODULE, chats_module.MODULE, assistant_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"), config=config)
 
 
 def _truthy(value: str | None) -> bool:
@@ -970,88 +968,37 @@ class ChatProxy:
         }
 
 
-class CollaborationBroker(SharedWorkspace):
-    """A shared workspace (Sync) over its storage (Workspace), plus the agent's
-    shared chat threads (chat.json), which move to Assistant later. The
-    underscored names are kept for code and tests from before the restructure."""
+class AgentThreads:
+    """The agent's shared conversations of each live workspace (chat.json beside
+    its project), until the Assistant module keeps them (step S4s-5)."""
 
-    def __init__(self, pin: str, state_file: Path | None, master_pin: str | None = None,
-                 workspace_dir: Path | None = None):
-        # A folder of real files (team workspaces), one JSON file (the PIN
-        # session), or memory only (a guest-hosted session).
-        self.state_file = state_file
-        self.workspace_dir = workspace_dir
-        self.store = (FolderStore(workspace_dir) if workspace_dir is not None
-                      else StateFile(state_file) if state_file is not None else None)
-        super().__init__(LiveProject(self.store), pin, master_pin, **SYNC_PARTS, edit_gap=EDIT_SESSION_GAP_SECONDS)
-        self.chat_workspace: dict = {"threads": [], "revision": 0}
-        self.chat_file = (self.workspace_dir / "chat.json" if self.workspace_dir is not None else
-                          self.state_file.with_suffix(".chat.json") if self.state_file is not None else None)
-        if self.chat_file is not None and self.chat_file.exists():
-            self.chat_workspace = json.loads(self.chat_file.read_text(encoding="utf-8"))
-
-    # Sessions, as code from before the restructure reads them.
-    subscribers = property(lambda self: self.sessions.subscribers)
-    presence = property(lambda self: self.sessions.presence)
-    leases = property(lambda self: self.sessions.leases)
-    tokens = property(lambda self: self.sessions.tokens)
-    _path_change_floor = property(lambda self: self.rebase.floor, lambda self, value: setattr(self.rebase, "floor", value))
-
-    def _admit(self, display_name, role, identity=None, device=None, leased=False):
-        return self.admit(display_name, role, identity, device, leased)
-
-    def _broadcast(self, event, exclude_token=None):
-        self.sessions.broadcast(event, exclude_token)
-
-    def _broadcast_to_users(self, usernames, event):
-        self.sessions.broadcast_to_users(usernames, event)
-
-    def _broadcast_presence(self, message):
-        self.sessions.broadcast_presence(message)
-
-    def _persist_state(self):
-        self.live.save()
-
-    def _ensure_persisted(self):
-        self.ensure_persisted()
+    def __init__(self):
+        self._by_workspace = weakref.WeakKeyDictionary()
+        self._lock = threading.Lock()
 
     @staticmethod
-    def _default_project():
-        return default_project()
+    def _file(workspace):
+        if workspace.folder is not None:
+            return workspace.folder / "chat.json"
+        return workspace.state_file.with_suffix(".chat.json") if workspace.state_file is not None else None
 
-    @staticmethod
-    def _decode_data_url(url):
-        return decode_data_url(url)
+    def current(self, workspace) -> dict:
+        """The workspace's conversations as kept (not a copy)."""
+        with self._lock:
+            if workspace not in self._by_workspace:
+                path = self._file(workspace)
+                self._by_workspace[workspace] = (json.loads(path.read_text(encoding="utf-8")) if path is not None and path.exists()
+                                                 else {"threads": [], "revision": 0})
+            return self._by_workspace[workspace]
 
-    def _get_node_id_by_path(self, path):
-        return node_id_by_path(self.project, path)
+    def get(self, workspace, token: str) -> dict:
+        workspace.authorize(token)
+        with workspace.lock:
+            return copy.deepcopy(self.current(workspace))
 
-    def _path_in(self, project, node_id):
-        return path_of(project, node_id)
-
-    def _externalize_images(self, project):
-        self.store.externalize_images(project)
-
-    def resolve_asset(self, rel_path: str) -> Path | None:
-        """The on-disk file at a workspace-relative path (by path, so every peer
-        agrees on the URL), or None; never outside the workspace folder."""
-        return self.store.resolve_asset(rel_path) if self.workspace_dir is not None else None
-
-    def write_asset_chunk(self, rel_path: str, offset: int, data: bytes) -> int:
-        """Write one chunk of an image (large images upload in pieces, not through
-        the operation stream); its node is created by a content-less create-file."""
-        if self.workspace_dir is None:
-            raise PermissionError("This workspace does not store server assets")
-        return self.store.write_asset_chunk(rel_path, offset, data)
-
-    def get_chat_workspace(self, token: str) -> dict:
-        self.authorize(token)
-        with self.lock:
-            return copy.deepcopy(self.chat_workspace)
-
-    def set_chat_workspace(self, token: str, workspace: dict) -> dict:
-        client_id = self.sessions.authorize(token)
-        threads = workspace.get("threads")
+    def set(self, workspace, token: str, payload: dict) -> dict:
+        client_id = workspace.sessions.authorize(token)
+        threads = payload.get("threads")
         if not isinstance(threads, list):
             raise ValueError("threads must be a list")
         # IDs are merge keys, not optional display metadata.
@@ -1068,91 +1015,51 @@ class CollaborationBroker(SharedWorkspace):
                 if not isinstance(message, dict) or not isinstance(message.get("id"), str) or not message["id"] or message["id"] in ids:
                     raise ValueError("Each chat message requires a unique ID")
                 ids.add(message["id"])
-        with self.lock:
-            revision = self.chat_workspace["revision"]
-            if workspace.get("baseRevision") != revision:
+        with workspace.lock:
+            revision = self.current(workspace)["revision"]
+            if payload.get("baseRevision") != revision:
                 raise ValueError("Chat conflict: reload the conversation before saving")
             snapshot = {"threads": copy.deepcopy(threads), "revision": revision + 1}
-            if self.chat_file is not None:
-                _atomic_write(self.chat_file, json.dumps(snapshot, ensure_ascii=False).encode("utf-8"))
-            self.chat_workspace = snapshot
-            self.sessions.broadcast({"type": "chat-workspace-update", "workspace": copy.deepcopy(snapshot),
-                             "clientId": client_id, "serverTime": time.time()}, exclude_token=token)
+            path = self._file(workspace)
+            if path is not None:
+                _atomic_write(path, json.dumps(snapshot, ensure_ascii=False).encode("utf-8"))
+            with self._lock:
+                self._by_workspace[workspace] = snapshot
+            workspace.sessions.broadcast({"type": "chat-workspace-update", "workspace": copy.deepcopy(snapshot),
+                                          "clientId": client_id, "serverTime": time.time()}, exclude_token=token)
             return copy.deepcopy(snapshot)
 
 
-# Special team that holds today's single PIN session and any ephemeral
-# guest-hosted local projects. Its workspaces are never account-owned.
-DEFAULT_TEAM = "temp"
-DEFAULT_WORKSPACE_ID = f"{DEFAULT_TEAM}/default"
-
-
 class WorkspaceRegistry:
-    """Owns one CollaborationBroker per workspace and maps session tokens to the
-    workspace that minted them, so every request can resolve the right broker.
-
-    Phase 0 keeps a single backward-compatible ``temp/default`` workspace that
-    loads the legacy state file and honours the legacy PIN, so existing sync
-    clients and the selftest behave exactly as before. Later phases add account
-    logins and additional (team) workspaces on top of the same structure.
-    """
+    """The server's modules, started together (with the server's settings), and
+    what is still put together here until a module does it itself: History,
+    Comments and Chats with their `places`, the agent's shared conversations,
+    and creating, deleting, exporting and importing projects. Shrinks to
+    nothing in step S4s (docs/ARCHITECTURE.md)."""
 
     def __init__(self, pin: str, legacy_state_file: Path, master_pin: str | None = None,
                  accounts: "AccountStore | None" = None, data_dir: Path | None = None, trash_days: int = 30):
-        self.lock = threading.RLock()
-        self.pin = pin
-        self.master_pin = master_pin or pin
-        self.identity = open_identity(accounts, data_dir)
-        # Where the teams' projects are and who may open them (the Projects module).
-        self.projects = open_projects(self.identity, data_dir)
+        self.modules = start_server_modules({"pin": pin, "master_pin": master_pin, "state_file": legacy_state_file,
+                                             "accounts": accounts, "data_dir": data_dir, "edit_gap": EDIT_SESSION_GAP_SECONDS})
+        self.identity = self.modules["identity"]
+        self.projects = self.modules["projects"]
+        self.directory = self.modules["sync"].directory
         # Bookkeeping files these keep in a project folder, never listed as entries.
         self.projects.reserve(COMMENTS_FILE, "chat.json", *CHAT_DB_FILES)
         self.history = open_history(data_dir, self, self.identity, trash_days)
         self.comments = open_comments(self)
         self.chats = open_chats(self)  # its runner (the agent) is set by build_server
+        self.agent_threads = AgentThreads()
         self.data_dir = data_dir
-        self.brokers: dict[str, CollaborationBroker] = {}
-        self.token_workspace: dict[str, str] = {}
-        # Ephemeral guest-hosted sessions: workspace_id -> {ownerToken, guestPin}.
-        # In-memory only; evicted when the hosting master disconnects.
-        self.ephemeral: dict[str, dict] = {}
-        # Backward-compatible default workspace.
-        self.brokers[DEFAULT_WORKSPACE_ID] = CollaborationBroker(
-            pin, legacy_state_file, master_pin=self.master_pin
-        )
-
-    # ---- Team workspace storage (accounts mode) --------------------------------
-    def _state_file(self, team: str, name: str) -> Path:
-        return self.projects.folders.workspaces_dir(team) / f"{safe_component(name)}.json"
-
-    def _workspace_dir(self, team: str, name: str) -> Path:
-        return self.projects.folders.workspaces_dir(team) / safe_component(name)
-
-    def _make_workspace_broker(self, team: str, name: str) -> CollaborationBroker:
-        """Directory-backed broker for a team workspace, migrating a legacy
-        single-file <name>.json into the new directory layout on first open."""
-        workspace_dir = self._workspace_dir(team, name)
-        legacy = self._state_file(team, name)
-        broker = CollaborationBroker(self.pin, None, master_pin=self.master_pin, workspace_dir=workspace_dir)
-        if legacy.exists() and not self.projects.folders.is_project(workspace_dir):
-            try:
-                data = json.loads(legacy.read_text(encoding="utf-8"))
-                broker.project = data.get("project") or broker._default_project()
-                broker.revision = int(data.get("revision", 0))
-                broker._path_change_floor = broker.revision
-                # Externalize inline images, write the real file tree + manifest.
-                broker._externalize_images(broker.project)
-                broker._persist_state()
-                legacy.rename(legacy.with_suffix(".json.bak"))
-                _log("WORKSPACE", f"Migrated {team}/{name} to directory storage")
-            except (OSError, ValueError, json.JSONDecodeError) as error:
-                _log("WORKSPACE", f"Migration failed for {team}/{name}: {error}")
-        broker.on_before_destructive = self.backup_before_destructive  # safety backups
-        broker.on_paths_moved = self.chats.paths_moved
-        return broker
+        # What happens in a live team project: a safety backup before a change that
+        # loses data, characters followed when files move, a deleted project's chats closed.
+        events = self.modules["sync"].events
+        events.on("before-destructive", lambda change: self.history.before_destructive(change["workspace"], change["reason"]))
+        events.on("paths-moved", lambda move: self.chats.paths_moved(move["workspace"], move["old"], move["new"]))
+        events.on("dropped", lambda gone: self.chats.close(gone["workspace_id"]))
 
     # ---- The places port of History, Comments and Chats: where a project is and
-    # who may see it (Projects'), and what is open now (until Sync owns it) -----
+    # who may see it (Projects'), and what is open now (Sync's) ---------------
     def project_dir(self, team, relpath):
         return self.projects.project_dir(team, relpath)
 
@@ -1169,32 +1076,45 @@ class WorkspaceRegistry:
         return self.projects.people(team, relpath)
 
     def live(self, team, relpath):
-        return self.get_broker(f"{team}/{relpath}")
+        return self.directory.live(team, relpath)
 
     def live_workspaces(self):
-        with self.lock:
-            return [(*wid.split("/", 1), b) for wid, b in self.brokers.items()
-                    if not wid.startswith(f"{DEFAULT_TEAM}/") and b.workspace_dir is not None]
+        return self.directory.live_workspaces()
 
-    def place_of(self, broker):
-        workspace_id = self._workspace_id_of(broker)
-        if not workspace_id or workspace_id.startswith(f"{DEFAULT_TEAM}/"):
-            return None
-        return tuple(workspace_id.split("/", 1))
+    def place_of(self, workspace):
+        return self.directory.place_of(workspace)
 
-    def _workspace_id_of(self, broker):
-        with self.lock:
-            return next((wid for wid, b in self.brokers.items() if b is broker), None)
-
-    def backup_before_destructive(self, broker, reason):
-        """Hook run by a shared workspace just before a destructive change."""
-        self.history.before_destructive(broker, reason)
+    def project_copy(self, team: str, relpath: str) -> dict:
+        """A copy of the project: the live one, or read from its folder."""
+        workspace = self.directory.read(team, relpath, self.projects.folders.under_team(team, relpath))
+        with workspace.lock:
+            return copy.deepcopy(workspace.project)
 
     def backup_sweep(self, now=None):
         """Daily backups for every live workspace that changed since its last one."""
         made = self.history.sweep(now)
         self.chats.backup(lambda team, relpath: self.history.backups.store(team, relpath).folder / "chats", now)
         return made
+
+    # ---- Sync's directory, as code and tests from before the move call it ------
+    brokers = property(lambda self: self.directory.workspaces)
+    token_workspace = property(lambda self: self.directory.token_workspace)
+    default_broker = property(lambda self: self.directory.default)
+
+    def open_workspace(self, *args, **kwargs):
+        return self.directory.open_workspace(*args, **kwargs)
+
+    def connect(self, *args, **kwargs):
+        return self.directory.connect(*args, **kwargs)
+
+    def expire_leases(self) -> int:
+        return self.directory.expire_leases()
+
+    def close_session(self, token: str) -> None:
+        self.directory.close_session(token)
+
+    def broker_for_token(self, token: str):
+        return self.directory.broker_for_token(token)
 
     # ---- Creating, deleting, exporting and importing projects ----------------
     def create_project(self, token: str, team: str, path: str, name: str) -> dict:
@@ -1213,14 +1133,8 @@ class WorkspaceRegistry:
             raise ValueError("A file or folder with that name already exists")
         new_rel = f"{relpath}/{name}" if relpath else name
         workspace_id = f"{team}/{new_rel}"
-        with self.lock:
-            broker = CollaborationBroker(
-                self.pin, None, master_pin=self.master_pin, workspace_dir=project_dir
-            )
-            broker.project = broker._default_project()
-            broker._persist_state()  # writes the file tree + manifest.json
-            self.identity.claim(identity, project_dir)
-            self.brokers[workspace_id] = broker
+        self.directory.adopt(team, new_rel, project_dir, default_project())
+        self.identity.claim(identity, project_dir)
         _log("WORKSPACE", f"{identity['username']} created project {workspace_id}")
         return {
             "team": team, "path": new_rel, "name": name, "kind": "project",
@@ -1245,26 +1159,13 @@ class WorkspaceRegistry:
             raise ValueError("Cannot delete a reserved entry")
         self.identity.may_delete(identity, team, target, lambda: self.projects.legacy_meta(team, relpath))
         workspace_id = f"{team}/{relpath}"
-        with self.lock:
-            # Drop any live broker (and nested project brokers) so an open
-            # session can't recreate files after the tree is gone.
-            for wid in [w for w in self.brokers if w == workspace_id or w.startswith(workspace_id + "/")]:
-                self.brokers.pop(wid, None)
-            self.chats.close(workspace_id)
-            kind = "project" if self.projects.folders.is_project(target) else "folder"
-            self.history.trash.put(identity["username"], team, relpath, target, kind)
+        # Its live workspaces (and nested projects') close first, so an open
+        # session can't write files again after the tree is gone.
+        self.directory.drop(team, relpath)
+        kind = "project" if self.projects.folders.is_project(target) else "folder"
+        self.history.trash.put(identity["username"], team, relpath, target, kind)
         _log("WORKSPACE", f"{identity['username']} deleted {workspace_id} (kept in the trash)")
         return {"team": team, "path": relpath, "deleted": True, "trashDays": self.history.trash.days}
-
-    # ---- Chats' port (server/stilo/modules/chats/service/desk.py) -----------------
-    def project_copy(self, team: str, relpath: str) -> dict:
-        """A copy of the project: the live one, or read from its folder."""
-        broker = self.get_broker(f"{team}/{relpath}")
-        if broker is None:
-            broker = CollaborationBroker(self.pin, None, master_pin=self.master_pin,
-                                         workspace_dir=self.projects.folders.under_team(team, relpath))
-        with broker.lock:
-            return copy.deepcopy(broker.project)
 
     def export_project(self, token: str, team: str, path: str) -> dict:
         """Return a portable copy of a project as ``{name, project}`` where
@@ -1281,20 +1182,14 @@ class WorkspaceRegistry:
             raise ValueError("Not a project directory")
         if not self.projects.can_access(identity, team, relpath):
             raise PermissionError("You do not have access to that project")
-        workspace_id = f"{team}/{relpath}"
-        # A live broker's in-memory project is fresher than disk; else load it.
-        with self.lock:
-            broker = self.brokers.get(workspace_id)
-        if broker is None:
-            broker = CollaborationBroker(
-                self.pin, None, master_pin=self.master_pin, workspace_dir=proj
-            )
-        with broker.lock:
-            project = copy.deepcopy(broker.project)
+        # A live workspace is fresher than its folder.
+        workspace = self.directory.read(team, relpath, proj)
+        with workspace.lock:
+            project = copy.deepcopy(workspace.project)
         # Inline image bytes as data: URLs so the payload is self-contained.
         for node_id, node in project.get("nodes", {}).items():
             if node.get("kind") == "file" and FILE_TYPES.is_image(node.get("name", "")):
-                rel = broker._path_in(project, node_id)
+                rel = path_of(project, node_id)
                 fpath = (proj / rel) if rel else None
                 if fpath and fpath.is_file():
                     raw = fpath.read_bytes()
@@ -1340,171 +1235,13 @@ class WorkspaceRegistry:
         if root_id and root_id in model.get("nodes", {}):
             model["nodes"][root_id]["name"] = final
         model["name"] = final
-        with self.lock:
-            broker = CollaborationBroker(
-                self.pin, None, master_pin=self.master_pin, workspace_dir=project_dir
-            )
-            broker.project = model
-            broker.revision = 0
-            broker._externalize_images(model)   # data: URLs -> files, content stripped
-            broker._persist_state()             # writes text files + manifest.json
-            self.identity.claim(identity, project_dir)
-            self.brokers[workspace_id] = broker
+        self.directory.adopt(team, new_rel, project_dir, model)
+        self.identity.claim(identity, project_dir)
         _log("WORKSPACE", f"{identity['username']} imported project {workspace_id}")
         return {
             "team": team, "path": new_rel, "name": final, "kind": "project",
             "id": workspace_id, "createdBy": identity["username"],
         }
-
-    def _make_workspace_broker_path(self, team: str, relpath: str) -> CollaborationBroker:
-        """Directory-backed broker for a project at an arbitrary path. Reuses the
-        legacy single-file migration for flat workspaces/<name> projects."""
-        parts = relpath.split("/")
-        if len(parts) == 2 and parts[0] == "workspaces":
-            return self._make_workspace_broker(team, parts[1])
-        workspace_dir = self.projects.folders.under_team(team, relpath)
-        broker = CollaborationBroker(
-            self.pin, None, master_pin=self.master_pin, workspace_dir=workspace_dir
-        )
-        broker.on_before_destructive = self.backup_before_destructive  # safety backups
-        broker.on_paths_moved = self.chats.paths_moved
-        return broker
-
-    def open_workspace(self, token: str, team: str, path: str, device: str | None = None, leased: bool = False) -> dict:
-        """Admit a logged-in account into a team project (role master), loading
-        or creating its persisted broker. ``path`` points at a project directory
-        relative to the team root (e.g. ``workspaces/WorkNotes``)."""
-        identity, team, relpath, _, role = self.projects.authorize_open(token, team, path)
-        workspace_id = f"{team}/{relpath}"
-        with self.lock:
-            broker = self.brokers.get(workspace_id)
-            if broker is None:
-                broker = self._make_workspace_broker_path(team, relpath)
-                self.brokers[workspace_id] = broker
-        # One live session per account PER DEVICE — a refresh/reconnect on the same
-        # device replaces its old session, but the same account on another device
-        # stays connected (self-collaboration across devices; no reconnect war).
-        broker.evict_user(identity["username"], device)
-        session = broker._admit(identity["username"], role, identity=identity["username"], device=device, leased=leased)
-        self.identity.remember_workspace(identity["username"], team, relpath)  # cross-device resume
-        with self.lock:
-            self.token_workspace[session["token"]] = workspace_id
-        session["sessionId"] = workspace_id
-        session["workspace"] = workspace_id
-        # Resume state: which files this user had open here last time, so the
-        # client can restore their tabs on open/reconnect.
-        session["resume"] = self.projects.read_user_state(team, relpath, identity["username"])
-        return session
-
-    # ---- Per-user global prefs (last workspace, for cross-device resume) -------
-    @property
-    def default_broker(self) -> CollaborationBroker:
-        return self.brokers[DEFAULT_WORKSPACE_ID]
-
-    def get_broker(self, workspace_id: str) -> CollaborationBroker | None:
-        with self.lock:
-            return self.brokers.get(workspace_id)
-
-    def _bind_session(self, workspace_id: str, session: dict) -> dict:
-        with self.lock:
-            self.token_workspace[session["token"]] = workspace_id
-        session["sessionId"] = workspace_id
-        session["workspace"] = workspace_id
-        return session
-
-    def connect(self, workspace_id: str | None, pin: str, display_name: str = "", leased: bool = False):
-        """Guest-PIN connect. With an explicit workspace, joins it; otherwise the
-        PIN is resolved — first against the default workspace, then against any
-        ephemeral guest-hosted session — so a guest only needs the shared PIN."""
-        if workspace_id:
-            broker = self.get_broker(workspace_id)
-            if broker is None:
-                raise PermissionError("Unknown workspace")
-            return self._bind_session(workspace_id, broker.connect(pin, display_name, leased=leased))
-        # No workspace given: try the legacy default session first.
-        try:
-            session = self.default_broker.connect(pin, display_name, leased=leased)
-        except PermissionError:
-            session = None  # not the default session's PIN
-        if session is not None:
-            return self._bind_session(DEFAULT_WORKSPACE_ID, session)
-        # Then any ephemeral host whose guest PIN matches.
-        with self.lock:
-            match = next((wid for wid, meta in self.ephemeral.items() if meta["guestPin"] == pin), None)
-        if match is None:
-            raise PermissionError("Invalid PIN")
-        broker = self.get_broker(match)
-        return self._bind_session(match, broker.connect(pin, display_name, leased=leased))
-
-    def host_ephemeral(self, display_name: str, leased: bool = False) -> dict:
-        """Create an in-memory guest-hosted session for a local project. Returns a
-        master session + the generated guest PIN. Evicted when the master leaves."""
-        guest_pin = f"{secrets.randbelow(900000) + 100000}"  # 6-digit shareable PIN
-        workspace_id = f"{DEFAULT_TEAM}/host-{uuid.uuid4().hex[:8]}"
-        broker = CollaborationBroker(guest_pin, None, master_pin=secrets.token_urlsafe(16))
-        with self.lock:
-            self.brokers[workspace_id] = broker
-        session = broker._admit(display_name, "master", leased=leased)
-        with self.lock:
-            self.ephemeral[workspace_id] = {"ownerToken": session["token"], "guestPin": guest_pin}
-        self._bind_session(workspace_id, session)
-        session["guestPin"] = guest_pin
-        _log("HOST", f"{session['displayName']} hosting ephemeral {workspace_id}", guestPin=guest_pin)
-        return session
-
-    def expire_leases(self) -> int:
-        with self.lock:
-            brokers = list(self.brokers.values())
-        expired = 0
-        for broker in brokers:
-            with broker.lock:
-                candidates = [token for token, last in broker.leases.items() if time.monotonic() - last > 75]
-            for token in candidates:
-                if broker.unsubscribe(token, expired_only=True, revoke=True):
-                    self.on_disconnect(token, revoke=True)
-                    expired += 1
-        return expired
-
-    def on_disconnect(self, token: str, revoke: bool = False) -> None:
-        """Called when a session's SSE stream closes. If the departing token owns
-        an ephemeral workspace, evict it (in-memory state discarded)."""
-        with self.lock:
-            workspace_id = self.token_workspace.get(token)
-            meta = self.ephemeral.get(workspace_id) if workspace_id else None
-            is_owner = bool(meta and meta.get("ownerToken") == token)
-        if is_owner:
-            self._evict_ephemeral(workspace_id)
-        elif revoke:
-            with self.lock:
-                self.token_workspace.pop(token, None)
-
-    def close_session(self, token: str) -> None:
-        broker = self.broker_for_token(token)
-        broker.authorize(token)
-        broker.unsubscribe(token, revoke=True)
-        self.on_disconnect(token, revoke=True)
-
-    def _evict_ephemeral(self, workspace_id: str) -> None:
-        with self.lock:
-            self.ephemeral.pop(workspace_id, None)
-            self.brokers.pop(workspace_id, None)
-            stale = [tok for tok, wid in self.token_workspace.items() if wid == workspace_id]
-            for tok in stale:
-                self.token_workspace.pop(tok, None)
-        _log("HOST", f"Evicted ephemeral {workspace_id} (master left)")
-
-    def broker_for_token(self, token: str) -> CollaborationBroker:
-        with self.lock:
-            workspace_id = self.token_workspace.get(token)
-        # Unknown token → route to the default broker, whose authorize() will
-        # raise the standard "invalid/expired token" error. (Every token minted
-        # through connect() is recorded, so this only hits genuinely bad tokens.)
-        broker = self.get_broker(workspace_id) if workspace_id else None
-        return broker or self.default_broker
-
-    def forget_token(self, token: str) -> None:
-        with self.lock:
-            self.token_workspace.pop(token, None)
 
 
 # Compressed static files, keyed by path and invalidated when the file changes
@@ -1620,49 +1357,6 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         })
         self._log_request(426, f"stale client v{client_version} < required v{SYNC_LEVEL}")
         return True
-
-    def _handle_asset_upload(self, parsed):
-        """Receive one binary chunk of an image asset (see write_asset_chunk)."""
-        try:
-            token = self._extract_token(parsed)
-            broker = self.registry.broker_for_token(token)
-            broker.authorize(token)
-            query = parse_qs(parsed.query)
-            rel_path = query.get("path", [""])[0]
-            offset = int(query.get("offset", ["0"])[0])
-            if not rel_path:
-                raise ValueError("Asset path is required")
-            length = int(self.headers.get("content-length", "0"))
-            data = self.rfile.read(length) if length > 0 else b""
-            size = broker.write_asset_chunk(rel_path, offset, data)
-            self._write_json(HTTPStatus.OK, {"ok": True, "size": size})
-        except PermissionError as error:
-            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
-        except (ValueError, TypeError) as error:
-            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
-
-    def _handle_asset(self, parsed):
-        """Serve a directory-backed workspace's binary asset (image) by its
-        workspace-relative path, to a member of that workspace's session."""
-        try:
-            token = self._extract_token(parsed)
-            broker = self.registry.broker_for_token(token)
-            broker.authorize(token)
-            rel_path = parse_qs(parsed.query).get("path", [""])[0]
-            path = broker.resolve_asset(rel_path)
-        except PermissionError as error:
-            return self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
-        if path is None:
-            return self._write_json(HTTPStatus.NOT_FOUND, {"message": "Asset not found"})
-        data = path.read_bytes()
-        content_type, _ = mimetypes.guess_type(str(path))
-        self.send_response(HTTPStatus.OK)
-        self._send_cors_headers()
-        self.send_header("Content-Type", content_type or "application/octet-stream")
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-cache")
-        self.end_headers()
-        self.wfile.write(data)
 
     def _handle_generated(self, parsed):
         """A generated image, to the account that asked for it."""
@@ -1965,7 +1659,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
     def _handle_get_chat_workspace(self, parsed):
         try:
             token = self._extract_token(parsed)
-            workspace = self.registry.broker_for_token(token).get_chat_workspace(token)
+            workspace = self.registry.agent_threads.get(self.registry.broker_for_token(token), token)
             self._write_json(HTTPStatus.OK, workspace)
             self._log_request(200, "chat workspace read")
         except PermissionError as error:
@@ -1978,7 +1672,7 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
             payload = self._read_json()
             if self._refuse_if_stale(self._client_version(payload=payload)):
                 return
-            workspace = self.registry.broker_for_token(token).set_chat_workspace(token, payload)
+            workspace = self.registry.agent_threads.set(self.registry.broker_for_token(token), token, payload)
             self._write_json(HTTPStatus.OK, workspace)
             self._log_request(200, "chat workspace updated")
         except PermissionError as error:
@@ -2071,7 +1765,6 @@ LEGACY_ROUTES = [
     ("GET", "/api/chat/status", False, lambda h, parsed: h._handle_chat_status()),
     ("GET", "/api/chat/workspace", False, lambda h, parsed: h._handle_get_chat_workspace(parsed)),
     ("GET", "/api/workspaces/export", False, lambda h, parsed: h._handle_export_project(parsed)),
-    ("GET", "/api/workspaces/asset", False, lambda h, parsed: h._handle_asset(parsed)),
     ("GET", "/api/generated", False, lambda h, parsed: h._handle_generated(parsed)),
     ("POST", "/api/chat/mcp", False, lambda h, parsed: h._handle_mcp()),
     ("POST", "/api/chat", False, lambda h, parsed: h._handle_chat()),
@@ -2081,7 +1774,6 @@ LEGACY_ROUTES = [
     ("POST", "/api/workspaces/create", False, lambda h, parsed: h._handle_create_project(parsed)),
     ("POST", "/api/workspaces/delete", False, lambda h, parsed: h._handle_delete(parsed)),
     ("POST", "/api/workspaces/import", False, lambda h, parsed: h._handle_import_project(parsed)),
-    ("POST", "/api/workspaces/asset", False, lambda h, parsed: h._handle_asset_upload(parsed)),
 ]
 
 
@@ -2095,11 +1787,8 @@ def build_server(host: str, port: int, pin: str, static_root: Path, state_file: 
     registry.chats.runner = chat_proxy
     if data_dir is not None and chat_proxy.generated is None:
         chat_proxy.generated = GeneratedImages(Path(data_dir) / "_generated")
-    modules = start_server_modules()
+    modules = registry.modules
     transport = modules["transport"]
-    modules["identity"].serve(registry.identity)
-    modules["projects"].serve(registry.projects)
-    modules["sync"].serve(registry)
     modules["history"].serve(registry.history)
     modules["comments"].serve(registry.comments)
     modules["chats"].serve(registry.chats)

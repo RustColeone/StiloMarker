@@ -2,6 +2,7 @@
 // server address of the session it belongs to, which may differ from the
 // settings while a session is open.
 import { normalizeServerUrl, throwForResponse, parseResponse } from "../../shell/index.js";
+import { dataUrlToBytes } from "../../workspace/index.js";
 import contract from "../model/contract.js";
 import { ignored } from "../../../kernel/index.js";
 
@@ -85,4 +86,26 @@ export function openEventStream(serverUrl, token, onEvent, onError) {
   };
   eventSource.onerror = (event) => onError?.(event);
   return eventSource;
+}
+
+// An image of a folder workspace, uploaded in pieces with the session token
+// (its node comes from a content-less create-file).
+export async function uploadAsset(serverUrl, token, path, dataUrl) {
+  const { bytes } = dataUrlToBytes(dataUrl);
+  const baseUrl = normalizeServerUrl(serverUrl);
+  // Small sequential chunks keep every request well under a 1 MB proxy body
+  // limit, so large images upload without a 413 and without base64 in the ops.
+  const CHUNK = 256 * 1024;
+  let offset = 0;
+  do {
+    const chunk = bytes.subarray(offset, offset + CHUNK);
+    const response = await fetch(
+      `${baseUrl}/api/workspaces/asset?token=${encodeURIComponent(token)}&path=${encodeURIComponent(path)}&offset=${offset}`,
+      { method: "POST", headers: { "content-type": "application/octet-stream" }, body: chunk }
+    );
+    if (!response.ok) {
+      await throwForResponse("Image upload failed.", response);
+    }
+    offset += CHUNK;
+  } while (offset < bytes.length);
 }

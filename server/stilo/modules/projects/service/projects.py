@@ -8,12 +8,13 @@ before folders (the team's index), and the questions other modules ask about
 a place: where it is, whether an account may open or edit it, who may.
 Bookkeeping files other modules keep in a project are never listed as
 entries: their owners name them (reserve)."""
+import json
 import threading
 import time
 
 from stilo.kernel.log import log as _log
 from stilo.modules.identity import ACCESS_FILE
-from stilo.modules.workspace import MANIFEST
+from stilo.modules.workspace import MANIFEST, migrate_state_file
 from ..adapters.team_folders import INDEX_FILE, USER_STATE_FILE
 from ..model.paths import safe_component, safe_relpath
 
@@ -114,7 +115,23 @@ class Projects:
             raise PermissionError("Unknown workspace")
         if not self.can_access(identity, team, relpath):
             raise PermissionError("You do not have access to that workspace")
+        self._migrate_flat(team, relpath, project_dir)
         return identity, team, relpath, project_dir, self.role_for(identity, team, relpath)
+
+    def _migrate_flat(self, team, relpath, project_dir):
+        """A flat workspace still kept as one file (workspaces/<name>.json) moves
+        into its folder the first time it opens."""
+        parts = relpath.split("/")
+        if len(parts) != 2 or parts[0] != "workspaces" or self.folders.is_project(project_dir):
+            return
+        state_file = self.folders.workspaces_dir(team) / f"{safe_component(parts[1])}.json"
+        if not state_file.exists():
+            return
+        try:
+            migrate_state_file(state_file, project_dir)
+            _log("WORKSPACE", f"Migrated {team}/{parts[1]} to directory storage")
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            _log("WORKSPACE", f"Migration failed for {team}/{parts[1]}: {error}")
 
     # ---- each account's open files ---------------------------------------------
     def read_user_state(self, team: str, relpath: str, username: str) -> dict:

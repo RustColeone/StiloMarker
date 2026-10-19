@@ -8,9 +8,12 @@ A module is a package under stilo/modules with a module.json manifest
 
     MODULE = define_module(__file__, start)
 
-    def start(ctx):          # ctx.use(name), ctx.registry(), ctx.emitter(), ctx.log()
+    def start(ctx):          # ctx.use(name), ctx.registry(), ctx.emitter(), ctx.log(), ctx.config
         ...
         return api           # what other modules may call
+
+ctx.config is what the server was started with (read-only; each module reads
+its own keys, and a missing one means "not set").
 """
 import json
 import re
@@ -56,11 +59,12 @@ def define_module(init_path, start) -> Module:
 
 
 class _Context:
-    def __init__(self, module, apis, log):
+    def __init__(self, module, apis, log, config):
         self._module = module
         self._apis = apis
         self._log = log
         self.name = module.name
+        self.config = config
 
     def use(self, name):
         if name not in self._module.uses:
@@ -77,9 +81,11 @@ class _Context:
         self._log(self._module.name, *parts)
 
 
-def start_modules(modules, log=lambda *parts: None):
+def start_modules(modules, log=lambda *parts: None, config=None):
     """Starts every module, lowest level first, and returns a read-only map of
-    name -> api. A module that raises while starting stops the whole start."""
+    name -> api. A module that raises while starting stops the whole start.
+    config: what the server was started with, read-only to every module."""
+    config = types.MappingProxyType(dict(config or {}))
     by_name = {}
     for module in modules:
         if module.name in by_name:
@@ -94,7 +100,7 @@ def start_modules(modules, log=lambda *parts: None):
                 raise ValueError(f"{module.name} (level {module.level}) may not use {used} (level {target.level})")
     apis = {}
     for module in sorted(modules, key=lambda m: (m.level, m.name)):
-        apis[module.name] = module.start(_Context(module, apis, log))
+        apis[module.name] = module.start(_Context(module, apis, log, config))
         log("kernel", f"started {module.name}")
     return types.MappingProxyType(dict(apis))
 

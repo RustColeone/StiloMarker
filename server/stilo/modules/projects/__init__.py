@@ -10,12 +10,12 @@ Static, for code from before the restructure:
     open_projects(identity, data_dir) -> Projects (service/projects.py)
     safe_component(name), safe_relpath(path)
 
-API (started by the kernel):
-    serve(projects)   adds the browsing, new-folder, open-files and access
-                      routes (adapters/routes.py, protocol/projects.contract.json)
+API (started by the kernel; config: data_dir): the Projects
+(service/projects.py): authorize_project, authorize_open, project_dir,
+may_edit, people, folder, read_user_state, reserve(*names)... It serves the
+browsing, new-folder, open-files and access routes (adapters/routes.py,
+protocol/projects.contract.json).
 """
-from types import SimpleNamespace
-
 from stilo.kernel import define_module
 from .adapters.routes import add_routes
 from .adapters.team_folders import TeamFolders
@@ -28,10 +28,10 @@ def open_projects(identity, data_dir=None) -> Projects:
 
 
 def start(ctx):
-    transport = ctx.use("transport")
     ctx.use("workspace")
-    ctx.use("identity")
-    return SimpleNamespace(serve=lambda projects: add_routes(transport, projects))
+    projects = open_projects(ctx.use("identity"), ctx.config.get("data_dir"))
+    add_routes(ctx.use("transport"), projects)
+    return projects
 
 
 MODULE = define_module(__file__, start)
