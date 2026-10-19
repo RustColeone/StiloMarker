@@ -358,7 +358,10 @@ opened, it keeps its tab and says where it went; press **Show here** to take
 it back. **Move to Other Group** moves a tab across, **Open to the Side**
 opens it in the other group too, and you can drag a tab onto the other
 group's tabs. When a group's last tab closes, the group closes and the other
-takes its place; View → Toggle Source or Toggle Preview brings it back.
+takes its place; View → Toggle Source or Toggle Preview brings it back. In a
+cloud workspace your groups and tabs come back when you reopen it: after a
+reload as you left them in this browser, and on another device as you last
+left them anywhere.
 
 **On a phone:** one file shows at a time. The top bar names it; tap the name
 for the list of open files (and Rename). The switch next to it shows the same

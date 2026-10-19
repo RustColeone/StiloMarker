@@ -17,7 +17,7 @@ import { createProviders } from "./providers.js";
 import { findElements } from "./elements.js";
 
 // The editor's functions the cloud parts call (editor.parts()).
-const EDITOR = ["showResumedFile", "currentWorkspaceView", "cachedWorkspaceView"];
+const EDITOR = ["showResumedFile", "cachedWorkspaceView", "resumeView"];
 
 export function createSurface({ shell, workspace, identity, sync, editor, history, comments, explorer, models }) {
   const editorParts = editor.parts();
@@ -102,7 +102,7 @@ export function createSurface({ shell, workspace, identity, sync, editor, histor
       else app.notify("Open a server workspace to manage its preview access.");
     }
   });
-  editor.openTabs.configure((ws, openFiles, activeFile) => saveUserState(app.settings.serverUrl, identity.token(), ws.team, ws.path, openFiles, activeFile));
+  editor.openTabs.configure((ws, openFiles, activeFile, groups) => saveUserState(app.settings.serverUrl, identity.token(), ws.team, ws.path, openFiles, activeFile, groups));
   // The welcome page (no file open): Resume the last cloud workspace, and open
   // one from the server when signed in.
   const welcomeResume = document.getElementById("welcome-resume");

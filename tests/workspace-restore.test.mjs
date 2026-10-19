@@ -13,7 +13,7 @@ test('a failed automatic workspace open keeps the cloud draft instead of restori
   const deps={syncState:{status:'offline'},identity:{account:()=>({token:'test'}),token:()=>'test'},settings:{syncedProjectId:'team/notes',syncedRevision:7},
     controller:{getProject:()=>visible,replaceProject:p=>visible=p},
     collaboration:{isConnected:()=>false,openWorkspace:async()=>{throw Object.assign(new Error('offline'),{status:503});},disconnect:()=>{}},
-    currentWorkspaceView:()=>({activeFile:'note.md'}),snapshotDirtyFiles:async()=>{},getDeviceId:()=> 'test-device',
+    resumeView:()=>({activeFile:'note.md'}),snapshotDirtyFiles:async()=>{},getDeviceId:()=> 'test-device',
     render:()=>{},logDebug:()=>{}};
   const kept={nodes:{}};
   const mode=createMode(createState('sync',{workspaceMode:'synced',privateProject:kept}));

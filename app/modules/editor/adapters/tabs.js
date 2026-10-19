@@ -6,7 +6,7 @@
 // What the groups show is the Editor's view (app.view, service/view.js).
 import { normalizeServerUrl } from "../../shell/index.js";
 import { getPath } from "../../workspace/index.js";
-import { filesIn, sameTab } from "../service/view.js";
+import { filesIn, groupsFromSaved, sameTab, savedGroups } from "../service/view.js";
 
 export function createTabs(app) {
 
@@ -50,13 +50,14 @@ export function createTabs(app) {
       return;
     }
     if (project.nodes[tab.fileId]?.kind !== "file") return;
+    tabsWorkedIn = true;
     app.captureViewState(); // resume-position: snapshot the outgoing document first
     if (tab.view === "source") app.view.pick(tab.fileId);
     app.view.activate(group, { fileId: tab.fileId, view: tab.view });
     // Drawn again: by the project changing, or here when only the view did.
     if (tab.view === "source" && project.activeFileId !== tab.fileId) app.controller.setActiveFile(tab.fileId);
     else app.updateStatus(project);
-    if (tab.view === "source") scheduleSaveUserState();
+    scheduleSaveUserState();
   }
 
   function setActiveSourceFile(fileId) {
@@ -64,11 +65,13 @@ export function createTabs(app) {
   }
 
   // ---- Per-user resume: persist which files are open in a cloud workspace so
-  // they can be restored on the next open/reconnect. Server-side, per account.
+  // they can be restored on the next open/reconnect. Server-side, per account:
+  // the source tabs and the active file (as before groups), and the groups.
   function currentWorkspaceView() {
     const project = app.controller.getProject();
     const pathFor = id => project.nodes[id]?.kind === "file" ? getPath(project, id) : null;
-    return { openFiles: filesIn(app.view.get(), "source").map(pathFor).filter(Boolean), activeFile: pathFor(project.activeFileId) };
+    return { openFiles: filesIn(app.view.get(), "source").map(pathFor).filter(Boolean), activeFile: pathFor(project.activeFileId),
+      groups: savedGroups(app.view.get(), pathFor) };
   }
   function cacheWorkspaceView() {
     if (app.workspaceMode !== "synced" || !app.settings.syncedProjectId) return;
@@ -84,6 +87,17 @@ export function createTabs(app) {
       const saved = JSON.parse(localStorage.getItem("mdnotes.workspaceView.v1"));
       return saved?.server === normalizeServerUrl(app.settings.serverUrl) && saved.workspace === workspace ? saved : null;
     } catch { return null; }
+  }
+  // Whether this page's tabs are the user's (worked in, or restored), not
+  // only the project's active file the page started with.
+  let tabsWorkedIn = false;
+  // The tabs to bring back when this workspace opens again: this page's once
+  // worked in; else those this browser kept from its last visit; else this
+  // page's (the Cloud asks, before the server's own resume).
+  function resumeView(workspace) {
+    const current = currentWorkspaceView();
+    if (tabsWorkedIn && current.activeFile) return current;
+    return cachedWorkspaceView(workspace) ?? (current.activeFile ? current : null);
   }
   function showResumedFile(resume) {
     restoreResumeState(resume);
@@ -102,27 +116,38 @@ export function createTabs(app) {
     if (saveUserStateTimer) clearTimeout(saveUserStateTimer);
     saveUserStateTimer = setTimeout(() => {
       saveUserStateTimer = null;
-      const project = app.controller.getProject();
-      const openFiles = filesIn(app.view.get(), "source")
-        .map((id) => (project.nodes[id]?.kind === "file" ? getPath(project, id) : null))
-        .filter(Boolean);
-      const activeId = project.activeFileId;
-      const activeFile = activeId && project.nodes[activeId]?.kind === "file"
-        ? getPath(project, activeId)
-        : null;
-      app.saveUserState(ws, openFiles, activeFile)
+      const { openFiles, activeFile, groups } = currentWorkspaceView();
+      app.saveUserState(ws, openFiles, activeFile, groups)
         .catch((error) => app.logDebug("response", "Save resume state failed", error.message));
     }, 1200);
   }
 
   // Restore the tabs the user had open here last time (from the open response's
   // `resume`). Paths are resolved back to node ids in the freshly-pulled project.
+  // Kept groups come back as they were; a resume from before groups opens its
+  // files as source tabs.
   function restoreResumeState(resume) {
-    if (!resume || (!resume.openFiles?.length && !resume.activeFile)) return;
+    if (!resume || (!resume.openFiles?.length && !resume.activeFile && !resume.groups?.length)) return;
     const project = app.controller.getProject();
     const pathToId = new Map();
     for (const node of Object.values(project.nodes)) {
       if (node.kind === "file") pathToId.set(getPath(project, node.id), node.id);
+    }
+    const restored = groupsFromSaved(resume.groups, (path) => pathToId.get(path) ?? null);
+    if (restored.groups.some((group) => group.tabs.length)) {
+      tabsWorkedIn = true;
+      app.view.restore(restored);
+      // The source editor shows the active file (else the source tab its group shows, else the first).
+      const shown = restored.groups.find((group) => group.id === restored.hosts.source)?.active;
+      const activeId = (resume.activeFile ? pathToId.get(resume.activeFile) : null)
+        ?? (shown?.view === "source" ? shown.fileId : null) ?? filesIn(app.view.get(), "source")[0] ?? null;
+      if (activeId) {
+        app.view.pick(activeId);
+        app.controller.setActiveFile(activeId);
+      }
+      app.render(app.controller.getProject());
+      app.logDebug("action", "Restored resume state", `${restored.groups.reduce((n, group) => n + group.tabs.length, 0)} tab(s) in groups`);
+      return;
     }
     const openIds = (resume.openFiles ?? [])
       .map((path) => pathToId.get(path))
@@ -293,11 +318,13 @@ export function createTabs(app) {
   // Closing a tab, in its group. When it was the source editor's file, the last
   // source tab left there is shown (or no file).
   function closeTab(group, tab) {
+    tabsWorkedIn = true;
     const project = app.controller.getProject();
     if (tab.view === "preview") {
       app.view.closeTab("preview", tab.fileId, group);
       app.updateStatus(project);
       closeGroupIfEmpty(group);
+      scheduleSaveUserState();
       return;
     }
     const wasShown = project.activeFileId === tab.fileId && app.view.get().hosts.source === group;
@@ -338,6 +365,7 @@ export function createTabs(app) {
     const to = otherGroup(from);
     const project = app.controller.getProject();
     if (project.nodes[tab.fileId]?.kind !== "file") return;
+    tabsWorkedIn = true;
     app.captureViewState();
     app.setAreaShown(areaOf(to), true);
     app.view.moveToGroup(from, to, { fileId: tab.fileId, view: tab.view }, { keep, target, placeAfter });
@@ -345,11 +373,11 @@ export function createTabs(app) {
       app.view.pick(tab.fileId);
       if (project.activeFileId !== tab.fileId) app.controller.setActiveFile(tab.fileId);
       else app.updateStatus(project);
-      scheduleSaveUserState();
     } else {
       app.updateStatus(project);
     }
     if (!keep) closeGroupIfEmpty(from);
+    scheduleSaveUserState();
   }
 
   // A group left with no tab closes, when the other one shows (on the
@@ -366,8 +394,10 @@ export function createTabs(app) {
   }
 
   function reorderTabs(group, dragged, target, placeAfter = false) {
+    tabsWorkedIn = true;
     app.view.moveTab(group, dragged, target, placeAfter);
     renderTabs(app.controller.getProject());
+    scheduleSaveUserState();
   }
 
   // The tab strips scroll instead of squeezing tabs down to unreadable slivers, so
@@ -672,5 +702,5 @@ export function createTabs(app) {
     });
   }
 
-  return { ensureOpenTabs, openSourceTab, openPreviewTab, activateTab, setActiveSourceFile, currentWorkspaceView, cacheWorkspaceView, cachedWorkspaceView, showResumedFile, scheduleSaveUserState, restoreResumeState, setActiveSourcePart, setPreviewFile, openFileFromExplorer, canOpenFileInPane, setPaneDropActive, clearPaneDropState, openDroppedFileInPane, openPartInPane, bindPaneDropTarget, closeTab, closeSourceTab, closePreviewTab, reorderTabs, moveTabToGroup, tabOverflowButton, closeTabOverflowMenu, openTabOverflowMenu, renderTabStrip, renderTabs, bindTabStripReorderTarget };
+  return { ensureOpenTabs, openSourceTab, openPreviewTab, activateTab, setActiveSourceFile, currentWorkspaceView, cacheWorkspaceView, cachedWorkspaceView, resumeView, showResumedFile, scheduleSaveUserState, restoreResumeState, setActiveSourcePart, setPreviewFile, openFileFromExplorer, canOpenFileInPane, setPaneDropActive, clearPaneDropState, openDroppedFileInPane, openPartInPane, bindPaneDropTarget, closeTab, closeSourceTab, closePreviewTab, reorderTabs, moveTabToGroup, tabOverflowButton, closeTabOverflowMenu, openTabOverflowMenu, renderTabStrip, renderTabs, bindTabStripReorderTarget };
 }

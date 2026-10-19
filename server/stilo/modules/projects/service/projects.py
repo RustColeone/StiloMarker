@@ -138,7 +138,7 @@ class Projects:
         """The account's open files in this project, or none."""
         return self.folders.read_user_state(self.folders.under_team(team, relpath), username)
 
-    def write_user_state(self, token: str, team: str, path: str, open_files: list, active_file) -> dict:
+    def write_user_state(self, token: str, team: str, path: str, open_files: list, active_file, groups=None) -> dict:
         identity = self.identity.require(token)
         team = self.identity.require_team(identity, team)
         relpath = safe_relpath(path)
@@ -147,7 +147,7 @@ class Projects:
             raise ValueError("Not a project directory")
         if not self.can_access(identity, team, relpath):
             raise PermissionError("You do not have access to that workspace")
-        self.folders.write_user_state(project_dir, identity["username"], open_files, active_file)
+        self.folders.write_user_state(project_dir, identity["username"], open_files, active_file, groups)
         return {"ok": True}
 
     # ---- the file browser ------------------------------------------------------

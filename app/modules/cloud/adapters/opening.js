@@ -55,8 +55,9 @@ export function createOpening(app) {
     if (!options.automatic) app.sessionRestorer.cancel();
     openWorkspaceInFlight = workspaceId;
     const previousMode = app.mode.get();
-    const previousView = app.settings.syncedProjectId === workspaceId
-      ? (app.currentWorkspaceView().activeFile ? app.currentWorkspaceView() : app.cachedWorkspaceView(workspaceId)) : null;
+    // Reopening the workspace this browser already holds: the tabs the Editor
+    // brings back (this page's, or the last visit's); else the server's resume.
+    const previousView = app.settings.syncedProjectId === workspaceId ? app.resumeView(workspaceId) : null;
     try {
       // Preserve the user's local project once, so leaving the cloud workspace
       // restores it. Setting synced mode up-front stops onStatusChange's master

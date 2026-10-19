@@ -70,12 +70,26 @@ class Folders(unittest.TestCase):
         self.project("Novel")
         self.projects.write_user_state(self.amy, "red", "Novel", ["a.md", 3, "b.md"], "a.md")
         self.projects.write_user_state(self.ben, "red", "Novel", [f"{n}.md" for n in range(300)], 7)
-        self.assertEqual(self.projects.read_user_state("red", "Novel", "amy"), {"openFiles": ["a.md", "b.md"], "activeFile": "a.md"})
+        self.assertEqual(self.projects.read_user_state("red", "Novel", "amy"), {"openFiles": ["a.md", "b.md"], "activeFile": "a.md", "groups": []})
         ben = self.projects.read_user_state("red", "Novel", "ben")
         self.assertEqual((len(ben["openFiles"]), ben["activeFile"]), (200, None))
-        self.assertEqual(self.projects.read_user_state("red", "Novel", "cat"), {"openFiles": [], "activeFile": None})
+        self.assertEqual(self.projects.read_user_state("red", "Novel", "cat"), {"openFiles": [], "activeFile": None, "groups": []})
         with self.assertRaisesRegex(ValueError, "Not a project"):
             self.projects.write_user_state(self.amy, "red", "", [], None)
+
+    def test_the_editor_groups_are_kept_cleaned(self):
+        self.project("Novel")
+        left = {"id": "left", "tabs": [{"path": "a.md", "view": "source"}, {"path": "b.md", "view": "preview"}, {"path": 3, "view": "source"},
+                                       {"path": "c.md", "view": "sideways"}, "d.md"], "active": {"path": "b.md", "view": "preview"}}
+        right = {"id": "right", "tabs": [{"path": f"{n}.md", "view": "preview"} for n in range(300)], "active": "0.md"}
+        self.projects.write_user_state(self.amy, "red", "Novel", ["a.md"], "a.md", [left, right, {"id": "left", "tabs": []}, {"id": "middle"}])
+        groups = self.projects.read_user_state("red", "Novel", "amy")["groups"]
+        self.assertEqual(groups[0], {"id": "left", "tabs": [{"path": "a.md", "view": "source"}, {"path": "b.md", "view": "preview"}],
+                                     "active": {"path": "b.md", "view": "preview"}})
+        self.assertEqual((groups[1]["id"], len(groups[1]["tabs"]), groups[1]["active"]), ("right", 200, None))
+        self.assertEqual(len(groups), 2, "a group twice, or one that is not, is dropped")
+        self.projects.write_user_state(self.amy, "red", "Novel", ["a.md"], "a.md", {"left": "not a list"})
+        self.assertEqual(self.projects.read_user_state("red", "Novel", "amy")["groups"], [])
 
     def test_who_may_open_and_edit(self):
         self.project("Novel")
@@ -145,7 +159,8 @@ class Routes(unittest.TestCase):
         listed = self.call("GET", f"/api/workspaces/browse?token={amy}&team=red&path=books")[1]["entries"]
         self.assertEqual([(e["name"], e["kind"]) for e in listed], [("Novel", "project")])
         self.assertEqual(self.call("POST", f"/api/workspaces/user-state?token={amy}",
-                                   {"team": "red", "path": created["path"], "openFiles": ["welcome.md"], "activeFile": "welcome.md"}), (200, {"ok": True}))
+                                   {"team": "red", "path": created["path"], "openFiles": ["welcome.md"], "activeFile": "welcome.md",
+                                    "groups": [{"id": "right", "tabs": [{"path": "welcome.md", "view": "preview"}]}]}), (200, {"ok": True}))
         self.assertEqual(self.call("GET", "/api/workspaces/browse?team=red")[0], 403, "no token")
         self.assertEqual(self.call("GET", f"/api/workspaces/browse?token={amy}&team=red&path=../x")[0], 400)
         self.assertEqual(self.call("POST", f"/api/workspaces?token={amy}", {"team": "red", "name": "Old"}),

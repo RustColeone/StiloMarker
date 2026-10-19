@@ -12,6 +12,30 @@ from ..model.paths import safe_component
 
 INDEX_FILE = "index.json"
 USER_STATE_FILE = "user-state.json"
+GROUP_IDS = ("left", "right")
+TAB_VIEWS = ("source", "preview")
+
+
+def _clean_tab(tab):
+    """A tab as kept: a path shown one way, or None."""
+    if isinstance(tab, dict) and isinstance(tab.get("path"), str) and tab.get("view") in TAB_VIEWS:
+        return {"path": tab["path"], "view": tab["view"]}
+    return None
+
+
+def _clean_groups(groups) -> list:
+    """The editor's groups as kept: at most the two, each with its tabs
+    (at most 200) and the one it shows; anything else is dropped."""
+    if not isinstance(groups, list):
+        return []
+    cleaned = []
+    for group in groups[:len(GROUP_IDS)]:
+        if not isinstance(group, dict) or group.get("id") not in GROUP_IDS or any(g["id"] == group["id"] for g in cleaned):
+            continue
+        tabs = group.get("tabs") if isinstance(group.get("tabs"), list) else []
+        kept = [tab for tab in (_clean_tab(t) for t in tabs) if tab][:200]
+        cleaned.append({"id": group["id"], "tabs": kept, "active": _clean_tab(group.get("active"))})
+    return cleaned
 
 
 class TeamFolders:
@@ -80,15 +104,16 @@ class TeamFolders:
     def read_user_state(self, project_dir: Path, username: str) -> dict:
         entry = self._read_user_states(project_dir).get(username)
         if not isinstance(entry, dict):
-            return {"openFiles": [], "activeFile": None}
+            return {"openFiles": [], "activeFile": None, "groups": []}
         open_files = [str(p) for p in entry.get("openFiles", []) if isinstance(p, str)]
         active = entry.get("activeFile")
-        return {"openFiles": open_files, "activeFile": active if isinstance(active, str) else None}
+        return {"openFiles": open_files, "activeFile": active if isinstance(active, str) else None,
+                "groups": _clean_groups(entry.get("groups"))}
 
-    def write_user_state(self, project_dir: Path, username: str, open_files, active_file) -> None:
+    def write_user_state(self, project_dir: Path, username: str, open_files, active_file, groups=None) -> None:
         data = self._read_user_states(project_dir)
         # Capped, so a runaway client can't bloat the file.
         cleaned = [str(p) for p in (open_files or []) if isinstance(p, str)][:200]
         data[username] = {"openFiles": cleaned, "activeFile": active_file if isinstance(active_file, str) else None,
-                          "updatedAt": time.time()}
+                          "groups": _clean_groups(groups), "updatedAt": time.time()}
         (project_dir / USER_STATE_FILE).write_text(json.dumps(data, indent=2), encoding="utf-8")

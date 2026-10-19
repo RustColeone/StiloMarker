@@ -66,13 +66,14 @@ async function createProjectServer(serverUrl, accountToken, team, path, name) {
 }
 
 // Persist which files the user has open in a cloud workspace, so they can be
-// restored on the next open/reconnect (per-user, server-side resume state).
-async function saveUserState(serverUrl, accountToken, team, path, openFiles, activeFile) {
+// restored on the next open/reconnect (per-user, server-side resume state):
+// the source tabs, the active file and the editor's groups (by path).
+async function saveUserState(serverUrl, accountToken, team, path, openFiles, activeFile, groups = []) {
   const baseUrl = normalizeServerUrl(serverUrl);
   const response = await fetch(`${baseUrl}/api/workspaces/user-state?token=${encodeURIComponent(accountToken)}`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({ team, path, openFiles, activeFile })
+    body: JSON.stringify({ team, path, openFiles, activeFile, groups })
   });
   if (!response.ok) {
     await throwForResponse("Could not save resume state.", response);

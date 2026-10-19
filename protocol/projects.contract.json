@@ -6,7 +6,7 @@
   "routes": [
     { "method": "GET", "path": "/api/workspaces/browse", "query": ["token", "team", "path"], "reply": ["teams", "team", "path", "entries"] },
     { "method": "POST", "path": "/api/workspaces/mkdir", "query": ["token"], "body": ["team", "path", "name"], "reply": ["team", "path", "name", "kind"] },
-    { "method": "POST", "path": "/api/workspaces/user-state", "query": ["token"], "body": ["team", "path", "openFiles", "activeFile"], "reply": ["ok"] },
+    { "method": "POST", "path": "/api/workspaces/user-state", "query": ["token"], "body": ["team", "path", "openFiles", "activeFile", "groups"], "reply": ["ok"] },
     {
       "method": "GET", "path": "/api/workspaces/access",
       "query": ["token", "team", "path"],

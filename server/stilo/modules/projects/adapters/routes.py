@@ -21,7 +21,7 @@ def add_routes(transport, projects):
     def user_state(request):
         token, payload = _token(request), request.json()
         return projects.write_user_state(token, str(payload.get("team", "")), str(payload.get("path", "")),
-                                         payload.get("openFiles", []), payload.get("activeFile"))
+                                         payload.get("openFiles", []), payload.get("activeFile"), payload.get("groups"))
 
     def get_access(request):
         return projects.get_access(_token(request), request.query("team"), request.query("path"))

@@ -42,6 +42,38 @@ export const groupOf = (state, id) => state.groups.find((group) => group.id === 
 export const hostOf = (state, view) => groupOf(state, state.hosts[view]);
 export const filesIn = (state, view) => (hostOf(state, view)?.tabs ?? []).filter((tab) => tab.view === view).map((tab) => tab.fileId);
 
+// The groups as kept with the workspace's open tabs, by path (ids are this
+// page's own), and back. pathOf(id) / idOf(path): null when not a file.
+export function savedGroups(state, pathOf) {
+  const saved = (tab) => {
+    const path = tab ? pathOf(tab.fileId) : null;
+    return path ? { path, view: tab.view } : null;
+  };
+  return state.groups.map((group) => ({ id: group.id, tabs: group.tabs.map(saved).filter(Boolean), active: saved(group.active) }));
+}
+
+// Each body goes to the group showing its view (the left first), else to one
+// holding a tab of it, else where it is by default; the preview shows that
+// group's preview tab.
+export function groupsFromSaved(saved, idOf) {
+  const byId = new Map();
+  for (const group of Array.isArray(saved) ? saved : []) if (!byId.has(group?.id)) byId.set(group?.id, group); // the first of a group named twice
+  const groups = EMPTY_VIEW.groups.map(({ id }) => {
+    const kept = byId.get(id);
+    const tabs = (kept?.tabs ?? []).flatMap((tab) => {
+      const fileId = idOf(tab.path);
+      return fileId ? [{ fileId, view: tab.view }] : [];
+    });
+    const shown = kept?.active ? { fileId: idOf(kept.active.path), view: kept.active.view } : null;
+    return { id, tabs, active: tabs.find((tab) => sameTab(tab, shown)) ?? tabs.at(-1) ?? null };
+  });
+  const holder = (view) => (groups.find((group) => group.active?.view === view)
+    ?? groups.find((group) => group.tabs.some((tab) => tab.view === view)))?.id ?? EMPTY_VIEW.hosts[view];
+  const hosts = { source: holder("source"), preview: holder("preview") };
+  const shownPreview = groups.find((group) => group.id === hosts.preview)?.active;
+  return { groups, hosts, previewFileId: shownPreview?.view === "preview" ? shownPreview.fileId : null };
+}
+
 const sameGroups = (a, b) => a.length === b.length && a.every((group, i) => group.id === b[i].id
   && ((!group.active && !b[i].active) || sameTab(group.active, b[i].active))
   && group.tabs.length === b[i].tabs.length && group.tabs.every((tab, j) => sameTab(tab, b[i].tabs[j])));
@@ -69,6 +101,11 @@ export function createView(state) {
         hosts: EMPTY_VIEW.hosts, focus: "left",
         previewFileId: active, previewPart: null, sourcePart: null, selectionNodeId: active ?? project.rootId
       });
+    },
+
+    // The groups as they were when the workspace was last open (groupsFromSaved).
+    restore({ groups, hosts, previewFileId }) {
+      state.set("restore groups", { groups: seal(groups), hosts: Object.freeze({ ...hosts }), focus: hosts.source, previewFileId, previewPart: null });
     },
 
     // The user picked a node, or one part of a file, in the explorer: it is

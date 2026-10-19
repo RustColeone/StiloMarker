@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-19 · release `v0.1.98` (not deployed; v0.1.95 is live)
+Last updated: 2026-10-19 · release `v0.1.99` (not deployed; v0.1.95 is live)
 
 ---
 
@@ -68,6 +68,22 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.1.99: the editor groups are kept
+
+Step 5i. Cloud workspaces; the server changed too (a restart on deploy).
+
+- Which tabs each group holds, and which one it shows, are saved with the
+  workspace's open tabs: on the server (per account) and in this browser.
+- A reload brings back the tabs and groups as you left them. Before, a
+  reload kept only the active file, because the freshly started page's one
+  tab won over what was saved. Opening the workspace on another device
+  brings back what the server kept.
+- Tabs saved before groups still come back, as source tabs.
+- Tests: `projects.test.py` (the groups kept, cleaned and capped),
+  `editor-view.test.mjs` (kept by path and restored), and the new
+  `groups-resume-browser.py` (restored from the server, saved again, back
+  after a reload).
 
 ### v0.1.98: editor groups come and go
 

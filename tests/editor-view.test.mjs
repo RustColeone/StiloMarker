@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createState, createTrace } from "../app/kernel/index.js";
-import { EMPTY_VIEW, createView, filesIn, groupOf, hostOf } from "../app/modules/editor/service/view.js";
+import { EMPTY_VIEW, createView, filesIn, groupOf, groupsFromSaved, hostOf, savedGroups } from "../app/modules/editor/service/view.js";
 
 const project = (active, ...files) => ({
   rootId: "root", activeFileId: active,
@@ -172,4 +172,36 @@ test("moveToGroup: a tab moves (or is opened too) to the other group, its body f
   view.closeGroup("left");
   assert.deepEqual({ ...view.get().hosts }, { source: "right", preview: "right" });
   assert.equal(view.get().focus, "right");
+});
+
+test("the groups kept by path and restored: unknown files dropped, each body in the group showing its view", () => {
+  const { view } = fresh();
+  view.reset(project("a", "a", "b", "c"));
+  view.activate("left", preview("b"));
+  view.moveToGroup("left", "right", source("a"));
+  const paths = { a: "a.md", b: "docs/b.md", c: "c.md" };
+  const kept = savedGroups(view.get(), (id) => paths[id] ?? null);
+  assert.deepEqual(kept, [
+    { id: "left", tabs: [{ path: "docs/b.md", view: "preview" }], active: { path: "docs/b.md", view: "preview" } },
+    { id: "right", tabs: [{ path: "a.md", view: "preview" }, { path: "a.md", view: "source" }], active: { path: "a.md", view: "source" } }
+  ]);
+  const ids = { "a.md": "a2", "docs/b.md": "b2" }; // reopened: new ids, and c.md is gone
+  const restored = groupsFromSaved([...kept, { id: "left", tabs: [] }], (path) => ids[path] ?? null);
+  assert.deepEqual(plain(restored), {
+    groups: [
+      { id: "left", tabs: [preview("b2")], active: preview("b2") },
+      { id: "right", tabs: [preview("a2"), source("a2")], active: source("a2") }
+    ],
+    hosts: { source: "right", preview: "left" },
+    previewFileId: "b2"
+  });
+  const { view: other } = fresh();
+  other.restore(restored);
+  assert.deepEqual(plain(other.get().groups), plain(restored.groups));
+  assert.equal(other.get().hosts.preview, "left");
+  assert.equal(other.get().previewFileId, "b2");
+  assert.deepEqual(plain(groupsFromSaved(null, () => null)), {
+    groups: [{ id: "left", tabs: [], active: null }, { id: "right", tabs: [], active: null }],
+    hosts: { source: "left", preview: "right" }, previewFileId: null
+  }, "nothing kept: today's layout, empty");
 });
