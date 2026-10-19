@@ -331,7 +331,8 @@ That is where bugs are hard to find. Steps, each its own release:
 | S4d-2a | Diagrams' browser code is an extension (v0.1.72, `extensions/bmap-diagram`): the diagram editor (moved whole from `app/ui/bmap-view.js`, still over budget, recorded under its new path), the format, the preview, Quick Generate, export, its two settings. Two Explorer extension points: `explorer.fileMenus` (a file type's own context-menu entries, e.g. Export As) and `explorer.newFiles` (a new file's first content; character sheets use it too). The name `bmap-diagram` keeps the "the core never names an extension" check meaningful ("diagram" is an everyday word in the core) | done (v0.1.72) |
 | S4d-2b | The Editor no longer knows diagrams (v0.1.73): their highlighting, toolbar buttons and autocomplete are the extension's (`adapters/source.js`) through the Editor's `highlighters`, `toolbars` and a new `completions` extension point; a preview may say `showOnOpen` (opening the file shows it there too) instead of the tabs checking for a diagram by name; Workspace's `isBmapFileName` is gone | done (v0.1.73) |
 | S4d-2c | The `.bmap` file type itself into the extension's manifest, with its styles. Waits on two things: extension settings (Shell's settings refuse keys they do not know, so `bmapGenerateScope` and `bmapAutoPan` have core defaults) and a generic overview in the server's generate endpoint (`bmap_overview`) | later |
-| S4d-3 | The comments glue (Comments), the welcome page (Editor), the maintenance commands (Workspace) | |
+| S4d-3a | Comments starts itself (v0.1.74; it was only used for its functions): its comments are notes on lines through a new Editor extension point, `editor.lineNotes` (the gutter mark and the overview ruler tick; a line number's click goes to the provider), they follow the text as the project changes (this tab's typing or a collaborator's), its popover's controls and its events on Sync's stream are its own, and Cloud asks it to load (`comments.load`). `commentsForActiveFile` and `scheduleCommentReanchor` left the Editor's port; `main.js` hands out 26 getters | done (v0.1.74) |
+| S4d-3b | The welcome page (Editor) and the maintenance commands (Workspace) | next |
 | S4e | Layout and gestures (Shell, the groundwork for step 5's areas), the `elements` table; then `main.js` only starts the kernel | |
 | S4 | `main.js` only starts the kernel; then the server's `WorkspaceRegistry` the same way | |
 
@@ -453,6 +454,9 @@ That is where bugs are hard to find. Steps, each its own release:
   items(context, { project, file, projectFiles(kind) }), label(context) })`.
   A preview whose file is used through it (a diagram's editor) adds
   `showOnOpen: true`.
+- Notes on lines (Comments): `editor.lineNotes.add({ id, kind,
+  notes(file) -> [{ line, title }], click?(line) })`; the gutter row gets
+  `has-<kind>` and an `editor-gutter-<kind>-mark`, the ruler `is-<kind>`.
 - A tab in the preview pane that is not a file (History's diff):
   `editor.paneViews.add({ id, element, tab() -> { label, title, iconText,
   iconClass, caption? } | null, show({ fresh }), close() })`; `tab()` is null

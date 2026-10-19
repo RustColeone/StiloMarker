@@ -215,10 +215,9 @@ export function installCursors(ed, app) {
       }
     }
 
-    // Line comments.
-    for (const comment of app.commentsForActiveFile()) {
-      add({ line: comment.line, className: "editor-overview-tick is-comment",
-            title: `${comment.author ?? "Comment"}: ${comment.text}` });
+    // Other modules' notes on lines (editor.lineNotes: comments).
+    for (const note of app.lineNotesOf(app.controller.getActiveFile())) {
+      add({ line: note.line, className: `editor-overview-tick is-${note.kind}`, title: note.title });
     }
 
     // My own caret last so it is never hidden behind another marker.

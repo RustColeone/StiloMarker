@@ -49,7 +49,7 @@ def api(method, path, body=None, token=None):
 checks = []
 def ok(name): checks.append(name); print("  ok ", name)
 
-HOOK = b"\nwindow.__w = { controller, workspace, collaboration, lineComments, get project() { return controller.getProject(); } };\n"
+HOOK = b"\nwindow.__w = { controller, workspace, collaboration, get project() { return controller.getProject(); } };\n"
 AGENT = {"next": None}  # the reply Anna's agent gives next
 
 

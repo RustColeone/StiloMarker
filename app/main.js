@@ -19,6 +19,7 @@ import modelsModule from "./modules/models/index.js";
 import chatsModule from "./modules/chats/index.js";
 import charactersModule from "./modules/characters/index.js";
 import assistantModule from "./modules/assistant/index.js";
+import commentsModule from "./modules/comments/index.js";
 import { loadTemplateProject } from "./services/template-service.js";
 import { query } from "./ui/dom.js";
 import explorerModule from "./modules/explorer/index.js";
@@ -26,7 +27,6 @@ import { registerPreviews } from "./features/previews.js";
 import { createLayout } from "./ui/layout.js";
 import editorModule, { escapeHtmlAttribute, forgetViewStates, getRelativeProjectPath, normalizePath, renderMarkdown } from "./modules/editor/index.js";
 import { createDialogs } from "./ui/dialogs.js";
-import { createLineComments } from "./modules/comments/index.js";
 
 document.querySelectorAll("[data-app-version]").forEach((label) => { label.textContent = `v${APP_VERSION}`; });
 
@@ -48,12 +48,6 @@ const elements = {
   previewTabOverflow: query("#preview-tab-overflow"),
   tabOverflowMenu: query("#tab-overflow-menu"),
   editorOverviewRuler: query("#editor-overview-ruler"),
-  lineCommentPopover: query("#line-comment-popover"),
-  lineCommentInput: query("#line-comment-input"),
-  lineCommentMeta: query("#line-comment-meta"),
-  lineCommentDelete: query("#line-comment-delete"),
-  lineCommentCancel: query("#line-comment-cancel"),
-  lineCommentSave: query("#line-comment-save"),
   explorerTree: query("#explorer-tree"),
   explorerContextMenu: query("#explorer-context-menu"),
   explorerFilterButton: query("#explorer-filter-button"),
@@ -204,7 +198,7 @@ const elements = {
 // ---- Modules (docs/ARCHITECTURE.md) ----
 // The app is moving into modules one step at a time. Code still in this file
 // reaches a module only through the public API the kernel hands back.
-const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, syncModule, historyModule, explorerModule, cloudModule, modelsModule, charactersModule, chatsModule, assistantModule, ...extensionModules], {
+const modules = await startModules([shellModule, fileTypesModule, workspaceModule, identityModule, editorModule, syncModule, historyModule, explorerModule, commentsModule, cloudModule, modelsModule, charactersModule, chatsModule, assistantModule, ...extensionModules], {
   log: (owner, ...args) => { try { logDebug("action", `${owner}: ${args.join(" ")}`); } catch (error) { ignore(error, "the log panel is not ready yet"); } }
 });
 const { shell, workspace, identity } = modules;
@@ -242,7 +236,6 @@ var editorParts = modules.editor.attach({
   settings, elements, identity,
   saveUserState: (ws, openFiles, activeFile) => saveUserState(settings.serverUrl, identity.token(), ws.team, ws.path, openFiles, activeFile),
   logDebug, traceEditorEvent, formatEditorDebugValue,
-  commentsForActiveFile, scheduleCommentReanchor,
   imageSrcFor,
   renderWelcomeState, setMobileExplorerOpen, togglePreview,
   scope: () => chatWorkspaceKey(), isReadOnly: () => isReadOnlyWorkspace(), onDrop: (event) => handleEditorDrop(event)
@@ -263,7 +256,7 @@ modules.explorer.newFiles.add({ id: "persona", content(name) {
 var historyParts = modules.history.attach({ togglePreview, logDebug });
 // The cloud file browser, accounts and hosting (modules/cloud/adapters/surface.js).
 var cloudParts = modules.cloud.attach({
-  elements, logDebug, flashStatusPanel, openSettingsDialog, refreshChatStatus, loadLineComments,
+  elements, logDebug, flashStatusPanel, openSettingsDialog, refreshChatStatus,
   setMobileExplorerOpen
 });
 var chatsPage = modules.chats.attach({ cloudWorkspaceTarget, chatWorkspaceKey, personaAvatarSrc, isMobileLayout, logDebug }); // the side panel's Chats page
@@ -471,44 +464,6 @@ function isReadOnlyWorkspace() {
 }
 
 
-// ---- Line comments -----------------------------------------------------------
-// A note attached to a LINE, like a breakpoint: it lives in metadata beside the
-// project on the server (the Comments module), never in the document text. Shared with
-// everyone who can open the workspace. Comments follow the text: each one stores
-// the line's own content, so after edits shift it we re-find it rather than
-// leaving the note stranded on a line number that now means something else.
-const lineComments = { byFile: new Map(), loadedFor: null };
-// ---- Line comments (the Comments module) ----
-// Created on first use. The module reads main's shared values through this
-// context, so it always sees their current values. `var`: a forwarding
-// function can run during startup, before this line is reached.
-var lineCommentsUiInstance;
-function lineCommentsUi() {
-  return (lineCommentsUiInstance ??= createLineComments({
-    get cloudWorkspaceTarget() { return cloudWorkspaceTarget; },
-    get collaboration() { return collaboration; },
-    get controller() { return controller; },
-    get elements() { return elements; },
-    get getEditorSelection() { return getEditorSelection; },
-    get getEditorText() { return getEditorText; },
-    get lineComments() { return lineComments; },
-    get logDebug() { return logDebug; },
-    get notify() { return notify; },
-    get renderEditorContent() { return renderEditorContent; },
-    get setEditorSelection() { return setEditorSelection; },
-    get showToast() { return showToast; },
-    get workspaceMode() { return syncMode.get().workspaceMode; }
-  }));
-}
-function closeCommentPopover(...args) { return lineCommentsUi().closeCommentPopover(...args); }
-function commentsAvailable(...args) { return lineCommentsUi().commentsAvailable(...args); }
-function commentsForActiveFile(...args) { return lineCommentsUi().commentsForActiveFile(...args); }
-async function loadLineComments(...args) { return lineCommentsUi().loadLineComments(...args); }
-function openCommentPopover(...args) { return lineCommentsUi().openCommentPopover(...args); }
-async function removeLineComment(...args) { return lineCommentsUi().removeLineComment(...args); }
-function renderEditorFromModel(...args) { return lineCommentsUi().renderEditorFromModel(...args); }
-function scheduleCommentReanchor(...args) { return lineCommentsUi().scheduleCommentReanchor(...args); }
-async function submitLineComment(...args) { return lineCommentsUi().submitLineComment(...args); }
 
 // The cloud workspace on screen (Sync's), for the code that still asks main.js.
 function cloudWorkspaceTarget() { return modules.sync.cloudWorkspace(); }
@@ -531,10 +486,6 @@ const collaboration = modules.sync.attach({
     if (view) restoreResumeState(view);
   },
   applyOperation(clientId, operation) {
-    // Comments are shared, so a COLLABORATOR's edit can move my commented lines
-    // just as my own typing does. Re-anchor after remote ops too, or a teammate
-    // inserting a paragraph above would strand every comment below it.
-    scheduleCommentReanchor();
     try {
       const activeFile = controller.getActiveFile();
       const activePath = activeFile ? getPath(controller.getProject(), activeFile.id) : null;
@@ -600,16 +551,6 @@ modules.sync.events.on("patch-confirmed", () => {
     // Path (not node id) so peers can match it — see renderRemoteCursors.
     const path = getPath(controller.getProject(), activeFile.id);
     collaboration.scheduleAwareness(path, sel.start, sel.end);
-  }
-});
-// Comments' events on Sync's stream (Chats and the Agent page hear their own).
-modules.sync.events.on("event", ({ event }) => {
-  if (event.type === "comments") {
-    // A collaborator added/edited/moved a comment: adopt the server's list and
-    // repaint the gutter + overview ruler without waiting for a reopen.
-    if (!commentsAvailable()) return;
-    lineComments.byFile = new Map(Object.entries(event.files ?? {}));
-    renderEditorFromModel();
   }
 });
 workspace.attach(createWorkspacePorts({ controller, collaboration, publishOperation, getEditorSelection, applyEditorEdit,
@@ -1114,33 +1055,7 @@ elements.importFileInput.addEventListener("change", async (event) => {
 
 
 shell.commands.add({ id: "editor.find-replace", title: "Find & Replace", menu: { id: "edit", group: 0, order: 1 }, run: () => openFindBar(true) });
-// Click a gutter line number to add/edit that line's comment (breakpoint-style).
-elements.editorGutter?.addEventListener("click", (event) => {
-  const row = event.target.closest?.(".editor-gutter-line");
-  if (!row || row.dataset.line === undefined) return;
-  openCommentPopover(Number(row.dataset.line));
-});
 window.addEventListener("resize", scheduleOverviewRuler);
-elements.lineCommentSave?.addEventListener("click", () => { void submitLineComment(); });
-elements.lineCommentCancel?.addEventListener("click", closeCommentPopover);
-elements.lineCommentDelete?.addEventListener("click", () => {
-  const id = elements.lineCommentPopover?.dataset.commentId;
-  if (id) void removeLineComment(id);
-});
-elements.lineCommentInput?.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") { event.preventDefault(); closeCommentPopover(); return; }
-  // Ctrl/Cmd+Enter saves; plain Enter stays a newline inside the note.
-  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-    event.preventDefault();
-    void submitLineComment();
-  }
-});
-document.addEventListener("click", (event) => {
-  if (elements.lineCommentPopover?.hidden) return;
-  if (event.target.closest?.("#line-comment-popover, .editor-gutter-line")) return;
-  closeCommentPopover();
-});
-
 bindPaneDropTarget(elements.sourcePane, "source");
 bindPaneDropTarget(elements.sourceTabStrip, "source");
 bindPaneDropTarget(elements.previewPane, "preview");

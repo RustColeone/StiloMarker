@@ -9,6 +9,7 @@
 // links, the tab strips and the preview, given what main.js still provides
 // (adapters/surface.js lists it: PORT); parts() -> the same functions.
 // previews, highlighters, toolbars, completions (autocomplete for a format),
+// lineNotes (notes on lines in the gutter: comments),
 // paneViews (tabs in the preview pane that
 // are not files, such as History's diff) and marks (extension points; marks are
 // what other modules put on files' lines, service/marks.js) and view: what the
@@ -43,7 +44,7 @@ export default defineModule({
   uses: ["shell", "file-types", "workspace", "identity"],
   owns: { elements: ["the source editor", "the formatting toolbar", "the find bar", "the tab strips", "the preview pane"],
     state: ["the open tabs", "what each pane shows", "the explorer selection"],
-    registries: ["previews", "highlighters", "toolbars", "completions", "marks", "pane views"], rules: ["Markdown rendering"] },
+    registries: ["previews", "highlighters", "toolbars", "completions", "line notes", "marks", "pane views"], rules: ["Markdown rendering"] },
   start(ctx) {
     // Previews of other kinds of file: { id, matches(file), render(target, project, file, tools), cacheable?, printHtml? }
     const previews = ctx.registry();
@@ -55,6 +56,9 @@ export default defineModule({
     // start, end } | null, items(context, { project, file, projectFiles(kind) }) -> [{ label, detail, insertText }],
     // label(context) -> the list's title } (a diagram's blocks and properties).
     const completions = ctx.registry({ validate: (entry) => { for (const key of ["find", "items", "label"]) if (typeof entry[key] !== "function") throw new Error(`completions ${entry.id} need ${key}()`); } });
+    // Notes on a file's lines, shown in the gutter and on the overview ruler: { id, kind,
+    // notes(file) -> [{ line, title }], click?(line) } (Comments; a line number's click goes to it).
+    const lineNotes = ctx.registry({ validate: (entry) => { if (typeof entry.notes !== "function" || !entry.kind) throw new Error(`line notes ${entry.id} need kind and notes()`); } });
     // Tabs in the preview pane that are not files: { id, element, tab() -> { label, title, iconText, iconClass } | null
     // (null while closed), show({ fresh }), close() } (History's diff).
     const paneViews = ctx.registry({ validate: (entry) => { for (const key of ["tab", "show", "close"]) if (typeof entry[key] !== "function") throw new Error(`pane view ${entry.id} needs ${key}()`); } });
@@ -73,10 +77,10 @@ export default defineModule({
     let parts = null;
     function attach(port) {
       if (parts) throw new Error("editor: already attached");
-      parts = createSurface({ port, view, marks, paneViews: open(paneViews), completions: open(completions), previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars),
+      parts = createSurface({ port, view, marks, paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars),
         workspace: ctx.use("workspace"), shell: ctx.use("shell") });
       return parts;
     }
-    return { previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars), paneViews: open(paneViews), completions: open(completions), marks, view, attach, parts: () => parts };
+    return { previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars), paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), marks, view, attach, parts: () => parts };
   }
 });

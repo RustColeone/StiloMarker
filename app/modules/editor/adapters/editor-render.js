@@ -264,20 +264,21 @@ export function installRender(ed, app) {
     // Gutter rows, diffed the same way. The gutter is entirely ours (no native
     // edits), so plain index comparison is enough. A line-count change shifts the
     // numbers of every following row, which then re-render — rare (Enter/paste).
-    const comments = app.commentsForActiveFile();
-    const commentByLine = new Map(comments.map((comment) => [comment.line, comment]));
-    // Row strings depend on the row index, its height, comments and the agent
-    // range. A changed line count renumbers every following row, so rebuild all;
-    // otherwise only rows that were just (re)measured can differ.
-    const gutterEpoch = `${cache.els.length}|${activeDecoration ? `${activeDecoration.kind}:${activeDecoration.lineStart}-${activeDecoration.lineEnd}` : ""}|${comments.map((c) => `${c.line}:${c.author ?? ""}:${c.text}`).join("\u0001")}`;
+    // Other modules' notes on lines (editor.lineNotes: comments), one per line.
+    const notes = app.lineNotesOf(activeFile);
+    const noteByLine = new Map(notes.map((note) => [note.line, note]));
+    // Row strings depend on the row index, its height, the notes and the
+    // mark's range. A changed line count renumbers every following row, so
+    // rebuild all; otherwise only rows that were just (re)measured can differ.
+    const gutterEpoch = `${cache.els.length}|${activeDecoration ? `${activeDecoration.kind}:${activeDecoration.lineStart}-${activeDecoration.lineEnd}` : ""}|${notes.map((n) => `${n.kind}:${n.line}:${n.title}`).join("\u0001")}`;
     const gutterRow = (index) => {
       const decorated = isDecorated(index);
       const marker = decorated ? `<span class="editor-gutter-mark" aria-hidden="true">◦</span>` : "";
-      const comment = commentByLine.get(index);
-      const commentMark = comment
-        ? `<span class="editor-gutter-comment-mark" title="${app.escapeHtmlAttribute(`${comment.author ?? ""}: ${comment.text}`.trim())}" aria-hidden="true">●</span>`
+      const note = noteByLine.get(index);
+      const noteMark = note
+        ? `<span class="editor-gutter-${note.kind}-mark" title="${app.escapeHtmlAttribute(note.title)}" aria-hidden="true">●</span>`
         : "";
-      return `<div class="editor-gutter-line${decorated ? ` is-${activeDecoration.kind}` : ""}${comment ? " has-comment" : ""}" data-line="${index}" style="height:${heights[index].toFixed(3)}px">${marker}${commentMark}${index + 1}</div>`;
+      return `<div class="editor-gutter-line${decorated ? ` is-${activeDecoration.kind}` : ""}${note ? ` has-${note.kind}` : ""}" data-line="${index}" style="height:${heights[index].toFixed(3)}px">${marker}${noteMark}${index + 1}</div>`;
     };
     let gutterHtml;
     if (gutterEpoch !== cache.gutterEpoch || cache.gutter.length !== cache.els.length) {

@@ -1,6 +1,6 @@
 // Line comments in cloud workspaces: loading them, keeping them anchored to
 // their lines as the text changes, and the gutter popover to add, edit or
-// remove one. main.js creates this on first use and passes its shared values in `app`.
+// remove one. Created when the Comments module starts (index.js), given its context in `app`.
 import { getPath, isTextFileName } from "../../workspace/index.js";
 import { deleteComment, listComments, reanchorComments, saveComment } from "./api.js";
 import { reanchor, withComment } from "../model/anchors.js";

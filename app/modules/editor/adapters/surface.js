@@ -29,13 +29,12 @@ import { createPreviewPane } from "./preview-pane.js";
 export const PORT = [
   "collaboration", "workspaceMode", "settings", "elements", "identity", "saveUserState",
   "logDebug", "traceEditorEvent", "formatEditorDebugValue",
-  "commentsForActiveFile", "scheduleCommentReanchor",
   "imageSrcFor",
   "renderWelcomeState", "setMobileExplorerOpen", "togglePreview",
   "scope", "isReadOnly", "onDrop"
 ];
 
-export function createSurface({ port, view, marks, paneViews, completions, previews, highlighters, toolbars, workspace, shell }) {
+export function createSurface({ port, view, marks, paneViews, completions, lineNotes, previews, highlighters, toolbars, workspace, shell }) {
   const missing = PORT.filter((name) => !(name in port));
   if (missing.length) throw new Error(`editor.attach: the port lacks ${missing.join(", ")}`);
   const composing = { now: false }; // an IME composition is under way
@@ -79,7 +78,7 @@ export function createSurface({ port, view, marks, paneViews, completions, previ
       heights: [],      // gutter heights measured for each line
       gutter: [],       // gutter row HTML as rendered
       metricsKey: "",   // geometry the heights were measured under (see below)
-      gutterEpoch: "",  // line count / agent range / comments the gutter rows reflect
+      gutterEpoch: "",  // line count / mark range / line notes the gutter rows reflect
       textExact: true   // every line's DOM text equals its source line
     },
     // Text dragged out of the editor, and where a drop would land.
@@ -89,7 +88,9 @@ export function createSurface({ port, view, marks, paneViews, completions, previ
     // The file the editor's text is (what its DOM shows), or null.
     shown: { fileId: null },
 
-    view, marks, paneViews, completions, previews, highlighters, toolbars, workspace, parts: workspace.parts,
+    view, marks, paneViews, completions, lineNotes, previews, highlighters,
+    // The notes on a file's lines from every provider: [{ kind, line, title }].
+    lineNotesOf: (file) => (file ? lineNotes.all().flatMap((provider) => provider.notes(file).map((note) => ({ kind: provider.kind, ...note }))) : []), toolbars, workspace, parts: workspace.parts,
     escapeHtmlAttribute, normalizePath, getRelativePath, getRelativeProjectPath,
     notify: (message) => shell.notify(message),
     showToast: (message, options) => shell.toast(message, options),
@@ -131,6 +132,12 @@ export function createSurface({ port, view, marks, paneViews, completions, previ
   add(createCharCount(app, shell.statusBar));
   add(createPreviewPane(app));
   installEditorEvents(app, composing);
+  // A click on a line number goes to the line notes' providers (comments: add or edit one).
+  app.elements.editorGutter?.addEventListener("click", (event) => {
+    const row = event.target.closest?.(".editor-gutter-line");
+    if (!row || row.dataset.line === undefined) return;
+    lineNotes.all().find((provider) => provider.click)?.click(Number(row.dataset.line));
+  });
   // The editor's settings, whoever changed them: new glyph metrics mean every
   // measured overlay (caret, cursors, search highlights) and the gutter's
   // scroll are worked out again; wrapping redraws the lines.

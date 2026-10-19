@@ -69,6 +69,16 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.74: Comments runs itself
+
+Step S4d-3a. Nothing changes for users.
+
+- The Comments module now starts like the others and owns everything about
+  comments on the page: the gutter marks and ruler ticks (through a new
+  Editor extension point for notes on lines), the popover, keeping each
+  comment on its line as the text changes, and others' changes arriving
+  live. `main.js` no longer mentions comments.
+
 ### v0.1.73: the Editor no longer knows diagrams
 
 Step S4d-2b. Nothing changes for users.

@@ -172,8 +172,6 @@ export function installHistory(ed, app) {
     }
     // Keep find matches/highlights accurate as the text changes underneath them.
     if (app.searchState.open) app.computeSearchMatches();
-    // Line comments follow the text: re-find any whose line moved.
-    app.scheduleCommentReanchor();
   }
 
   Object.assign(ed, { diffEditorTexts, pushEditorHistoryState, clampEditorSelection, resetEditorHistory, transformEditorOffset, transformEditorSelection, queueExternalEditorSelection, consumeExternalEditorSelection, pushEditorHistoryCheckpoint, editorUndo, editorRedo, applyEditorEdit, loadEditorContent, replaceEditorRange, notifyEditorChanged });

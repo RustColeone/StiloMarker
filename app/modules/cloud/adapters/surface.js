@@ -16,14 +16,14 @@ import { createProviders } from "./providers.js";
 // What main.js attaches (cloud.attach(port)); each entry should move to an
 // owner, or become an extension point, and leave this list.
 export const PORT = [
-  "elements", "logDebug", "flashStatusPanel", "openSettingsDialog", "refreshChatStatus", "loadLineComments",
+  "elements", "logDebug", "flashStatusPanel", "openSettingsDialog", "refreshChatStatus",
   "setMobileExplorerOpen"
 ];
 
 // The editor's functions the cloud parts call (editor.parts()).
 const EDITOR = ["showResumedFile", "currentWorkspaceView", "cachedWorkspaceView"];
 
-export function createSurface({ port, shell, workspace, identity, sync, editor, history }) {
+export function createSurface({ port, shell, workspace, identity, sync, editor, history, comments }) {
   const missing = PORT.filter((name) => !(name in port));
   if (missing.length) throw new Error(`cloud.attach: the port lacks ${missing.join(", ")}`);
   const editorParts = editor.parts();
@@ -32,6 +32,7 @@ export function createSurface({ port, shell, workspace, identity, sync, editor, 
   const app = {
     view: editor.view, identity, history, mode: sync.mode, settings: shell.settings, syncState: sync.status,
     switchWorkspaceMode: (next) => sync.switchMode(next),
+    loadLineComments: (options) => comments.load(options), // the open workspace's comments (Comments')
     // Snapshots are History's.
     ensureSnapshotsMigrated: (...args) => history.parts().ensureSnapshotsMigrated(...args),
     refreshSnapshotBaselines: (...args) => history.parts().refreshSnapshotBaselines(...args),
