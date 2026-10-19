@@ -911,3 +911,28 @@ among them), 23 browser suites.
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261019T180656Z-v0.1.95`.
 172/172 data files (taken with the service stopped), every JSON file valid.
+
+## Verified release: v0.1.99
+
+Deployed on 2026-10-19 at 21:57 UTC, with every release since v0.1.95
+(v0.1.96–v0.1.99): editor groups, stage 1. The model (v0.1.96), Open as in
+the same group with the placeholder and Show here (v0.1.97), Move to Other
+Group, Open to the Side and a group closing with its last tab (v0.1.98), and
+the groups kept with a cloud workspace's open tabs, on the server and in the
+browser (v0.1.99, a server change: Projects' `user-state.json` gains
+`groups`). App version `0.1.99`; sync compatibility unchanged at `117`. The
+service's command line and environment file are unchanged.
+
+Public checks: ping (`0.1.99`, accounts on, hosting on), the service worker's
+cache label `mdnotes-shell-v0.1.99`, the new scripts served (`groups.js`, the
+view with `groupsFromSaved`), the server's own files refused
+(`server/mdnotes_server.py`, `server/whitelist.json`, `server/stilomarker.env`,
+a module's Python file answer as the app's page), an unknown token answered
+403 on the session state and on the user state (with `groups` in the body),
+and a clean journal (no errors).
+
+Validation: 249 Node tests, all 22 Python suites (the backend self-test
+among them), 25 browser suites.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261019T215738Z-v0.1.99`.
+172/172 data files (taken with the service stopped), every JSON file valid.
