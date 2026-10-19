@@ -1,5 +1,6 @@
 // Who may open a cloud project: its access list, edited by its owner.
 // Part of the Cloud module: `app` is its shared context (surface.js).
+import { getAccessServer, setAccessServer } from "./api.js";
 
 export function createAccess(app) {
   let accessEditorTarget = null;
@@ -18,7 +19,7 @@ export function createAccess(app) {
     if (app.elements.accessBlacklist) app.elements.accessBlacklist.value = "";
     setAccessStatus("");
     try {
-      const data = await app.identity.getAccess(team, path);
+      const data = await getAccessServer(app.settings.serverUrl, app.identity.token(), team, path);
       if (app.elements.accessWhitelist) app.elements.accessWhitelist.value = (data.whitelist ?? []).join("\n");
       if (app.elements.accessBlacklist) app.elements.accessBlacklist.value = (data.blacklist ?? []).join("\n");
     } catch (error) {
@@ -31,7 +32,9 @@ export function createAccess(app) {
     if (!accessEditorTarget || !app.identity.account()) return;
     const parseList = (value) => String(value ?? "").split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
     try {
-      await app.identity.setAccess(
+      await setAccessServer(
+        app.settings.serverUrl,
+        app.identity.token(),
         accessEditorTarget.team,
         accessEditorTarget.path,
         parseList(app.elements.accessWhitelist?.value),

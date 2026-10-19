@@ -44,30 +44,21 @@ async function harness(replies) {
   return { identity, stored, calls, events, restore: () => { globalThis.fetch = realFetch; } };
 }
 
-test("signing in, out and in again by itself; access goes with the token", async () => {
+test("signing in, out and in again by itself", async () => {
   const h = await harness({
     "POST /api/auth/login": (body) => body.password === "pw"
       ? [200, { token: "t1", username: "amy", teams: ["red"], lastWorkspace: null }]
-      : [403, { message: "Invalid username or password" }],
-    "GET /api/workspaces/access": (_, query) => [200, { whitelist: [], createdBy: "amy", asked: query }],
-    "POST /api/workspaces/access": (body) => [200, { whitelist: body.whitelist }]
+      : [403, { message: "Invalid username or password" }]
   });
   try {
     await assert.rejects(h.identity.signIn("amy", "nope"), /^Error: Login failed\. Invalid username or password$/);
     assert.equal(h.identity.account(), null);
-    await assert.rejects(h.identity.getAccess("red", "Novel"), /Sign in first/);
 
     await h.identity.signIn(" amy ", "pw");
     assert.deepEqual({ ...h.identity.account(), teams: [...h.identity.account().teams] }, { token: "t1", username: "amy", teams: ["red"] });
     assert.throws(() => { h.identity.account().teams.push("x"); }, TypeError, "callers cannot change the account");
     assert.deepEqual(h.stored, { username: "amy", password: "pw", proven: { [SERVER]: "amy" } });
     assert.equal(h.identity.canRestore(), true);
-
-    const access = await h.identity.getAccess("red", "Novel");
-    assert.deepEqual(access.asked, { token: "t1", team: "red", path: "Novel" });
-    await h.identity.setAccess("red", "Novel", ["amy"], []);
-    assert.deepEqual(h.calls.at(-1), { method: "POST", path: "/api/workspaces/access", query: { token: "t1" },
-      body: { team: "red", path: "Novel", whitelist: ["amy"], blacklist: [] } });
 
     h.identity.drop();
     assert.equal(h.identity.token(), null);

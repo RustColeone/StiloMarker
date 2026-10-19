@@ -1,6 +1,7 @@
-// The server's routes for cloud workspaces (still the legacy contract): ping,
-// browse, make a folder, create, delete, export, import, the resume state, and
-// uploading an image. Moved from the legacy sync service.
+// The server's routes for cloud workspaces: browsing, making a folder, the
+// resume state and who may open a project are the server's Projects
+// (protocol/projects.contract.json); ping, create, delete, export, import and
+// uploading an image are still the legacy routes.
 import { dataUrlToBytes } from "../../workspace/index.js";
 import { normalizeServerUrl, parseResponse, throwForResponse } from "../../shell/index.js";
 
@@ -138,8 +139,34 @@ async function importProjectServer(serverUrl, accountToken, team, path, name, pr
   return parseResponse(response);
 }
 
+// Who may open a project: its access list (Identity's rules, kept by Projects).
+async function getAccessServer(serverUrl, accountToken, team, path) {
+  const params = new URLSearchParams({ token: accountToken, team, path });
+  const response = await fetch(`${normalizeServerUrl(serverUrl)}/api/workspaces/access?${params.toString()}`, {
+    headers: { accept: "application/json" }
+  });
+  if (!response.ok) {
+    await throwForResponse("Could not read access list.", response);
+  }
+  return parseResponse(response);
+}
+
+async function setAccessServer(serverUrl, accountToken, team, path, whitelist, blacklist) {
+  const response = await fetch(`${normalizeServerUrl(serverUrl)}/api/workspaces/access?token=${encodeURIComponent(accountToken)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ team, path, whitelist, blacklist })
+  });
+  if (!response.ok) {
+    await throwForResponse("Could not update access list.", response);
+  }
+  return parseResponse(response);
+}
+
 export {
   browseServer,
+  getAccessServer,
+  setAccessServer,
   createProjectServer,
   deleteServer,
   exportProjectServer,

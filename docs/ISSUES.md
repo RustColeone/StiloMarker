@@ -69,6 +69,20 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 
 ## Fixed
 
+### v0.1.83: the server's Projects module
+
+Step S4s-1. Nothing changes for users.
+
+- Where the teams' projects are kept on the server and who may open them is
+  now a module of its own (Projects): browsing the server's folders, making
+  a folder, each account's open files in a project, and reading or setting a
+  project's access list. The replies are the same as before.
+- Two server routes nobody has called since v0.1.60 (listing and making the
+  flat workspaces from before folders) are gone. Those old workspaces still
+  open.
+- The browser's access dialog now asks the server itself (Cloud) instead of
+  going through the sign-in module.
+
 ### v0.1.82: main.js only starts the modules
 
 Step S4e-4c. Nothing changes for users.

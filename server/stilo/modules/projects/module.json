@@ -1,0 +1,10 @@
+{
+  "name": "projects",
+  "level": 3,
+  "uses": ["transport", "workspace", "identity"],
+  "owns": {
+    "names": ["team index file", "user state file"],
+    "routes": ["/api/workspaces/browse", "/api/workspaces/mkdir", "/api/workspaces/user-state", "/api/workspaces/access"],
+    "rules": ["where a team's projects are kept", "safe names and paths", "who may open a project (with Identity's rules)"]
+  }
+}

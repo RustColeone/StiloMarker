@@ -9,7 +9,6 @@
 //   signIn(username, password, { isCurrent }) -> the server's reply
 //   canRestore()   restore({ isCurrent }) -> reply | null
 //   signOut()      drop()
-//   getAccess(team, path)   setAccess(team, path, whitelist, blacklist)
 //   events: "account" { account }   signed in, out, or dropped
 // Static: participantColor(clientId), a person's colour in a session (model/colors.js).
 import { defineModule } from "../../kernel/index.js";
@@ -31,16 +30,6 @@ export default defineModule({
     const account = createAccount({ api, server, events, log: (message) => ctx.log(message) });
     const { settings } = ctx.use("shell");
     if (settings) account.attach(signInSettings(settings));
-    const signedIn = () => {
-      const token = account.token();
-      if (!token) throw new Error("Sign in first.");
-      return token;
-    };
-    return {
-      ...account,
-      getAccess: async (team, path) => api.getAccess(signedIn(), team, path),
-      setAccess: async (team, path, whitelist, blacklist) => api.setAccess(signedIn(), team, path, whitelist, blacklist),
-      events: { on: events.on }
-    };
+    return { ...account, events: { on: events.on } };
   }
 });

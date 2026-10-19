@@ -161,7 +161,7 @@ class RegistryBase(unittest.TestCase):
         self.reg = server.WorkspaceRegistry('2468', Path(self.tmp.name) / 'state.json', accounts=accounts, data_dir=self.data)
         self.addCleanup(self.reg.chats.close)
         self.tokens = {name: self.reg.identity.login(name, 'pw')['token'] for name in ('leo', 'amy', 'ben', 'eve')}
-        self.reg.create_workspace(self.tokens['leo'], 'qa', 'Novel', share_team=True)
+        self.reg.projects.create_workspace(self.tokens['leo'], 'qa', 'Novel', share_team=True)
         self.path = 'workspaces/Novel'
         self.sessions = {name: self.reg.open_workspace(self.tokens[name], 'qa', self.path)['token'] for name in ('leo', 'amy', 'ben')}
         self.broker = self.reg.brokers[f'qa/{self.path}']
@@ -248,7 +248,7 @@ class RegistryTests(RegistryBase):
         self.assertTrue((folder / chats.DB_NAME).is_file())
         self.assertEqual(self.call('amy', 'messages', pair['id'])['messages'][0]['content'], 'still here')
         self.assertNotIn(chats.DB_NAME, json.dumps(self.broker.project))
-        self.assertTrue(set(chats.SIDE_FILES) <= self.reg._RESERVED_NAMES)
+        self.assertTrue(all(self.reg.projects.is_reserved(name) for name in chats.SIDE_FILES))
 
     def test_chats_get_a_daily_backup_only_when_they_changed(self):
         pair = self.call('leo', 'start', [AMY])['conversation']

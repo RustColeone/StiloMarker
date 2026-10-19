@@ -18,7 +18,7 @@ This file is the short reference that the structure tests enforce.
   | --- | --- |
   | 1 | Shell (browser) / Transport (server), File types |
   | 2 | Workspace, Identity and access, Models |
-  | 3 | Editor (browser), Sync, Characters |
+  | 3 | Editor (browser), Sync, Characters, Projects (server) |
   | 4 | History, Comments, Explorer (browser) |
   | 5 | Assistant, Chats, Cloud (browser) |
   | 6 | Extensions (`extensions/<name>/`): the URL album |
@@ -72,6 +72,7 @@ flowchart TB
     Editor["Editor (browser)"]
     Sync["Sync (both)"]
     Characters["Characters (both)"]
+    Projects["Projects (server)"]
   end
   subgraph L2["Level 2 · the workspace and who uses it"]
     Workspace["Workspace (both)"]
@@ -93,6 +94,7 @@ flowchart TB
   Explorer --> Editor & Workspace & Shell
   Editor --> Workspace & FileTypes & Shell
   Characters --> Workspace
+  Projects --> Workspace & Identity & Transport
   Sync --> Workspace & Identity
   Workspace --> FileTypes
   Identity --> Shell & Transport
@@ -340,7 +342,13 @@ That is where bugs are hard to find. Steps, each its own release:
 | S4e-4b1 | Same-level modules meet in Workspace (v0.1.80; decided 2026-10-19). The Editor and Sync (both level 3) never call each other: Workspace announces typed changes (`typed` → `"text-changed"`, which Sync sends), others' changes (`applyRemote` → `"remote-change"`, `"remote-applied"`: the Editor keeps the caret and moves their cursor), project replacement (`replace` → `"replacing"`, `"replaced"`: the view kept on a reconnect), and carets (`presence`: mine from the Editor, others' from Sync); the write path's ports are Workspace's own (`editing.configure` from the Editor); `location` says shared, read-only, which files the server confirmed and what images' addresses depend on. Sync starts its session itself; History keeps local edits before a reload (`sync.keepers`), Cloud supplies signing in again, uploads (`sync.configure`) and the open tabs on the server (`editor.openTabs`). The Sync port, the saving port, `features/workspace-ports.js` and five Editor port entries are gone; `main.js` hands out 1 getter | done (v0.1.80) |
 | S4e-4b2 | The rest of the ports (v0.1.81). What is dropped into the source editor is handled by whoever configures `editor.drops` (the Explorer). The project root's menu takes other modules' entries (`explorer.rootMenus`: Cloud's Manage Preview, shown when it applies). A rename or move is announced (`explorer.events` `"path-changed"`), and Chats follows its characters. Module maps are an extension (`extensions/module-map`: the dialog, its markup and styles, its `.mtree` menu entry through `explorer.fileMenus`, its Ctrl+S). The character sheet's preview and template are Chats' (Characters shares the Editor's level). The Assistant and Chats (both level 5) no longer call each other: Chats draws itself on Shell's redraw, and the Agent page's old Roleplay threads reach it through Workspace (`workspace.handover`). Cloud asks Models for the agent's status itself. `app/features` is gone, 41 unused forwarders left `main.js` (329 lines), which hands out no getters | done (v0.1.81) |
 | S4e-4c | `main.js` only starts the modules (v0.1.82; 27 lines, from 4,539 when the moves out of it began). Each module that draws finds its own elements (`adapters/elements.js`) and creates its parts when it starts in a page (`attach(port)` is gone everywhere). The start is the modules': Shell adds the menus, shows the version (`model/version.js`, moved from `app/`), points the server at its setting and registers the offline files; Identity reads the stored sign-in from the settings (moved from `app/services`); Workspace opens the project this browser kept (or a seed) and, on a first visit, installs the welcome template unless a workspace arrived first (moved from `app/services`; `"started-over"`, and the Editor starts its view over), and shows the project's name. What must wait for the whole app waits with the kernel's new `ctx.whenStarted(fn)`: the offline files, the template, the Agent page, the agent's status and resuming the last session, in start order as before. Browser tests reach the app through `modules` (`tests/helpers/app_hook.py`). The page looks the same (compared pixel for pixel) | done (v0.1.82) |
-| S4 | The server's `WorkspaceRegistry` the same way | next |
+| S4s | The server the same way (decided 2026-10-19): `mdnotes_server.py`'s `WorkspaceRegistry` and `ChatProxy` into modules. Server levels after it: 1 Transport, File types; 2 Identity, Models, Workspace; 3 Characters, Projects; 4 Sync (from 3: it asks Projects who may open); 5 Comments, History; 6 Cloud (the browser Cloud's server half), Chats, Assistant (from 5). Routes and their replies stay as they are | |
+| S4s-1 | Projects, a server module on level 3 (v0.1.83): where the teams' projects are kept (`data/team_<team>/`, folders at any depth, a project marked by Workspace's manifest), safe names and paths, who may open or edit a project (Identity's rules over its access file), each account's open files, the file browser's listing and new folder, and the flat workspaces from before folders. Its routes (`protocol/projects.contract.json`; a contract may name its browser half, here the browser's Cloud) took over browse, mkdir, user-state and the access routes (from Identity, whose browser half no longer calls them: Cloud's access dialog does). Bookkeeping files other modules keep in a project are never listed: their owners name them (`projects.reserve`). The registry asks Projects; the two routes for listing and making flat workspaces, unused by the app since v0.1.60, are gone. `mdnotes_server.py` 2,577 → 2,212 lines | done (v0.1.83) |
+| S4s-2 | The live workspaces and sessions into Sync (level 4): the brokers, session tokens, joining by PIN, guest hosting, leases; Sync asks Projects whether an account may open a project | next |
+| S4s-3 | Cloud on the server (level 6): creating, importing, exporting and deleting projects (to History's trash) | |
+| S4s-4 | Backups and the timers (the lease sweep, the daily backup) to their owners; the kernel gets "every N seconds" and "on stop" | |
+| S4s-5 | `ChatProxy` split: providers to Models, the agent's loop and tools to Assistant, a character's prompt to Characters and Chats | |
+| S4s-6 | `mdnotes_server.py` only starts the modules; static files to Transport; `LEGACY_ROUTES` gone | |
 
 ### Notes for module authors
 
@@ -402,6 +410,10 @@ That is where bugs are hard to find. Steps, each its own release:
 - Browser: a command id is `<owner>.<action>`; add it with
   `shell.commands.add({ id, title, run, keys?, menu? })`. Menus are drawn
   from commands, so `index.html` holds no menu items.
+- Server: where a project is and who may open or edit it is Projects'
+  (`authorize_project(token, team, path)`, `project_dir`, `may_edit`,
+  `people`); a file a module keeps in a project folder is named once with
+  `projects.reserve(name)` so the file browser never lists it.
 - Server: a new route is `transport.add_route(method, path, run)`, where
   `run(request)` returns the JSON payload and raises `PermissionError`,
   `LookupError` or `ValueError` for 403, 404 and 400. `KeyError` and

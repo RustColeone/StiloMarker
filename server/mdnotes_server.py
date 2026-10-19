@@ -26,7 +26,7 @@ if _mcp_module_dir not in sys.path:
 from stilo.modules.chats import DB_FILES as CHAT_DB_FILES, open_chats
 from stilo.kernel import start_modules
 from stilo.modules import (assistant as assistant_module, characters as characters_module, file_types as file_types_module,
-                           identity as identity_module, models as models_module, sync as sync_module, history as history_module, comments as comments_module, chats as chats_module, transport as transport_module, workspace as workspace_module)
+                           identity as identity_module, models as models_module, projects as projects_module, sync as sync_module, history as history_module, comments as comments_module, chats as chats_module, transport as transport_module, workspace as workspace_module)
 from stilo.modules.file_types import BUILTIN as FILE_TYPES
 from stilo.kernel.log import log as _log, ignore as _ignore, best_effort as _best_effort
 from stilo.modules.workspace import (append_node, atomic_write as _atomic_write, create_id, decode_data_url, default_project,
@@ -40,13 +40,14 @@ from stilo.modules.characters import (character_instructions, characters_view, n
 from stilo.modules.assistant import AGENT_TOOLS, propose_edit
 from stilo.modules.comments import COMMENTS_FILE, open_comments
 from stilo.modules.history import open_history
-from stilo.modules.identity import ACCESS_FILE, ACCOUNT_FILE, AccountStore, open_identity
+from stilo.modules.identity import ACCOUNT_FILE, AccountStore, open_identity
+from stilo.modules.projects import open_projects, safe_component, safe_relpath
 from stilo.modules.models import IMAGE_SIZES, GeneratedImages, MCPManager, MCPTurn, open_providers
 
 
 def start_server_modules():
     """The server's modules (docs/ARCHITECTURE.md); more join as the restructure moves code."""
-    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE, identity_module.MODULE, models_module.MODULE, sync_module.MODULE, characters_module.MODULE, history_module.MODULE, comments_module.MODULE, chats_module.MODULE, assistant_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"))
+    return start_modules([transport_module.MODULE, file_types_module.MODULE, workspace_module.MODULE, identity_module.MODULE, models_module.MODULE, projects_module.MODULE, sync_module.MODULE, characters_module.MODULE, history_module.MODULE, comments_module.MODULE, chats_module.MODULE, assistant_module.MODULE], log=lambda owner, *parts: _log("MODULE", f"{owner}: {' '.join(map(str, parts))}"))
 
 
 def _truthy(value: str | None) -> bool:
@@ -1102,6 +1103,10 @@ class WorkspaceRegistry:
         self.pin = pin
         self.master_pin = master_pin or pin
         self.identity = open_identity(accounts, data_dir)
+        # Where the teams' projects are and who may open them (the Projects module).
+        self.projects = open_projects(self.identity, data_dir)
+        # Bookkeeping files these keep in a project folder, never listed as entries.
+        self.projects.reserve(COMMENTS_FILE, "chat.json", *CHAT_DB_FILES)
         self.history = open_history(data_dir, self, self.identity, trash_days)
         self.comments = open_comments(self)
         self.chats = open_chats(self)  # its runner (the agent) is set by build_server
@@ -1117,48 +1122,11 @@ class WorkspaceRegistry:
         )
 
     # ---- Team workspace storage (accounts mode) --------------------------------
-    @staticmethod
-    def safe_component(name: str) -> str:
-        """Sanitize a single team/workspace path component. Rejects traversal and
-        anything outside a conservative allowlist so a request can never escape
-        the data directory."""
-        cleaned = str(name or "").strip()
-        if not cleaned or cleaned in {".", ".."} or "/" in cleaned or "\\" in cleaned:
-            raise ValueError("Invalid name")
-        if not re.fullmatch(r"[A-Za-z0-9 _.-]{1,64}", cleaned):
-            raise ValueError("Name may only contain letters, numbers, spaces, _.-")
-        return cleaned
-
-    def _team_dir(self, team: str) -> Path:
-        if self.data_dir is None:
-            raise PermissionError("Cloud storage is not enabled on this server")
-        return self.data_dir / f"team_{self.safe_component(team)}" / "workspaces"
-
-    def _index_path(self, team: str) -> Path:
-        return self._team_dir(team).parent / "index.json"
-
-    def _read_index(self, team: str) -> dict:
-        path = self._index_path(team)
-        if not path.exists():
-            return {"workspaces": {}}
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return {"workspaces": {}}
-        if not isinstance(data.get("workspaces"), dict):
-            data["workspaces"] = {}
-        return data
-
-    def _write_index(self, team: str, index: dict) -> None:
-        path = self._index_path(team)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(index, indent=2), encoding="utf-8")
-
     def _state_file(self, team: str, name: str) -> Path:
-        return self._team_dir(team) / f"{self.safe_component(name)}.json"
+        return self.projects.folders.workspaces_dir(team) / f"{safe_component(name)}.json"
 
     def _workspace_dir(self, team: str, name: str) -> Path:
-        return self._team_dir(team) / self.safe_component(name)
+        return self.projects.folders.workspaces_dir(team) / safe_component(name)
 
     def _make_workspace_broker(self, team: str, name: str) -> CollaborationBroker:
         """Directory-backed broker for a team workspace, migrating a legacy
@@ -1166,7 +1134,7 @@ class WorkspaceRegistry:
         workspace_dir = self._workspace_dir(team, name)
         legacy = self._state_file(team, name)
         broker = CollaborationBroker(self.pin, None, master_pin=self.master_pin, workspace_dir=workspace_dir)
-        if legacy.exists() and not (workspace_dir / "manifest.json").exists():
+        if legacy.exists() and not self.projects.folders.is_project(workspace_dir):
             try:
                 data = json.loads(legacy.read_text(encoding="utf-8"))
                 broker.project = data.get("project") or broker._default_project()
@@ -1183,104 +1151,22 @@ class WorkspaceRegistry:
         broker.on_paths_moved = self.chats.paths_moved
         return broker
 
-    def list_workspaces(self, token: str) -> list[dict]:
-        """Only workspaces the caller is a member of, across their teams."""
-        identity = self.identity.require(token)
-        out = []
-        for team in identity["teams"]:
-            try:
-                index = self._read_index(team)
-            except (ValueError, PermissionError):
-                continue
-            for name, meta in index["workspaces"].items():
-                members = meta.get("members", [])
-                if identity["username"] in members:
-                    out.append({
-                        "team": team,
-                        "name": name,
-                        "id": f"{team}/{name}",
-                        "members": members,
-                        "createdBy": meta.get("createdBy"),
-                    })
-        return out
-
-    # ---- File-browser navigation (nested folders + per-project access) ---------
-    # Files that are storage bookkeeping, never shown as browseable entries.
-    _RESERVED_NAMES = {"index.json", ACCESS_FILE, "manifest.json", "user-state.json", COMMENTS_FILE, "chat.json", *CHAT_DB_FILES}
-
-    def _safe_relpath(self, path: str) -> str:
-        """Sanitize a '/'-separated path relative to a team dir. Each segment is
-        validated with safe_component (which rejects '..', separators, etc.), so
-        the result can never escape the team directory. '' means the team root."""
-        raw = str(path or "").strip().strip("/")
-        if not raw:
-            return ""
-        return "/".join(self.safe_component(seg) for seg in raw.split("/") if seg)
-
-    def _abs_under_team(self, team: str, relpath: str) -> Path:
-        """Resolve relpath under team_<team>/ (the team root, which contains
-        workspaces/ and index.json), sandbox-checked as defence in depth."""
-        base = self._team_dir(team).parent.resolve()  # team_<team>/
-        candidate = (base / relpath).resolve() if relpath else base
-        if candidate != base and base not in candidate.parents:
-            raise PermissionError("Path escapes team directory")
-        return candidate
-
-    @staticmethod
-    def is_project_dir(directory: Path) -> bool:
-        """A directory is a project iff it carries a manifest.json."""
-        return (directory / "manifest.json").is_file()
-
-    def _legacy_meta(self, team: str, relpath: str) -> dict | None:
-        """If relpath is a legacy flat project (workspaces/<name>) recorded in the
-        team's index.json, return its meta dict; else None. Used to keep pre-
-        browser membership gating and open un-migrated single-file workspaces."""
-        parts = relpath.split("/")
-        if len(parts) != 2 or parts[0] != "workspaces":
-            return None
-        try:
-            index = self._read_index(team)
-        except (ValueError, PermissionError):
-            return None
-        return index["workspaces"].get(parts[1])
-
-    def project(self, team: str, path: str, must_exist: bool = False):
-        """(project folder, legacy meta getter) for Identity's access routes."""
-        relpath = self._safe_relpath(path)
-        project_dir = self._abs_under_team(self.safe_component(team), relpath)
-        if must_exist and not self.is_project_dir(project_dir):
-            raise ValueError("Not a project directory")
-        return project_dir, lambda: self._legacy_meta(team, relpath)
-
-    def read_access(self, team: str, relpath: str) -> dict:
-        project_dir, legacy = self.project(team, relpath)
-        return self.identity.access(project_dir, legacy)
-
-    def role_for(self, identity: dict, team: str, relpath: str) -> str:
-        return self.identity.role(identity, self.read_access(team, relpath))
-
-    def can_access(self, identity: dict, team: str, relpath: str) -> bool:
-        return self.identity.may_open(identity, team, self.read_access(team, relpath))
-
-    # ---- The port of Comments and History: where a project is, who may see it --
+    # ---- The places port of History, Comments and Chats: where a project is and
+    # who may see it (Projects'), and what is open now (until Sync owns it) -----
     def project_dir(self, team, relpath):
-        return self._abs_under_team(team, relpath)
+        return self.projects.project_dir(team, relpath)
 
     def authorize_project(self, token, team, path):
-        identity = self.identity.require(token)
-        team = self.identity.require_team(identity, team)
-        relpath = self._safe_relpath(path)
-        if not relpath:
-            raise ValueError("A project path is required")
-        if not self.is_project_dir(self._abs_under_team(team, relpath)):
-            raise ValueError("Not a project")
-        if not self.can_access(identity, team, relpath):
-            raise PermissionError("You do not have access to that project")
-        return identity, team, relpath
+        return self.projects.authorize_project(token, team, path)
 
-    # ---- History's port (server/stilo/modules/history/service/desk.py) -----------
     def may_edit(self, identity, team, relpath):
-        return self.identity.can(identity, "edit", team, self.read_access(team, relpath))
+        return self.projects.may_edit(identity, team, relpath)
+
+    def folder(self, team: str, relpath: str) -> Path:  # History's trash port
+        return self.projects.folder(team, relpath)
+
+    def people(self, team: str, relpath: str) -> list[str]:
+        return self.projects.people(team, relpath)
 
     def live(self, team, relpath):
         return self.get_broker(f"{team}/{relpath}")
@@ -1310,144 +1196,16 @@ class WorkspaceRegistry:
         self.chats.backup(lambda team, relpath: self.history.backups.store(team, relpath).folder / "chats", now)
         return made
 
-    # ---- Per-user resume state (which files a user had open) -------------------
-    def read_user_state(self, team: str, relpath: str, username: str) -> dict:
-        """The caller's saved open-files state for this project, or an empty
-        default. Stored per-user in a user-state.json sidecar keyed by username."""
-        proj = self._abs_under_team(team, relpath)
-        path = proj / "user-state.json"
-        data = {}
-        if path.exists():
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                data = {}
-        entry = data.get(username) if isinstance(data, dict) else None
-        if not isinstance(entry, dict):
-            return {"openFiles": [], "activeFile": None}
-        open_files = [str(p) for p in entry.get("openFiles", []) if isinstance(p, str)]
-        active = entry.get("activeFile")
-        return {"openFiles": open_files, "activeFile": active if isinstance(active, str) else None}
-
-    def write_user_state(self, token: str, team: str, path: str,
-                         open_files: list, active_file) -> dict:
-        """Persist the caller's open-files state for a project they can access."""
-        identity = self.identity.require(token)
-        team = self.identity.require_team(identity, team)
-        relpath = self._safe_relpath(path)
-        proj = self._abs_under_team(team, relpath)
-        if not self.is_project_dir(proj):
-            raise ValueError("Not a project directory")
-        if not self.can_access(identity, team, relpath):
-            raise PermissionError("You do not have access to that workspace")
-        sidecar = proj / "user-state.json"
-        data = {}
-        if sidecar.exists():
-            try:
-                data = json.loads(sidecar.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                data = {}
-        if not isinstance(data, dict):
-            data = {}
-        # Cap the stored list defensively so a runaway client can't bloat the file.
-        cleaned = [str(p) for p in (open_files or []) if isinstance(p, str)][:200]
-        data[identity["username"]] = {
-            "openFiles": cleaned,
-            "activeFile": active_file if isinstance(active_file, str) else None,
-            "updatedAt": time.time(),
-        }
-        sidecar.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        return {"ok": True}
-
-    @staticmethod
-    def _mtime(path: Path):
-        """Last-modified time (epoch seconds) for a path, or None if unavailable."""
-        try:
-            return path.stat().st_mtime
-        except OSError:
-            return None
-
-    def browse(self, token: str, team: str = "", path: str = "") -> dict:
-        """Directory listing for the file browser. No team ⇒ the caller's teams.
-        With a team ⇒ the navigable subdirectories at path: projects (dir with a
-        manifest.json) the caller can access, and normal folders. Each entry
-        carries a ``modified`` epoch-seconds timestamp for the explorer view."""
-        identity = self.identity.require(token)
-        if not team:
-            teams = []
-            for name in identity["teams"]:
-                modified = None
-                try:
-                    modified = self._mtime(self._team_dir(name).parent)
-                except (ValueError, PermissionError):
-                    modified = None
-                teams.append({"name": name, "modified": modified})
-            return {"teams": teams}
-        team = self.identity.require_team(identity, team)
-        relpath = self._safe_relpath(path)
-        base = self._abs_under_team(team, relpath)
-        if not base.is_dir():
-            # A team with no content yet browses as an empty root, not an error.
-            if not relpath:
-                return {"team": team, "path": "", "entries": []}
-            raise ValueError("No such directory")
-        if relpath and self.is_project_dir(base):
-            raise ValueError("That is a project — open it instead")
-        entries = []
-        for child in sorted(base.iterdir(), key=lambda p: p.name.lower()):
-            name = child.name
-            if not child.is_dir() or name in self._RESERVED_NAMES:
-                continue
-            child_rel = f"{relpath}/{name}" if relpath else name
-            if self.is_project_dir(child):
-                if not self.can_access(identity, team, child_rel):
-                    continue
-                access = self.read_access(team, child_rel)
-                owner = access.get("createdBy")
-                entries.append({
-                    "name": name,
-                    "kind": "project",
-                    "path": child_rel,
-                    "createdBy": owner,
-                    "canEdit": owner in (None, identity["username"]),
-                    "modified": self._mtime(child),
-                })
-            else:
-                entries.append({
-                    "name": name,
-                    "kind": "folder",
-                    "path": child_rel,
-                    "modified": self._mtime(child),
-                })
-        return {"team": team, "path": relpath, "entries": entries}
-
-    def make_folder(self, token: str, team: str, path: str, name: str) -> dict:
-        """Create a normal (non-project) folder at path."""
-        identity = self.identity.require(token)
-        team = self.identity.require_team(identity, team)
-        relpath = self._safe_relpath(path)
-        name = self.safe_component(name)
-        parent = self._abs_under_team(team, relpath)
-        if relpath and parent.exists() and self.is_project_dir(parent):
-            raise ValueError("Cannot create folders inside a project")
-        parent.mkdir(parents=True, exist_ok=True)  # segments are all sandboxed
-        target = parent / name
-        if target.exists():
-            raise ValueError("A file or folder with that name already exists")
-        target.mkdir(parents=True)
-        new_rel = f"{relpath}/{name}" if relpath else name
-        _log("WORKSPACE", f"{identity['username']} mkdir {team}/{new_rel}")
-        return {"team": team, "path": new_rel, "name": name, "kind": "folder"}
-
+    # ---- Creating, deleting, exporting and importing projects ----------------
     def create_project(self, token: str, team: str, path: str, name: str) -> dict:
         """Create an empty project directory (with manifest.json) at path. A
         publish-to-cloud seeds content afterwards via the normal op stream."""
         identity = self.identity.require(token)
         team = self.identity.require_team(identity, team)
-        relpath = self._safe_relpath(path)
-        name = self.safe_component(name)
-        parent = self._abs_under_team(team, relpath)
-        if relpath and parent.exists() and self.is_project_dir(parent):
+        relpath = safe_relpath(path)
+        name = safe_component(name)
+        parent = self.projects.folders.under_team(team, relpath)
+        if relpath and parent.exists() and self.projects.folders.is_project(parent):
             raise ValueError("Cannot nest a project inside another project")
         parent.mkdir(parents=True, exist_ok=True)  # segments are all sandboxed
         project_dir = parent / name
@@ -1469,13 +1227,6 @@ class WorkspaceRegistry:
             "id": workspace_id, "createdBy": identity["username"],
         }
 
-    def set_access(self, token: str, team: str, path: str,
-                   whitelist: list, blacklist: list, readers: list | None = None) -> dict:
-        identity = self.identity.require(token)
-        team = self.identity.require_team(identity, team)
-        project_dir, legacy = self.project(team, path, must_exist=True)
-        return self.identity.set_access(identity, team, project_dir, whitelist, blacklist, readers, legacy)
-
     def delete_entry(self, token: str, team: str, path: str) -> dict:
         """Delete a project or folder at ``path``. A project may only be removed
         by its recorded owner (createdBy); a folder may be removed by any team
@@ -1484,15 +1235,15 @@ class WorkspaceRegistry:
         itself can never be deleted."""
         identity = self.identity.require(token)
         team = self.identity.require_team(identity, team)
-        relpath = self._safe_relpath(path)
+        relpath = safe_relpath(path)
         if not relpath:
             raise ValueError("Cannot delete the team root")
-        target = self._abs_under_team(team, relpath)
+        target = self.projects.folders.under_team(team, relpath)
         if not target.is_dir():
             raise ValueError("No such folder or project")
-        if target.name in self._RESERVED_NAMES:
+        if self.projects.is_reserved(target.name):
             raise ValueError("Cannot delete a reserved entry")
-        self.identity.may_delete(identity, team, target, lambda: self._legacy_meta(team, relpath))
+        self.identity.may_delete(identity, team, target, lambda: self.projects.legacy_meta(team, relpath))
         workspace_id = f"{team}/{relpath}"
         with self.lock:
             # Drop any live broker (and nested project brokers) so an open
@@ -1500,13 +1251,10 @@ class WorkspaceRegistry:
             for wid in [w for w in self.brokers if w == workspace_id or w.startswith(workspace_id + "/")]:
                 self.brokers.pop(wid, None)
             self.chats.close(workspace_id)
-            kind = "project" if self.is_project_dir(target) else "folder"
+            kind = "project" if self.projects.folders.is_project(target) else "folder"
             self.history.trash.put(identity["username"], team, relpath, target, kind)
         _log("WORKSPACE", f"{identity['username']} deleted {workspace_id} (kept in the trash)")
         return {"team": team, "path": relpath, "deleted": True, "trashDays": self.history.trash.days}
-
-    def folder(self, team: str, relpath: str) -> Path:  # History's trash port
-        return self._abs_under_team(self.safe_component(team), self._safe_relpath(relpath))
 
     # ---- Chats' port (server/stilo/modules/chats/service/desk.py) -----------------
     def project_copy(self, team: str, relpath: str) -> dict:
@@ -1514,14 +1262,9 @@ class WorkspaceRegistry:
         broker = self.get_broker(f"{team}/{relpath}")
         if broker is None:
             broker = CollaborationBroker(self.pin, None, master_pin=self.master_pin,
-                                         workspace_dir=self._abs_under_team(team, relpath))
+                                         workspace_dir=self.projects.folders.under_team(team, relpath))
         with broker.lock:
             return copy.deepcopy(broker.project)
-
-    def people(self, team: str, relpath: str) -> list[str]:
-        """Everyone in the team who may open this project (Chats' contacts)."""
-        return [name for name in self.identity.team_members(team)
-                if self.can_access(self.identity.member(name), team, relpath)]
 
     def export_project(self, token: str, team: str, path: str) -> dict:
         """Return a portable copy of a project as ``{name, project}`` where
@@ -1530,13 +1273,13 @@ class WorkspaceRegistry:
         or duplicate a project)."""
         identity = self.identity.require(token)
         team = self.identity.require_team(identity, team)
-        relpath = self._safe_relpath(path)
+        relpath = safe_relpath(path)
         if not relpath:
             raise ValueError("Not a project")
-        proj = self._abs_under_team(team, relpath)
-        if not self.is_project_dir(proj):
+        proj = self.projects.folders.under_team(team, relpath)
+        if not self.projects.folders.is_project(proj):
             raise ValueError("Not a project directory")
-        if not self.can_access(identity, team, relpath):
+        if not self.projects.can_access(identity, team, relpath):
             raise PermissionError("You do not have access to that project")
         workspace_id = f"{team}/{relpath}"
         # A live broker's in-memory project is fresher than disk; else load it.
@@ -1569,8 +1312,8 @@ class WorkspaceRegistry:
         directory."""
         identity = self.identity.require(token)
         team = self.identity.require_team(identity, team)
-        relpath = self._safe_relpath(path)
-        name = self.safe_component(name)
+        relpath = safe_relpath(path)
+        name = safe_component(name)
         if not isinstance(project, dict) or not isinstance(project.get("nodes"), dict):
             raise ValueError("Invalid project payload")
         root_id = project.get("rootId")
@@ -1580,8 +1323,8 @@ class WorkspaceRegistry:
             nm = str(node.get("name", ""))
             if "/" in nm or "\\" in nm or nm in ("", ".", ".."):
                 raise ValueError("Invalid file or folder name in payload")
-        parent = self._abs_under_team(team, relpath)
-        if relpath and parent.exists() and self.is_project_dir(parent):
+        parent = self.projects.folders.under_team(team, relpath)
+        if relpath and parent.exists() and self.projects.folders.is_project(parent):
             raise ValueError("Cannot nest a project inside another project")
         parent.mkdir(parents=True, exist_ok=True)
         final = name
@@ -1619,7 +1362,7 @@ class WorkspaceRegistry:
         parts = relpath.split("/")
         if len(parts) == 2 and parts[0] == "workspaces":
             return self._make_workspace_broker(team, parts[1])
-        workspace_dir = self._abs_under_team(team, relpath)
+        workspace_dir = self.projects.folders.under_team(team, relpath)
         broker = CollaborationBroker(
             self.pin, None, master_pin=self.master_pin, workspace_dir=workspace_dir
         )
@@ -1627,38 +1370,11 @@ class WorkspaceRegistry:
         broker.on_paths_moved = self.chats.paths_moved
         return broker
 
-    def create_workspace(self, token: str, team: str, name: str, share_team: bool = False) -> dict:
-        identity = self.identity.require(token)
-        team = self.identity.require_team(identity, team)
-        name = self.safe_component(name)
-        with self.lock:
-            index = self._read_index(team)
-            if name in index["workspaces"]:
-                raise ValueError("A workspace with that name already exists")
-            members = list(self.identity.team_members(team)) if share_team else [identity["username"]]
-            if identity["username"] not in members:
-                members.append(identity["username"])
-            index["workspaces"][name] = {
-                "members": members,
-                "createdBy": identity["username"],
-                "createdAt": time.time(),
-            }
-            self._write_index(team, index)
-        _log("WORKSPACE", f"{identity['username']} created {team}/{name}", members=members)
-        return {"team": team, "name": name, "id": f"{team}/{name}", "members": members, "createdBy": identity["username"]}
-
     def open_workspace(self, token: str, team: str, path: str, device: str | None = None, leased: bool = False) -> dict:
         """Admit a logged-in account into a team project (role master), loading
         or creating its persisted broker. ``path`` points at a project directory
         relative to the team root (e.g. ``workspaces/WorkNotes``)."""
-        identity = self.identity.require(token)
-        team = self.identity.require_team(identity, team)
-        relpath = self._safe_relpath(path)
-        project_dir = self._abs_under_team(team, relpath)
-        if not self.is_project_dir(project_dir) and self._legacy_meta(team, relpath) is None:
-            raise PermissionError("Unknown workspace")
-        if not self.can_access(identity, team, relpath):
-            raise PermissionError("You do not have access to that workspace")
+        identity, team, relpath, _, role = self.projects.authorize_open(token, team, path)
         workspace_id = f"{team}/{relpath}"
         with self.lock:
             broker = self.brokers.get(workspace_id)
@@ -1669,7 +1385,6 @@ class WorkspaceRegistry:
         # device replaces its old session, but the same account on another device
         # stays connected (self-collaboration across devices; no reconnect war).
         broker.evict_user(identity["username"], device)
-        role = self.role_for(identity, team, relpath)
         session = broker._admit(identity["username"], role, identity=identity["username"], device=device, leased=leased)
         self.identity.remember_workspace(identity["username"], team, relpath)  # cross-device resume
         with self.lock:
@@ -1678,7 +1393,7 @@ class WorkspaceRegistry:
         session["workspace"] = workspace_id
         # Resume state: which files this user had open here last time, so the
         # client can restore their tabs on open/reconnect.
-        session["resume"] = self.read_user_state(team, relpath, identity["username"])
+        session["resume"] = self.projects.read_user_state(team, relpath, identity["username"])
         return session
 
     # ---- Per-user global prefs (last workspace, for cross-device resume) -------
@@ -1906,13 +1621,6 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         self._log_request(426, f"stale client v{client_version} < required v{SYNC_LEVEL}")
         return True
 
-    def _handle_list_workspaces(self, parsed):
-        try:
-            token = self._extract_token(parsed)
-            self._write_json(HTTPStatus.OK, {"workspaces": self.registry.list_workspaces(token)})
-        except PermissionError as error:
-            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
-
     def _handle_asset_upload(self, parsed):
         """Receive one binary chunk of an image asset (see write_asset_chunk)."""
         try:
@@ -1986,56 +1694,6 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
                                   "If you are signed in, reload the page.")
         return identity
 
-    def _handle_create_workspace(self, parsed):
-        try:
-            token = self._extract_token(parsed)
-            payload = self._read_json()
-            result = self.registry.create_workspace(
-                token,
-                str(payload.get("team", "")),
-                str(payload.get("name", "")),
-                share_team=bool(payload.get("shareTeam", False)),
-            )
-            self._write_json(HTTPStatus.OK, result)
-            self._log_request(200, f"created {result['id']}")
-        except PermissionError as error:
-            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
-            self._log_request(403, str(error))
-        except ValueError as error:
-            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
-            self._log_request(400, str(error))
-
-    def _handle_browse(self, parsed):
-        try:
-            token = self._extract_token(parsed)
-            query = parse_qs(parsed.query)
-            team = query.get("team", [""])[0]
-            path = query.get("path", [""])[0]
-            self._write_json(HTTPStatus.OK, self.registry.browse(token, team, path))
-        except PermissionError as error:
-            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
-        except ValueError as error:
-            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
-
-    def _handle_mkdir(self, parsed):
-        try:
-            token = self._extract_token(parsed)
-            payload = self._read_json()
-            result = self.registry.make_folder(
-                token,
-                str(payload.get("team", "")),
-                str(payload.get("path", "")),
-                str(payload.get("name", "")),
-            )
-            self._write_json(HTTPStatus.OK, result)
-            self._log_request(200, f"mkdir {result['team']}/{result['path']}")
-        except PermissionError as error:
-            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
-            self._log_request(403, str(error))
-        except ValueError as error:
-            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
-            self._log_request(400, str(error))
-
     def _handle_create_project(self, parsed):
         try:
             token = self._extract_token(parsed)
@@ -2054,24 +1712,6 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
         except ValueError as error:
             self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
             self._log_request(400, str(error))
-
-    # GET /api/chats[/messages|/search|/note]   POST /api/chats/<action>
-    def _handle_set_user_state(self, parsed):
-        try:
-            token = self._extract_token(parsed)
-            payload = self._read_json()
-            result = self.registry.write_user_state(
-                token,
-                str(payload.get("team", "")),
-                str(payload.get("path", "")),
-                payload.get("openFiles", []),
-                payload.get("activeFile"),
-            )
-            self._write_json(HTTPStatus.OK, result)
-        except PermissionError as error:
-            self._write_json(HTTPStatus.FORBIDDEN, {"message": str(error)})
-        except ValueError as error:
-            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(error)})
 
     def _handle_delete(self, parsed):
         try:
@@ -2430,8 +2070,6 @@ class MDNotesRequestHandler(BaseHTTPRequestHandler):
 LEGACY_ROUTES = [
     ("GET", "/api/chat/status", False, lambda h, parsed: h._handle_chat_status()),
     ("GET", "/api/chat/workspace", False, lambda h, parsed: h._handle_get_chat_workspace(parsed)),
-    ("GET", "/api/workspaces", False, lambda h, parsed: h._handle_list_workspaces(parsed)),
-    ("GET", "/api/workspaces/browse", False, lambda h, parsed: h._handle_browse(parsed)),
     ("GET", "/api/workspaces/export", False, lambda h, parsed: h._handle_export_project(parsed)),
     ("GET", "/api/workspaces/asset", False, lambda h, parsed: h._handle_asset(parsed)),
     ("GET", "/api/generated", False, lambda h, parsed: h._handle_generated(parsed)),
@@ -2440,12 +2078,9 @@ LEGACY_ROUTES = [
     ("POST", "/api/chat/prompt", False, lambda h, parsed: h._handle_persona_prompt()),
     ("POST", "/api/generate", False, lambda h, parsed: h._handle_generate()),
     ("POST", "/api/chat/workspace", False, lambda h, parsed: h._handle_post_chat_workspace(parsed)),
-    ("POST", "/api/workspaces", False, lambda h, parsed: h._handle_create_workspace(parsed)),
-    ("POST", "/api/workspaces/mkdir", False, lambda h, parsed: h._handle_mkdir(parsed)),
     ("POST", "/api/workspaces/create", False, lambda h, parsed: h._handle_create_project(parsed)),
     ("POST", "/api/workspaces/delete", False, lambda h, parsed: h._handle_delete(parsed)),
     ("POST", "/api/workspaces/import", False, lambda h, parsed: h._handle_import_project(parsed)),
-    ("POST", "/api/workspaces/user-state", False, lambda h, parsed: h._handle_set_user_state(parsed)),
     ("POST", "/api/workspaces/asset", False, lambda h, parsed: h._handle_asset_upload(parsed)),
 ]
 
@@ -2462,7 +2097,8 @@ def build_server(host: str, port: int, pin: str, static_root: Path, state_file: 
         chat_proxy.generated = GeneratedImages(Path(data_dir) / "_generated")
     modules = start_server_modules()
     transport = modules["transport"]
-    modules["identity"].serve(registry.identity, registry)
+    modules["identity"].serve(registry.identity)
+    modules["projects"].serve(registry.projects)
     modules["sync"].serve(registry)
     modules["history"].serve(registry.history)
     modules["comments"].serve(registry.comments)

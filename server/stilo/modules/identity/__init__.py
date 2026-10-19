@@ -9,8 +9,8 @@ Static, for code from before the restructure:
     ROLES, can(role, action)
 
 API (started by the kernel):
-    serve(identity, places)   adds the sign-in and access routes for that
-                              Identity (see adapters/routes.py for `places`)
+    serve(identity)   adds the sign-in route for that Identity (who may open a
+                      project is read and set through Projects' routes)
 """
 from types import SimpleNamespace
 
@@ -34,7 +34,7 @@ def open_identity(accounts: AccountStore | None = None, data_dir=None) -> Identi
 
 def start(ctx):
     transport = ctx.use("transport")
-    return SimpleNamespace(serve=lambda identity, places: add_routes(transport, identity, places))
+    return SimpleNamespace(serve=lambda identity: add_routes(transport, identity))
 
 
 MODULE = define_module(__file__, start)

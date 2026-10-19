@@ -14,8 +14,9 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
-from mdnotes_server import (ACCESS_FILE, EDIT_SESSION_GAP_SECONDS, SYNC_LEVEL, AccountStore,  # noqa: E402
+from mdnotes_server import (EDIT_SESSION_GAP_SECONDS, SYNC_LEVEL, AccountStore,  # noqa: E402
                             CollaborationBroker, WorkspaceRegistry, build_server, bump_edit_counters)
+from stilo.modules.identity import ACCESS_FILE  # noqa: E402
 
 
 def run_selftest():
@@ -229,11 +230,11 @@ def run_broker_selftest(state_file):
     _bob_id = {"username": "bob", "teams": ["qa"]}
 
     # No team → the caller's teams (name + modified); a fresh team is empty.
-    assert [t["name"] for t in _reg.browse(_alice)["teams"]] == ["qa"], "browse should list the caller's teams"
-    assert _reg.browse(_alice, "qa", "")["entries"] == [], "fresh team should browse empty"
+    assert [t["name"] for t in _reg.projects.browse(_alice)["teams"]] == ["qa"], "browse should list the caller's teams"
+    assert _reg.projects.browse(_alice, "qa", "")["entries"] == [], "fresh team should browse empty"
 
     # Create a normal folder, then a project inside it.
-    _reg.make_folder(_alice, "qa", "", "workspaces")
+    _reg.projects.make_folder(_alice, "qa", "", "workspaces")
     _created = _reg.create_project(_alice, "qa", "workspaces", "Alpha")
     assert _created["id"] == "qa/workspaces/Alpha"
     _alpha_dir = _data / "team_qa" / "workspaces" / "Alpha"
@@ -241,16 +242,16 @@ def run_broker_selftest(state_file):
     assert (_alpha_dir / ACCESS_FILE).is_file(), "project must record its access file"
 
     # Browse classifies dir-with-manifest as project, others as folder.
-    _root = {e["name"]: e for e in _reg.browse(_alice, "qa", "")["entries"]}
+    _root = {e["name"]: e for e in _reg.projects.browse(_alice, "qa", "")["entries"]}
     assert _root["workspaces"]["kind"] == "folder"
-    _ws = {e["name"]: e for e in _reg.browse(_alice, "qa", "workspaces")["entries"]}
+    _ws = {e["name"]: e for e in _reg.projects.browse(_alice, "qa", "workspaces")["entries"]}
     assert _ws["Alpha"]["kind"] == "project" and _ws["Alpha"]["path"] == "workspaces/Alpha"
     # Reserved bookkeeping files never appear as entries.
     assert "manifest.json" not in _ws and ACCESS_FILE not in _ws and "index.json" not in _root
 
     # Browsing into a project is rejected (open it instead).
     try:
-        _reg.browse(_alice, "qa", "workspaces/Alpha")
+        _reg.projects.browse(_alice, "qa", "workspaces/Alpha")
         assert False, "browsing into a project should fail"
     except ValueError:
         pass
@@ -261,42 +262,42 @@ def run_broker_selftest(state_file):
     assert _reg.brokers["qa/workspaces/Alpha"].workspace_dir is not None, "opened broker not directory-backed"
 
     # Access: both lists empty ⇒ everyone in the team.
-    assert _reg.can_access(_bob_id, "qa", "workspaces/Alpha"), "empty access should allow team members"
+    assert _reg.projects.can_access(_bob_id, "qa", "workspaces/Alpha"), "empty access should allow team members"
     # Whitelist limits to listed members.
-    _reg.set_access(_alice, "qa", "workspaces/Alpha", ["alice"], [])
-    assert _reg.can_access(_alice_id, "qa", "workspaces/Alpha")
-    assert not _reg.can_access(_bob_id, "qa", "workspaces/Alpha"), "whitelist should exclude bob"
+    _reg.projects.set_access(_alice, "qa", "workspaces/Alpha", ["alice"], [])
+    assert _reg.projects.can_access(_alice_id, "qa", "workspaces/Alpha")
+    assert not _reg.projects.can_access(_bob_id, "qa", "workspaces/Alpha"), "whitelist should exclude bob"
     # Blacklist excludes a member even with an empty whitelist.
-    _reg.set_access(_alice, "qa", "workspaces/Alpha", [], ["bob"])
-    assert _reg.can_access(_alice_id, "qa", "workspaces/Alpha")
-    assert not _reg.can_access(_bob_id, "qa", "workspaces/Alpha"), "blacklist should exclude bob"
+    _reg.projects.set_access(_alice, "qa", "workspaces/Alpha", [], ["bob"])
+    assert _reg.projects.can_access(_alice_id, "qa", "workspaces/Alpha")
+    assert not _reg.projects.can_access(_bob_id, "qa", "workspaces/Alpha"), "blacklist should exclude bob"
     # Only the owner may change access.
     try:
-        _reg.set_access(_bob, "qa", "workspaces/Alpha", [], [])
+        _reg.projects.set_access(_bob, "qa", "workspaces/Alpha", [], [])
         assert False, "non-owner should not edit access"
     except PermissionError:
         pass
 
     # access.json survives a publish/replace-project wipe.
-    _reg.set_access(_alice, "qa", "workspaces/Alpha", ["alice"], [])
+    _reg.projects.set_access(_alice, "qa", "workspaces/Alpha", ["alice"], [])
     _broker = _reg.brokers["qa/workspaces/Alpha"]
     _broker._apply_operation({"type": "replace-project", "baseRevision": _broker.revision, "project": _broker._default_project()})
     assert (_alpha_dir / ACCESS_FILE).is_file(), "the access file must survive replace-project"
-    assert _reg.read_access("qa", "workspaces/Alpha")["whitelist"] == ["alice"], "whitelist lost on publish"
+    assert _reg.projects.read_access("qa", "workspaces/Alpha")["whitelist"] == ["alice"], "whitelist lost on publish"
 
     # Lazy-migrate a legacy index.json members list into the whitelist.
     _legacy = _data / "team_qa" / "workspaces" / "Legacy"
     _legacy.mkdir(parents=True, exist_ok=True)
     (_legacy / "manifest.json").write_text('{"project":{},"revision":0}', encoding="utf-8")
-    _reg._write_index("qa", {"workspaces": {"Legacy": {"members": ["bob"], "createdBy": "bob"}}})
-    _acc = _reg.read_access("qa", "workspaces/Legacy")
+    _reg.projects.folders.write_index("qa", {"workspaces": {"Legacy": {"members": ["bob"], "createdBy": "bob"}}})
+    _acc = _reg.projects.read_access("qa", "workspaces/Legacy")
     assert _acc["whitelist"] == ["bob"] and _acc["createdBy"] == "bob", "legacy members not migrated"
     assert (_legacy / ACCESS_FILE).is_file(), "migration should persist the access file"
-    assert not _reg.can_access(_alice_id, "qa", "workspaces/Legacy"), "migrated whitelist should gate alice"
+    assert not _reg.projects.can_access(_alice_id, "qa", "workspaces/Legacy"), "migrated whitelist should gate alice"
 
     # Path traversal in a browse path is rejected.
     try:
-        _reg.browse(_alice, "qa", "../../etc")
+        _reg.projects.browse(_alice, "qa", "../../etc")
         assert False, "path traversal should be rejected"
     except (ValueError, PermissionError):
         pass
@@ -305,17 +306,17 @@ def run_broker_selftest(state_file):
     # publish (user-state.json is preserved like access.json).
     _alpha_broker = _reg.brokers["qa/workspaces/Alpha"]
     _alpha_broker._persist_state()  # restore manifest.json (an earlier test wiped it)
-    assert _reg.read_user_state("qa", "workspaces/Alpha", "alice")["openFiles"] == [], "default resume is empty"
-    _reg.write_user_state(_alice, "qa", "workspaces/Alpha", ["welcome.md", "docs/spec.md"], "welcome.md")
-    _rs = _reg.read_user_state("qa", "workspaces/Alpha", "alice")
+    assert _reg.projects.read_user_state("qa", "workspaces/Alpha", "alice")["openFiles"] == [], "default resume is empty"
+    _reg.projects.write_user_state(_alice, "qa", "workspaces/Alpha", ["welcome.md", "docs/spec.md"], "welcome.md")
+    _rs = _reg.projects.read_user_state("qa", "workspaces/Alpha", "alice")
     assert _rs["openFiles"] == ["welcome.md", "docs/spec.md"] and _rs["activeFile"] == "welcome.md", "resume not saved"
-    assert _reg.read_user_state("qa", "workspaces/Alpha", "bob")["openFiles"] == [], "resume must be per-user"
+    assert _reg.projects.read_user_state("qa", "workspaces/Alpha", "bob")["openFiles"] == [], "resume must be per-user"
     assert (_alpha_dir / "user-state.json").is_file(), "resume sidecar not written"
     # A publish (replace-project + persist) must preserve the resume sidecar.
     _alpha_broker._apply_operation({"type": "replace-project", "baseRevision": _alpha_broker.revision, "project": _alpha_broker._default_project()})
     _alpha_broker._persist_state()
     assert (_alpha_dir / "user-state.json").is_file(), "user-state.json must survive replace-project"
-    assert _reg.read_user_state("qa", "workspaces/Alpha", "alice")["activeFile"] == "welcome.md", "resume lost on publish"
+    assert _reg.projects.read_user_state("qa", "workspaces/Alpha", "alice")["activeFile"] == "welcome.md", "resume lost on publish"
     # open_workspace hands the resume state back to the client.
     _sess2 = _reg.open_workspace(_alice, "qa", "workspaces/Alpha")
     assert _sess2.get("resume", {}).get("activeFile") == "welcome.md", "open should return resume state"
@@ -336,7 +337,7 @@ def run_broker_selftest(state_file):
     assert [c["text"] for c in _all[_cf]] == ["check this pacing"]
     # comments.json lives beside the project but is never a browseable file.
     assert (_alpha_dir / "comments.json").is_file(), "sidecar not written"
-    assert "comments.json" not in {e["name"] for e in _reg.browse(_alice, "qa", "workspaces")["entries"]}
+    assert "comments.json" not in {e["name"] for e in _reg.projects.browse(_alice, "qa", "workspaces")["entries"]}
 
     # Editing by id updates in place rather than adding a duplicate.
     _reg.comments.save(_alice, "qa", _CP, {"file": _cf, "id": _c1["id"], "text": "revised note"})
@@ -500,14 +501,14 @@ def run_broker_selftest(state_file):
 
     # --- Capability tiers: master / editor / reader -------------------------
     _RP = "workspaces/Alpha"
-    _reg.set_access(_alice, "qa", _RP, [], [], [])          # open to the team, no readers
-    assert _reg.role_for(_alice_id, "qa", _RP) == "master", "creator should be master"
-    assert _reg.role_for(_bob_id, "qa", _RP) == "editor", "a plain member should be an editor"
-    _reg.set_access(_alice, "qa", _RP, [], [], ["bob"])
-    assert _reg.role_for(_bob_id, "qa", _RP) == "reader", "listed reader should be read-only"
+    _reg.projects.set_access(_alice, "qa", _RP, [], [], [])          # open to the team, no readers
+    assert _reg.projects.role_for(_alice_id, "qa", _RP) == "master", "creator should be master"
+    assert _reg.projects.role_for(_bob_id, "qa", _RP) == "editor", "a plain member should be an editor"
+    _reg.projects.set_access(_alice, "qa", _RP, [], [], ["bob"])
+    assert _reg.projects.role_for(_bob_id, "qa", _RP) == "reader", "listed reader should be read-only"
     # readers survive a whitelist edit that omits them
-    _reg.set_access(_alice, "qa", _RP, [], [])
-    assert _reg.read_access("qa", _RP)["readers"] == ["bob"], "omitted readers must not be cleared"
+    _reg.projects.set_access(_alice, "qa", _RP, [], [])
+    assert _reg.projects.read_access("qa", _RP)["readers"] == ["bob"], "omitted readers must not be cleared"
 
     _rb = _reg.brokers["qa/" + _RP]
     _rs = _reg.open_workspace(_bob, "qa", _RP)
@@ -521,7 +522,7 @@ def run_broker_selftest(state_file):
             pass
 
     # An editor may write, but may NOT replace the whole tree.
-    _reg.set_access(_alice, "qa", _RP, [], [], [])
+    _reg.projects.set_access(_alice, "qa", _RP, [], [], [])
     _es = _reg.open_workspace(_bob, "qa", _RP)
     assert _es["role"] == "editor"
     _rb.apply_operation(_es["token"], {"type": "create-file", "parentPath": "", "name": "editor-ok.md", "content": "x"})

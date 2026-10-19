@@ -238,7 +238,8 @@ test("each module's contract lists exactly the routes it serves, and only that m
     const where = `protocol/${name}`;
     if (!Number.isInteger(contract.version) || contract.version < 1) problems.push(`${where}: version must be a whole number from 1`);
     const serverDir = `server/stilo/modules/${contract.module.replaceAll("-", "_")}`;
-    const browserDir = `app/modules/${contract.module.replaceAll("_", "-")}`;
+    // The browser half has the module's name, unless the contract names it ("browser").
+    const browserDir = `app/modules/${(contract.browser ?? contract.module).replaceAll("_", "-")}`;
     const listed = new Set(contract.routes.map((r) => `${r.method} ${r.path}`));
     const served = new Set();
     for (const file of files.filter((f) => f.startsWith(`${serverDir}/`))) {

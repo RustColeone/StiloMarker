@@ -1,0 +1,22 @@
+{
+  "about": "Projects' network messages (rule 7): the teams' folders and projects on the server, each account's open files in a project, and who may open a project. The server half serves exactly these routes (server/stilo/modules/projects/adapters/routes.py); its browser half is the Cloud module's file browser and access dialog (app/modules/cloud/adapters/api.js), named by \"browser\".",
+  "module": "projects",
+  "browser": "cloud",
+  "version": 1,
+  "routes": [
+    { "method": "GET", "path": "/api/workspaces/browse", "query": ["token", "team", "path"], "reply": ["teams", "team", "path", "entries"] },
+    { "method": "POST", "path": "/api/workspaces/mkdir", "query": ["token"], "body": ["team", "path", "name"], "reply": ["team", "path", "name", "kind"] },
+    { "method": "POST", "path": "/api/workspaces/user-state", "query": ["token"], "body": ["team", "path", "openFiles", "activeFile"], "reply": ["ok"] },
+    {
+      "method": "GET", "path": "/api/workspaces/access",
+      "query": ["token", "team", "path"],
+      "reply": ["whitelist", "blacklist", "readers", "createdBy"]
+    },
+    {
+      "method": "POST", "path": "/api/workspaces/access",
+      "query": ["token"],
+      "body": ["team", "path", "whitelist", "blacklist", "readers"],
+      "reply": ["whitelist", "blacklist", "readers", "createdBy"]
+    }
+  ]
+}
