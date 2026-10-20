@@ -45,7 +45,7 @@
   --status-height: 24px;
   --activity-width: 48px;
   --sidebar-width: 280px;
-  --preview-width: 420px;
+  --preview-width: 1fr; /* half of the editor, until dragged (areas.js) */
   --chat-width: 420px;
   --splitter-size: 4px;
   --radius: 0;
@@ -1260,10 +1260,12 @@ p {
   color: var(--danger);
 }
 
+/* Source | splitter | Preview: half and half until dragged (--preview-width
+   is 1fr then); the preview keeps 280px, or half when the editor is narrower. */
 .editor-grid {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--splitter-size) minmax(280px, var(--preview-width));
+  grid-template-columns: minmax(0, 1fr) var(--splitter-size) minmax(min(280px, calc((100% - var(--splitter-size)) / 2)), var(--preview-width));
   gap: 0;
   overflow: hidden;
 }

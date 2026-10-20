@@ -74,11 +74,6 @@ export function createAreas({ settings, events, pages, log = () => {}, doc = glo
 
   // ── Applying the settings to the page ──
   function apply() {
-    const styles = win.getComputedStyle?.(appEl);
-    const splitterSize = Number.parseFloat(styles?.getPropertyValue("--splitter-size") ?? "4") || 4;
-    const gridWidth = editorGrid.getBoundingClientRect().width;
-    const previewWidth = settings.previewWidthCustomized ? settings.previewWidth
-      : (Number.isFinite(gridWidth) && gridWidth > 0 ? Math.round(clamp((gridWidth - splitterSize) / 2, 280, Math.max(320, gridWidth - 280))) : 420);
     appEl.dataset.explorer = settings.explorer;
     // On the phone the explorer is always a drawer: "floating" never reaches the
     // page there (its desktop rule outweighs the phone's and pinned the editor to
@@ -89,7 +84,10 @@ export function createAreas({ settings, events, pages, log = () => {}, doc = glo
     appEl.dataset.chat = settings.chatPanel;
     appEl.dataset.debug = settings.debugPanel ? "on" : "off";
     appEl.style.setProperty("--sidebar-width", `${settings.sidebarWidth}px`);
-    appEl.style.setProperty("--preview-width", `${previewWidth}px`);
+    // The preview: as wide as dragged, else half of the editor (the CSS grid
+    // shares it, whatever else opens or the window does; it was measured once
+    // here, before the areas just shown took their space: ISSUES 6).
+    appEl.style.setProperty("--preview-width", settings.previewWidthCustomized ? `${settings.previewWidth}px` : "1fr");
     appEl.style.setProperty("--chat-width", `${settings.chatWidth}px`);
     appEl.style.setProperty("--debug-height", `${settings.debugPanelHeight}px`);
     $("preview-collapse-button")?.setAttribute("aria-expanded", String(settings.preview === "shown"));
@@ -135,6 +133,10 @@ export function createAreas({ settings, events, pages, log = () => {}, doc = glo
     const rect = editorGrid.getBoundingClientRect();
     return { previewWidthCustomized: true, previewWidth: Math.round(clamp(rect.right - event.clientX, 280, Math.max(320, rect.width - 280))) };
   } });
+  // A double-click on it: the even split again.
+  $("editor-splitter")?.addEventListener("dblclick", () => {
+    if (settings.previewWidthCustomized) settings.change({ previewWidthCustomized: false }, "even split");
+  });
   splitter("chat-splitter", { when: () => settings.chatPanel !== "hidden", size(event) {
     const rect = shellEl.getBoundingClientRect();
     return { chatWidth: Math.round(clamp(rect.right - event.clientX, 300, Math.max(340, rect.width - 360))) };

@@ -348,7 +348,9 @@ The explorer shows the project tree as a collapsible file/folder list.
 - **Drag a file from the Explorer into the Chat compose area** to attach it as context for the AI assistant.
 
 **Tabs and groups:** the editor has two groups side by side, at first Source
-on the left and Preview on the right, each with a row of tabs. A tab is a file
+on the left and Preview on the right, each with a row of tabs. They share the
+width half and half; drag the line between them to change it, and
+double-click the line to make them even again. A tab is a file
 shown one way, as Source or as Preview. Right-click a tab for Close, Close
 Others, Close to the Right, Close All, Open as Source or Preview (the same
 file shown the other way, in the same group), and Copy Path. When a group

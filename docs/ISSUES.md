@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-19 · release `v0.1.101` (not deployed; v0.1.99 is live)
+Last updated: 2026-10-19 · release `v0.2.0` (not deployed; v0.1.99 is live)
 
 ---
 
@@ -65,21 +65,27 @@ no whitelist or blacklist, so everyone in the team may open it. Since v0.1.52
 the server log says so. Possible fix: refuse to open it (fail closed) until the
 file is fixed. Needs a decision: failing closed locks out its owner too.
 
-### 6. Opening the side panel squeezes the source pane
-**Confidence:** seen happen (measured, live v0.1.99 and dev) · **Severity:** medium (layout)
-
-At 1400×900 with the explorer shown, the source pane is 744 px wide and the
-preview 320 px; showing the side panel makes them 108 px and 532 px. The
-preview's width (while never set by hand) is half the editor grid, but
-`areas.js` measures the grid before the panel that just opened takes its
-space, so the preview is sized for the old, wider grid. The same measure at
-the start gives today's 744/320 split rather than half and half. Possible
-fix: measure after the layout's attributes are set. It changes the default
-split too (to about half), so it waits for a decision.
-
 ---
 
 ## Fixed
+
+### v0.2.0: Source and Preview half and half
+
+A new minor version: since v0.1.60 the app has been rebuilt on a small
+kernel and modules, in the browser and on the server (the restructure), and
+step 5 added editor groups (a tab is a file shown as Source or Preview, in
+either of two groups), the phone's drawers and sheet, and panels that move
+between the left, right and bottom areas. This release:
+
+- Source and Preview split the editor half and half until the splitter is
+  dragged, and stay even when the side panel or the Log opens or the window
+  narrows (the preview keeps at least 280 px, or half when the editor is
+  narrower). Before, opening the side panel at 1400 px squeezed the source
+  to 108 px, because the preview's width was measured before the panel took
+  its space; and the start gave about 744/320 instead of half and half.
+- A dragged width stays; a double-click on the splitter gives the even split
+  back.
+- New browser test: `editor-split-browser.py`.
 
 ### v0.1.101: pages move between the areas
 
@@ -97,7 +103,7 @@ Step 5k. On the desktop (the phone's drawers show what is placed in them).
   so touch events arriving in a bunch no longer count as a flick (the sheet
   test failed once under load from this).
 - New browser test: `area-pages-browser.py`. Found while testing, older than
-  this work: issue 6 above (the side panel squeezes the source pane).
+  this work: the side panel squeezed the source pane (fixed in v0.2.0).
 
 ### v0.1.100: the areas are hosts
 
