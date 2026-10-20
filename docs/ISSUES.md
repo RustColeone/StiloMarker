@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-20 · release `v0.2.11` (not deployed; v0.2.7 is live)
+Last updated: 2026-10-20 · release `v0.2.12` (not deployed; v0.2.7 is live)
 
 ---
 
@@ -40,6 +40,26 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.12: the Settings dialog
+
+Part of the UI polish (2026-10-20: "Settings dialog"). Browser only.
+
+- **Settings → Appearance** reads like an editor's settings: one row per
+  setting, its name on the left and its control on the right, a line between
+  rows, no box around the page; the theme cards head it. On the phone the
+  rows stay side by side, the control taking at most half the width.
+- **Inputs and lists show their edges** throughout Settings (they had none,
+  white on a near-white page).
+- Buttons on the accent colour take the theme's text colour for it (High
+  Contrast's is black on orange; they were always white).
+- Tests: `shell-browser.py` (a field's control at its row's right end).
+  `phone-log-sheet-browser.py` reads the sheet once it stands still, not
+  after a fixed 400 ms (on a busy machine its slide was once still going);
+  `editor-typing-browser.py` allows one redraw per pause over 250 ms between
+  keys (on a saturated machine keys came 400–600 ms apart, and each such
+  pause rightly lets a waiting redraw through). Typing measured as fast as
+  v0.2.7's (70–100 ms a key here, against 75–125).
 
 ### v0.2.11: the frame's chrome
 

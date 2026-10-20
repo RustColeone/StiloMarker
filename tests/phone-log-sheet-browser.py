@@ -32,6 +32,14 @@ STATE = '''(() => {
   };
 })()'''
 
+# Whether the sheet stands still: where it is now, and 150 ms later.
+SETTLED = '''() => new Promise((done) => {
+  const at = () => { const box = document.querySelector("#debug-panel").getBoundingClientRect(); return `${box.top},${box.bottom}`; };
+  const first = at();
+  setTimeout(() => done(at() === first), 150);
+})'''
+
+
 # A drag on an element: touches at x=200, the finger's y going through moves,
 # 16 ms apart (a phone's 60 Hz). The times are the events' own, as a real
 # touch's are the input's: a synthetic event's would be when it was made, late
@@ -96,8 +104,11 @@ async def main():
         await page.goto(BASE, wait_until='domcontentloaded')
         await page.wait_for_function('document.querySelector("#editor-content")?.innerText.includes("STILO MARKER")', timeout=20000)
 
+        # The state once the sheet has stopped moving (not after a fixed time:
+        # on a busy machine its slide may still be going).
         async def state():
-            await page.wait_for_timeout(400)
+            await page.wait_for_timeout(250)
+            await page.wait_for_function(SETTLED, polling=50)
             return await page.evaluate(STATE)
 
         async def open_log():

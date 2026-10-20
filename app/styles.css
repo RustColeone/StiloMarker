@@ -2947,6 +2947,47 @@ p {
   gap: 6px;
 }
 
+/* A page of declared fields (Appearance, and any a module adds): no box, a
+   row per field, its name on the left and its control on the right, a line
+   between rows, as in an editor's settings. */
+.settings-section:has(> [data-settings-fields]) {
+  gap: 0;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+}
+
+.settings-section:has(> [data-settings-fields]) > h3 {
+  padding-bottom: 6px;
+  font-size: 13px;
+}
+
+[data-settings-fields] > :is(label, .settings-field) {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+[data-settings-fields] > label:not(.checkbox-row),
+[data-settings-fields] > .settings-field > label:not(.checkbox-row) {
+  grid-template-columns: minmax(0, 1fr) minmax(130px, min(280px, 55%));
+  align-items: center;
+  gap: 4px 16px;
+}
+
+[data-settings-fields] > .settings-field > .subtle-label:empty {
+  display: none;
+}
+
+#settings-dialog :is(select, textarea, input:not([type="checkbox"], [type="radio"])) {
+  border-color: var(--border-strong);
+  border-radius: 4px;
+  background: var(--editor);
+}
+
+#settings-dialog [data-settings-fields] :is(select, input:not([type="checkbox"], [type="radio"])) {
+  padding: 5px 8px;
+}
+
 /* Settings → Appearance → Theme: each theme a card drawn in its own colours
    (Shell's theme picker sets the --card-* values). */
 .theme-picker {
@@ -3087,7 +3128,7 @@ p {
 .settings-actions-row button:last-child {
   border-color: var(--accent);
   background: var(--accent);
-  color: #ffffff;
+  color: var(--text-on-accent);
 }
 
 @keyframes flash-border-success {
@@ -3397,7 +3438,7 @@ p {
 
 .side-tab.is-active {
   background: var(--accent);
-  color: #ffffff;
+  color: var(--text-on-accent);
 }
 
 .side-tab:disabled {
@@ -3422,13 +3463,13 @@ p {
 .browser-primary-btn:not(:disabled) {
   border-color: var(--accent);
   background: var(--accent);
-  color: #ffffff;
+  color: var(--text-on-accent);
 }
 
 .browser-tool-btn.is-suggested {
   border-color: var(--accent);
   background: var(--accent);
-  color: #ffffff;
+  color: var(--text-on-accent);
 }
 
 .browser-tool-btn.is-active {
@@ -5800,7 +5841,7 @@ pre.proposal-diff-block {
   border: 0;
   border-radius: 4px;
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   font-size: 18px;
   font-weight: 700;
   line-height: 1;
@@ -6023,7 +6064,7 @@ pre.proposal-diff-block {
 .line-comment-actions .browser-primary-btn {
   border-color: var(--accent);
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
 }
 .line-comment-meta {
   font-size: 11px;
@@ -6513,7 +6554,7 @@ pre.proposal-diff-block {
   padding: 0 4px;
   border-radius: 8px;
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   font-size: 10px;
   line-height: 16px;
   letter-spacing: 0;
@@ -6574,7 +6615,7 @@ pre.proposal-diff-block {
 .cv-text-btn:hover,
 .cv-older:hover { background: var(--surface-2); }
 .cv-text-btn.is-danger { color: var(--danger, #c0392b); }
-.cv-primary { padding: 6px 14px; background: var(--accent); border-color: var(--accent); color: #fff; }
+.cv-primary { padding: 6px 14px; background: var(--accent); border-color: var(--accent); color: var(--text-on-accent); }
 .cv-primary:disabled { opacity: 0.5; cursor: default; }
 .cv-older { display: block; margin: 4px auto 8px; padding: 3px 10px; color: var(--text-dim); }
 .cv-stop { margin-left: auto; padding: 0 8px; font-size: 11px; color: var(--text-dim); }
@@ -6635,7 +6676,7 @@ pre.proposal-diff-block {
   padding: 0 5px;
   border-radius: 9px;
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   font-size: 10px;
   line-height: 18px;
   text-align: center;

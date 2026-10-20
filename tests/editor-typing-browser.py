@@ -169,13 +169,19 @@ async def main():
         count = '() => stiloTrace().filter((e) => e.kind === "event" && e.message === "render").reduce((n, e) => n + (e.count ?? 1), 0)'
         before = await page.evaluate(count)
         await caret_at(20, 2)
+        # When each key reached the page.
+        await page.evaluate("() => { window.__keyTimes = []; document.addEventListener('keydown', () => window.__keyTimes.push(performance.now()), true); }")
         started = time.monotonic()
         await page.keyboard.type('abcdefghijklmnopqrstuvwxyz0123', delay=15)
         seconds = time.monotonic() - started
         await page.wait_for_timeout(800)
         redraws = await page.evaluate(count) - before
-        # A long burst still redraws every 1.5 s, and once when typing pauses.
-        assert 1 <= redraws <= seconds / 1.5 + 2, f'{redraws} full redraws for 30 keys in {seconds:.1f} s'
+        # A long burst still redraws every 1.5 s, and once whenever typing
+        # pauses (over 250 ms between keys: on a busy machine some keys come
+        # that late, and each such pause rightly lets the waiting redraw through).
+        stamps = await page.evaluate('window.__keyTimes')
+        pauses = sum(1 for a, b in zip(stamps, stamps[1:]) if b - a > 250)
+        assert 1 <= redraws <= seconds / 1.5 + 2 + pauses, f'{redraws} full redraws for 30 keys in {seconds:.1f} s ({pauses} pauses)'
         checks.append(f'typing holds the redraws ({redraws} for 30 keys)')
 
         print(json.dumps({'checks': checks, 'runtimeErrors': len(errors)}, ensure_ascii=False))
