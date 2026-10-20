@@ -185,11 +185,22 @@ async def main():
         tabs = await page.evaluate('[...document.querySelectorAll("#settings-tab-strip [data-page]")].map((b) => [b.dataset.page, b.getAttribute("aria-selected")])')
         assert tabs == [['appearance', 'true'], ['agent', 'false'], ['collaboration', 'false']], tabs
         fields = await page.evaluate('[...document.querySelectorAll("#settings-panel-appearance [data-settings-fields] select, #settings-panel-appearance [data-settings-fields] input")].map((c) => c.id)')
-        assert fields == ['theme-select', 'explorer-select', 'explorer-anchor-select', 'preview-select', 'source-font-size-select',
+        assert fields == ['explorer-select', 'explorer-anchor-select', 'preview-select', 'source-font-size-select',
                           'source-font-family-select', 'source-font-custom-input', 'word-wrap-select', 'indent-style-select',
                           'format-toolbar-input', 'auto-save-input', 'bmap-generate-scope-select', 'bmap-auto-pan-input'], fields
-        await page.select_option('#theme-select', 'dark')
+        # Theme: a card per theme (System, Light, Dark, then the extension's); a click applies one.
+        cards = await page.evaluate('[...document.querySelectorAll("#theme-picker .theme-card")].map((c) => [c.dataset.themeChoice, c.getAttribute("aria-checked")])')
+        assert cards == [['system', 'true'], ['light', 'false'], ['dark', 'false'], ['paper', 'false'], ['midnight', 'false'],
+                         ['forest', 'false'], ['high-contrast', 'false']], cards
+        await page.click('#theme-picker [data-theme-choice="dark"]')
         assert await page.evaluate('document.documentElement.dataset.theme') == 'dark'
+        await page.click('#theme-picker [data-theme-choice="paper"]')
+        theme = await page.evaluate('''[document.documentElement.dataset.theme, document.documentElement.dataset.themeId,
+            getComputedStyle(document.documentElement).getPropertyValue("--bg").trim(), document.querySelector('#theme-picker [aria-checked="true"]').dataset.themeChoice]''')
+        assert theme == ['light', 'paper', '#efe8dc', 'paper'], theme
+        await page.keyboard.press('ArrowRight')
+        assert await page.evaluate('document.documentElement.dataset.themeId') == 'midnight', 'arrows move the choice'
+        await page.click('#theme-picker [data-theme-choice="dark"]')
         await page.select_option('#source-font-size-select', '18')
         assert await page.evaluate('document.documentElement.style.getPropertyValue("--editor-font-size")') == '18px'
         await page.select_option('#word-wrap-select', 'off')

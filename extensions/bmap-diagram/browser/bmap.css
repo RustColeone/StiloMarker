@@ -38,16 +38,16 @@
 }
 
 /* ── .bmap syntax tokens ──────────────────────────────────────────────────── */
-.token-bmap-comment { color: #6a9955; }
-.token-bmap-selector { color: #4ec9b0; font-weight: 600; }
-.token-bmap-brace { color: #c586c0; }
-.token-bmap-key { color: #9cdcfe; }
-.token-bmap-style-key { color: #ce9178; }
+.token-bmap-comment { color: var(--syntax-comment); }
+.token-bmap-selector { color: var(--syntax-type); font-weight: 600; }
+.token-bmap-brace { color: var(--syntax-punctuation); }
+.token-bmap-key { color: var(--syntax-attribute); }
+.token-bmap-style-key { color: var(--syntax-string); }
 .token-bmap-sep { color: var(--text-dim); }
-.token-bmap-value { color: #d4d4d4; }
-.token-bmap-keyword { color: #569cd6; }
-.token-bmap-color { color: #ce9178; }
-.token-bmap-number { color: #b5cea8; }
+.token-bmap-value { color: var(--text); }
+.token-bmap-keyword { color: var(--syntax-keyword); }
+.token-bmap-color { color: var(--syntax-string); }
+.token-bmap-number { color: var(--syntax-number); }
 .token-bmap-endpoint-node { color: #dcdcaa; }
 .token-bmap-endpoint-side { color: #b5cea8; }
 

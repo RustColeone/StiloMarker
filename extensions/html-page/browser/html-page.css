@@ -50,9 +50,9 @@
 }
 
 /* Source highlighting. */
-.token-html-tag { color: #569cd6; }
-.token-html-attribute { color: #9cdcfe; }
-.token-html-string { color: #ce9178; }
-.token-html-comment { color: #6a9955; font-style: italic; }
-.token-html-doctype { color: #808080; }
-.token-html-entity { color: #d7ba7d; }
+.token-html-tag { color: var(--syntax-keyword); }
+.token-html-attribute { color: var(--syntax-attribute); }
+.token-html-string { color: var(--syntax-string); }
+.token-html-comment { color: var(--syntax-comment); font-style: italic; }
+.token-html-doctype { color: var(--text-dim); }
+.token-html-entity { color: var(--syntax-constant); }

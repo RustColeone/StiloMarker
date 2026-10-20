@@ -54,6 +54,8 @@
 //                            add({ id, label, order?, keep: async () => problem text | nothing });
 //                            a problem asks the user before reloading
 //   reloading()              Reload Window is reloading: the page must not ask "Leave site?"
+//   themes()                 the themes Settings offers: Light, Dark and those extensions
+//                            contribute (manifest contributes.themes; model/themes.js)
 //   settings                 the app's settings, read-only (settings.theme);
 //                            settings.change({ key: value }, why?) saves a change,
 //                            settings.on(listener) hears them (service/settings.js)
@@ -71,6 +73,9 @@ import contributed from "./model/contributed-settings.js";
 import { createSettingsDialog } from "./adapters/settings-dialog.js";
 import { createStatusBar } from "./adapters/status-bar.js";
 import { applyTheme } from "./adapters/theme.js";
+import { createThemePicker } from "./adapters/theme-picker.js";
+import { usableThemes } from "./model/themes.js";
+import contributedThemes from "./model/contributed-themes.js";
 import { addMaintenanceCommands, clearAppStorage } from "./adapters/maintenance.js";
 import { createRender } from "./adapters/render.js";
 import { createFrame } from "./adapters/frame/index.js";
@@ -96,7 +101,8 @@ export default defineModule({
     connection: ["the server address"],
     events: ["render", "clearing-caches", "area", "resized", "layout"],
     diagnostics: ["uncaught errors", "stiloTrace()"],
-    state: ["the app's settings"]
+    state: ["the app's settings"],
+    storage: ["the theme kept for the next page"]
   },
   start(ctx) {
     watchPageErrors();
@@ -119,13 +125,14 @@ export default defineModule({
       areaShown: (host) => frame?.shown(AREA_OF_HOST[host]) ?? false,
       showArea: (host) => { if (frame && !frame.shown(AREA_OF_HOST[host])) frame.toggle(AREA_OF_HOST[host]); } });
     const settingsDialog = createSettingsDialog({ pages, settings, registry: ctx.registry() });
-    // The theme follows its setting, and the system's when it is "system".
-    applyTheme(settings.theme);
-    settings.on((view, changed) => { if (changed.includes("theme")) applyTheme(view.theme); });
-    globalThis.matchMedia?.("(prefers-color-scheme: dark)")?.addEventListener?.("change", () => applyTheme(settings.theme));
+    // The theme follows its setting, and the system's when it is "system":
+    // Light, Dark, or one an extension contributes (model/themes.js).
+    const themes = usableThemes(contributedThemes, (id, why) => ctx.log(`theme ${id} left out: ${why}`));
+    applyTheme(settings.theme, themes);
+    settings.on((view, changed) => { if (changed.includes("theme")) applyTheme(view.theme, themes); });
+    globalThis.matchMedia?.("(prefers-color-scheme: dark)")?.addEventListener?.("change", () => applyTheme(settings.theme, themes));
     settingsDialog.addPage({ id: "appearance", label: "Appearance", order: 10, body: globalThis.document?.querySelector("#settings-panel-appearance") });
-    settingsDialog.fields.add({ page: "appearance", id: "theme-select", order: 10, label: "Theme", key: "theme", control: "select",
-      options: [["system", "System"], ["light", "Light"], ["dark", "Dark"]] });
+    settingsDialog.fields.add({ page: "appearance", id: "theme-picker", order: 10, render: createThemePicker({ themes, settings }).render });
     // The frame's layout (main.js applies it until the areas are Shell's).
     settingsDialog.fields.add({ page: "appearance", id: "explorer-select", order: 20, label: "Explorer", key: "explorer", control: "select",
       options: [["expanded", "Expanded"], ["collapsed", "Collapsed"]] });
@@ -224,6 +231,11 @@ export default defineModule({
       } });
     commands.add({ id: "shell.reload-window", title: "Reload Window", keywords: ["refresh", "restart", "stuck", "frozen"],
       menu: { id: "settings", group: 0, order: 2.5 }, run: () => reload.reloadWindow() });
+    commands.add({ id: "shell.pick-theme", title: "Change Theme…", keywords: ["colour", "color", "dark", "light", "appearance"],
+      run() {
+        settingsDialog.open("appearance");
+        globalThis.document?.querySelector('#theme-picker [aria-checked="true"]')?.focus();
+      } });
     commands.add({ id: "shell.list-commands", title: "Help: List Commands", keywords: ["commands"],
       run: () => { showLog(); logPanel.showAll(); listCommands({ commands, log: logPanel.log }); } });
     // The server is where the settings say.
@@ -259,6 +271,7 @@ export default defineModule({
       upgradeApp: (detail) => upgradeApp(detail, { log: logPanel.log, notify: (message) => notice(message), toast: dialogs.showToast, ignore }),
       beforeReload: { add: reloadSteps.add },
       reloading: reload.reloading,
+      themes: () => themes,
       render: redraw.render,
       holdRendering: redraw.holdWhile,
       clearAppStorage,

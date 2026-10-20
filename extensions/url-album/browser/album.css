@@ -78,9 +78,9 @@
 }
 
 .token-urldb-name {
-  color: #c586c0;
+  color: var(--syntax-punctuation);
 }
 
 .token-urldb-description {
-  color: #ce9178;
+  color: var(--syntax-string);
 }

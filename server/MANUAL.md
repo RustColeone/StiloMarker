@@ -720,7 +720,12 @@ When a user asks you to update a character file after new writing:
 - **Ping Server** — Test connectivity without joining.
 - **Connect / Disconnect** — Join or leave the collaboration session.
 - **Toggle Log Panel** — Show or hide the debug log panel.
-- **Theme** — Switch between light and dark themes.
+- **Theme** — Settings → Appearance shows each theme as a small card in its
+  own colours: **System** (light or dark as your device is), **Light**,
+  **Dark**, **Paper** (warm off-white, for long writing), **Midnight** (deep
+  navy), **Forest** (dark green) and **High Contrast** (black, white and bright
+  outlines). A click applies it at once; it is kept in this browser.
+  `Change Theme…` (type it in the Log's command line) opens the cards.
 
 ---
 

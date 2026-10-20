@@ -1,3 +1,5 @@
+/* The colour tokens are a theme's (app/modules/shell/model/themes.js lists
+   them, with these values for Light and Dark); a theme sets any of them. */
 :root {
   color-scheme: light;
   --bg: #f3f3f3;
@@ -23,6 +25,24 @@
   --danger: #c74e39;
   --status-bg: #007acc;
   --status-text: #ffffff;
+  --text-on-accent: #ffffff;
+  --link: #0a6fb5;
+  --selection: rgba(14, 99, 156, 0.28);
+  /* Highlighted source: Markdown's parts, then code's (any highlighter's). */
+  --syntax-heading: #1177bb;
+  --syntax-strong: #1f1f1f;
+  --syntax-emphasis: #6a3fa0;
+  --syntax-link: #0a6fb5;
+  --syntax-quote: #3c7a32;
+  --syntax-code: #a1401f;
+  --syntax-keyword: #1a4fbf;
+  --syntax-string: #a31515;
+  --syntax-comment: #4a7c3a;
+  --syntax-number: #098658;
+  --syntax-type: #267f99;
+  --syntax-attribute: #b8331b;
+  --syntax-punctuation: #a3239b;
+  --syntax-constant: #795e26;
   --focus-ring: 0 0 0 1px var(--accent);
   --font-ui: "Segoe UI", Tahoma, sans-serif;
   --font-mono: "Cascadia Code", Consolas, "Courier New", monospace;
@@ -76,6 +96,23 @@
   --danger: #f48771;
   --status-bg: #007acc;
   --status-text: #ffffff;
+  --text-on-accent: #ffffff;
+  --link: #3794ff;
+  --selection: rgba(14, 99, 156, 0.28);
+  --syntax-heading: #3794ff;
+  --syntax-strong: #dcdcaa;
+  --syntax-emphasis: #9cdcfe;
+  --syntax-link: #4fc1ff;
+  --syntax-quote: #6a9955;
+  --syntax-code: #ce9178;
+  --syntax-keyword: #569cd6;
+  --syntax-string: #ce9178;
+  --syntax-comment: #6a9955;
+  --syntax-number: #b5cea8;
+  --syntax-type: #4ec9b0;
+  --syntax-attribute: #9cdcfe;
+  --syntax-punctuation: #c586c0;
+  --syntax-constant: #d7ba7d;
 }
 
 * {
@@ -1821,7 +1858,7 @@ p {
   place-items: center;
   border-radius: 12px;
   background: var(--accent);
-  color: var(--text-on-accent, #fff);
+  color: var(--text-on-accent);
   font-size: 26px;
   font-weight: 700;
 }
@@ -2383,12 +2420,12 @@ p {
 
 #editor-content::selection,
 #editor-content *::selection {
-  background: rgba(14, 99, 156, 0.28);
+  background: var(--selection);
 }
 
 .token-heading-mark,
 .token-heading-text {
-  color: var(--accent-strong);
+  color: var(--syntax-heading);
 }
 
 .token-heading-text {
@@ -2398,49 +2435,49 @@ p {
 .token-list-mark,
 .token-quote-mark,
 .token-fence {
-  color: #c586c0;
+  color: var(--syntax-punctuation);
 }
 
 .token-quote-text {
-  color: #6a9955;
+  color: var(--syntax-quote);
 }
 
 .token-inline-code,
 .token-code-block {
-  color: #ce9178;
+  color: var(--syntax-code);
 }
 
 .token-link {
-  color: #4fc1ff;
+  color: var(--syntax-link);
 }
 
 .token-strong {
-  color: #dcdcaa;
+  color: var(--syntax-strong);
   font-weight: 700;
 }
 
 .token-emphasis {
-  color: #9cdcfe;
+  color: var(--syntax-emphasis);
   font-style: italic;
 }
 
 .token-mtree-comment,
 .token-mtree-section-mark,
 .token-mtree-continuation {
-  color: #c586c0;
+  color: var(--syntax-punctuation);
 }
 
 .token-mtree-section-name,
 .token-mtree-chain-arrow {
-  color: #4fc1ff;
+  color: var(--syntax-link);
 }
 
 .token-mtree-name {
-  color: #dcdcaa;
+  color: var(--syntax-strong);
 }
 
 .token-mtree-description {
-  color: #6a9955;
+  color: var(--syntax-quote);
 }
 
 /* ── color swatch (shared across file types) ─────────────────────────────── */
@@ -2466,6 +2503,15 @@ p {
 
 .preview-output > :first-child {
   margin-top: 0;
+}
+
+.preview-output a {
+  color: var(--link);
+  text-underline-offset: 2px;
+}
+
+.preview-output a:hover {
+  text-decoration-thickness: 2px;
 }
 
 .preview-output pre,
@@ -2740,6 +2786,125 @@ p {
 .settings-field {
   display: grid;
   gap: 6px;
+}
+
+/* Settings → Appearance → Theme: each theme a card drawn in its own colours
+   (Shell's theme picker sets the --card-* values). */
+.theme-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 8px;
+}
+
+.theme-card {
+  display: grid;
+  gap: 5px;
+  padding: 4px 4px 5px;
+  border: 1px solid var(--border);
+  background: var(--surface-0);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.theme-card:hover {
+  border-color: var(--border-strong);
+}
+
+.theme-card[aria-checked="true"] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.theme-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.theme-card-frame {
+  position: relative;
+  display: block;
+  height: 58px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.theme-card-art {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 26% 1fr;
+  grid-template-rows: 1fr 7px;
+  background: var(--card-bg);
+}
+
+/* System: Dark over the lower-right half of Light. */
+.theme-card-art.is-second {
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+}
+
+.theme-card-side,
+.theme-card-page {
+  display: grid;
+  align-content: start;
+}
+
+.theme-card-side {
+  gap: 4px;
+  padding: 7px 4px;
+  border-right: 1px solid var(--card-border);
+  background: var(--card-side);
+}
+
+.theme-card-page {
+  gap: 5px;
+  padding: 7px 8px;
+  background: var(--card-page);
+}
+
+.theme-card-art i {
+  display: block;
+  height: 3px;
+  border-radius: 1px;
+  background: var(--card-text);
+  opacity: 0.6;
+}
+
+.theme-card-side i:first-child {
+  background: var(--card-accent);
+  opacity: 1;
+}
+
+.theme-card-page i {
+  width: 88%;
+}
+
+.theme-card-page i.is-heading {
+  width: 55%;
+  height: 5px;
+  background: var(--card-heading);
+  opacity: 1;
+}
+
+.theme-card-page i.is-short {
+  width: 66%;
+}
+
+.theme-card-page i.is-link {
+  width: 38%;
+  background: var(--card-link);
+  opacity: 1;
+}
+
+.theme-card-bar {
+  grid-column: 1 / -1;
+  background: var(--card-bar);
+}
+
+.theme-card-name {
+  padding: 0 2px;
+  font-size: 11px;
 }
 
 .settings-section {
@@ -4308,7 +4473,7 @@ menu {
   padding: 7px 14px;
   border-radius: 6px;
   background: var(--surface-3, rgba(30, 30, 30, 0.94));
-  color: var(--text-on-accent, #fff);
+  color: var(--text-on-accent);
   font-size: 12px;
   font-weight: 600;
   text-align: center;

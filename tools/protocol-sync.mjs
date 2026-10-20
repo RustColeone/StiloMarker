@@ -4,7 +4,8 @@
 //   protocol/file-types.json (+ each extension's fileTypes) -> app/modules/file-types/model/builtin-types.js
 //   extensions/*/extension.json -> app/extensions.js (the browser modules to start),
 //                                  extensions/offline.js (their files, for the service worker)
-//                                  and app/modules/shell/model/contributed-settings.js (their settings)
+//                                  app/modules/shell/model/contributed-settings.js (their settings)
+//                                  and app/modules/shell/model/contributed-themes.js (their themes)
 //   protocol/sync.contract.json -> app/modules/sync/model/contract.js (its version)
 // Run after editing a protocol file; tests/structure fails while a copy is stale.
 //   node tools/protocol-sync.mjs           write the copies
@@ -30,11 +31,17 @@ const extensionTypes = () => extensions().flatMap((extension) =>
 const contributedSettings = () => extensions().flatMap((extension) =>
   (extension.contributes?.settings ?? []).map((entry) => ({ ...entry, extension: extension.name })));
 
+// The themes extensions contribute: { id, label, base, colors, extension }.
+const contributedThemes = () => extensions().flatMap((extension) =>
+  (extension.contributes?.themes ?? []).map((entry) => ({ ...entry, extension: extension.name })));
+
 export const COPIES = [
   { from: "protocol/file-types.json", to: "app/modules/file-types/model/builtin-types.js", pick: (data) => [...data.types, ...extensionTypes()] },
   { from: "protocol/sync.contract.json", to: "app/modules/sync/model/contract.js", pick: (data) => ({ version: data.version }) },
   { from: "extensions/*/extension.json", to: "app/modules/shell/model/contributed-settings.js", text: () =>
     `export default Object.freeze(${JSON.stringify(contributedSettings(), null, 2)});\n` },
+  { from: "extensions/*/extension.json", to: "app/modules/shell/model/contributed-themes.js", text: () =>
+    `export default Object.freeze(${JSON.stringify(contributedThemes(), null, 2)});\n` },
   { from: "extensions/*/extension.json", to: "app/extensions.js", text: () => {
     const started = extensions().filter((extension) => extension.browser);
     return started.map((extension, index) => `import extension${index} from "../extensions/${extension.folder}/${extension.browser}";\n`).join("") +

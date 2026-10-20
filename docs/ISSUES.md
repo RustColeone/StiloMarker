@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-20 · release `v0.2.8` (not deployed; v0.2.7 is live)
+Last updated: 2026-10-20 · release `v0.2.9` (not deployed; v0.2.7 is live)
 
 ---
 
@@ -40,6 +40,32 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.9: themes
+
+Asked for 2026-10-20 (a better UI, and themes; decided: Paper, Midnight,
+Forest and High Contrast, built in, from an extension). Browser only.
+
+- **Themes**: Settings → Appearance → Theme shows System, Light, Dark,
+  Paper, Midnight, Forest and High Contrast as cards in their own colours;
+  a click applies one at once and it is kept. Change Theme… (the Log's
+  command line) opens them. The four new ones come from an extension
+  (`extensions/theme-pack/`, data only): adding a theme is one entry there.
+- **Light was hard to read in the editor** (fixed): its syntax colours were
+  Dark's, so bold text was pale yellow and emphasis pale blue on white, and
+  the Diagram, HTML, Mermaid and album highlighters were the same (a
+  diagram's values pale grey). Each theme now has its own syntax colours,
+  and every highlighter uses them.
+- **Preview links** take the theme's link colour, not the browser's blue and
+  purple.
+- **No flash of Light on load** with a dark theme: the theme last shown is
+  applied before the app's code runs.
+- Tests: `themes.test.mjs` (the tokens, Light and Dark as styles.css draws
+  them, the contributed themes, every theme's contrast: text, links and
+  every syntax colour against the editor), `themes-browser.py` (a card
+  applies its theme, kept across a reload, shown with the app's code
+  blocked, System follows the device); `shell-browser.py` picks themes from
+  the cards.
 
 ### v0.2.8: the Log's command line, and Reload Window
 
