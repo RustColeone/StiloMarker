@@ -31,7 +31,7 @@ import { installTogether } from "./together.js";
 
 import { findElements } from "./elements.js";
 
-export function createSurface({ view, marks, paneViews, completions, lineNotes, welcome, identity, openTabsStore, drops, previews, highlighters, toolbars, workspace, shell }) {
+export function createSurface({ view, marks, paneViews, completions, lineNotes, welcome, identity, openTabsStore, drops, codeBlocks, previews, highlighters, toolbars, workspace, shell }) {
   const composing = { now: false }; // an IME composition is under way
 
   const app = {
@@ -142,7 +142,7 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
   add(createAutocomplete(app));
   add(createFindReplace(app));
   add(createLinks(app));
-  add({ ...createTabs(app), ...createPreview(app, previews) });
+  add({ ...createTabs(app), ...createPreview(app, previews, codeBlocks) });
   add(createTabMenu(app));
   add(createGroups(app));
   add(createResume(app));

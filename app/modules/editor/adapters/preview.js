@@ -7,14 +7,18 @@
 //                  showOnOpen?: bool (opening the file shows it here too: a diagram's editor) })
 // tools.markdownHtml(project, file, text) renders Markdown with the project's
 // link and image resolution; tools.part is the id of the one part of the file
-// to show (a file with parts, Workspace's `parts`), or null for all of it. A cacheable preview is a pure function of the
+// to show (a file with parts, Workspace's `parts`), or null for all of it.
+// A Markdown preview's code blocks in a language some extension draws
+// (`codeBlocks`: { languages, render(block, code, tools) }, Mermaid's
+// diagrams) are handed to it once the preview has rendered.
+// A cacheable preview is a pure function of the
 // file's text, the project's paths and the connection, so it is not rebuilt
 // while none of those changed.
 import { getNodeIdByPath, getPath, isImageFileName, isMarkdownFileName, isMtreeFileName } from "../../workspace/index.js";
 import { renderMarkdown } from "../model/markdown.js";
 import { ignore } from "../../../kernel/index.js";
 
-export function createPreview(app, previews) {
+export function createPreview(app, previews, codeBlocks = { all: () => [] }) {
   let mathJaxLoadPromise = null; // MathJax loads once, on the first formula
   function hasMathMarkup(value) {
     return /\$\$[\s\S]+?\$\$|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\]|\$(?!\s)[^$\n]+\$/.test(value);
@@ -69,6 +73,17 @@ export function createPreview(app, previews) {
   }
   const tools = { markdownHtml };
 
+  // Code blocks drawn by an extension (codeBlocks); a block that fails stays code.
+  function drawCodeBlocks(target) {
+    for (const block of target.querySelectorAll(".md-code-block[data-lang]")) {
+      const drawer = codeBlocks.all().find((entry) => entry.languages.includes(block.dataset.lang));
+      if (!drawer) continue;
+      const code = block.querySelector("code")?.textContent ?? "";
+      Promise.resolve().then(() => drawer.render(block, code, tools))
+        .catch((error) => ignore(error, `the ${block.dataset.lang} block could not be drawn; it shows as code`));
+    }
+  }
+
   // The built-in previews, after any added ones (an added preview wins).
   const builtIn = [
     { id: "image", matches: (file) => isImageFileName(file.name), cacheable: false,
@@ -92,6 +107,7 @@ export function createPreview(app, previews) {
     { id: "markdown", matches: () => true, cacheable: true,
       render(target, project, file) {
         target.innerHTML = markdownHtml(project, file, file.content);
+        drawCodeBlocks(target);
         return { shouldTypeset: true, content: file.content };
       },
       printHtml: (project, file) => renderMarkdown(file.content, { resolveUrl: (url) => app.resolveProjectAssetUrl(project, file.id, url) }) }

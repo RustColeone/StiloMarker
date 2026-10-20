@@ -21,7 +21,7 @@ test("MIME types, accept lists and the Create order come from the one list", () 
   assert.equal(builtinTypes.mimeOf("a.JPG"), "image/jpeg");
   assert.equal(builtinTypes.mimeOf("a.unknown"), "application/octet-stream");
   assert.ok(builtinTypes.accept().split(",").includes(".persona.skill"));
-  assert.deepEqual(builtinTypes.creatable().map((t) => t.id), ["md", "mtree", "urldb", "bmap", "persona"]);
+  assert.deepEqual(builtinTypes.creatable().map((t) => t.id), ["md", "mtree", "urldb", "bmap", "persona", "mermaid"]);
 });
 
 test("the module lets a new type in, refuses a taken extension, and sees the new type at once", async () => {

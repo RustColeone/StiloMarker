@@ -110,6 +110,24 @@ export default Object.freeze([
     ]
   },
   {
+    "id": "mermaid",
+    "label": "Mermaid",
+    "kind": "text",
+    "format": "mermaid",
+    "extensions": {
+      ".mmd": "text/plain;charset=utf-8",
+      ".mermaid": "text/plain;charset=utf-8"
+    },
+    "icon": "is-mermaid",
+    "filters": [],
+    "create": {
+      "label": "New Mermaid Diagram",
+      "name": "new mermaid",
+      "order": 6
+    },
+    "extension": "mermaid"
+  },
+  {
     "id": "urldb",
     "label": "URL Album",
     "kind": "text",

@@ -484,6 +484,7 @@ function renderMarkdown(markdown, options = {}) {
   const output = [];
   let inCodeBlock = false;
   let codeBuffer = [];
+  let codeLanguage = ""; // the fence's info string's first word (```mermaid), for codeBlocks
   let listBuffer = [];
 
   const renderOptions = {
@@ -498,8 +499,9 @@ function renderMarkdown(markdown, options = {}) {
     }
   }
 
-  function renderCodeBlock(code) {
-    return `<div class="md-code-block"><button class="md-code-copy-button" type="button" data-copy-code="true" aria-label="Copy code block">Copy</button><pre><code>${code}</code></pre></div>`;
+  function renderCodeBlock(code, language = "") {
+    const lang = language ? ` data-lang="${escapeHtml(language)}"` : "";
+    return `<div class="md-code-block"${lang}><button class="md-code-copy-button" type="button" data-copy-code="true" aria-label="Copy code block">Copy</button><pre><code>${code}</code></pre></div>`;
   }
 
   for (let index = 0; index < lines.length; index += 1) {
@@ -509,11 +511,12 @@ function renderMarkdown(markdown, options = {}) {
     if (line.startsWith("```")) {
       flushList();
       if (inCodeBlock) {
-        output.push(renderCodeBlock(codeBuffer.join("\n")));
+        output.push(renderCodeBlock(codeBuffer.join("\n"), codeLanguage));
         inCodeBlock = false;
         codeBuffer = [];
       } else {
         inCodeBlock = true;
+        codeLanguage = (/^```\s*([\w+.-]+)/.exec(line)?.[1] ?? "").toLowerCase();
       }
       continue;
     }

@@ -12,15 +12,16 @@ Stilo Marker is a browser-based Markdown workspace. It lets you write notes, bui
 4. [Module-Map Files (.mtree)](#4-module-map-files-mtree)
 5. [URL Album Files (.urldb)](#5-url-album-files-urldb)
 6. [Brainstorm Diagram Files (.bmap)](#6-brainstorm-diagram-files-bmap)
-7. [Image Files](#7-image-files)
-8. [Explorer](#8-explorer)
-9. [Source Pane](#9-source-pane)
-10. [Preview Pane](#10-preview-pane)
-11. [Saving and Exporting](#11-saving-and-exporting)
-12. [Collaboration Backend](#12-collaboration-backend)
-13. [Chat Panel](#13-chat-panel)
-14. [Settings](#14-settings)
-15. [Templates](#15-templates)
+7. [Mermaid Diagrams (.mmd)](#7-mermaid-diagrams-mmd)
+8. [Image Files](#8-image-files)
+9. [Explorer](#9-explorer)
+10. [Source Pane](#10-source-pane)
+11. [Preview Pane](#11-preview-pane)
+12. [Saving and Exporting](#12-saving-and-exporting)
+13. [Collaboration Backend](#13-collaboration-backend)
+14. [Chat Panel](#14-chat-panel)
+15. [Settings](#15-settings)
+16. [Templates](#16-templates)
 
 ---
 
@@ -77,7 +78,7 @@ node
   sourceVersion number   — (files only) monotonically increasing edit counter
 ```
 
-The file type is determined purely by the file extension (`.md`, `.mtree`, `.urldb`, `.bmap`, or an image extension).
+The file type is determined purely by the file extension (`.md`, `.mtree`, `.urldb`, `.bmap`, `.mmd`, or an image extension).
 
 **Source modes:**
 
@@ -323,7 +324,36 @@ In the preview pane the diagram is rendered as an interactive SVG/HTML canvas:
 
 ---
 
-## 7. Image Files
+## 7. Mermaid Diagrams (.mmd)
+
+[Mermaid](https://mermaid.js.org) diagrams are written as text and drawn by
+the app: flowcharts, sequence diagrams, class, state and entity diagrams,
+Gantt charts, mind maps, timelines and more.
+
+**In a note:** a fenced code block whose language is `mermaid` is drawn as the
+diagram in the note's preview (its Copy button still copies the code):
+
+````markdown
+```mermaid
+flowchart LR
+    A[Start] --> B{Choice}
+    B -->|Yes| C[Done]
+    B -->|No| D[Try again]
+```
+````
+
+**As a file:** a `.mmd` (or `.mermaid`) file holds one diagram. Its source is
+highlighted, opening it shows the diagram in the preview, and Create → New
+Mermaid Diagram starts one. The formatting toolbar (Settings → Appearance)
+offers a flowchart, a sequence diagram and a mind map to start from.
+
+A diagram with a mistake keeps its code in the preview, with Mermaid's reason
+above it. The Mermaid library is loaded from the internet the first time a
+diagram shows; offline, diagrams show as code.
+
+---
+
+## 8. Image Files
 
 Stilo Marker recognizes: `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.bmp`.
 
@@ -334,7 +364,7 @@ Stilo Marker recognizes: `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.bmp
 
 ---
 
-## 8. Explorer
+## 9. Explorer
 
 The explorer shows the project tree as a collapsible file/folder list.
 
@@ -390,7 +420,7 @@ to Bottom**. The panel stays where you put it; move it back the same way.
 
 ---
 
-## 9. Source Pane
+## 10. Source Pane
 
 A plain-text editor for `.md`, `.mtree`, `.urldb`, and `.bmap` files. Image files show a read-only preview.
 
@@ -405,7 +435,7 @@ The source pane header shows the filename, dirty indicator (`•`), and buttons 
 
 ---
 
-## 10. Preview Pane
+## 11. Preview Pane
 
 Renders the active file's content in read-only mode.
 
@@ -421,7 +451,7 @@ The preview can be shown or hidden with `View > Toggle Preview` or the `×` butt
 
 ---
 
-## 11. Saving and Exporting
+## 12. Saving and Exporting
 
 ### Save
 
@@ -439,7 +469,7 @@ The preview can be shown or hidden with `View > Toggle Preview` or the `×` butt
 
 ---
 
-## 12. Collaboration Backend
+## 13. Collaboration Backend
 
 The Python backend (`server/mdnotes_server.py`) enables real-time multi-user sessions.
 
@@ -512,7 +542,7 @@ When a collaboration session is active, the chat thread list is shared across al
 
 ---
 
-## 13. Chat Panel
+## 14. Chat Panel
 
 The chat panel provides an AI assistant scoped to the current workspace.
 
@@ -643,7 +673,7 @@ When a user asks you to update a character file after new writing:
 
 ---
 
-## 14. Settings
+## 15. Settings
 
 `Settings` menu or the settings panel:
 
@@ -657,7 +687,7 @@ When a user asks you to update a character file after new writing:
 
 ---
 
-## 15. Templates
+## 16. Templates
 
 On first load, Stilo Marker offers to open the built-in template project, which demonstrates all file types:
 

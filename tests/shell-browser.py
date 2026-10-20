@@ -76,13 +76,14 @@ async def main():
         assert supported.startswith('Supported: .md') and '.bmap' in supported and '.skill' in supported, supported
         options = await page.evaluate('[...document.querySelectorAll("#new-file-type option")].map((o) => [o.value, o.textContent])')
         assert options == [['md', 'Markdown (.md)'], ['mtree', 'MTREE (.mtree)'], ['urldb', 'URL Album (.urldb)'],
-                           ['bmap', 'Diagram (.bmap)'], ['persona', 'Character (.persona.skill)']], options
+                           ['bmap', 'Diagram (.bmap)'], ['persona', 'Character (.persona.skill)'],
+                       ['mermaid', 'Mermaid (.mmd)']], options
 
         # Five menus, in order, each with its items.
         labels = await page.locator('.menu-bar .menu-trigger').all_inner_texts()
         assert labels == ['File', 'Edit', 'Create', 'View', 'Settings'], labels
         counts = await page.evaluate('[...document.querySelectorAll(".menu-bar .menu-popover")].map((p) => p.children.length)')
-        assert counts == [9, 5, 6, 5, 5], counts
+        assert counts == [9, 5, 7, 5, 5], counts  # Create: md, mtree, urldb, bmap, persona, mermaid, folder
         assert await page.locator('#file-menu').is_hidden()
 
         # Opening one closes the others; a click outside closes it.

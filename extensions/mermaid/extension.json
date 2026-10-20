@@ -1,0 +1,13 @@
+{
+  "about": "Mermaid diagrams: .mmd (and .mermaid) files, edited as text and previewed as their diagram, and ```mermaid blocks drawn in Markdown previews. The Mermaid library is imported from jsDelivr, pinned, the first time a diagram shows (strict mode). Everything about it lives in this folder; the core only offers extension points (File types, the Editor's previews, codeBlocks, highlighters and toolbars, the Explorer's new files). Both ends read 'fileTypes' (the server through File types, the browser through the copy tools/protocol-sync.mjs writes); 'browser' is the module the page starts.",
+  "name": "mermaid",
+  "browser": "browser/index.js",
+  "fileTypes": [
+    {
+      "id": "mermaid", "label": "Mermaid", "kind": "text", "format": "mermaid",
+      "extensions": { ".mmd": "text/plain;charset=utf-8", ".mermaid": "text/plain;charset=utf-8" },
+      "icon": "is-mermaid", "filters": [],
+      "create": { "label": "New Mermaid Diagram", "name": "new mermaid", "order": 6 }
+    }
+  ]
+}

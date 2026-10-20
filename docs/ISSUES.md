@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-20 · release `v0.2.0` (deployed with v0.1.100–v0.1.101; public checks passed)
+Last updated: 2026-10-20 · release `v0.2.1` (not deployed; v0.2.0 is live)
 
 ---
 
@@ -68,6 +68,27 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.2.1: Mermaid diagrams
+
+The first of the two extensions decided on 2026-10-20 (Mermaid, then static
+HTML pages).
+
+- A ```` ```mermaid ```` block in a note is drawn as its diagram in the
+  preview; Copy still copies its code. Other code blocks are unchanged.
+- `.mmd` (and `.mermaid`) files: Mermaid diagrams as files. Their source is
+  highlighted, opening one shows the diagram in the preview, Create → New
+  Mermaid Diagram starts one, and the formatting toolbar offers a flowchart,
+  a sequence diagram and a mind map.
+- A diagram with a mistake keeps its code, with Mermaid's reason above it.
+- The Mermaid library (11.17.2) loads from jsDelivr the first time a diagram
+  shows, in strict mode (no scripts or click handlers in labels); offline,
+  diagrams show as code.
+- The manual has a Mermaid section (7; the later ones moved down by one), so
+  the Agent knows it can write them.
+- Tests: `mermaid.test.mjs` (the fence's language, the highlighting, the
+  loader) and `mermaid-browser.py` (a note's block, a `.mmd` file, a broken
+  diagram, offline).
 
 ### v0.2.0: Source and Preview half and half
 

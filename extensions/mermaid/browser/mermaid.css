@@ -1,0 +1,91 @@
+/* Mermaid's look: its icon in the explorer, its diagrams (a .mmd file's
+   preview, a ```mermaid block in a note) and its source highlighting. Loaded
+   by the extension's module when it starts. */
+.tree-icon.is-mermaid {
+  border: 1px solid #2a9d8f;
+  background: rgba(42, 157, 143, 0.15);
+}
+
+.tree-icon.is-mermaid::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 5px;
+  height: 5px;
+  background: var(--sidebar);
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+  border-left: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.tree-icon.is-mermaid::after {
+  content: "MMD";
+  position: absolute;
+  inset: 2px 1px 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #2a9d8f;
+  font-size: 5.5px;
+  font-weight: 700;
+}
+
+/* A .mmd file's preview. */
+.mermaid-preview {
+  height: 100%;
+  overflow: auto;
+  padding: 16px;
+}
+
+.mermaid-diagram {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+  padding: 8px 0;
+}
+
+.mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.mermaid-diagram.is-loading {
+  min-height: 24px;
+}
+
+/* A ```mermaid block drawn: its diagram shows, its code hides (Copy still copies it). */
+.md-code-block[data-mermaid="drawn"] > pre {
+  display: none;
+}
+
+.md-code-block[data-mermaid="drawn"] {
+  background: transparent;
+}
+
+.mermaid-error,
+.mermaid-hint {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--danger, #d16969);
+  background: var(--surface-1);
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.mermaid-hint {
+  border-left-color: var(--accent);
+}
+
+.mermaid-source {
+  margin: 0;
+}
+
+/* Source highlighting. */
+.token-mermaid-diagram { color: #c586c0; font-weight: 600; }
+.token-mermaid-keyword { color: #569cd6; }
+.token-mermaid-link { color: #d7ba7d; }
+.token-mermaid-label,
+.token-mermaid-string { color: #ce9178; }
+.token-mermaid-comment { color: #6a9955; font-style: italic; }

@@ -8,7 +8,8 @@
 // API: parts() -> the source editor's, find's, autocomplete's, links', the tab
 // strips' and the preview's functions (adapters/surface.js), created when the
 // Editor starts in a page.
-// previews, highlighters, toolbars, completions (autocomplete for a format),
+// previews, codeBlocks (code blocks of a language drawn in a Markdown
+// preview: Mermaid's diagrams), highlighters, toolbars, completions (autocomplete for a format),
 // lineNotes (notes on lines in the gutter: comments), welcome (parts of the
 // page shown when no file is open),
 // paneViews (tabs in the preview pane that
@@ -47,10 +48,15 @@ export default defineModule({
   uses: ["shell", "file-types", "workspace", "identity"],
   owns: { elements: ["the source editor", "the formatting toolbar", "the find bar", "the tab strips", "the preview pane"],
     state: ["the open tabs", "what each pane shows", "the explorer selection"],
-    registries: ["previews", "highlighters", "toolbars", "completions", "line notes", "marks", "pane views", "the welcome page"], rules: ["Markdown rendering"] },
+    registries: ["previews", "code blocks", "highlighters", "toolbars", "completions", "line notes", "marks", "pane views", "the welcome page"], rules: ["Markdown rendering"] },
   start(ctx) {
     // Previews of other kinds of file: { id, matches(file), render(target, project, file, tools), cacheable?, printHtml? }
     const previews = ctx.registry();
+    // Code blocks of a language drawn in a Markdown preview, after it renders:
+    // { id, languages: ["mermaid"], render(block, code, tools) } (block: the .md-code-block; may be async).
+    const codeBlocks = ctx.registry({ validate: (entry) => {
+      if (!Array.isArray(entry.languages) || typeof entry.render !== "function") throw new Error(`code blocks ${entry.id} need languages and render()`);
+    } });
     // Highlighting for a format that is not built in: { id: format, line(rawLine, { escape, blank }) -> html }
     const highlighters = ctx.registry({ validate: (entry) => { if (typeof entry.line !== "function") throw new Error(`highlighter ${entry.id} needs line()`); } });
     // Formatting-toolbar buttons for such a format: { id: format, groups: [[{ id, html, title, action }]] }
@@ -88,10 +94,10 @@ export default defineModule({
     const drops = { handle: (event) => handleDrop(event), configure(handle) { handleDrop = handle; } };
     // The source editor, find, autocomplete, links, the tab strips and the preview (in a page).
     if (globalThis.document) {
-      parts = createSurface({ view, marks, identity: ctx.use("identity"), openTabsStore, drops, paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), welcome: open(welcome), previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars),
+      parts = createSurface({ view, marks, identity: ctx.use("identity"), openTabsStore, drops, paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), welcome: open(welcome), previews: open(previews), codeBlocks: open(codeBlocks), highlighters: open(highlighters), toolbars: open(toolbars),
         workspace: ctx.use("workspace"), shell: ctx.use("shell") });
     }
-    return { previews: open(previews), highlighters: open(highlighters), toolbars: open(toolbars), paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), welcome: open(welcome), marks,
+    return { previews: open(previews), codeBlocks: open(codeBlocks), highlighters: open(highlighters), toolbars: open(toolbars), paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), welcome: open(welcome), marks,
       openTabs: { configure: openTabsStore.configure }, drops: { configure: drops.configure }, view, parts: () => parts };
   }
 });
