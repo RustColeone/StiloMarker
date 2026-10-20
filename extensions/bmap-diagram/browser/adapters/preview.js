@@ -6,6 +6,7 @@ import { getNodeIdByPath, getPath, isImageFileName } from "../../../../app/modul
 
 export function addDiagramPreview({ editor, shell, workspace, isDiagram, generate, log }) {
   let viewModule = null, loading = null, diagramView = null;
+  const secondViews = new WeakMap(); // a group's second preview -> its diagram editor
   const load = () => (loading ??= import("./view.js")
     .then((module) => (viewModule = module))
     .catch((error) => { loading = null; throw error; }));
@@ -14,7 +15,7 @@ export function addDiagramPreview({ editor, shell, workspace, isDiagram, generat
     id: "bmap", matches: (file) => isDiagram(file.name), cacheable: false,
     showOnOpen: true, // the diagram editor is how a diagram is used
     viewState: () => diagramView?.getView?.() ?? null, // the pan and zoom, remembered per file
-    render(target, project, file) {
+    render(target, project, file, tools) {
       if (!viewModule) {
         target.innerHTML = `<div class="preview-loading">Loading diagram…</div>`;
         load().then(() => {
@@ -26,7 +27,9 @@ export function addDiagramPreview({ editor, shell, workspace, isDiagram, generat
         });
         return { shouldTypeset: false, content: "" };
       }
-      diagramView ??= viewModule.createBmapView({ container: target });
+      // The preview's editor (its pan and zoom remembered per file), or a second preview's own.
+      if (tools?.secondary && !secondViews.has(target)) secondViews.set(target, viewModule.createBmapView({ container: target }));
+      const view = tools?.secondary ? secondViews.get(target) : (diagramView ??= viewModule.createBmapView({ container: target }));
       const basePath = getPath(project, file.id);
       const resolve = (filePath) => {
         const baseSegments = basePath.split("/").filter(Boolean);
@@ -34,10 +37,10 @@ export function addDiagramPreview({ editor, shell, workspace, isDiagram, generat
         return getNodeIdByPath(project, normalizePath([...baseSegments, filePath].join("/")));
       };
       const parts = editor.parts();
-      diagramView.render({
+      view.render({
         documentKey: file.id,
         source: file.content,
-        initialView: parts.getViewState(file.id)?.bmap ?? null,
+        initialView: tools?.secondary ? null : parts.getViewState(file.id)?.bmap ?? null,
         onOpenLinkedFile(filePath) {
           const nodeId = resolve(filePath);
           if (nodeId) parts.openFileFromExplorer(nodeId);

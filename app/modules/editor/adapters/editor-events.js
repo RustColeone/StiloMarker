@@ -253,7 +253,9 @@ export function installEditorEvents(app, composing) {
   app.elements.editorContent.addEventListener("mousemove", app.handleEditorLinkHover);
   app.elements.editorContent.addEventListener("mouseleave", app.handleEditorMouseLeave);
 
-  app.elements.preview.addEventListener("click", (event) => {
+  // Links in a preview (the preview, or a group's second one).
+  (app.elements.preview.closest(".editor-grid") ?? app.elements.preview).addEventListener("click", (event) => {
+    if (!event.target.closest?.(".preview-output")) return;
     const fileLink = event.target.closest("a[data-open-file-id]");
     if (fileLink) {
       event.preventDefault();

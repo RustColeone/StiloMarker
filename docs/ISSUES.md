@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-20 · release `v0.2.5` (not deployed; v0.2.0 is live)
+Last updated: 2026-10-20 · release `v0.2.6` (not deployed; v0.2.0 is live)
 
 ---
 
@@ -68,6 +68,21 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.2.6: two previews side by side
+
+Editor groups, stage 2 (decided 2026-10-20: several previews, still one
+source editor).
+
+- When both groups show a preview tab, each shows its own preview: a note on
+  one side and a diagram (or another note) on the other. Before, the second
+  group showed a placeholder. Two Source tabs at once still share the one
+  source editor (its placeholder, with Show here).
+- A diagram in the second preview has a diagram editor of its own.
+- Links in either preview open their file.
+- On the phone nothing changes: one view at a time.
+- Tests: `tab-menu-browser.py` (two previews, the preview taken back) and
+  `editor-groups-browser.py` (a diagram in a second preview).
 
 ### v0.2.5: panels dragged between areas
 

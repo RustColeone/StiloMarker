@@ -3929,7 +3929,8 @@ menu {
   }
 
   .app-shell[data-mobile-view="preview"] .editor-group > .source-body,
-  .app-shell[data-mobile-view="source"] .editor-group > .preview-body {
+  .app-shell[data-mobile-view="source"] .editor-group > .preview-body,
+  .editor-group > .preview-body.second-preview {
     display: none;
   }
 

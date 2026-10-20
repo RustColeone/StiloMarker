@@ -119,10 +119,25 @@ async def main():
         assert 'STILO MARKER' in await page.locator('#preview-output').inner_text()
         assert ['welcome.md', 'preview'] not in now['left']['tabs'], now['left']
 
+        # Two previews at once (stage 2): a diagram in the right group's preview, then the
+        # note's preview taken to the left group; the diagram stays, in a second preview
+        # with an editor of its own.
+        await page.locator('#explorer-tree .tree-row', has_text='welcome.bmap').first.click()
+        await page.wait_for_selector('#preview-pane #preview-output .bmap-editor', timeout=15000)
+        await menu('right', 'welcome.md', 'preview', 'Move to Other Group')
+        now = await groups()
+        assert now['left']['active'] == ['welcome.md', 'preview'] and now['left']['bodies'] == ['preview-body'], now['left']
+        assert now['right']['active'] == ['welcome.bmap', 'preview'], now['right']
+        await page.wait_for_selector('#preview-pane .second-preview .bmap-editor', timeout=15000)
+        assert await page.locator('#preview-pane .second-preview').is_visible()
+        assert 'STILO MARKER' in await page.locator('#preview-output').inner_text()
+        assert await page.locator('.bmap-editor').count() == 1, 'the note in the preview, the diagram in the second one'
+
         assert not errors, errors
         await browser.close()
         print(json.dumps({'checks': ['move to other group', 'placeholder left behind', 'open to the side', 'drag to the other strip',
-                                     'emptied group closes', 'explorer opens in the group left', 'group comes back', 'move back']}))
+                                     'emptied group closes', 'explorer opens in the group left', 'group comes back', 'move back',
+                                     'a diagram in a second preview']}))
 
 
 asyncio.run(main())

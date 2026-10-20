@@ -26,7 +26,7 @@ GROUPS = '''() => Object.fromEntries([...document.querySelectorAll(".editor-grou
   const active = g.querySelector(".editor-tab.is-active[data-file-id]");
   return [g.dataset.group, {
     label: g.querySelector(".pane-label").textContent,
-    body: shown.length ? (shown[0].classList.contains("source-body") ? "source" : "preview") : null,
+    body: shown.length ? (shown[0].classList.contains("second-preview") ? "second" : shown[0].classList.contains("source-body") ? "source" : "preview") : null,
     placeholder: placeholder.hidden ? null : placeholder.querySelector(".group-placeholder-text").textContent,
     tabs: tabs.map((t) => [t.querySelector(".tab-title").textContent, t.dataset.view]),
     marks: tabs.map((t) => t.querySelector(".tab-view-mark")?.textContent ?? null),
@@ -93,8 +93,8 @@ async def main():
         assert set(groups['left']['marks']) == {None}, groups
 
         # Open as Preview: in the same group. The preview moves to the left
-        # group, whose tabs name their views; the right group keeps its tab
-        # behind a placeholder.
+        # group, whose tabs name their views; the right group, whose tab is a
+        # preview too, shows a second preview of its own: two side by side.
         await tab_menu('source', 'LULUKA.urldb')
         await choose('Open as Preview')
         groups = await page.evaluate(GROUPS)
@@ -103,21 +103,25 @@ async def main():
         assert left['tabs'] == [['welcome.md', 'source'], ['MeitanteiCure.mtree', 'source'], ['LULUKA.urldb', 'source'], ['LULUKA.urldb', 'preview']], left
         assert left['active'] == ['LULUKA.urldb', 'preview'], left
         assert left['marks'] == ['Source', 'Source', 'Source', 'Preview'], left
-        assert (right['body'], right['placeholder']) == (None, 'welcome.md is open as Preview in the other group.'), right
+        assert (right['body'], right['placeholder']) == ('second', None), right
         assert right['active'] == ['welcome.md', 'preview'], right
+        assert 'STILO MARKER' in await page.locator('#preview-pane .second-preview .preview-output').inner_text()
+        assert 'Moria Luluka' in await page.locator('#preview-output').inner_text(), 'the album in the left group'
         await page.locator('#source-tab-strip .editor-tab[data-view="preview"]', has_text='LULUKA.urldb').click(button='right')
         await page.wait_for_timeout(150)
         entries = await page.evaluate(MENU)
         assert entries[4][2] is False and entries[5][2] is True, f'the preview tab is ticked as Preview: {entries}'
         await page.keyboard.press('Escape')
 
-        # Show here: the right group takes the preview back, and the left waits.
-        await page.locator('#preview-pane .group-placeholder-button').click()
+        # The right group's preview tab clicked: the preview comes back there,
+        # and the left group keeps the album in a second preview of its own.
+        await page.locator('#preview-tab-strip .editor-tab[data-view="preview"]', has_text='welcome.md').click()
         await page.wait_for_timeout(300)
         groups = await page.evaluate(GROUPS)
         assert (groups['right']['body'], groups['right']['placeholder']) == ('preview', None), groups['right']
         assert 'STILO MARKER' in await page.locator('#preview-output').inner_text()
-        assert groups['left']['placeholder'] == 'LULUKA.urldb is open as Preview in the other group.', groups['left']
+        assert (groups['left']['body'], groups['left']['placeholder']) == ('second', None), groups['left']
+        assert 'Moria Luluka' in await page.locator('#source-pane .second-preview .preview-output').inner_text()
 
         # A source tab there brings the source editor back to the left group.
         await page.locator('#source-tab-strip .editor-tab[data-view="source"]', has_text='welcome.md').click()
@@ -172,7 +176,7 @@ async def main():
 
         assert not errors, errors
         await browser.close()
-        print(json.dumps({'checks': ['menu entries', 'escape', 'default layout', 'open as preview in the same group', 'placeholder', 'show here', 'source back', 'phone with a mixed group', 'copy path',
+        print(json.dumps({'checks': ['menu entries', 'escape', 'default layout', 'open as preview in the same group', 'two previews side by side', 'the preview back', 'source back', 'phone with a mixed group', 'copy path',
                                      'close to the right', 'close others', 'press outside', 'close all']}))
 
 

@@ -402,9 +402,10 @@ shown one way, as Source or as Preview. Right-click a tab for Close, Close
 Others, Close to the Right, Close All, Open as Source or Preview (the same
 file shown the other way, in the same group), and Copy Path. When a group
 holds tabs of both kinds, each tab says which it is. There is one source
-editor and one preview: if the other group was showing the one you just
-opened, it keeps its tab and says where it went; press **Show here** to take
-it back. **Move to Other Group** moves a tab across, **Open to the Side**
+editor: if the other group was showing it, that group keeps its tab and
+says where it went; press **Show here** to take it back. Previews are not
+limited: each group can show a preview at the same time, so a note and a
+diagram can sit side by side. **Move to Other Group** moves a tab across, **Open to the Side**
 opens it in the other group too, and you can drag a tab onto the other
 group's tabs. When a group's last tab closes, the group closes and the other
 takes its place; View → Toggle Source or Toggle Preview brings it back. In a

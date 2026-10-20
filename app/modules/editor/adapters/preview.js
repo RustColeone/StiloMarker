@@ -114,11 +114,12 @@ export function createPreview(app, previews, codeBlocks = { all: () => [] }) {
   ];
   const previewFor = (file) => [...previews.all(), ...builtIn].find((entry) => entry.matches(file));
 
-  // Inputs of the last cacheable render. A 90k-character chapter is ~11k
-  // nodes: rebuilding it for a presence ping, a collaborator's keystroke or
-  // typing in another file used to re-lay-out the whole preview. Any other
-  // kind of preview clears the key, so returning to a file renders it again.
-  let previewRenderKey = null;
+  // Inputs of each preview's last cacheable render (the preview, and a
+  // group's second one). A 90k-character chapter is ~11k nodes: rebuilding it
+  // for a presence ping, a collaborator's keystroke or typing in another file
+  // used to re-lay-out the whole preview. Any other kind of preview clears the
+  // key, so returning to a file renders it again.
+  const renderKeys = new WeakMap(); // preview element -> key
 
   function previewRenderKeyFor(project, file) {
     const structure = Object.values(project.nodes).map((node) => `${node.id}/${node.parentId ?? ""}/${node.name}`).join("|");
@@ -126,14 +127,17 @@ export function createPreview(app, previews, codeBlocks = { all: () => [] }) {
     return `${file.id}\u0000${file.name}\u0000${where.shared()}\u0000${where.assetsKey()}\u0000${structure}\u0000${file.content}`;
   }
 
-  function renderPreviewContent(target, project, file) {
+  // secondary: a group's second preview (groups.js), which shows the whole
+  // file (no part) and is told so (tools.secondary).
+  function renderPreviewContent(target, project, file, { secondary = false } = {}) {
     const preview = file ? previewFor(file) : null;
     const key = preview?.cacheable ? previewRenderKeyFor(project, file) : null;
-    if (key !== null && key === previewRenderKey && target.childNodes.length > 0) return { shouldTypeset: false, content: "" };
-    previewRenderKey = key;
+    if (key !== null && key === renderKeys.get(target) && target.childNodes.length > 0) return { shouldTypeset: false, content: "" };
+    renderKeys.set(target, key);
     target.replaceChildren();
     if (!file) return { shouldTypeset: false, content: "" };
-    return preview.render(target, project, file, { ...tools, part: app.view.get().previewFileId === file.id ? app.view.get().previewPart ?? null : null });
+    const part = !secondary && app.view.get().previewFileId === file.id ? app.view.get().previewPart ?? null : null;
+    return preview.render(target, project, file, { ...tools, secondary, part });
   }
 
   function printPreviewAsPdf() {
