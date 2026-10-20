@@ -178,9 +178,11 @@ test("the diagram editor (extensions/bmap-diagram) wires interaction controls", 
   assert.match(bmapViewSource, /function collectGenerationContextFiles\(/);
   assert.match(bmapViewSource, /function buildBmapOverview\(/);
   assert.match(bmapViewSource, /onQuickGenerate/);
-  // Its settings, its Export As entries and a new diagram's content are registered by the extension.
+  // Its settings are declared in its manifest (contributed: Shell adds their fields); its
+  // Export As entries and a new diagram's content are registered by the extension.
+  const manifest = JSON.parse(await readFile(resolveFromRoot("extensions/bmap-diagram/extension.json"), "utf8"));
+  assert.deepEqual(manifest.contributes.settings.map((entry) => entry.field.id), ["bmap-generate-scope-select", "bmap-auto-pan-input"]);
   const extension = await readFile(resolveFromRoot("extensions/bmap-diagram/browser/index.js"), "utf8");
-  assert.match(extension, /bmap-generate-scope-select/);
   assert.match(extension, /explorer\.fileMenus\.add/);
   assert.match(extension, /explorer\.newFiles\.add/);
 });

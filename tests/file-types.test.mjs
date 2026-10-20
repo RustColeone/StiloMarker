@@ -35,3 +35,16 @@ test("the module lets a new type in, refuses a taken extension, and sees the new
   remove();
   assert.equal(types.typeOf("song.abc"), null);
 });
+
+test("settings extensions contribute: Shell's defaults hold them, never over a core key, each field complete", async () => {
+  const { default: contributed } = await import("../app/modules/shell/model/contributed-settings.js");
+  const { createDefaultSettings } = await import("../app/modules/shell/adapters/settings-store.js");
+  const defaults = createDefaultSettings();
+  assert.ok(contributed.length > 0, "the diagram's settings at least");
+  for (const entry of contributed) {
+    assert.ok(entry.key && "default" in entry && entry.extension, JSON.stringify(entry));
+    assert.deepEqual(defaults[entry.key], entry.default, `${entry.key}'s default comes from ${entry.extension}`);
+    if (entry.field) for (const part of ["page", "id", "label", "control"]) assert.ok(entry.field[part], `${entry.key}'s field needs ${part}`);
+  }
+  assert.equal(new Set(contributed.map((entry) => entry.key)).size, contributed.length, "a key contributed once");
+});

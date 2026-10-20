@@ -6,10 +6,11 @@
 //              (adapters/source.js)
 //   Explorer   "Export As" (PNG, JPG, SVG) on a diagram, and a new diagram's
 //              first content
-//   Shell      its two settings in Settings → Appearance
+//   Shell      its two settings (declared in ../extension.json: Shell knows
+//              their defaults and shows their fields in Settings → Appearance)
 //   Assistant  Quick Generate asks the server's agent for a note
 // The file type is still one of File types' built-in ones (see extension.json),
-// and so are its two settings' defaults (Shell) and the server's Quick Generate.
+// and the server's Quick Generate still names diagrams.
 import { defineModule } from "../../../app/kernel/index.js";
 import { createDefaultBmap } from "./model/bmap.js";
 import { createDiagramExport } from "./adapters/export.js";
@@ -47,11 +48,6 @@ export default defineModule({
     editor.toolbars.add({ id: TYPE, groups: toolbarGroups });
     editor.completions.add({ id: TYPE, ...completions });
 
-    shell.settingsDialog.fields.add({ page: "appearance", id: "bmap-generate-scope-select", order: 110, label: "Bmap Generate Context",
-      key: "bmapGenerateScope", control: "select", options: [["connected", "Connected nodes only"], ["all", "All linked files"]],
-      read: (s) => (s.bmapGenerateScope === "all" ? "all" : "connected") });
-    shell.settingsDialog.fields.add({ page: "appearance", id: "bmap-auto-pan-input", order: 120, label: "Auto-pan diagrams to content on open",
-      key: "bmapAutoPan", control: "checkbox", read: (s) => s.bmapAutoPan !== false });
     return {};
   }
 });

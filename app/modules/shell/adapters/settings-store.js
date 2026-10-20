@@ -3,10 +3,18 @@
 // stored now, so a tab never writes back values another tab changed since it
 // loaded. Moved from the legacy settings service when Shell took settings.
 import { ignore } from "../../../kernel/index.js";
+import contributed from "../model/contributed-settings.js";
 
 const SETTINGS_KEY = "mdnotes.settings.v1";
 
+// The core's settings, then those extensions contribute (their manifests'
+// `contributes.settings`); an extension never redefines a core key.
 function createDefaultSettings() {
+  const core = coreDefaults();
+  return { ...core, ...Object.fromEntries(contributed.filter((entry) => !(entry.key in core)).map((entry) => [entry.key, entry.default])) };
+}
+
+function coreDefaults() {
   return {
     theme: "system",
     serverUrl: "",
@@ -36,8 +44,6 @@ function createDefaultSettings() {
     chatWidth: 420,
     previewWidthCustomized: false,
     debugPanelHeight: 180,
-    bmapGenerateScope: "connected",
-    bmapAutoPan: true,
     autoReconnect: true,
     chatModel: "",
     // Which chat tab is open: "agent" or "chats" ("roleplay" from v0.1.25 means chats).

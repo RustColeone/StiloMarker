@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-20 · release `v0.2.2` (not deployed; v0.2.0 is live)
+Last updated: 2026-10-20 · release `v0.2.3` (not deployed; v0.2.0 is live)
 
 ---
 
@@ -68,6 +68,18 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.2.3: settings an extension contributes
+
+Groundwork for moving Diagrams wholly into their extension; nothing on
+screen changed.
+
+- An extension's manifest can declare its settings (key, default, and the
+  field Settings shows). The app knows their defaults and shows their fields
+  before any extension code runs; the core no longer holds an extension's
+  defaults. The Diagram's two settings (Bmap Generate Context, Auto-pan) are
+  the first.
+- Tests: `file-types.test.mjs` checks the contributed settings.
 
 ### v0.2.2: static HTML pages
 

@@ -59,6 +59,7 @@ import { createMenuBar } from "./adapters/menu-bar.js";
 import { createServer } from "./adapters/server.js";
 import { watchPageErrors } from "./adapters/page-errors.js";
 import { createPages } from "./adapters/pages.js";
+import contributed from "./model/contributed-settings.js";
 import { createSettingsDialog } from "./adapters/settings-dialog.js";
 import { createStatusBar } from "./adapters/status-bar.js";
 import { applyTheme } from "./adapters/theme.js";
@@ -122,6 +123,17 @@ export default defineModule({
       options: [["docked", "Docked (resizes content)"], ["floating", "Floating (overlay)"]] });
     settingsDialog.fields.add({ page: "appearance", id: "preview-select", order: 40, label: "Preview", key: "preview", control: "select",
       options: [["shown", "Shown"], ["hidden", "Hidden"]] });
+    // The fields of the settings extensions contribute (their manifests): a
+    // select shows its default while what is kept is none of its options, a
+    // checkbox its default until it is set.
+    for (const { key, default: fallback, field } of contributed) {
+      if (!field) continue;
+      settingsDialog.fields.add({ ...field, key, read(view) {
+        const value = view[key];
+        if (field.control === "select") return (field.options ?? []).some(([option]) => option === value) ? value : fallback;
+        return value === undefined || value === null ? fallback : field.control === "checkbox" ? Boolean(value) : value;
+      } });
+    }
 
     function notice(message, title = "Message") {
       ctx.log(`notice: ${message}`);
