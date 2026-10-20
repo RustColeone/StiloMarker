@@ -3,7 +3,11 @@
 //
 // API:
 //   commands.add({ id: "owner.action", title, run, keys?: ["Mod+S"],
-//                  menu?: { id, group?, order? }, enabled?: () => bool, danger? })
+//                  menu?: { id, group?, order? }, enabled?: () => bool, danger?,
+//                  keywords?: ["other", "words"], args? })
+//                            any command can be typed on the Log's command line
+//                            (adapters/command-line.js) but one whose run() needs
+//                            its caller's arguments (args: true)
 //   menus.add({ id, label, order })
 //   run(id, ...args)              -> Promise<boolean>
 //   closeMenus()
@@ -46,6 +50,10 @@
 //                            logLines() -> [{ kind, message, detail, timestamp }] (for tests)
 //   flash(panel, "success" | "error")   flash a status panel's border
 //   upgradeApp(detail)       the server refused this tab as too old: update it (once per tab)
+//   beforeReload             what Reload Window keeps before it reloads (adapters/reload.js):
+//                            add({ id, label, order?, keep: async () => problem text | nothing });
+//                            a problem asks the user before reloading
+//   reloading()              Reload Window is reloading: the page must not ask "Leave site?"
 //   settings                 the app's settings, read-only (settings.theme);
 //                            settings.change({ key: value }, why?) saves a change,
 //                            settings.on(listener) hears them (service/settings.js)
@@ -69,6 +77,8 @@ import { createFrame } from "./adapters/frame/index.js";
 import { registerOfflineShell, upgradeApp } from "./adapters/offline.js";
 import { APP_VERSION } from "./model/version.js";
 import { createLogPanel, flash } from "./adapters/log-panel.js";
+import { createCommandLine, listCommands } from "./adapters/command-line.js";
+import { checkReloadStep, createReload } from "./adapters/reload.js";
 import { loadSettings, patchStoredSettings } from "./adapters/settings-store.js";
 import { SECRET_SETTINGS, keysToSave } from "./service/settings.js";
 
@@ -81,8 +91,8 @@ export default defineModule({
   level: 1,
   uses: [],
   owns: {
-    registries: ["commands", "menus", "pages", "settings fields", "status bar items", "phone panes"],
-    elements: ["menu bar", "the Settings dialog", "the status bar", "the log panel", "the frame: areas, splitters, phone panes and gestures", "notice dialog", "confirm dialog", "input dialog", "form dialog", "toasts"],
+    registries: ["commands", "menus", "pages", "settings fields", "status bar items", "phone panes", "reload steps"],
+    elements: ["menu bar", "the Settings dialog", "the status bar", "the log panel", "the Log's command line", "the frame: areas, splitters, phone panes and gestures", "notice dialog", "confirm dialog", "input dialog", "form dialog", "toasts"],
     connection: ["the server address"],
     events: ["render", "clearing-caches", "area", "resized", "layout"],
     diagnostics: ["uncaught errors", "stiloTrace()"],
@@ -194,6 +204,28 @@ export default defineModule({
         body: doc.getElementById("log-page"), toolbar: doc.getElementById("log-toolbar"), shown: (visible) => { if (visible) logPanel.render(); } });
     }
     logPanel.render();
+    // The Log's command line, and the commands that help when the app seems
+    // stuck: Run Command… (F1) goes to it wherever the Log page is; Reload
+    // Window reloads keeping the work (the modules' beforeReload steps).
+    const commandLine = createCommandLine({ commands, run, log: logPanel.log, showAll: logPanel.showAll });
+    const reloadSteps = ctx.registry({ validate: checkReloadStep });
+    const reload = createReload({ steps: reloadSteps, confirm, log: logPanel.log });
+    function showLog() {
+      const area = pages.areaOf("log") ?? "bottom";
+      if (!frame.shown(area)) frame.toggle(area);
+      const host = pages.hostOf("log") ?? "bottom";
+      if (host === "left") pages.reveal(host, "log");
+      else pages.show(host, "log");
+    }
+    commands.add({ id: "shell.run-command", title: "Run Command…", keywords: ["palette", "console", "terminal"], keys: ["F1"],
+      menu: { id: "view", group: 0, order: 6 }, run() {
+        showLog();
+        globalThis.requestAnimationFrame?.(() => commandLine.focus());
+      } });
+    commands.add({ id: "shell.reload-window", title: "Reload Window", keywords: ["refresh", "restart", "stuck", "frozen"],
+      menu: { id: "settings", group: 0, order: 2.5 }, run: () => reload.reloadWindow() });
+    commands.add({ id: "shell.list-commands", title: "Help: List Commands", keywords: ["commands"],
+      run: () => { showLog(); logPanel.showAll(); listCommands({ commands, log: logPanel.log }); } });
     // The server is where the settings say.
     const server = createServer();
     server.configure({ address: () => settings.serverUrl });
@@ -225,6 +257,8 @@ export default defineModule({
       logLines: logPanel.lines,
       flash,
       upgradeApp: (detail) => upgradeApp(detail, { log: logPanel.log, notify: (message) => notice(message), toast: dialogs.showToast, ignore }),
+      beforeReload: { add: reloadSteps.add },
+      reloading: reload.reloading,
       render: redraw.render,
       holdRendering: redraw.holdWhile,
       clearAppStorage,

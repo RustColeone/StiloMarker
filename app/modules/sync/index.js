@@ -48,6 +48,9 @@ import { createConnection } from "./adapters/connection.js";
 import { normalizeServerUrl } from "../shell/index.js";
 import { getPath } from "../workspace/index.js";
 
+// How long Reload Window waits for this tab's typing to be confirmed.
+const TYPING_WAIT = 5000;
+
 export { transformTextPatch } from "./model/rebase.js";
 export { sanitizeProjectForSync } from "./model/paths.js";
 export const syncVersion = contract.version;
@@ -167,6 +170,25 @@ export default defineModule({
     });
     // The session on the page: the status bar's collaborators and the Session panel.
     addSessionView({ shell: ctx.use("shell"), status, mode });
+    // Reload Window (Shell): this tab's typing confirmed by the server first.
+    // A reload opens the server's copy, keeping unconfirmed typing in
+    // Snapshots (History's keeper), so whatever is still on its way is said.
+    shell.beforeReload.add({ id: "sync.typing", label: "Shared edits", order: 10, async keep() {
+      const unconfirmed = () => {
+        if (mode.get().workspaceMode !== "synced") return [];
+        const project = workspace.project().getProject();
+        const files = Object.values(project.nodes).filter((node) => node.kind === "file");
+        // Offline or reconnecting, nothing is confirmed: the files still marked as changed are what is waiting.
+        if (!session.isConnected() || session.isReconnecting()) return files.filter((node) => node.dirty);
+        return files.filter((node) => session.hasUnsyncedText(getPath(project, node.id)));
+      };
+      const until = Date.now() + TYPING_WAIT;
+      while (unconfirmed().length && Date.now() < until && session.isConnected()) await new Promise((resolve) => setTimeout(resolve, 100));
+      const left = unconfirmed().map((node) => node.name);
+      if (!left.length) return "";
+      const names = left.length > 5 ? `${left.slice(0, 5).join(", ")} and ${left.length - 5} more` : left.join(", ");
+      return `changes in ${names} are not confirmed by the server yet. If you reload now, the server's copy opens and these changes are kept in Snapshots.`;
+    } });
     return { createCollaborationRuntime, syncVersion, mode, status, session: () => session, events: { on: events.on },
       keepers: { add(keep) { keepers.add(keep); return () => keepers.delete(keep); } },
       configure(next) { supplied = { ...supplied, ...next }; },

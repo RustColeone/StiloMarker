@@ -1,7 +1,8 @@
 // What Workspace does as the page comes and goes: reattach the on-device
 // folder the project was opened from (a reload keeps saving to it without
 // asking again), keep this browser's copy when the page hides, and warn before
-// leaving with a file that has unsaved changes.
+// leaving with a file that has unsaved changes (not while Reload Window,
+// which kept them, reloads).
 import { getOpfsDirectoryHandle, supportsOpfs } from "./device-folders.js";
 import { saveProject } from "./browser-copy.js";
 import { ROOT_ID, createProject } from "../model/project.js";
@@ -25,14 +26,15 @@ export async function reattachDeviceFolder({ store, settings, log }) {
   }
 }
 
-export function watchPage({ store, log, win = globalThis.window, doc = globalThis.document }) {
+// reloading(): Shell's Reload Window, which kept the work first, is reloading.
+export function watchPage({ store, log, reloading = () => false, win = globalThis.window, doc = globalThis.document }) {
   const keepCopy = () => {
     try { saveProject(store().getProject()); } catch (error) { log("Browser recovery save failed", error.message); }
   };
   win?.addEventListener("pagehide", keepCopy);
   doc?.addEventListener("visibilitychange", () => { if (doc.visibilityState === "hidden") keepCopy(); });
   win?.addEventListener("beforeunload", (event) => {
-    if (!store()?.getActiveFile()?.dirty) return;
+    if (reloading() || !store()?.getActiveFile()?.dirty) return;
     event.preventDefault();
     event.returnValue = "";
   });

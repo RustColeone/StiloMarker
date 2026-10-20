@@ -83,7 +83,7 @@ async def main():
         labels = await page.locator('.menu-bar .menu-trigger').all_inner_texts()
         assert labels == ['File', 'Edit', 'Create', 'View', 'Settings'], labels
         counts = await page.evaluate('[...document.querySelectorAll(".menu-bar .menu-popover")].map((p) => p.children.length)')
-        assert counts == [9, 5, 8, 5, 5], counts  # Create: md, mtree, urldb, bmap, persona, mermaid, html, folder
+        assert counts == [9, 5, 8, 6, 6], counts  # Create: md, mtree, urldb, bmap, persona, mermaid, html, folder
         assert await page.locator('#file-menu').is_hidden()
 
         # Opening one closes the others; a click outside closes it.

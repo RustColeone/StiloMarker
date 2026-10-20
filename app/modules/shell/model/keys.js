@@ -31,3 +31,8 @@ export function chordMatches(chord, event) {
   if (chord.shift && !event.shiftKey) return false;
   return true;
 }
+
+// A shortcut as the user reads it: "Mod" is Cmd on a Mac, Ctrl elsewhere.
+export function chordLabel(text, mac = false) {
+  return String(text ?? "").replace(/\bMod\b/g, mac ? "Cmd" : "Ctrl");
+}

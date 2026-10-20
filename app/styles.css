@@ -3451,6 +3451,108 @@ menu {
   overflow-wrap: anywhere;
 }
 
+/* The Log's command line: under the log, its suggestions over the log's end. */
+.log-page {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.log-page > .debug-log-list,
+.log-page > .log-suggestions {
+  grid-row: 1;
+  grid-column: 1;
+}
+
+.log-command {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 8px;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.log-command-prompt {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.log-command-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+
+.log-command-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--editor);
+}
+
+.log-suggestions {
+  align-self: end;
+  z-index: 2;
+  max-height: min(100%, 260px);
+  overflow: auto;
+  margin: 0 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-1);
+  box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+}
+
+.log-suggestion {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.log-suggestion.is-chosen {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.log-suggestion.is-disabled {
+  color: var(--text-dim);
+}
+
+.log-suggestion.is-danger .log-suggestion-title {
+  color: var(--danger);
+}
+
+.log-suggestion.is-empty {
+  color: var(--text-dim);
+  cursor: default;
+}
+
+.log-suggestion-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-suggestion-keys {
+  flex: none;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* A confirm's message may come in paragraphs (Reload Window's problems). */
+#confirm-dialog-message {
+  white-space: pre-line;
+}
+
 .editor-line.is-empty {
   min-height: calc(var(--editor-font-size) * 1.6);
 }

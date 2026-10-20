@@ -12,6 +12,10 @@ export function createCommands(ctx) {
       if (!titled) throw new Error(`${entry.id} needs a title (text, or a function giving it)`);
       if (typeof entry.run !== "function") throw new Error(`${entry.id} needs run()`);
       for (const keys of entry.keys ?? []) parseChord(keys);
+      // Other words it is found by on the Log's command line ("refresh" for Reload Window).
+      if (entry.keywords !== undefined && !(Array.isArray(entry.keywords) && entry.keywords.every((word) => typeof word === "string" && word))) {
+        throw new Error(`${entry.id}: keywords are a list of words`);
+      }
     }
   });
   const menus = ctx.registry({

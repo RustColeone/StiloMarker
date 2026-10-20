@@ -86,7 +86,14 @@ export function createLogPanel({ shown, copyText, notify, doc = globalThis.docum
     render();
   });
 
-  return { log, render, lines: () => entries.map((entry) => ({ ...entry })) };
+  // The All tab: what a typed command did shows there.
+  function showAll() {
+    if (activeTab === "all") return;
+    activeTab = "all";
+    render();
+  }
+
+  return { log, render, showAll, lines: () => entries.map((entry) => ({ ...entry })) };
 }
 
 // Flash a status panel's border: green ("success") or red ("error").

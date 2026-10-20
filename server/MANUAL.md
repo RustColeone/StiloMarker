@@ -48,6 +48,24 @@ Stilo Marker is a browser-based Markdown workspace. It lets you write notes, bui
 
 Panels can be toggled from the `View` menu.
 
+### The Log and its command line
+
+The Log (View → Toggle Log) lists what the app did. Under it is a command
+line: type part of a command's name and pick it from the suggestions (↑ ↓ to
+choose, Enter to run, Tab to complete, Esc to close). With nothing typed it
+lists every command. `View → Run Command…` (`F1`) opens the Log with the
+line ready; `help` lists the commands in the Log. Any menu command can be
+run there.
+
+**If the app seems stuck**, run **Reload Window** (also in the Settings
+menu). It is the browser's reload without losing work: it first waits for
+your typing in a shared workspace to reach the server, writes your files to
+this browser (and to a local project's folder), and keeps the open tabs and
+the caret; then it reloads, without the browser's "Leave site?" question.
+If something can't be kept (the server is unreachable, a folder on disk has
+unsaved files, the Agent is still answering), it says what and asks before
+reloading.
+
 ---
 
 ## 2. Project Model

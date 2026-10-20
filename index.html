@@ -219,6 +219,14 @@
             <div class="area-pages" data-tab-host-pages="bottom">
               <div id="log-page" class="log-page">
                 <div id="debug-log-list" class="debug-log-list"></div>
+                <!-- The command line (Shell's): suggestions open above it, over the log. -->
+                <div id="log-suggestions" class="log-suggestions" role="listbox" aria-label="Commands" hidden></div>
+                <div class="log-command">
+                  <span class="log-command-prompt" aria-hidden="true">&gt;</span>
+                  <input id="log-command-input" class="log-command-input" type="text" role="combobox" aria-label="Run a command"
+                    aria-controls="log-suggestions" aria-expanded="false" aria-autocomplete="list" autocomplete="off"
+                    autocapitalize="off" spellcheck="false" enterkeyhint="go" placeholder="Run a command (try Reload Window, or help)">
+                </div>
               </div>
             </div>
           </section>

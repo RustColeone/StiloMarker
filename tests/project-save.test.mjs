@@ -132,3 +132,27 @@ test('localStorage failure never marks an in-memory project saved', async () => 
   await handlers.auto('test'); await assert.rejects(handlers.manual(), /quota exceeded/);
   assert.equal(marks, 0);
 });
+
+test('Reload Window: keepAll writes everything now and says what it could not keep', async () => {
+  // In this browser: written at once, auto-save marks it saved, nothing to say.
+  let p = localProject(); p.sourceMode = 'memory'; const id = fileId(p); p = updateFileContent(p, id, 'typed');
+  const written = []; const marked = [];
+  const controller = { getProject: () => p, markSaved() {}, markManySaved: ids => marked.push(...ids) };
+  let handlers = mainSaveHandlers(controller, async () => false, (project) => written.push(project.nodes[id].content));
+  assert.equal(await handlers.saving.keepAll(), '');
+  assert.ok(written.includes('typed') && marked.includes(id));
+  // This browser's copy can't be written: said.
+  handlers = mainSaveHandlers(controller, async () => false, () => { throw new Error('quota exceeded'); });
+  assert.match(await handlers.saving.keepAll(), /browser's copy could not be written \(quota exceeded\)/);
+  // A local project's folder: written too, or said.
+  let q = localProject(); const qid = fileId(q); q = updateFileContent(q, qid, 'local');
+  const folder = [];
+  handlers = mainSaveHandlers({ getProject: () => q, markSaved() {}, markManySaved() {} }, async (project) => { folder.push(project.nodes[qid].content); return true; });
+  assert.equal(await handlers.saving.keepAll(), ''); assert.ok(folder.includes('local'));
+  handlers = mainSaveHandlers({ getProject: () => q, markSaved() {}, markManySaved() {} }, async () => { throw new Error('disk full'); });
+  assert.match(await handlers.saving.keepAll(), /folder could not be written \(disk full\)/);
+  // A folder picked on this device saves only on Save: its unsaved files are named.
+  let f = localProject(); const fid = fileId(f); f = updateFileContent(f, fid, 'unsaved'); f.sourceMode = 'filesystem';
+  handlers = mainSaveHandlers({ getProject: () => f, markSaved() {}, markManySaved() {} }, async () => { throw new Error('not asked'); });
+  assert.match(await handlers.saving.keepAll(), /1 file\(s\) have changes not saved to the folder on disk \(note\.md\)/);
+});

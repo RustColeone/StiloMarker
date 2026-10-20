@@ -203,6 +203,8 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
   window.addEventListener("pagehide", keepView);
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") keepView(); });
   window.addEventListener("beforeunload", () => app.captureViewState());
+  // Reload Window (Shell) keeps it too, so the reload opens the same tabs at the same place.
+  shell.beforeReload.add({ id: "editor.view", label: "Where you were", order: 30, keep() { keepView(); return ""; } });
   // A mark put or taken off shows at once: the shown file's lines and bar, the tabs' badges.
   marks.on(() => {
     const file = app.controller.getActiveFile();

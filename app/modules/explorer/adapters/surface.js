@@ -178,7 +178,7 @@ export function createSurface({ workspace, editor, shell, sync, types, fileMenus
   shell.commands.add({ id: "explorer.export-selected", title: "Export Selected", menu: { id: "file", group: 0, order: 9 },
     run: () => app.exportNode(app.getSelectedNode(app.controller.getProject())?.id ?? app.controller.getProject().rootId) });
   // The phone's pen renames the file on screen (Shell's frame asks with its id).
-  shell.commands.add({ id: "explorer.rename-file", title: "Rename File", run: (nodeId) => app.renameFileById(nodeId) });
+  shell.commands.add({ id: "explorer.rename-file", title: "Rename File", args: true, run: (nodeId) => app.renameFileById(nodeId) });
   // A drag that ended anywhere leaves no drop marks on the tree.
   document.addEventListener("dragend", () => app.clearExplorerDropState());
   document.addEventListener("drop", () => app.clearExplorerDropState());

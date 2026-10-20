@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-20 · release `v0.2.7` (deployed with v0.2.1–v0.2.6; public checks passed)
+Last updated: 2026-10-20 · release `v0.2.8` (not deployed; v0.2.7 is live)
 
 ---
 
@@ -40,6 +40,34 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.8: the Log's command line, and Reload Window
+
+Asked for 2026-10-20: commands typed in the Log with suggestions, and a
+reload for a page that seems stuck which, unlike the browser's, can't lose
+work. Browser only.
+
+- **A command line under the Log**: type part of a command's name and pick
+  it (↑ ↓, Enter, Tab completes, Esc closes then clears). Nothing typed lists
+  every command, Reload Window first; `help` writes them all in the log; an
+  unknown command says so and stays in the line to be put right. Run
+  Command… (View menu, `F1`) opens the Log with the line ready, on the phone
+  in its sheet. Rename File, which needs to be told which file, is not
+  offered.
+- **Reload Window** (the command line, or Settings → Reload Window) keeps
+  the work, then reloads: the shared workspace's typing confirmed by the
+  server (it waits up to 5 s), the files written to this browser and a local
+  project's folder, the open tabs and the caret. No "Leave site?" question,
+  which a plain reload of a page with unsaved changes asks. When something
+  can't be kept (typing the server has not confirmed, a folder on disk with
+  unsaved files, the Agent still answering) it says what and asks; staying
+  reloads nothing.
+- Tests: `command-line.test.mjs` (finding commands, keywords, Reload
+  Window's steps, problems and time limit), `project-save.test.mjs`
+  (Workspace's step: written now, or what could not be), `log-commands-browser.py` (the
+  line on the desktop and the phone; a plain reload asks, Reload Window
+  doesn't and brings back the edit, the file and the caret; a problem asks
+  first); `shell-browser.py` counts the two new menu items.
 
 ### v0.2.7: the open issues
 

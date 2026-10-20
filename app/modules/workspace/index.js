@@ -49,7 +49,8 @@
 //     holdSaving(busyNow): saving waits while busy (the Editor's IME composition)
 //   saving: schedule(project) after a change (this browser's copy, a local
 //       project's folder, auto-save), saveActiveFile() (Save), runAutoSave(why),
-//       scheduleAutoSave(), flush() (the browser copy, now), and
+//       scheduleAutoSave(), flush() (the browser copy, now), keepAll() (Reload
+//       Window's step: all of it, now; says what it could not keep), and
 //       attach({ busy, scope, shared, confirmed }) from the app above, which
 //       starts the page listeners and the periodic save (adapters/saving.js)
 // Static: the project's storage (loadProject, saveProject; folders on disk:
@@ -123,7 +124,9 @@ export default defineModule({
     // Where the project lives, in the status bar: drawn as the project changes.
     const drawStatus = addStatusItems({ shell, log: (message) => ctx.log(message) });
     // This browser's copy when the page hides, and a warning before leaving unsaved changes.
-    watchPage({ store: () => store, log: (...parts) => ctx.log(parts.join(" ")) });
+    watchPage({ store: () => store, log: (...parts) => ctx.log(parts.join(" ")), reloading: () => shell.reloading() });
+    // Reload Window (Shell) writes everything first, after Sync's typing is confirmed.
+    shell.beforeReload.add({ id: "workspace.files", label: "Your files", order: 20, keep: () => (store ? saving.keepAll() : "") });
     addWorkspaceCommands({ shell, log: (...parts) => ctx.log(parts.join(" ")) });
     // Save (Ctrl+S): auto-save keeps the work, so Save also marks a point to
     // compare against later; it says "saved" and History takes a snapshot.

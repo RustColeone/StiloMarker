@@ -43,7 +43,7 @@ test("an edit lands beside other people's changes, and refuses to guess", () => 
 
 // A real project in the module; what it announces stands in for Sync.
 async function harness(files) {
-  const shell = { name: "shell", level: 1, uses: [], owns: {}, start: () => ({ settings: { autoSave: false, on() {} }, settingsDialog: { fields: { add() {} }, onOpen() {} }, statusBar: { add: () => ({ set() {} }) }, commands: { add() {} }, events: { on() {} }, render() {}, holdRendering() {} }) };
+  const shell = { name: "shell", level: 1, uses: [], owns: {}, start: () => ({ settings: { autoSave: false, on() {} }, settingsDialog: { fields: { add() {} }, onOpen() {} }, statusBar: { add: () => ({ set() {} }) }, commands: { add() {} }, beforeReload: { add() {} }, reloading: () => false, events: { on() {} }, render() {}, holdRendering() {} }) };
   const { workspace } = await startModules([shell, fileTypesModule, workspaceModule]);
   let project = createProject("W");
   for (const [name, content] of Object.entries(files)) project = addFile(project, ROOT_ID, name, content);

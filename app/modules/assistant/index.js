@@ -73,6 +73,9 @@ export default defineModule({
       });
     }
     shell.settingsDialog.onOpen(() => { if (!panel) void load(); });
+    // Reload Window (Shell): an answer still on its way would be cut off.
+    shell.beforeReload.add({ id: "assistant.answer", label: "The Agent", order: 40,
+      keep: () => (panel?.chatState.sending ? "it is still answering; reloading now may lose its answer." : "") });
     shell.commands.add({ id: "assistant.toggle-chat", title: () => (shell.frame.shown("right") ? "Hide Chat" : "Show Chat"),
       menu: { id: "view", group: 0, order: 4 }, run: () => shell.frame.toggle("right") });
     // It loads when the area holding it shows, even on another of its tabs

@@ -135,6 +135,30 @@ export function createSaving({ store, settings, log, io = { saveProject, savePro
     if (hooks.confirmed(current, [activeId]).includes(activeId)) store().markSaved(activeId, !hooks.shared());
   }
 
+  // Reload Window (Shell): everything written now (this browser's copy, a
+  // local project's folder, auto-save's marks). Says what it could not keep.
+  async function keepAll() {
+    const project = store().getProject();
+    if (recoveryTimer) clearTimeout(recoveryTimer);
+    recoveryTimer = null;
+    recoveryDeadline = 0;
+    recoveryPending = null;
+    try { io.saveProject(project); } catch (error) { return `this browser's copy could not be written (${error.message}).`; }
+    if (project.sourceMode === "opfs" && project.handles?.[project.rootId]) {
+      try { await io.saveProjectToHandles(project); } catch (error) { return `the project's folder could not be written (${error.message}).`; }
+    }
+    await runAutoSave("reload");
+    // A folder picked on this device saves only on Save, and a reload can't
+    // reopen it without asking: its unsaved files stay in this browser only.
+    const unsaved = project.sourceMode === "filesystem" ? dirtyFileIds(store().getProject()) : [];
+    if (unsaved.length) {
+      const all = unsaved.map((id) => store().getProject().nodes[id]?.name).filter(Boolean);
+      const names = all.length > 5 ? `${all.slice(0, 5).join(", ")} and ${all.length - 5} more` : all.join(", ");
+      return `${unsaved.length} file(s) have changes not saved to the folder on disk (${names}). After a reload they are kept in this browser, but the folder must be opened again; Save (Ctrl+S) writes them there first.`;
+    }
+    return "";
+  }
+
   // The project changed (or the app rendered it): schedule each kind of save.
   function schedule(project) {
     scheduleRecoverySave(project);
@@ -159,6 +183,6 @@ export function createSaving({ store, settings, log, io = { saveProject, savePro
     }, AUTOSAVE_PERIODIC_MS);
   }
 
-  return Object.freeze({ attach, schedule, scheduleAutoSave, runAutoSave, saveActiveFile, flush: flushRecoverySave, dirtyFileIds });
+  return Object.freeze({ attach, schedule, scheduleAutoSave, runAutoSave, saveActiveFile, keepAll, flush: flushRecoverySave, dirtyFileIds });
 }
 
