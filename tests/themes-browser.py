@@ -74,6 +74,11 @@ async def main():
         state = await page.evaluate(STATE)
         assert (state['base'], state['id'], state['bg'], state['bold']) == ('light', 'light', '#f3f3f3', 'rgb(31, 31, 31)'), state
 
+        # A toast is the theme turned over: its text colour behind its page colour.
+        await page.evaluate('window.__themeTest.shell.toast("Saved", { duration: 4000 })')
+        toast = await page.evaluate('(() => { const t = document.querySelector(".app-toast"), cs = getComputedStyle(t); return [cs.backgroundColor, cs.color]; })()')
+        assert toast == ['rgb(31, 31, 31)', 'rgb(255, 255, 255)'], toast
+
         # Change Theme… opens the cards; a card applies its theme at once.
         await page.evaluate('window.__themeTest.shell.run("shell.pick-theme")')
         await page.wait_for_selector('#settings-dialog[open] #theme-picker')
@@ -109,7 +114,7 @@ async def main():
         assert not errors, errors
         await context.close()
         await browser.close()
-        print(json.dumps({'checks': ['Light bold readable', 'Change Theme… and a card applies its theme', 'kept across a reload',
+        print(json.dumps({'checks': ['Light bold readable', 'toasts readable', 'Change Theme… and a card applies its theme', 'kept across a reload',
                                      'shown before the app runs', 'System follows the device'], 'runtimeErrors': 0}))
 
 

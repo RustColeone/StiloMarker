@@ -15,6 +15,7 @@ import {
   serializeBmap,
 } from "../model/bmap.js";
 import { renderMarkdown } from "../../../../app/modules/editor/index.js";
+import { fitView } from "../model/fit.js";
 import { builtinTypes } from "../../../../app/modules/file-types/index.js";
 
 const GRID_BASE = 5;
@@ -942,6 +943,9 @@ function createBmapView({ container, ...defaultOptions } = {}) {
   };
 
   let canvasEl = null;
+  // A fit waiting for the canvas to have a size, and the last fit (while the
+  // view is still it, a resize fits again: nobody has panned or zoomed since).
+  let fitPending = false, fitted = null;
   let innerEl = null;
   let rootEl = null; // the .bmap-editor wrapper for the current render
   let viewActive = false; // the bmap was the last thing the user pointer-interacted with
@@ -3410,6 +3414,10 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     canvas.className = "bmap-canvas";
     canvas.tabIndex = 0;
     canvasEl = canvas;
+    new ResizeObserver(() => {
+      const untouched = fitted && zoom === fitted.zoom && pan.x === fitted.pan.x && pan.y === fitted.pan.y;
+      if (canvas.clientWidth && canvas.clientHeight && (fitPending || untouched)) { fitPending = false; fitToContent(); }
+    }).observe(canvas);
 
     const inner = document.createElement("div");
     inner.className = "bmap-inner";
@@ -3447,11 +3455,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
         zoom = clamp(zoom - ZOOM_STEP, MIN_ZOOM, MAX_ZOOM);
         applyViewportTransform();
       }),
-      makeControlButton("⊡", "Reset view", () => {
-        pan = { x: 40, y: 40 };
-        zoom = 1;
-        applyViewportTransform();
-      }),
+      makeControlButton("⊡", "Fit the diagram", () => fitToContent()),
     );
 
     const nodeMap = new Map(ast.nodes.map((node) => [node.id, node]));
@@ -3967,17 +3971,22 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     }
   }
 
-  // On opening a diagram whose nodes all sit far from the origin, the default
-  // top-left view would look empty. If nothing is in view, pan to the node
-  // nearest the origin and centre it (opt-out via the autoPan option).
+  // The whole diagram in view (model/fit.js).
+  function fitToContent() {
+    fitted = canvasEl ? fitView(ast.nodes.map(getNodeRect), canvasEl.getBoundingClientRect()) : null;
+    if (fitted) { zoom = fitted.zoom; pan = { ...fitted.pan }; }
+    applyViewportTransform();
+  }
+
+  // On a fresh open the whole diagram shows (fitToContent). A view restored
+  // from an earlier visit keeps its place, unless nothing is in it: then the
+  // node nearest its centre is brought there. (Opt-out: the autoPan option.)
   function maybeAutoPanToContent() {
-    if (!activeOptions.autoPan || ast.nodes.length === 0 || !canvasEl) {
-      return;
-    }
-    const rect = canvasEl.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) {
-      return;
-    }
+    const rect = canvasEl?.getBoundingClientRect();
+    fitted = null; // a new document: its view is not the last one's fit
+    if (!activeOptions.autoPan || ast.nodes.length === 0) return;
+    if (!rect?.width || !rect.height) { fitPending = autoPanTargetIsOrigin; return; }
+    if (autoPanTargetIsOrigin) return fitToContent();
     const topLeft = clientToWorld(rect.left, rect.top);
     const bottomRight = clientToWorld(rect.right, rect.bottom);
     const anyVisible = ast.nodes.some((node) => {
@@ -3985,28 +3994,12 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       return r.x < bottomRight.x && r.x + r.width > topLeft.x
         && r.y < bottomRight.y && r.y + r.height > topLeft.y;
     });
-    if (anyVisible) {
-      return;
-    }
-    // Aim at the origin on a fresh open, or at the restored view's centre when
-    // resuming a cached location — pan to whichever node is nearest that point.
-    const target = autoPanTargetIsOrigin
-      ? { x: 0, y: 0 }
-      : clientToWorld(rect.left + (rect.width / 2), rect.top + (rect.height / 2));
-    let best = null;
-    let bestDistance = Infinity;
-    for (const node of ast.nodes) {
-      const r = getNodeRect(node);
-      const cx = r.x + (r.width / 2);
-      const cy = r.y + (r.height / 2);
-      const dx = cx - target.x;
-      const dy = cy - target.y;
-      const distance = (dx * dx) + (dy * dy);
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        best = { cx, cy };
-      }
-    }
+    if (anyVisible) return;
+    // The node nearest the restored view's centre is brought to it.
+    const target = clientToWorld(rect.left + (rect.width / 2), rect.top + (rect.height / 2));
+    const centres = ast.nodes.map(getNodeRect).map((r) => ({ cx: r.x + (r.width / 2), cy: r.y + (r.height / 2) }));
+    const distance = ({ cx, cy }) => ((cx - target.x) ** 2) + ((cy - target.y) ** 2);
+    const best = centres.reduce((nearest, centre) => (distance(centre) < distance(nearest) ? centre : nearest), centres[0]);
     if (best) {
       pan = { x: (rect.width / 2) - (best.cx * zoom), y: (rect.height / 2) - (best.cy * zoom) };
       applyViewportTransform();

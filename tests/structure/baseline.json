@@ -1,7 +1,7 @@
 {
   "about": "Structure violations that existed when the rules were introduced (2026-10-16). They may only shrink; see tools/structure-baseline.mjs.",
   "oversized": {
-    "extensions/bmap-diagram/browser/adapters/view.js": 4025
+    "extensions/bmap-diagram/browser/adapters/view.js": 4018
   },
   "spellings": {
     "access file": [],

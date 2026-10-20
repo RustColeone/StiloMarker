@@ -188,7 +188,6 @@ export function createTabs(app) {
     const phonePane = app.phonePane();
     if (phonePane && phonePane !== "source" && !(phonePane === "preview" && app.isPreviewableFileName(node.name))) app.showPhonePane("source");
     setActiveSourceFile(fileId);
-    app.showToast(`Opened ${node.name}`);
     // On mobile the explorer is a flyout overlay — close it so the opened file
     // is visible without an extra tap.
     app.setMobileExplorerOpen(false);
@@ -639,21 +638,30 @@ export function createTabs(app) {
       strip.append(tab);
     });
 
-    // The strip scrolls now, so the active tab can sit off-screen after a switch.
-    // Nudge it into view without disturbing any other scroll container.
+    revealActiveTab(strip);
+  }
+
+  // The strip scrolls, so the active tab can sit off-screen after a switch or
+  // when the strip narrows: it is nudged into view, no other scroll container
+  // disturbed. Its place is measured in the strip (offsetLeft counted from the
+  // header, the group's label included, and scrolled too far).
+  function revealActiveTab(strip) {
     const activeTab = strip.querySelector(".editor-tab.is-active");
-    if (activeTab) {
-      const left = activeTab.offsetLeft;
-      const right = left + activeTab.offsetWidth;
-      if (left < strip.scrollLeft) {
-        strip.scrollLeft = left;
-      } else if (right > strip.scrollLeft + strip.clientWidth) {
-        strip.scrollLeft = right - strip.clientWidth;
-      }
+    if (!activeTab) return;
+    const left = activeTab.getBoundingClientRect().left - strip.getBoundingClientRect().left + strip.scrollLeft;
+    const right = left + activeTab.getBoundingClientRect().width;
+    // A tab wider than the strip shows its start (its name), not its ×.
+    if (left < strip.scrollLeft || right - left > strip.clientWidth) {
+      strip.scrollLeft = left;
+    } else if (right > strip.scrollLeft + strip.clientWidth) {
+      strip.scrollLeft = right - strip.clientWidth;
     }
   }
 
   const stripOf = (group) => (group === "left" ? app.elements.sourceTabStrip : app.elements.previewTabStrip);
+  for (const strip of [stripOf("left"), stripOf("right")]) {
+    if (strip && globalThis.ResizeObserver) new ResizeObserver(() => revealActiveTab(strip)).observe(strip);
+  }
 
   function renderTabs(project) {
     const state = app.view.get();
@@ -671,7 +679,7 @@ export function createTabs(app) {
         project,
         tabs: group.tabs,
         active: group.active,
-        emptyText: group.id === "left" ? "No source file selected" : "No preview file selected",
+        emptyText: "No file open",
         onActivate: (tab) => activateTab(group.id, tab),
         onClose: (tab) => closeTab(group.id, tab),
         extraTabs: state.hosts.preview === group.id ? paneViewTabs : []

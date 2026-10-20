@@ -12,14 +12,13 @@ export function createActions(app) {
     const nodeId = target.nodeId;
     app.view.pick(nodeId, target.partId);
     app.logDebug("action", "Explorer action", action);
+    // Opening shows the file: no toast to say so.
     if (action === "open-source") {
       app.setActiveSourceFile(nodeId);
-      app.showToast(`Opened ${app.controller.getProject().nodes[nodeId]?.name ?? "file"}`);
       return;
     }
     if (action === "open-preview") {
       app.setPreviewFile(nodeId);
-      app.showToast(`Preview: ${app.controller.getProject().nodes[nodeId]?.name ?? "file"}`);
       return;
     }
     if (action.startsWith("filter-")) {

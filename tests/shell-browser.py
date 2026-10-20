@@ -253,6 +253,17 @@ async def main():
         # A diagram previews as the diagram editor, not as its text (lost in v0.1.48).
         await page.evaluate('window.__shellTest.openFileFromExplorer("d")')
         await page.wait_for_selector('#preview-output .bmap-editor', timeout=15000)
+        # Opened, it fits its pane: every node in view, or, in a pane too narrow
+        # even at the floor (50%), its start; its status reads in the theme's colours.
+        await page.wait_for_timeout(300)
+        fit = await page.evaluate('''() => { const canvas = document.querySelector("#preview-output .bmap-canvas").getBoundingClientRect();
+          const nodes = [...document.querySelectorAll("#preview-output .bmap-node")].map((n) => n.getBoundingClientRect());
+          const out = nodes.filter((r) => r.left < canvas.left || r.right > canvas.right || r.top < canvas.top || r.bottom > canvas.bottom).length;
+          const status = document.querySelector("#preview-output .bmap-status-float");
+          return { nodes: nodes.length, out, startShown: Math.min(...nodes.map((r) => r.left)) >= canvas.left,
+            transform: document.querySelector("#preview-output .bmap-inner").style.transform, status: getComputedStyle(status).color }; }''')
+        assert fit['nodes'] > 2 and fit['startShown'] and (fit['out'] == 0 or 'scale(0.5)' in fit['transform']), fit
+        assert fit['status'] != 'rgba(255, 255, 255, 0.9)', fit
         # In the source editor the extension's highlighting, toolbar buttons and
         # autocomplete apply to the diagram (the Editor's extension points).
         await page.wait_for_selector('#editor-content .token-bmap-selector')
@@ -291,7 +302,7 @@ async def main():
         await browser.close()
         print(json.dumps({'checks': ['file-type lists from File types', 'five menus with their items, groups and shortcuts', 'one menu open at a time', 'live titles',
                                      'menu item runs its command', 'Ctrl+S runs Save', 'a snapshot compared in the diff tab', 'rename keeps the extension',
-                                     'late menus and commands appear', 'Replace File replaces an image', 'the welcome page from its owners', 'status bar items from their owners', 'Settings sections and fields', 'the trace and its tab', 'a diagram previews as a diagram', 'diagram source: highlighting, toolbar, autocomplete (extension)', 'diagram Export As and new diagram (extension)', 'phone menu panel'], 'runtimeErrors': 0}))
+                                     'late menus and commands appear', 'Replace File replaces an image', 'the welcome page from its owners', 'status bar items from their owners', 'Settings sections and fields', 'the trace and its tab', 'a diagram previews as a diagram, fitted', 'diagram source: highlighting, toolbar, autocomplete (extension)', 'diagram Export As and new diagram (extension)', 'phone menu panel'], 'runtimeErrors': 0}))
 
 
 asyncio.run(main())

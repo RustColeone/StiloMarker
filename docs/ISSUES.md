@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-20 · release `v0.2.13` (deployed with v0.2.8–v0.2.12; public checks passed)
+Last updated: 2026-10-20 · release `v0.2.14` (not deployed; v0.2.13 is live)
 
 ---
 
@@ -40,6 +40,34 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.14: small things that were wrong
+
+Found looking for polish after v0.2.13 (2026-10-20). Browser only.
+
+- **Toasts were unreadable in Light**: white text on a light grey pill
+  (since before the themes). A toast is now the theme turned over, readable
+  on all seven. Opening a file no longer shows an "Opened …" toast (it was
+  on every open; the file opening says so).
+- **A pane's active tab could sit off-screen**: its strip was scrolled by
+  the tab's place in the whole header, the group's label included (wider
+  since v0.2.13), and not again when the strip narrowed. It is measured in
+  the strip and kept in view as the strip resizes; a tab wider than the
+  strip shows its name rather than its ×.
+- An empty pane said "No preview file selected" whatever it showed: now
+  "No file open".
+- **A diagram opened cut off**: it started at 100% from the top-left. A
+  fresh open now fits it to its pane (zoomed out to at most 50%, a bigger
+  one showing its top-left part), and fits again as the pane resizes until
+  you pan or zoom (its side panel opening had narrowed it after the fit);
+  a diagram looked at before still opens where it was left. ⊡ fits it
+  (it reset to the top-left). The fitting is its own small model
+  (`extensions/bmap-diagram/browser/model/fit.js`); the view file got
+  smaller.
+- A diagram's status (top right) was white text: invisible in light themes.
+- Tests: `bmap-service.test.mjs` (the fit), `tab-menu-browser.py` (the
+  active tab in view in a narrow window), `themes-browser.py` (a toast's
+  colours), `shell-browser.py` (a diagram fitted, its status readable).
 
 ### v0.2.13: a group's label switches its view
 

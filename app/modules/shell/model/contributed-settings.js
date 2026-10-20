@@ -30,7 +30,7 @@ export default Object.freeze([
       "page": "appearance",
       "id": "bmap-auto-pan-input",
       "order": 120,
-      "label": "Auto-pan diagrams to content on open",
+      "label": "Fit diagrams to their pane on open",
       "control": "checkbox"
     },
     "extension": "bmap-diagram"

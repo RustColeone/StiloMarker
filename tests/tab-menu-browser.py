@@ -79,6 +79,24 @@ async def main():
             await open_file(name)
         assert await page.evaluate(TABS, 'source') == ['welcome.md', 'MeitanteiCure.mtree', 'LULUKA.urldb']
 
+        # In a narrow window the strip scrolls, and the active tab is always in
+        # view: wholly when it fits, else its start (it was scrolled by its place
+        # in the header, label included).
+        await page.set_viewport_size({'width': 980, 'height': 900})
+        in_view = '''() => { const strip = document.querySelector("#source-tab-strip"), tab = strip.querySelector(".editor-tab.is-active");
+          const s = strip.getBoundingClientRect(), t = tab.getBoundingClientRect();
+          const fits = t.width <= s.width + 0.5;
+          return [tab.querySelector(".tab-title").textContent, Math.abs(t.left - s.left) < 0.5 || (t.left >= s.left - 0.5 && (fits ? t.right <= s.right + 0.5 : false)), strip.scrollWidth > strip.clientWidth]; }'''
+        overflowed = False
+        for name in ('LULUKA.urldb', 'welcome.md', 'MeitanteiCure.mtree', 'LULUKA.urldb', 'welcome.md'):
+            await open_file(name)
+            title, whole, scrolls = await page.evaluate(in_view)
+            assert title == name and whole, (name, title, whole)
+            overflowed = overflowed or scrolls
+        assert overflowed, 'the strip must overflow for this check'
+        await page.set_viewport_size({'width': 1400, 'height': 900})
+        await page.wait_for_timeout(300)
+
         # The menu of a source tab: the view it is in ticked, a one-view file not previewable.
         entries = await tab_menu('source', 'MeitanteiCure.mtree')
         labels = [label for label, _, _ in entries]
@@ -195,7 +213,7 @@ async def main():
 
         assert not errors, errors
         await browser.close()
-        print(json.dumps({'checks': ['menu entries', 'escape', 'default layout', 'open as preview in the same group', 'two previews side by side', 'the preview back', 'source back', 'the label switches views', 'phone with a mixed group', 'copy path',
+        print(json.dumps({'checks': ['active tab in view', 'menu entries', 'escape', 'default layout', 'open as preview in the same group', 'two previews side by side', 'the preview back', 'source back', 'the label switches views', 'phone with a mixed group', 'copy path',
                                      'close to the right', 'close others', 'press outside', 'close all']}))
 
 

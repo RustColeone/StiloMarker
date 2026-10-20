@@ -158,7 +158,7 @@
   backdrop-filter: blur(2px);
   font-size: 12px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

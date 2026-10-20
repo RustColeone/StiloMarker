@@ -134,3 +134,21 @@ test("bmap: single-line styles parse regardless of delimiter", () => {
     }
   }
 });
+
+test("a diagram fitted to its pane: every node in view, centred, never zoomed in past 100% or out past the floor", async () => {
+  const { fitView } = await import("../extensions/bmap-diagram/browser/model/fit.js");
+  const view = { width: 500, height: 400 };
+  // Small: 100%, centred.
+  const small = fitView([{ x: 0, y: 0, width: 100, height: 50 }, { x: 200, y: 100, width: 100, height: 50 }], view);
+  assert.deepEqual(small, { zoom: 1, pan: { x: 100, y: 125 } });
+  // Wide: zoomed out to fit the width (436 px of room for 700), centred.
+  const wide = fitView([{ x: 100, y: 0, width: 700, height: 100 }], view);
+  assert.equal(wide.zoom, 436 / 700);
+  assert.equal(Math.round(wide.pan.x + 100 * wide.zoom), 32, "the margin on the left");
+  assert.equal(Math.round(wide.pan.y), Math.round((400 - 100 * wide.zoom) / 2), "centred down");
+  // Huge: no further out than the floor, from its top-left, a margin in.
+  const huge = fitView([{ x: -50, y: -20, width: 5000, height: 3000 }], view);
+  assert.deepEqual(huge, { zoom: 0.5, pan: { x: 32 + 25, y: 32 + 10 } });
+  assert.equal(fitView([], view), null);
+  assert.equal(fitView([{ x: 0, y: 0, width: 10, height: 10 }], { width: 0, height: 0 }), null);
+});
