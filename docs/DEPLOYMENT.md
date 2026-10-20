@@ -988,3 +988,32 @@ among them), 29 browser suites.
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261020T100550Z-v0.2.7`.
 172/172 data files (taken with the service stopped), every JSON file valid.
+
+## Verified release: v0.2.13
+
+Deployed on 2026-10-20 at 21:37 UTC, with every release since v0.2.7
+(v0.2.8–v0.2.13): the Log's command line and Reload Window (v0.2.8), themes
+with the theme-pack extension and readable syntax colours in Light (v0.2.9),
+Markdown's missing syntax and spaces kept after a list marker (v0.2.10), the
+frame's chrome (v0.2.11), the Settings dialog (v0.2.12), and a group's label
+switching its view (v0.2.13). Browser only: the server's code is unchanged.
+App version `0.2.13`; sync compatibility unchanged at `117`. The service's
+command line and environment file are unchanged; it was down 7 seconds.
+
+Public checks: ping (`0.2.13`, accounts on, hosting on), the service
+worker's cache label `mdnotes-shell-v0.2.13`, the new files served
+(`app/boot-theme.js`, which the page loads in its head, the command line,
+Reload Window, the theme model, the contributed themes, the theme picker,
+the command search), the server's own files refused
+(`server/mdnotes_server.py`, `server/whitelist.json`,
+`server/stilomarker.env` answer as the app's page), an unknown session
+token answered 403, and a clean journal (no errors). A fresh browser on the
+public site (no account, no workspace) showed `v0.2.13` with no page errors;
+F1 and "change theme" found Change Theme…, which showed the seven theme
+cards.
+
+Validation: 275 Node tests, all 22 Python suites (the backend self-test
+among them), 31 browser suites.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261020T213733Z-v0.2.13`.
+172/172 data files (taken with the service stopped), every JSON file valid.
