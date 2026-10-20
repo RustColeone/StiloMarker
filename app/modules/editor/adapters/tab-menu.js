@@ -2,6 +2,7 @@
 // those to its right or all of them; opening the file as Source or Preview in
 // the same group (a tab is a file in a view: step 5 of docs/ARCHITECTURE.md);
 // moving it to the other group or opening it there too; copying its path.
+// The same menu, short, under a group's label: its file as Source or Preview.
 // Part of the Editor module: `app` is its shared context (surface.js).
 import { getPath } from "../../workspace/index.js";
 import { sameTab } from "../service/view.js";
@@ -12,6 +13,7 @@ export function createTabMenu(app) {
   function closeTabMenu() {
     const element = menu();
     if (element && !element.hidden) element.hidden = true;
+    for (const label of document.querySelectorAll('.pane-label[aria-expanded="true"]')) label.setAttribute("aria-expanded", "false");
   }
 
   const tabsOf = (group) => app.view.get().groups.find((g) => g.id === group)?.tabs ?? [];
@@ -81,6 +83,17 @@ export function createTabMenu(app) {
     ], x, y);
   }
 
+  // A group's label (its ▾): the group's file as Source or Preview, in the group.
+  function openViewMenu(group, tab, anchor) {
+    app.closeTabOverflowMenu();
+    if (app.controller.getProject().nodes[tab?.fileId]?.kind !== "file") return;
+    const view = (name, label) => [label, () => app.activateTab(group, { fileId: tab.fileId, view: name }),
+      { checked: tab.view === name, disabled: tab.view === name || !app.canOpenFileInPane(tab.fileId, name) }];
+    const box = anchor.getBoundingClientRect();
+    draw([view("source", "Source"), view("preview", "Preview")], box.left, box.bottom);
+    anchor.setAttribute("aria-expanded", "true");
+  }
+
   // A tab that is not a file (History's diff): it only closes.
   function openViewTabMenu(close, x, y) {
     app.closeTabOverflowMenu();
@@ -96,5 +109,5 @@ export function createTabMenu(app) {
   });
   window.addEventListener("resize", closeTabMenu);
 
-  return { openTabMenu, openViewTabMenu, closeTabMenu };
+  return { openTabMenu, openViewMenu, openViewTabMenu, closeTabMenu };
 }

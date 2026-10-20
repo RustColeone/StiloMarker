@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-20 · release `v0.2.12` (not deployed; v0.2.7 is live)
+Last updated: 2026-10-20 · release `v0.2.13` (not deployed; v0.2.7 is live)
 
 ---
 
@@ -40,6 +40,18 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.13: a group's label switches its view
+
+Asked for 2026-10-20: since either pane can show either view, its fixed
+SOURCE / PREVIEW label should say what it shows and switch it. Browser only.
+
+- **Each pane's label** says what it is doing with which file: EDITING (or
+  READING, when the file can't be changed) or PREVIEWING over the file's
+  name; VIEWING for History's comparison. Its ▾ opens Source and Preview,
+  the current one ticked (a file with one view can't switch): the file
+  switches in the same pane, as Open as… in a tab's menu does.
+- Tests: `tab-menu-browser.py` (the label's words, its menu, both ways).
 
 ### v0.2.12: the Settings dialog
 

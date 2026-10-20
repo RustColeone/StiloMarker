@@ -5,10 +5,11 @@
 // shows the body its active tab wants. When the other group holds that body:
 // a preview tab gets a second preview of its own (stage 2: two previews side
 // by side; History's diff stays in the preview), a source tab a placeholder
-// with Show here (one source editor). Each group's label names the view it
-// shows. Drawn on every render (surface.js); on the phone the groups draw
-// nothing of their own and the second previews none (the CSS), so the views
-// show as before.
+// with Show here (one source editor). Each group's label says what it does
+// with which file ("Editing" / "Previewing", and its name); its ▾ switches the
+// file between Source and Preview. Drawn on every render (surface.js); on the
+// phone the groups draw nothing of their own and the second previews none
+// (the CSS), so the views show as before.
 // Part of the Editor: `app` is its shared context (surface.js).
 import { getPath } from "../../workspace/index.js";
 
@@ -31,6 +32,22 @@ export function createGroups(app) {
       seconds.set(groupId, body);
     }
     return seconds.get(groupId);
+  }
+
+  // A group's label: the view (a verb while it shows a file), the file's name,
+  // and its ▾ when the file can switch views.
+  function drawLabel(label, view, group, project) {
+    const active = group.active;
+    const file = active ? project.nodes[active.fileId] : null;
+    const paneView = active ? app.paneViews.get(active.fileId) : null;
+    const verb = !active ? VIEWS[view]
+      : paneView ? "Viewing"
+        : view === "source" ? (app.workspace.location.readOnly() ? "Reading" : "Editing") : "Previewing";
+    label.querySelector(".pane-label-view").textContent = verb;
+    label.querySelector(".pane-label-file").textContent = active ? nameOf(project, active) : "";
+    label.dataset.view = view;
+    label.title = file ? `${getPath(project, file.id)}: switch between Source and Preview` : "";
+    label.disabled = file?.kind !== "file";
   }
 
   // The name a placeholder gives its tab: the file's, or a pane view's (History's diff).
@@ -56,7 +73,7 @@ export function createGroups(app) {
       for (const view of held) bodyOf(view).dataset.shown = String(holds && view === wants);
       element.dataset.view = wants ?? "";
       const label = element.querySelector(".pane-label");
-      if (label && wants) label.textContent = VIEWS[wants];
+      if (label && wants) drawLabel(label, wants, group, project);
       // A preview tab whose preview the other group holds: a second preview here
       // (not a pane view: History's diff stays where the preview is).
       const file = group.active ? project.nodes[group.active.fileId] : null;
@@ -84,8 +101,14 @@ export function createGroups(app) {
     }
   }
 
-  // Show here: the group's active tab takes its body back.
+  // Show here: the group's active tab takes its body back. The label's ▾:
+  // the active tab's file as Source or Preview.
   for (const element of document.querySelectorAll(".editor-group")) {
+    element.querySelector(".pane-label")?.addEventListener("click", (event) => {
+      const group = app.view.get().groups.find((g) => g.id === element.dataset.group);
+      if (event.currentTarget.getAttribute("aria-expanded") === "true") { app.closeTabMenu(); return; }
+      if (group?.active) app.openViewMenu(group.id, group.active, event.currentTarget);
+    });
     element.querySelector(".group-placeholder-button")?.addEventListener("click", () => {
       const group = app.view.get().groups.find((g) => g.id === element.dataset.group);
       if (group?.active) app.activateTab(group.id, group.active);

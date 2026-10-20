@@ -1634,14 +1634,65 @@ p {
   border-left: 1px solid var(--border);
 }
 
+/* A group's label: what it does with which file ("Editing" over its name),
+   and a ▾ that switches the file between Source and Preview. */
 .pane-label {
   display: flex;
   align-items: center;
+  gap: 6px;
   min-height: 34px;
-  padding: 0 14px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  max-width: 220px;
+  padding: 0 8px 0 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--text-dim);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pane-label:not(:disabled):hover,
+.pane-label[aria-expanded="true"] {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.pane-label:disabled {
+  cursor: default;
+}
+
+.pane-label-text {
+  display: grid;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.pane-label-view {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.pane-label-file {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-label-file:empty {
+  display: none;
+}
+
+.pane-label-caret {
+  flex: none;
+  width: 13px;
+  height: 13px;
+}
+
+.pane-label:disabled .pane-label-caret {
+  visibility: hidden;
 }
 
 .pane-action {

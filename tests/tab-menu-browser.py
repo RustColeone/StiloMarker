@@ -25,7 +25,7 @@ GROUPS = '''() => Object.fromEntries([...document.querySelectorAll(".editor-grou
   const tabs = [...g.querySelectorAll(".editor-tab[data-file-id]")];
   const active = g.querySelector(".editor-tab.is-active[data-file-id]");
   return [g.dataset.group, {
-    label: g.querySelector(".pane-label").textContent,
+    label: g.querySelector(".pane-label-view").textContent,
     body: shown.length ? (shown[0].classList.contains("second-preview") ? "second" : shown[0].classList.contains("source-body") ? "source" : "preview") : null,
     placeholder: placeholder.hidden ? null : placeholder.querySelector(".group-placeholder-text").textContent,
     tabs: tabs.map((t) => [t.querySelector(".tab-title").textContent, t.dataset.view]),
@@ -89,7 +89,7 @@ async def main():
 
         # Today's layout: Source on the left, Preview on the right, no marks.
         groups = await page.evaluate(GROUPS)
-        assert (groups['left']['label'], groups['left']['body'], groups['right']['label'], groups['right']['body']) == ('Source', 'source', 'Preview', 'preview'), groups
+        assert (groups['left']['label'], groups['left']['body'], groups['right']['label'], groups['right']['body']) == ('Editing', 'source', 'Previewing', 'preview'), groups
         assert set(groups['left']['marks']) == {None}, groups
 
         # Open as Preview: in the same group. The preview moves to the left
@@ -99,7 +99,7 @@ async def main():
         await choose('Open as Preview')
         groups = await page.evaluate(GROUPS)
         left, right = groups['left'], groups['right']
-        assert (left['label'], left['body'], left['placeholder']) == ('Preview', 'preview', None), left
+        assert (left['label'], left['body'], left['placeholder']) == ('Previewing', 'preview', None), left
         assert left['tabs'] == [['welcome.md', 'source'], ['MeitanteiCure.mtree', 'source'], ['LULUKA.urldb', 'source'], ['LULUKA.urldb', 'preview']], left
         assert left['active'] == ['LULUKA.urldb', 'preview'], left
         assert left['marks'] == ['Source', 'Source', 'Source', 'Preview'], left
@@ -127,8 +127,27 @@ async def main():
         await page.locator('#source-tab-strip .editor-tab[data-view="source"]', has_text='welcome.md').click()
         await page.wait_for_timeout(300)
         groups = await page.evaluate(GROUPS)
-        assert (groups['left']['label'], groups['left']['body'], groups['left']['placeholder']) == ('Source', 'source', None), groups['left']
+        assert (groups['left']['label'], groups['left']['body'], groups['left']['placeholder']) == ('Editing', 'source', None), groups['left']
         assert (await page.locator('#editor-content').inner_text()).startswith('# STILO MARKER')
+
+        # A group's label says what it does with which file; its ▾ switches
+        # that file between Source and Preview, in the group.
+        label = await page.evaluate('''() => { const l = document.querySelector("#source-pane-label");
+          return [l.querySelector(".pane-label-view").textContent, l.querySelector(".pane-label-file").textContent, l.disabled]; }''')
+        assert label == ['Editing', 'welcome.md', False], label
+        await page.click('#source-pane-label')
+        await page.wait_for_timeout(150)
+        assert await page.evaluate(MENU) == [['Source', True, True], ['Preview', False, False]], await page.evaluate(MENU)
+        assert await page.get_attribute('#source-pane-label', 'aria-expanded') == 'true'
+        await choose('Preview')
+        groups = await page.evaluate(GROUPS)
+        assert (groups['left']['label'], groups['left']['active']) == ('Previewing', ['welcome.md', 'preview']), groups['left']
+        assert await page.get_attribute('#source-pane-label', 'aria-expanded') == 'false'
+        await page.click('#source-pane-label')
+        await page.wait_for_timeout(150)
+        await choose('Source')
+        groups = await page.evaluate(GROUPS)
+        assert (groups['left']['label'], groups['left']['body'], groups['left']['active']) == ('Editing', 'source', ['welcome.md', 'source']), groups['left']
 
         # Narrowed to a phone with the preview in the left group: the groups
         # draw nothing of their own, and each view shows its body.
@@ -176,7 +195,7 @@ async def main():
 
         assert not errors, errors
         await browser.close()
-        print(json.dumps({'checks': ['menu entries', 'escape', 'default layout', 'open as preview in the same group', 'two previews side by side', 'the preview back', 'source back', 'phone with a mixed group', 'copy path',
+        print(json.dumps({'checks': ['menu entries', 'escape', 'default layout', 'open as preview in the same group', 'two previews side by side', 'the preview back', 'source back', 'the label switches views', 'phone with a mixed group', 'copy path',
                                      'close to the right', 'close others', 'press outside', 'close all']}))
 
 
