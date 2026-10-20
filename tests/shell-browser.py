@@ -76,7 +76,7 @@ async def main():
         assert supported.startswith('Supported: .md') and '.bmap' in supported and '.skill' in supported, supported
         options = await page.evaluate('[...document.querySelectorAll("#new-file-type option")].map((o) => [o.value, o.textContent])')
         assert options == [['md', 'Markdown (.md)'], ['mtree', 'MTREE (.mtree)'], ['urldb', 'URL Album (.urldb)'],
-                           ['bmap', 'Diagram (.bmap)'], ['persona', 'Character (.persona.skill)'],
+                           ['bmap', 'Brainstorm Diagram (.bmap)'], ['persona', 'Character (.persona.skill)'],
                        ['mermaid', 'Mermaid (.mmd)'], ['htmlpage', 'HTML Page (.html)']], options
 
         # Five menus, in order, each with its items.

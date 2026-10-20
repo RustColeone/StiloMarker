@@ -68,6 +68,8 @@ export function addDiagramPreview({ editor, shell, workspace, isDiagram, generat
         onQuickGenerate: (request) => generate(file.id, request),
         logDebug: log
       });
+      // Its drags are its own: the phone's swipes leave the editor alone.
+      target.querySelector(".bmap-editor")?.setAttribute("data-own-gestures", "");
       return { shouldTypeset: false, content: "" };
     }
   });

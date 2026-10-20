@@ -197,7 +197,7 @@ async def main():
         await assert_right('closed')
         # Horizontal content and the diagram canvas own even edge drags.
         await page.locator('#preview-output').evaluate('''el => {
-          el.innerHTML='<div id="wide-content" style="width:200px;overflow-x:auto"><div style="width:1000px">Wide table</div></div><div class="bmap-editor" id="test-canvas">Diagram canvas</div>';
+          el.innerHTML='<div id="wide-content" style="width:200px;overflow-x:auto"><div style="width:1000px">Wide table</div></div><div data-own-gestures id="test-canvas">Diagram canvas</div>';
         }''')
         await gesture('#wide-content',[70,180],start=40)
         await assert_pane('preview')

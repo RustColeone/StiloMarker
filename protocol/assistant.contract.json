@@ -7,7 +7,7 @@
     { "method": "GET", "path": "/api/chat/status", "caller": "models", "reply": ["configured", "provider", "model", "models", "modelInfo", "imageGeneration", "localOnly", "message", "requiresAccount"] },
     { "method": "POST", "path": "/api/chat/mcp", "headers": ["Authorization"], "body": ["action", "servers"], "reply": ["servers", "message"] },
     { "method": "POST", "path": "/api/chat/prompt", "caller": "chats", "body": ["messages", "contextFiles", "projectName", "project", "persona", "cast"], "reply": ["payload"] },
-    { "method": "POST", "path": "/api/generate", "body": ["subject", "instructions", "contextFiles", "bmapOverview", "projectName", "accountToken"], "reply": ["message", "model", "provider", "contextPaths"] },
+    { "method": "POST", "path": "/api/generate", "body": ["subject", "instructions", "contextFiles", "overview", "projectName", "accountToken"], "reply": ["message", "model", "provider", "contextPaths"] },
     { "method": "GET", "path": "/api/generated", "query": ["token", "id"], "reply": "the image's bytes" },
     { "method": "GET", "path": "/api/chat/workspace", "query": ["token"], "reply": ["threads", "revision"] },
     { "method": "POST", "path": "/api/chat/workspace", "query": ["token"], "body": ["threads", "baseRevision", "version"], "reply": ["threads", "revision"] }

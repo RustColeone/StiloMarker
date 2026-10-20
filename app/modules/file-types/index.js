@@ -37,7 +37,7 @@ export default defineModule({
   level: 1,
   uses: [],
   owns: {
-    names: ["file type .mtree", "file type .bmap", "file type .persona.skill", "image extension list"],
+    names: ["file type .mtree", "file type .persona.skill", "image extension list"],
     registries: ["file types"],
     data: ["protocol/file-types.json"]
   },

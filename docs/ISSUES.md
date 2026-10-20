@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-20 · release `v0.2.3` (not deployed; v0.2.0 is live)
+Last updated: 2026-10-20 · release `v0.2.4` (not deployed; v0.2.0 is live)
 
 ---
 
@@ -68,6 +68,24 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.2.4: Diagrams wholly an extension
+
+Nothing on screen changed (the diagram editor compared pixel for pixel), but
+for one name. A server change too (a restart on deploy).
+
+- Everything about diagrams (`.bmap`) now lives in their extension folder:
+  the file type, the two settings, and the styles (1,230 lines moved out of
+  the app's stylesheet, in the same order). The core no longer names them.
+- The file type's name in lists is "Brainstorm Diagram" (Create still says
+  New Diagram), apart from Mermaid's diagrams.
+- On the phone, an element that keeps its own drags (the diagram editor)
+  says so with an attribute any extension can use.
+- Quick Generate sends the map's overview as a named context; the server
+  takes any such overview. A page from before this release still generates,
+  without the map's overview.
+- Tests: `openai-images.test.py` (the named overview, on the route and in
+  the generator's instructions).
 
 ### v0.2.3: settings an extension contributes
 

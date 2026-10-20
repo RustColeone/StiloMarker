@@ -38,22 +38,6 @@ export default Object.freeze([
     }
   },
   {
-    "id": "bmap",
-    "label": "Diagram",
-    "kind": "text",
-    "format": "bmap",
-    "extensions": {
-      ".bmap": "text/plain;charset=utf-8"
-    },
-    "icon": "is-bmap",
-    "filters": [],
-    "create": {
-      "label": "New Diagram",
-      "name": "new diagram",
-      "order": 4
-    }
-  },
-  {
     "id": "persona",
     "label": "Character",
     "kind": "text",
@@ -108,6 +92,23 @@ export default Object.freeze([
     "filters": [
       "images"
     ]
+  },
+  {
+    "id": "bmap",
+    "label": "Brainstorm Diagram",
+    "kind": "text",
+    "format": "bmap",
+    "extensions": {
+      ".bmap": "text/plain;charset=utf-8"
+    },
+    "icon": "is-bmap",
+    "filters": [],
+    "create": {
+      "label": "New Diagram",
+      "name": "new diagram",
+      "order": 4
+    },
+    "extension": "bmap-diagram"
   },
   {
     "id": "htmlpage",

@@ -46,7 +46,7 @@ export function createGenerate({ shell, workspace, identity, sync, editor, log }
     log("request", "POST /api/generate", `subject=${subject.slice(0, 80)}${subject.length > 80 ? "…" : ""}`);
     try {
       const result = await sendGenerationRequest(serverUrl, {
-        subject, contextFiles, bmapOverview: String(request?.bmapOverview ?? ""),
+        subject, contextFiles, overview: { title: "Brainstorm map overview", text: String(request?.bmapOverview ?? "") },
         projectName: project.name ?? "Workspace", accountToken: identity.token()
       });
       const content = String(result?.content ?? "").trim();

@@ -342,6 +342,26 @@ class GateTests(unittest.TestCase):
         self.assertEqual(call(transport, 'POST', '/api/generate', FakeRequest({'subject': 'x'}))[0], 403)
         self.assertEqual(calls, [])
 
+    def test_quick_generate_passes_a_named_overview(self):
+        transport, calls = self.routes()
+        payload = {'subject': 'Plot', 'accountToken': 'acct', 'overview': {'title': 'Brainstorm map overview', 'text': 'A -> B'}}
+        self.assertEqual(call(transport, 'POST', '/api/generate', FakeRequest(payload))[0], 200)
+        self.assertEqual(calls[0][3], {'title': 'Brainstorm map overview', 'text': 'A -> B'})
+        call(transport, 'POST', '/api/generate', FakeRequest({'subject': 'Plot', 'accountToken': 'acct', 'overview': 'not an object'}))
+        self.assertEqual(calls[1][3], {'title': '', 'text': ''}, 'a malformed overview is none')
+
+    def test_the_overview_is_named_in_the_generators_instructions(self):
+        sent = []
+        agent = Agent()
+        agent.providers = SimpleNamespace(configured=lambda: True, route=lambda: SimpleNamespace(model='m', label='L'),
+                                          complete=lambda route, payload: sent.append(payload) or {'choices': [{'message': {'content': '# Doc'}}]})
+        result = agent.generate('Plot', '', [], {'title': 'Brainstorm map overview', 'text': 'A -> B'}, 'Novel')
+        self.assertEqual(result['content'], '# Doc')
+        system = sent[0]['messages'][0]['content']
+        self.assertIn('Brainstorm map overview:\nA -> B', system)
+        agent.generate('Plot', '', [], {'title': '', 'text': ''}, 'Novel')
+        self.assertNotIn('overview:', sent[1]['messages'][0]['content'].lower().replace('use the overview', ''), 'no overview, no section')
+
     def test_status_says_an_account_is_needed(self):
         transport, _ = self.routes()
         self.assertTrue(call(transport, 'GET', '/api/chat/status', FakeRequest())[1]['requiresAccount'])

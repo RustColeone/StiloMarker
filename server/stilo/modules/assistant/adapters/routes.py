@@ -116,9 +116,11 @@ def add_routes(transport, *, agent, threads, identity, directory, version):
         context_files = payload.get("contextFiles") or []
         if not isinstance(context_files, list):
             raise ValueError("Context files payload must be a list.")
+        overview = payload.get("overview") if isinstance(payload.get("overview"), dict) else {}
         try:
             return agent.generate(str(payload.get("subject", "")), str(payload.get("instructions", "")), context_files,
-                                  str(payload.get("bmapOverview", "")), str(payload.get("projectName", "Workspace")))
+                                  {"title": str(overview.get("title") or ""), "text": str(overview.get("text") or "")},
+                                  str(payload.get("projectName", "Workspace")))
         except RuntimeError as error:
             raise Refusal(502, {"message": str(error)}) from error
 

@@ -8,9 +8,11 @@
 //              first content
 //   Shell      its two settings (declared in ../extension.json: Shell knows
 //              their defaults and shows their fields in Settings → Appearance)
-//   Assistant  Quick Generate asks the server's agent for a note
-// The file type is still one of File types' built-in ones (see extension.json),
-// and the server's Quick Generate still names diagrams.
+//   Assistant  Quick Generate asks the server's agent for a note, the map's
+//              overview as its named context
+// Its file type is declared in ../extension.json too, and its styles are its
+// own (bmap.css). Nothing in the core names it; remove this folder and the
+// app runs without it.
 import { defineModule } from "../../../app/kernel/index.js";
 import { createDefaultBmap } from "./model/bmap.js";
 import { createDiagramExport } from "./adapters/export.js";
@@ -44,6 +46,12 @@ export default defineModule({
       }
     });
     explorer.newFiles.add({ id: TYPE, content: () => createDefaultBmap() });
+    if (globalThis.document) {
+      const style = document.createElement("link");
+      style.rel = "stylesheet";
+      style.href = new URL("./bmap.css", import.meta.url).href;
+      document.head.append(style);
+    }
     editor.highlighters.add({ id: TYPE, ...highlighter });
     editor.toolbars.add({ id: TYPE, groups: toolbarGroups });
     editor.completions.add({ id: TYPE, ...completions });

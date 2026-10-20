@@ -7,6 +7,7 @@ self.EXTENSION_FILES = [
   "./extensions/bmap-diagram/browser/adapters/preview.js",
   "./extensions/bmap-diagram/browser/adapters/source.js",
   "./extensions/bmap-diagram/browser/adapters/view.js",
+  "./extensions/bmap-diagram/browser/bmap.css",
   "./extensions/bmap-diagram/browser/index.js",
   "./extensions/bmap-diagram/browser/model/bmap.js",
   "./extensions/html-page/browser/adapters/frame.js",

@@ -49,7 +49,7 @@ export function createPreviewPane(app) {
     } finally {
       updatingFromPreview = false;
     }
-    app.logDebug("action", "Bmap preview updated", reason);
+    app.logDebug("action", "File changed in its preview", reason);
   }
 
   return { drawPreviewPane, updateFileContentFromPreview, shownPaneView: shownView };

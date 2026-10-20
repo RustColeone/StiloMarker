@@ -231,7 +231,7 @@ export function createPhone({ panes, isPhone, closeMenus, events, run, doc = glo
     gesture = null;
     // Editing, canvases, menus and horizontal content own their drags (checked
     // before the edge gesture too, so a table at the left edge can scroll).
-    if (event.target.closest?.("dialog, .menu-bar, .explorer-context-menu, .tab-overflow-menu, input, textarea, select, button, a, [contenteditable], .bmap-editor, .cm-editor")) return;
+    if (event.target.closest?.("dialog, .menu-bar, .explorer-context-menu, .tab-overflow-menu, input, textarea, select, button, a, [contenteditable], [data-own-gestures], .cm-editor")) return;
     if (claimsHorizontalScroll(event.target) || win.getSelection()?.isCollapsed === false) return;
     const touch = event.touches[0];
     if (touch.clientX < EDGE_INSET || touch.clientX > win.innerWidth - EDGE_INSET) return;

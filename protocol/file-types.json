@@ -15,12 +15,6 @@
       "create": { "label": "New MTREE", "name": "new mtree", "order": 2 }
     },
     {
-      "id": "bmap", "label": "Diagram", "kind": "text", "format": "bmap",
-      "extensions": { ".bmap": "text/plain;charset=utf-8" },
-      "icon": "is-bmap", "filters": [],
-      "create": { "label": "New Diagram", "name": "new diagram", "order": 4 }
-    },
-    {
       "id": "persona", "label": "Character", "kind": "text", "format": "markdown",
       "extensions": { ".persona.skill": "text/markdown;charset=utf-8" },
       "icon": "is-persona", "filters": ["notes"],

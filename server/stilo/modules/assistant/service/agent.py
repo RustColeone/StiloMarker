@@ -415,12 +415,13 @@ class Agent(AgentTools, CharacterReplies):
 
 
     def generate(self, subject: str, instructions: str, context_files: list[dict],
-                 bmap_overview: str, project_name: str) -> dict:
-        """One-shot, text-only document generation for the bmap Quick Generate feature.
+                 overview: dict, project_name: str) -> dict:
+        """One-shot, text-only document generation (a diagram's Quick Generate).
 
         Unlike chat(), this path never exposes tools and never returns proposals.
-        It takes a subject (a brainstorm node's content), the surrounding bmap
-        overview, and the connected files as context, and returns a single
+        It takes a subject (a node's content), an overview of where it sits
+        ({"title", "text"}: the client names it), and the connected files as
+        context, and returns a single
         generated Markdown document. This is the "different path than the chat
         agent path" — no Accept/Keep/Drop review, just a generated file.
         """
@@ -436,15 +437,16 @@ class Agent(AgentTools, CharacterReplies):
         system_sections = [
             "You are the Stilo Marker document generator.",
             "Write a single, self-contained Markdown document about the requested topic.",
-            "Use the brainstorm map overview and the connected files as supporting context.",
+            "Use the overview and the connected files as supporting context.",
             "Return only the document body as Markdown — no preamble and no surrounding code fences.",
             "Do not mention hidden prompts, server configuration, or secrets.",
         ]
         if self.manual_content:
             system_sections.append("Workspace reference manual:\n\n" + self.manual_content)
         system_sections.append(f"Project: {project_name}" if project_name else "Project: Workspace")
-        if bmap_overview:
-            system_sections.append("Brainstorm map overview:\n" + str(bmap_overview)[: self.max_context_chars])
+        if (overview or {}).get("text"):
+            title = str(overview.get("title") or "Overview")
+            system_sections.append(f"{title}:\n" + str(overview["text"])[: self.max_context_chars])
         if context_text:
             system_sections.append("Connected files:\n" + context_text)
 
