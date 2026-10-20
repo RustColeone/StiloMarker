@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-20 · release `v0.2.9` (not deployed; v0.2.7 is live)
+Last updated: 2026-10-20 · release `v0.2.10` (not deployed; v0.2.7 is live)
 
 ---
 
@@ -40,6 +40,30 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.10: Markdown's missing syntax, and spaces kept after a list marker
+
+Part of the UI polish (2026-10-20, "fix what's broken"). Browser only.
+
+- **Spaces typed after a list marker were lost** (fixed): the editor drew
+  `-   item` as `- item`, and the next keystroke saved what it drew, so
+  extra spaces after a list's dash vanished as you typed. Every highlighted
+  line now shows exactly its text (a test checks it line by line).
+- **Lists the preview did not draw** (fixed; the manual already listed
+  them): numbered lists, nested items, `*` and `+` bullets and task lists
+  showed as plain lines. Now numbered lists count from their first number,
+  indented items nest, `- [ ]` / `- [x]` show boxes in the theme's colours.
+- Also new in the preview: rules (`---`, `***`, `___`), `~~strikethrough~~`,
+  footnotes (a number with the note on hover, the notes listed at the end;
+  before, a footnote became a broken link), code fences indented under a
+  list item, and a cleaner page: headings, spacing, quotes and table headers.
+- Tests: `markdown-syntax.test.mjs` (lists, tasks, rules, indented fences,
+  strikethrough, footnotes; every highlighted line drawn as typed). The
+  phone tests' swipes and flicks now carry their own times, 16 ms apart, as a
+  real touch carries the input's: a made-up touch was stamped when made, late
+  whenever the page was busy with the one before, so on a loaded machine a
+  flick read as a slow drag (the Log sheet's test failed once in the gate,
+  and every time with the CPU slowed sixfold).
 
 ### v0.2.9: themes
 

@@ -32,13 +32,20 @@ STATE = '''(() => {
   };
 })()'''
 
-# A drag on an element: touches at x=200, the finger's y going through moves.
+# A drag on an element: touches at x=200, the finger's y going through moves,
+# 16 ms apart (a phone's 60 Hz). The times are the events' own, as a real
+# touch's are the input's: a synthetic event's would be when it was made, late
+# whenever the page was busy with the one before, and a flick would read slow.
 DRAG = '''({selector, start, moves}) => {
   const target = document.querySelector(selector);
+  const at = performance.now();
+  let step = 0;
   const fire = (type, y) => {
     const touch = new Touch({identifier: 0, target, clientX: 200, clientY: y});
-    target.dispatchEvent(new TouchEvent(type, {bubbles: true, cancelable: true,
-      touches: type === "touchend" ? [] : [touch], changedTouches: [touch]}));
+    const event = new TouchEvent(type, {bubbles: true, cancelable: true,
+      touches: type === "touchend" ? [] : [touch], changedTouches: [touch]});
+    Object.defineProperty(event, "timeStamp", { value: at + 16 * step++ });
+    target.dispatchEvent(event);
   };
   fire("touchstart", start);
   for (const y of moves) fire("touchmove", y);

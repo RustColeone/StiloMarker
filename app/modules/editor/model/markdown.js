@@ -151,20 +151,29 @@ function parseReferenceDefinition(line) {
   };
 }
 
+// A footnote's text: "[^label]: text" on a line of its own.
+const FOOTNOTE = /^\s{0,3}\[\^([^\]\s]+)\]:\s+(.*)$/;
+
 function collectReferenceDefinitions(lines) {
   const contentLines = [];
   const references = new Map();
+  const footnotes = new Map();
   let inCodeBlock = false;
 
   for (const rawLine of lines) {
     const line = rawLine.trimEnd();
-    if (line.startsWith("```")) {
+    if (FENCE.test(line)) {
       inCodeBlock = !inCodeBlock;
       contentLines.push(rawLine);
       continue;
     }
 
     if (!inCodeBlock) {
+      const footnote = FOOTNOTE.exec(line);
+      if (footnote) {
+        footnotes.set(footnote[1], footnote[2]);
+        continue;
+      }
       const definition = parseReferenceDefinition(line);
       if (definition) {
         references.set(definition.key, definition);
@@ -175,7 +184,7 @@ function collectReferenceDefinitions(lines) {
     contentLines.push(rawLine);
   }
 
-  return { contentLines, references };
+  return { contentLines, references, footnotes };
 }
 
 function collectMarkdownReferences(markdown) {
@@ -292,7 +301,8 @@ function parseMarkdownInlineElements(value, references) {
 function renderTextFormatting(value) {
   return escapeHtml(value)
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+    .replace(/~~([^~]+)~~/g, "<del>$1</del>");
 }
 
 function serializeHtmlAttributes(attributes = {}) {
@@ -372,10 +382,20 @@ function renderInline(value, options = {}) {
     codeFragments.push(`<code>${escapeHtml(code)}</code>`);
     return token;
   });
-  const rendered = parseInlineElements(codeTokenized, options.references)
+  // A footnote's mark: its number, its text on hover (the notes are listed at the end).
+  const notes = options.footnotes;
+  const noteFragments = [];
+  const noteTokenized = notes ? codeTokenized.replace(/\[\^([^\]\s]+)\]/g, (whole, label) => {
+    if (!notes.texts.has(label)) return whole;
+    if (!notes.order.includes(label)) notes.order.push(label);
+    const token = `__MDNOTES_NOTE_${noteFragments.length}__`;
+    noteFragments.push(`<sup class="footnote-ref" title="${escapeAttribute(notes.texts.get(label))}">${notes.order.indexOf(label) + 1}</sup>`);
+    return token;
+  }) : codeTokenized;
+  const rendered = parseInlineElements(noteTokenized, options.references)
     .map((token) => renderInlineElement(token, options))
     .join("");
-  return restoreHtmlFragments(restoreTokens(rendered, "__MDNOTES_CODE_", codeFragments), fragments);
+  return restoreHtmlFragments(restoreTokens(restoreTokens(rendered, "__MDNOTES_NOTE_", noteFragments), "__MDNOTES_CODE_", codeFragments), fragments);
 }
 
 function extractMarkdownLinks(markdown) {
@@ -387,7 +407,7 @@ function extractMarkdownLinks(markdown) {
   for (const rawLine of contentLines) {
     const line = rawLine.trimEnd();
 
-    if (line.startsWith("```")) {
+    if (FENCE.test(line)) {
       inCodeBlock = !inCodeBlock;
       continue;
     }
@@ -478,26 +498,89 @@ function renderTableBlock(headerLine, delimiterLine, bodyLines, renderOptions) {
   return `<table>${headHtml}${bodyHtml}</table>`;
 }
 
+// ---- Lists. An item is "-", "*" or "+" (bulleted) or "1." / "1)" (numbered,
+// from its first number), then a space and its text; "[ ]" or "[x]" first
+// makes it a task. Deeper items belong to the item above them; a line
+// indented under an item continues its text; a blank line between items
+// keeps the list going. A line of three or more -, * or _ is a rule.
+const LIST_ITEM = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
+const RULE = /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/;
+const FENCE = /^ {0,3}```/;
+const TASK = /^\[( |x|X)\]\s+/;
+
+const indentWidth = (indent) => indent.replace(/\t/g, "    ").length;
+
+function listItemOf(line) {
+  const match = LIST_ITEM.exec(line);
+  if (!match || RULE.test(line)) return null;
+  const [, indent, marker, text] = match;
+  const ordered = /\d/.test(marker);
+  return { indent: indentWidth(indent), ordered, start: ordered ? Number.parseInt(marker, 10) : 1, text };
+}
+
+// The list starting at lines[index]: { html, next } (the first line after it).
+function renderListBlock(lines, index, renderOptions) {
+  const items = [];
+  let at = index;
+  while (at < lines.length) {
+    const line = lines[at].trimEnd();
+    const item = listItemOf(line);
+    if (item) { items.push(item); at += 1; continue; }
+    if (line && !FENCE.test(line) && items.length && indentWidth(/^\s*/.exec(line)[0]) > items.at(-1).indent) {
+      items.at(-1).text += ` ${line.trim()}`;
+      at += 1;
+      continue;
+    }
+    if (!line) {
+      let ahead = at + 1;
+      while (ahead < lines.length && !lines[ahead].trim()) ahead += 1;
+      if (ahead < lines.length && listItemOf(lines[ahead].trimEnd())) { at = ahead; continue; }
+    }
+    break;
+  }
+  const root = { children: [] };
+  const stack = [{ indent: -1, list: null }];
+  const open = (item) => {
+    const parent = stack.at(-1).list?.items.at(-1) ?? root;
+    const list = { ordered: item.ordered, start: item.start, items: [] };
+    parent.children.push(list);
+    stack.push({ indent: item.indent, list });
+  };
+  for (const item of items) {
+    while (stack.length > 1 && stack.at(-1).indent > item.indent) stack.pop();
+    if (stack.at(-1).indent < item.indent) open(item);
+    else if (stack.at(-1).list.ordered !== item.ordered) { stack.pop(); open(item); }
+    stack.at(-1).list.items.push({ text: item.text, children: [] });
+  }
+  const draw = (list) => {
+    const tag = list.ordered ? "ol" : "ul";
+    const start = list.ordered && list.start !== 1 ? ` start="${list.start}"` : "";
+    const tasks = list.items.some((entry) => TASK.test(entry.text));
+    const body = list.items.map((entry) => {
+      const box = TASK.exec(entry.text);
+      const text = box ? entry.text.slice(box[0].length) : entry.text;
+      const check = box ? `<input type="checkbox" disabled${box[1] === " " ? "" : " checked"}> ` : "";
+      return `<li${box ? ' class="task-item"' : ""}>${check}${renderInline(text, renderOptions)}${entry.children.map(draw).join("")}</li>`;
+    }).join("");
+    return `<${tag}${start}${tasks ? ' class="task-list"' : ""}>${body}</${tag}>`;
+  };
+  return { html: root.children.map(draw).join(""), next: at };
+}
+
 function renderMarkdown(markdown, options = {}) {
-  const { contentLines, references } = collectReferenceDefinitions(String(markdown ?? "").replace(/\r\n/g, "\n").split("\n"));
+  const { contentLines, references, footnotes } = collectReferenceDefinitions(String(markdown ?? "").replace(/\r\n/g, "\n").split("\n"));
   const lines = contentLines;
   const output = [];
   let inCodeBlock = false;
   let codeBuffer = [];
   let codeLanguage = ""; // the fence's info string's first word (```mermaid), for codeBlocks
-  let listBuffer = [];
+  let codeIndent = 0; // the opening fence's indent, taken off its lines
 
   const renderOptions = {
     ...options,
-    references
+    references,
+    footnotes: footnotes.size ? { texts: footnotes, order: [] } : null
   };
-
-  function flushList() {
-    if (listBuffer.length > 0) {
-      output.push(`<ul>${listBuffer.join("")}</ul>`);
-      listBuffer = [];
-    }
-  }
 
   function renderCodeBlock(code, language = "") {
     const lang = language ? ` data-lang="${escapeHtml(language)}"` : "";
@@ -508,26 +591,26 @@ function renderMarkdown(markdown, options = {}) {
     const rawLine = lines[index];
     const line = rawLine.trimEnd();
 
-    if (line.startsWith("```")) {
-      flushList();
+    // A fence may be indented up to three spaces (under a list item).
+    if (FENCE.test(line)) {
       if (inCodeBlock) {
         output.push(renderCodeBlock(codeBuffer.join("\n"), codeLanguage));
         inCodeBlock = false;
         codeBuffer = [];
       } else {
         inCodeBlock = true;
-        codeLanguage = (/^```\s*([\w+.-]+)/.exec(line)?.[1] ?? "").toLowerCase();
+        codeIndent = /^ */.exec(line)[0].length;
+        codeLanguage = (/^ {0,3}```\s*([\w+.-]+)/.exec(line)?.[1] ?? "").toLowerCase();
       }
       continue;
     }
 
     if (inCodeBlock) {
-      codeBuffer.push(escapeHtml(rawLine));
+      codeBuffer.push(escapeHtml(rawLine.replace(new RegExp(`^ {0,${codeIndent}}`), "")));
       continue;
     }
 
     if (!line) {
-      flushList();
       continue;
     }
 
@@ -538,7 +621,6 @@ function renderMarkdown(markdown, options = {}) {
       index + 1 < lines.length &&
       isTableDelimiterRow(lines[index + 1].trimEnd())
     ) {
-      flushList();
       const bodyLines = [];
       let bodyIndex = index + 2;
       while (bodyIndex < lines.length) {
@@ -555,37 +637,45 @@ function renderMarkdown(markdown, options = {}) {
     }
 
     if (isBlockHtmlLine(line)) {
-      flushList();
       output.push(rawLine);
       continue;
     }
 
     if (/^#{1,6}\s/.test(line)) {
-      flushList();
       const level = line.match(/^#+/)[0].length;
       output.push(`<h${level}>${renderInline(line.slice(level + 1), renderOptions)}</h${level}>`);
       continue;
     }
 
-    if (/^-\s+/.test(line)) {
-      listBuffer.push(`<li>${renderInline(line.slice(2), renderOptions)}</li>`);
+    if (RULE.test(line)) {
+      output.push("<hr>");
+      continue;
+    }
+
+    if (listItemOf(line)) {
+      const list = renderListBlock(lines, index, renderOptions);
+      output.push(list.html);
+      index = list.next - 1;
       continue;
     }
 
     if (/^>\s?/.test(line)) {
-      flushList();
       output.push(`<blockquote>${renderInline(line.replace(/^>\s?/, ""), renderOptions)}</blockquote>`);
       continue;
     }
 
-    flushList();
     output.push(`<p>${renderInline(line, renderOptions)}</p>`);
   }
 
-  flushList();
-
   if (inCodeBlock) {
     output.push(renderCodeBlock(codeBuffer.join("\n")));
+  }
+
+  // The notes the text refers to, numbered in the order first referred to.
+  const referred = renderOptions.footnotes?.order ?? [];
+  if (referred.length) {
+    const noteOptions = { ...renderOptions, footnotes: null };
+    output.push(`<section class="footnotes"><ol>${referred.map((label) => `<li>${renderInline(footnotes.get(label), noteOptions)}</li>`).join("")}</ol></section>`);
   }
 
   return output.join("\n");

@@ -128,12 +128,18 @@ async def main():
         await page.set_viewport_size({'width':390,'height':844})
         await page.evaluate('getSelection().removeAllRanges()')
 
+        # Touches 16 ms apart by their own times (as a real touch's are the
+        # input's), so a busy page does not make a quick swipe read slow.
         async def gesture(selector, moves, ending='touchend', start=270):
             await page.evaluate('''({selector,moves,ending,start}) => {
               const target=document.querySelector(selector);
+              const at=performance.now();
+              let step=0;
               const fire=(type,x,count=1)=>{
                 const touches=Array.from({length:count},(_,i)=>new Touch({identifier:i,target,clientX:x+i*20,clientY:220}));
-                target.dispatchEvent(new TouchEvent(type,{bubbles:true,cancelable:true,touches:type==='touchend'||type==='touchcancel'?[]:touches,changedTouches:touches}));
+                const event=new TouchEvent(type,{bubbles:true,cancelable:true,touches:type==='touchend'||type==='touchcancel'?[]:touches,changedTouches:touches});
+                Object.defineProperty(event,'timeStamp',{value:at+16*step++});
+                target.dispatchEvent(event);
               };
               fire('touchstart',start);
               for(const x of moves) fire('touchmove',x);

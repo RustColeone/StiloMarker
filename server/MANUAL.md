@@ -117,14 +117,17 @@ Standard CommonMark-ish Markdown with a few extensions.
 - Headings `# H1` through `###### H6`
 - Bold `**text**`, italic `*text*`, strikethrough `~~text~~`, inline code `` `code` ``
 - Fenced code blocks with optional language tag ` ```lang `
-- Unordered lists `- item`, ordered lists `1. item`, task lists `- [ ] item`
+- Lists: `- item` (or `*`, `+`), numbered `1. item` or `1) item` (counting
+  from the first number), nested by indenting the item, task lists
+  `- [ ] item` / `- [x] item`
 - Blockquotes `> text`
 - Tables `| col | col |`
-- Horizontal rules `---`
+- Horizontal rules `---` (or `***`, `___`)
 - Links `[label](url)` and reference-style links
 - Images `![alt](url)` and reference-style images
 - HTML pass-through (inline tags and comments are preserved)
-- Footnotes `[^label]` / `[^label]: text`
+- Footnotes `[^label]` / `[^label]: text` (a number in the text, its note on
+  hover, and the notes listed at the end of the preview)
 
 **Preview:** The preview pane renders Markdown to HTML with syntax-highlighted code blocks.
 

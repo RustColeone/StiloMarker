@@ -118,9 +118,13 @@ export function createHighlighter(app) {
       return { html: `<div class="editor-line">${escapeEditorHtml(indent)}<span class="token-heading-mark">${escapeEditorHtml(hashes)}</span>${escapeEditorHtml(space)}<span class="token-heading-text">${applyInlineHighlighting(escapeEditorHtml(text || ""))}</span></div>`, inFence };
     }
 
-    if (/^\s*-\s+/.test(rawLine)) {
-      const [, indent, marker, text] = rawLine.match(/^(\s*)(-)\s+(.*)$/);
-      return { html: `<div class="editor-line">${escapeEditorHtml(indent)}<span class="token-list-mark">${marker}</span> ${applyInlineHighlighting(escapeEditorHtml(text || ""))}</div>`, inFence };
+    // A list item ("-", "*", "+", "1." or "1)", and a task's "[ ]" or "[x]"):
+    // the space after its marker is drawn as typed, so none of it is lost.
+    const listItem = /^(\s*)([-*+]|\d{1,9}[.)])(\s+)(\[[ xX]\](?=\s))?(.*)$/.exec(rawLine);
+    if (listItem) {
+      const [, indent, marker, space, box, text] = listItem;
+      const boxHtml = box ? `<span class="token-list-mark">${box}</span>` : "";
+      return { html: `<div class="editor-line">${escapeEditorHtml(indent)}<span class="token-list-mark">${escapeEditorHtml(marker)}</span>${escapeEditorHtml(space)}${boxHtml}${applyInlineHighlighting(escapeEditorHtml(text || ""))}</div>`, inFence };
     }
 
     if (/^\s*>\s?/.test(rawLine)) {

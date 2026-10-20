@@ -2590,6 +2590,129 @@ p {
   border: 1px solid var(--border);
 }
 
+/* A Markdown page's rhythm: its blocks are the preview's own children (other
+   previews draw inside containers of their own, so this leaves them alone). */
+.preview-output > :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1.3em 0 0.5em;
+  line-height: 1.25;
+  font-weight: 600;
+}
+
+.preview-output > h1 {
+  font-size: 1.85em;
+}
+
+.preview-output > :is(h1, h2) {
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--border);
+}
+
+.preview-output > h2 {
+  font-size: 1.4em;
+}
+
+.preview-output > h3 {
+  font-size: 1.18em;
+}
+
+.preview-output > :is(p, ul, ol, table, .md-code-block) {
+  margin: 0 0 0.7em;
+}
+
+.preview-output > blockquote {
+  margin: 0 0 0.7em;
+  padding: 0.25em 0.9em;
+  background: var(--surface-1);
+}
+
+.preview-output :is(ul, ol) {
+  padding-left: 1.6em;
+}
+
+.preview-output li + li,
+.preview-output li > :is(ul, ol) {
+  margin-top: 0.2em;
+}
+
+.preview-output li > :is(ul, ol) {
+  margin-bottom: 0;
+}
+
+.preview-output li::marker {
+  color: var(--text-dim);
+}
+
+.preview-output ul.task-list {
+  padding-left: 0.3em;
+  list-style: none;
+}
+
+/* A task's box, drawn in the theme's colours (a disabled box would be grey). */
+.preview-output .task-item > input {
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  width: 14px;
+  height: 14px;
+  margin: 0 0.45em 0 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--editor);
+  vertical-align: -2px;
+}
+
+.preview-output .task-item > input:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.preview-output .task-item > input:checked::before {
+  content: "";
+  width: 7px;
+  height: 4px;
+  border: solid var(--text-on-accent);
+  border-width: 0 0 2px 2px;
+  transform: translateY(-1px) rotate(-45deg);
+}
+
+.preview-output > hr {
+  height: 0;
+  margin: 1.4em 0;
+  border: 0;
+  border-top: 1px solid var(--border-strong);
+}
+
+.preview-output th {
+  background: var(--surface-1);
+  font-weight: 600;
+  text-align: start; /* a column's own alignment (its delimiter row) is on the cell */
+}
+
+.preview-output del {
+  color: var(--text-dim);
+}
+
+/* A footnote's number (its text on hover), and the notes at the end. */
+.preview-output .footnote-ref {
+  padding-left: 1px;
+  color: var(--link);
+  font-size: 0.75em;
+  cursor: help;
+}
+
+.preview-output > .footnotes {
+  margin-top: 1.6em;
+  padding-top: 0.6em;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.preview-output :not(pre) > code {
+  border-radius: 3px;
+  font-size: 0.92em;
+}
+
 .status-bar {
   display: flex;
   gap: 14px;
