@@ -936,3 +936,26 @@ among them), 25 browser suites.
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261019T215738Z-v0.1.99`.
 172/172 data files (taken with the service stopped), every JSON file valid.
+
+## Verified release: v0.2.0
+
+Deployed on 2026-10-20 at 01:20 UTC, with every release since v0.1.99
+(v0.1.100–v0.2.0): the areas as hosts (v0.1.100, the bottom area's header
+one row), pages moving between the areas with Move to… (v0.1.101), and
+Source and Preview half and half until dragged (v0.2.0, a new minor version
+for the restructure and step 5). App version `0.2.0`; sync compatibility
+unchanged at `117`. The service's command line and environment file are
+unchanged.
+
+Public checks: ping (`0.2.0`, accounts on, hosting on), the service worker's
+cache label `mdnotes-shell-v0.2.0`, the new scripts and styles served
+(`shell/adapters/pages.js`, `frame/sheet.js`, the even split in
+`styles.css`), the server's own files refused (`server/mdnotes_server.py`,
+`server/whitelist.json`, `server/stilomarker.env` answer as the app's page),
+an unknown session token answered 403, and a clean journal (no errors).
+
+Validation: 249 Node tests, all 22 Python suites (the backend self-test
+among them), 27 browser suites.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261020T012024Z-v0.2.0`.
+172/172 data files (taken with the service stopped), every JSON file valid.
