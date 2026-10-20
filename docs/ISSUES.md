@@ -5,13 +5,19 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-20 · release `v0.2.6` (not deployed; v0.2.0 is live)
+Last updated: 2026-10-20 · release `v0.2.7` (not deployed; v0.2.0 is live)
 
 ---
 
 ## Open
 
-### 1. Restart recovery can require a fresh cloud snapshot
+None. Items 3, 4 and 5 were fixed in v0.2.7; 1 and 2 are accepted (below).
+
+## Accepted
+
+Known and kept as they are, with the reason.
+
+### A1. Restart recovery can require a fresh cloud snapshot
 **Confidence:** confirmed, intended · **Severity:** informational
 
 The OT rebase log is in-memory and capped at 2,000 entries, so it is empty after a
@@ -19,7 +25,9 @@ restart. Patches based on an older revision are now **refused** rather than appl
 at wrong offsets (which silently corrupted text before). Recovery automatically fetches
 the current cloud snapshot and preserves conflicting local text in Snapshots.
 
-### 2. Residual risk in the snapshot migration
+Accepted (2026-10-20): it is how the rebase log is meant to work; recovery is automatic and keeps the conflicting text.
+
+### A2. Residual risk in the snapshot migration
 **Confidence:** theoretical · **Severity:** low
 
 Legacy browser-local snapshots were filed under the shared `server-project` key.
@@ -27,47 +35,42 @@ Migration only adopts files whose paths exist in the workspace being opened, so 
 two workspaces contain a **same-named file**, a snapshot could migrate to the wrong
 one. Affects only pre-existing local history.
 
-### 3. Typing in a URL album entry can jump the caret under heavy load
-**Confidence:** reproduced, cause not found · **Severity:** medium (an entry's link can be lost)
-
-When a single album entry is open in the source editor and the machine is
-very slow, the caret can jump to the start of the entry mid-typing. What is
-typed next then lands in front of `url =`, the line no longer reads as the
-link, and the entry is saved with an empty URL. Seen in `url-album-browser.py`
-about once in five runs while the server was busy, and about every other run
-with Chrome's CPU slowed sixfold; never in twelve runs on an idle machine.
-Whole files are not affected.
-
-Found on 2026-10-17 while releasing v0.1.51. Tracing ruled out a repaint by
-the app's render and a focus loss on the editor. Two things were seen at the
-moment of the jump: the editor's caret restore was skipped because the page
-reported focus on the body, and saving an entry trims a trailing space in its
-description. It predates the extension move (the same code path as before).
-Next step: trace the editor's own input path (re-highlighting after a
-keystroke and restoring the caret), with `STILO_CPU_SLOWDOWN=6` set for
-`url-album-browser.py`.
-
-### 4. An unreadable comments file is replaced by the next comment
-**Confidence:** read in the code, not seen happen · **Severity:** medium (comments can be lost)
-
-If a project's `comments.json` cannot be read (cut short by a full disk, edited
-by hand), the server shows no comments, and the next comment anyone adds writes
-a new file over it. Since v0.1.52 the server log says so (`[ignored] ...
-comments.json is unreadable`). Possible fix: keep the unreadable file aside
-before writing a new one. History's index (`index.json` of snapshots and
-backups) has the same pattern.
-
-### 5. An unreadable access file opens the project to its whole team
-**Confidence:** read in the code, not seen happen · **Severity:** medium (access)
-
-If a project's `access.json` cannot be read, the project is treated as having
-no whitelist or blacklist, so everyone in the team may open it. Since v0.1.52
-the server log says so. Possible fix: refuse to open it (fail closed) until the
-file is fixed. Needs a decision: failing closed locks out its owner too.
+Accepted (2026-10-20): it can only touch history from before snapshots lived on the server, and only when two workspaces share a file's name.
 
 ---
 
 ## Fixed
+
+### v0.2.7: the open issues
+
+The last of the plans on paper (decided 2026-10-20). A server change too (a
+restart on deploy).
+
+- **Typing in a URL album entry no longer jumps the caret** (was open item
+  3). Clicking an entry in the explorer redrew the app with the project as it
+  was before the click, which told the editor another file was shown; the
+  next redraw, which a slow machine delays into typing, reloaded the entry
+  with the caret at the start, so the rest of the typing went in front of
+  `url =` and the entry was saved without its link. The Explorer now draws
+  the project as it is, and the editor always draws from the current
+  project, whatever it is handed. Found with a trace of every caret move
+  under a sixfold-slowed CPU.
+- Also in an album entry: a pause after typing a space no longer eats the
+  space. Writing the entry back trims a trailing space, and the editor was
+  rewritten to match; now the text as typed stays when it means the same.
+- **An unreadable access file locks its project** (was open item 5): nobody
+  may open it until it is repaired or restored, and the message says to ask
+  the server's admin (the server log names the file). Before, the project
+  opened to its whole team.
+- **An unreadable comments file, or History's index, is set aside** before a
+  new one is written (was open item 4): kept as
+  `<name>.unreadable-<time>.json` and named in the server log. Before, the
+  next comment replaced it.
+- Restart recovery and the snapshot migration's residual risk (open items 1
+  and 2) are accepted, with the reasons, under Accepted.
+- Tests: `projects.test.py` (a locked project, repaired), `comments.test.py`
+  and `history.test.py` (set aside, kept), `url-album-browser.py` (a pause
+  after a space; its waits now grow with `STILO_CPU_SLOWDOWN`).
 
 ### v0.2.6: two previews side by side
 

@@ -179,8 +179,11 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
   // file, the groups (where the bodies are), the preview pane (a file's preview
   // or a pane view) and the links.
   shell.holdRendering(() => app.isTyping());
-  shell.events.on("render", ({ project }) => {
-    if (!project) return;
+  shell.events.on("render", ({ project: given }) => {
+    if (!given) return;
+    // Drawn from the project as it is now: a redraw handed one read before a
+    // change (a stale copy) must not take the editor back to what was active then.
+    const project = app.controller.getProject() ?? given;
     app.ensureOpenTabs(project);
     app.renderTabs(project);
     app.drawGroups(project);

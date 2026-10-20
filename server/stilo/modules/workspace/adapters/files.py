@@ -1,9 +1,13 @@
-"""Writing project files safely: atomic replace with fsync, and image bytes
-from data: URLs."""
+"""Writing project files safely: atomic replace with fsync, a file that no
+longer reads set aside before it is replaced, and image bytes from data: URLs."""
 import base64
+import json
 import os
 import tempfile
+import time
 from pathlib import Path
+
+from stilo.kernel.log import ignore, log
 
 
 def fsync_directory(path: Path):
@@ -14,6 +18,25 @@ def fsync_directory(path: Path):
         os.fsync(fd)
     finally:
         os.close(fd)
+
+
+def set_aside_unreadable(path: Path, valid=lambda data: True) -> Path | None:
+    """A JSON file about to be replaced that does not read as it should (cut
+    short, edited by hand): renamed <name>.unreadable-<time><suffix> and kept,
+    so writing the new one loses nothing; the log names it. Returns where it
+    went, or None when it read well (or was not there)."""
+    path = Path(path)
+    if not path.exists():
+        return None
+    try:
+        if valid(json.loads(path.read_text(encoding="utf-8"))):
+            return None
+    except (OSError, ValueError) as error:
+        ignore(error, f"{path} does not read; it is set aside before it is replaced")
+    kept = path.with_name(f"{path.stem}.unreadable-{time.strftime('%Y%m%dT%H%M%S')}{path.suffix}")
+    os.replace(path, kept)
+    log("kept", f"{path.name} did not read; set aside before a new one was written", kept=str(kept))
+    return kept
 
 
 def atomic_write(path: Path, data: bytes):

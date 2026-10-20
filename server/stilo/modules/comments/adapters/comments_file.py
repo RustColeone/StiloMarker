@@ -1,9 +1,10 @@
 """A project's comments, kept as comments.json inside the project folder so
-they travel with it; replaced atomically."""
+they travel with it; replaced atomically. One that no longer reads shows no
+comments, and is set aside (kept) when the next comment is saved."""
 import json
 from pathlib import Path
 
-from stilo.modules.workspace import atomic_write
+from stilo.modules.workspace import atomic_write, set_aside_unreadable
 from ..model.comments import empty
 from stilo.kernel.log import ignore
 
@@ -18,9 +19,11 @@ def read_comments(project_dir: Path) -> dict:
             if isinstance(data, dict) and isinstance(data.get("files"), dict):
                 return data
         except (OSError, json.JSONDecodeError) as error:
-            ignore(error, f"{path} is unreadable; showing no comments (saving a comment would replace it)")
+            ignore(error, f"{path} is unreadable; showing no comments (the next comment sets it aside)")
     return empty()
 
 
 def write_comments(project_dir: Path, data: dict) -> None:
-    atomic_write(Path(project_dir) / COMMENTS_FILE, json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"))
+    path = Path(project_dir) / COMMENTS_FILE
+    set_aside_unreadable(path, valid=lambda kept: isinstance(kept, dict) and isinstance(kept.get("files"), dict))
+    atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"))

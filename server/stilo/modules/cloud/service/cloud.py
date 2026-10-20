@@ -80,7 +80,7 @@ class Cloud:
         if not self.projects.folders.is_project(project_dir):
             raise ValueError("Not a project directory")
         if not self.projects.can_access(identity, team, relpath):
-            raise PermissionError("You do not have access to that project")
+            raise PermissionError(self.projects.refusal(team, relpath, "You do not have access to that project"))
         workspace = self.directory.read(team, relpath, project_dir)  # a live one is fresher than its folder
         with workspace.lock:
             project = copy.deepcopy(workspace.project)

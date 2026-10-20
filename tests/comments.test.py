@@ -60,6 +60,21 @@ class Service(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 comments.list("eve", "red", "Novel")
 
+    def test_an_unreadable_comments_file_is_set_aside_not_replaced(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            places = SimpleNamespace(authorize_project=lambda token, team, path: ({"username": token}, team, path),
+                                     project_dir=lambda team, rel: Path(tmp), live=lambda team, rel: None)
+            comments = open_comments(places)
+            (Path(tmp) / COMMENTS_FILE).write_text('{"files": {"a.md": [{"id": "x", "text": "cut sh', encoding="utf-8")
+            self.assertEqual(comments.list("amy", "red", "Novel")["files"], {}, "an unreadable file shows no comments")
+            comments.save("amy", "red", "Novel", {"file": "a.md", "line": 1, "anchorText": "it", "text": "new"})
+            kept = list(Path(tmp).glob("comments.unreadable-*.json"))
+            self.assertEqual(len(kept), 1, "the unreadable file is kept, set aside")
+            self.assertIn('"text": "cut sh', kept[0].read_text(encoding="utf-8"))
+            self.assertEqual([c["text"] for c in comments.list("amy", "red", "Novel")["files"]["a.md"]], ["new"])
+            comments.save("amy", "red", "Novel", {"file": "a.md", "line": 2, "anchorText": "it", "text": "more"})
+            self.assertEqual(len(list(Path(tmp).glob("comments.unreadable-*.json"))), 1, "a file that reads is never set aside")
+
 
 if __name__ == "__main__":
     unittest.main()

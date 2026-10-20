@@ -3,7 +3,7 @@ so it travels with the project."""
 import json
 from pathlib import Path
 
-from ..model.access import clean_access, from_legacy_members
+from ..model.access import clean_access, from_legacy_members, locked_access
 from stilo.kernel.log import ignore
 
 ACCESS_FILE = "access.json"
@@ -18,8 +18,8 @@ def read_access(project_dir: Path, legacy=lambda: None) -> dict:
         try:
             return clean_access(json.loads(path.read_text(encoding="utf-8")))
         except (json.JSONDecodeError, OSError) as error:
-            ignore(error, f"{path} is unreadable; treating the project as open to its whole team")
-            return clean_access(None)
+            ignore(error, f"{path} is unreadable; the project is locked until it is repaired or restored")
+            return locked_access()
     meta = legacy()
     if meta is None:
         return clean_access(None)

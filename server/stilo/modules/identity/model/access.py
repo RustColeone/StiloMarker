@@ -21,6 +21,21 @@ def _names(values) -> list[str]:
     return [str(value).strip() for value in (values or []) if str(value).strip()]
 
 
+# A project whose access record cannot be read is locked: its owner is
+# recorded there too, so nobody can be told apart; the server's admin repairs
+# or restores the file.
+LOCKED = "This project's access settings cannot be read, so it is locked. Ask the server's admin to repair or restore its access.json."
+
+
+def locked_access() -> dict:
+    return {**clean_access(None), "locked": True}
+
+
+def refusal(access: dict, default: str) -> str:
+    """Why an account may not open a project: locked, or `default`."""
+    return LOCKED if access.get("locked") else default
+
+
 def clean_access(data: dict | None) -> dict:
     data = data if isinstance(data, dict) else {}
     return {"whitelist": _names(data.get("whitelist")), "blacklist": _names(data.get("blacklist")),
@@ -33,8 +48,8 @@ def from_legacy_members(meta: dict) -> dict:
 
 
 def may_open(access: dict, username: str, teams, team: str) -> bool:
-    """In the team, AND (whitelist empty OR listed) AND not blacklisted."""
-    if team not in teams or username in access["blacklist"]:
+    """In the team, AND (whitelist empty OR listed) AND not blacklisted; never a locked project."""
+    if access.get("locked") or team not in teams or username in access["blacklist"]:
         return False
     return not access["whitelist"] or username in access["whitelist"]
 
@@ -60,7 +75,9 @@ def owned_by_other(access: dict, username: str) -> bool:
 
 def require_owner(access: dict, username: str, opens: bool, refusal: str) -> None:
     """Only the recorded owner may manage a project (change who may open it,
-    delete it). With no owner recorded, anyone who may open it may."""
+    delete it). With no owner recorded, anyone who may open it may; a locked one, nobody."""
+    if access.get("locked"):
+        raise PermissionError(LOCKED)
     if owned_by_other(access, username):
         raise PermissionError(refusal)
     if not access.get("createdBy") and not opens:

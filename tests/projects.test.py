@@ -66,6 +66,20 @@ class Folders(unittest.TestCase):
         with self.assertRaisesRegex(PermissionError, "not a member"):
             self.projects.browse(self.amy, "blue", "")
 
+    def test_an_unreadable_access_file_locks_the_project(self):
+        self.project("Novel")
+        folder = self.projects.folders.under_team("red", "Novel")
+        self.assertTrue(self.projects.can_access(self.identity.who(self.amy), "red", "Novel"))
+        (folder / "access.json").write_text('{"whitelist": ["amy"', encoding="utf-8")
+        for token in (self.amy, self.ben):
+            with self.subTest(token=token), self.assertRaisesRegex(PermissionError, "locked. Ask the server's admin"):
+                self.projects.authorize_open(token, "red", "Novel")
+        with self.assertRaisesRegex(PermissionError, "locked"):
+            self.projects.set_access(self.amy, "red", "Novel", [], [])
+        self.assertEqual(self.projects.people("red", "Novel"), [], "nobody may open it")
+        (folder / "access.json").write_text('{"whitelist": [], "createdBy": "amy"}', encoding="utf-8")
+        self.assertEqual(self.projects.authorize_open(self.amy, "red", "Novel")[4], "master", "repaired: open again")
+
     def test_open_files_are_kept_per_account_and_capped(self):
         self.project("Novel")
         self.projects.write_user_state(self.amy, "red", "Novel", ["a.md", 3, "b.md"], "a.md")

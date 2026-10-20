@@ -99,7 +99,14 @@ export function createShowFile(app, composing) {
       // rebuild here — triggered by ANY unrelated render (auto-save, presence, a
       // remote op on another file) — would abort the composition and slam the caret
       // to offset 0. The model catches up on compositionend, which re-syncs cleanly.
-      if (nextText !== domText && !composing.now) {
+      // A part spelled as the user typed it stays: when the editor's text,
+      // written back, gives the file as it is, it is the same content (an
+      // album trims a description's trailing space; rewriting the editor for
+      // that ate the space just typed and, under load, reset the caret to 0:
+      // docs/ISSUES.md, fixed in v0.2.7).
+      const typedSpelling = Boolean(selectedPart) && nextText !== domText
+        && selectedPart.parts.withBody(selectedPart.file.content, selectedPart.part.id, domText) === selectedPart.file.content;
+      if (nextText !== domText && !composing.now && !typedSpelling) {
         if (editorHasFocus) {
           // External same-file changes invalidate snapshot-based undo history.
           // Keep the caret stable when possible, then fence the history stack at

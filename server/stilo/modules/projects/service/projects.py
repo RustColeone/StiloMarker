@@ -13,7 +13,7 @@ import threading
 import time
 
 from stilo.kernel.log import log as _log
-from stilo.modules.identity import ACCESS_FILE
+from stilo.modules.identity import ACCESS_FILE, refusal
 from stilo.modules.workspace import MANIFEST, migrate_state_file
 from ..adapters.team_folders import INDEX_FILE, USER_STATE_FILE
 from ..model.paths import safe_component, safe_relpath
@@ -63,6 +63,11 @@ class Projects:
     def can_access(self, identity: dict, team: str, relpath: str) -> bool:
         return self.identity.may_open(identity, team, self.read_access(team, relpath))
 
+    def refusal(self, team: str, relpath: str, default: str) -> str:
+        """Why an account may not open the project: it is locked (its access
+        file cannot be read), or `default`."""
+        return refusal(self.read_access(team, relpath), default)
+
     def get_access(self, token: str, team: str, path: str) -> dict:
         """The project's access file (who may open it, in what role)."""
         identity = self.identity.require(token)
@@ -101,7 +106,7 @@ class Projects:
         if not self.folders.is_project(self.folders.under_team(team, relpath)):
             raise ValueError("Not a project")
         if not self.can_access(identity, team, relpath):
-            raise PermissionError("You do not have access to that project")
+            raise PermissionError(self.refusal(team, relpath, "You do not have access to that project"))
         return identity, team, relpath
 
     def authorize_open(self, token, team, path):
@@ -114,7 +119,7 @@ class Projects:
         if not self.folders.is_project(project_dir) and self.legacy_meta(team, relpath) is None:
             raise PermissionError("Unknown workspace")
         if not self.can_access(identity, team, relpath):
-            raise PermissionError("You do not have access to that workspace")
+            raise PermissionError(self.refusal(team, relpath, "You do not have access to that workspace"))
         self._migrate_flat(team, relpath, project_dir)
         return identity, team, relpath, project_dir, self.role_for(identity, team, relpath)
 
@@ -146,7 +151,7 @@ class Projects:
         if not self.folders.is_project(project_dir):
             raise ValueError("Not a project directory")
         if not self.can_access(identity, team, relpath):
-            raise PermissionError("You do not have access to that workspace")
+            raise PermissionError(self.refusal(team, relpath, "You do not have access to that workspace"))
         self.folders.write_user_state(project_dir, identity["username"], open_files, active_file, groups)
         return {"ok": True}
 

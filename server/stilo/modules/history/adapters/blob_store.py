@@ -7,7 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from stilo.modules.workspace import atomic_write
+from stilo.modules.workspace import atomic_write, set_aside_unreadable
 from stilo.kernel.log import ignore
 
 
@@ -29,11 +29,12 @@ class BlobStore:
                     data.setdefault("bytes", 0)
                     return data
             except (OSError, json.JSONDecodeError) as error:
-                ignore(error, f"{path} is unreadable; starting an empty index")
+                ignore(error, f"{path} is unreadable; starting an empty index (the next save sets it aside)")
         return {**{key: type(value)() for key, value in self._empty.items()}, "refs": {}, "bytes": 0}
 
     def save(self, index: dict) -> None:
         self.folder.mkdir(parents=True, exist_ok=True)
+        set_aside_unreadable(self.folder / "index.json", valid=lambda kept: isinstance(kept, dict))
         atomic_write(self.folder / "index.json", json.dumps(index, ensure_ascii=False).encode("utf-8"))
 
     def _path(self, blob: str) -> Path:

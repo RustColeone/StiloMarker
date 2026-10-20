@@ -22,7 +22,7 @@ from .adapters.access_file import ACCESS_FILE  # noqa: F401
 from .adapters.account_file import ACCOUNT_FILE, AccountStore  # noqa: F401
 from .adapters.prefs_file import PREFS_FILE, UserPrefs  # noqa: F401
 from .adapters.routes import add_routes
-from .model.access import ROLES, can  # noqa: F401
+from .model.access import ROLES, can, refusal  # noqa: F401
 from .service.identity import Identity
 
 _ACCESS_STORE = SimpleNamespace(read=access_file.read_access, write=access_file.write_access, projects_in=access_file.projects_in)

@@ -32,6 +32,8 @@ async def main():
         context = await browser.new_context(viewport={'width': 1400, 'height': 900}, service_workers='block')
         page = await context.new_page(); errors = []; checks = []
         page.on('pageerror', lambda e: errors.append(str(e)))
+        slowdown = float(os.environ.get('STILO_CPU_SLOWDOWN') or 1)
+        page.set_default_timeout(30000 * slowdown)  # waits grow with the CPU's slowdown
         if os.environ.get('STILO_CPU_SLOWDOWN'):  # e.g. 6: reproduces docs/ISSUES.md open item 3
             await (await context.new_cdp_session(page)).send('Emulation.setCPUThrottlingRate', {'rate': float(os.environ['STILO_CPU_SLOWDOWN'])})
         await page.add_init_script('if (!sessionStorage.getItem("seeded")) { sessionStorage.setItem("seeded", "1");'
@@ -72,7 +74,7 @@ async def main():
         preview = page.locator('#preview-output')
 
         # Entries are listed under their album.
-        await page.wait_for_selector('.tree-row-derived', timeout=15000)
+        await page.wait_for_selector('.tree-row-derived', timeout=15000 * slowdown)
         assert await entry_names('r') == ['Castle', 'River'], await entry_names('r')
         assert await entry_names('m') == ['Forest']
         checks.append('entries listed under their album')
@@ -81,7 +83,7 @@ async def main():
         await entry_row('r', 'Castle').click()
         await page.wait_for_function('document.querySelector("#editor-content").innerText.includes("description = Old keep")')
         assert 'castle.jpg' in await editor.inner_text() and '[River]' not in await editor.inner_text()
-        await page.wait_for_selector('#preview-output .remote-asset-preview', timeout=5000)
+        await page.wait_for_selector('#preview-output .remote-asset-preview', timeout=5000 * slowdown)
         assert 'Castle' in await preview.inner_text()
         assert await page.locator('#editor-content .token-urldb-key').count() >= 1, 'the entry is highlighted'
         checks.append('entry opens on its own, with its preview')
@@ -93,12 +95,26 @@ async def main():
         assert 'description = Old keep tower' in refs and '[River]' in refs and refs.count('[Castle]') == 1, refs
         checks.append('editing an entry writes the album')
 
+        # Typed slowly (a pause after a space, so the app draws in between): the space
+        # stays, and so does the caret (writing the entry back trims a trailing space;
+        # the editor used to be rewritten for that, eating the space and, under load,
+        # putting the caret at 0 so the rest went in front of url =: ISSUES item 3).
+        await page.keyboard.press('Control+End'); await page.keyboard.type(' and')
+        await page.keyboard.press('Space')
+        await page.wait_for_timeout(900)
+        await page.keyboard.type('moat')
+        await page.wait_for_timeout(600)
+        refs = await saved('refs.urldb')
+        assert 'description = Old keep tower and moat' in refs and 'url = https://img.example/castle.jpg' in refs, refs
+        assert (await editor.inner_text()).startswith('url = https://img.example/castle.jpg'), await editor.inner_text()
+        checks.append('a pause after a space keeps it, and the caret')
+
         # The album opens whole: its text, a table preview and the Entry snippet.
         await page.dblclick('.tree-row[title="refs.urldb"]')
         await page.wait_for_function('document.querySelector("#editor-content").innerText.includes("[River]")')
         await page.locator('.tree-row[title="refs.urldb"]').click(button='right')
         await page.locator('#explorer-context-menu').get_by_text('Open Preview', exact=True).click()
-        await page.wait_for_selector('#preview-output .urldb-table', timeout=5000)
+        await page.wait_for_selector('#preview-output .urldb-table', timeout=5000 * slowdown)
         table = await page.locator('#preview-output .urldb-table').inner_text()
         assert 'Castle' in table and 'River' in table and 'river.jpg' in table, table
         assert await page.locator('#editor-content .token-urldb-name').count() == 2

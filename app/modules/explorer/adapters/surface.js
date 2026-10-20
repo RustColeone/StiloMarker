@@ -94,7 +94,10 @@ export function createSurface({ workspace, editor, shell, sync, types, fileMenus
       app.setActiveSourcePart(fileId, partId);
       app.openPreviewTab(fileId);
       app.view.showPreview(fileId, partId);
-      app.updateStatus(project);
+      // The project as it is now (the part's file just became the active one):
+      // drawing the one read above told the editor the old file was shown, and
+      // the next redraw, mid-typing, reloaded the part with the caret at 0.
+      app.updateStatus(app.controller.getProject());
     },
     onToggleFolder(nodeId) {
       app.view.pick(nodeId);

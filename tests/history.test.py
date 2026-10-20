@@ -75,6 +75,19 @@ class Store(unittest.TestCase):
             self.assertEqual(store.load()["files"], {})
 
 
+class UnreadableIndex(unittest.TestCase):
+    def test_an_unreadable_index_is_set_aside_before_the_next_save(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = BlobStore(Path(tmp), {"files": {}})
+            (Path(tmp) / "index.json").write_text("{not json", encoding="utf-8")
+            index = store.load()
+            self.assertEqual(index["files"], {}, "an empty index meanwhile")
+            store.save(index)
+            kept = list(Path(tmp).glob("index.unreadable-*.json"))
+            self.assertEqual([path.read_text(encoding="utf-8") for path in kept], ["{not json"])
+            self.assertEqual(store.load()["files"], {})
+
+
 class Services(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
