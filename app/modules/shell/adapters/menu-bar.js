@@ -1,7 +1,11 @@
 // Draws the menu bar from the registered menus and commands, in the markup
 // the styles (desktop and the phone's ⋮ panel) expect:
 //   .menu-group > button.menu-trigger + div.menu-popover > button[data-command]
+// An item shows its title and its shortcut; a line separates its menu's groups.
 import { layoutMenus } from "../model/menu-layout.js";
+import { chordLabel } from "../model/keys.js";
+
+const MAC = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? "");
 
 export function createMenuBar({ root, commands, menus, run, report, doc = document }) {
   let groups = [];
@@ -22,14 +26,29 @@ export function createMenuBar({ root, commands, menus, run, report, doc = docume
       popover.id = `${menu.id}-menu`;
       popover.className = "menu-popover";
       popover.hidden = true;
-      for (const item of menu.items) {
+      menu.items.forEach((item, index) => {
+        if (index && item.group !== menu.items[index - 1].group) {
+          const line = doc.createElement("div");
+          line.className = "menu-separator";
+          line.setAttribute("role", "separator");
+          popover.append(line);
+        }
         const button = doc.createElement("button");
         button.type = "button";
         button.dataset.command = item.id;
         if (item.danger) button.className = "menu-danger-button";
-        button.textContent = item.title;
+        const title = doc.createElement("span");
+        title.className = "menu-item-title";
+        title.textContent = item.title;
+        button.append(title);
+        if (item.keys) {
+          const keys = doc.createElement("span");
+          keys.className = "menu-item-keys";
+          keys.textContent = chordLabel(item.keys, MAC);
+          button.append(keys);
+        }
         popover.append(button);
-      }
+      });
       group.append(trigger, popover);
       root.append(group);
       groups.push({ trigger, popover });

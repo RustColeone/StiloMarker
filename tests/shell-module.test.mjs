@@ -42,6 +42,11 @@ test("menus: ordered by menu, group, order; titles may be live; unknown menus ar
   assert.equal(laid[0].items[1].danger, true);
   chat = "Hide Chat";
   assert.equal(layoutMenus([{ id: "view", label: "View" }], [{ id: "a.chat", title: () => chat, menu: { id: "view" } }])[0].items[0].title, "Hide Chat");
+  // Each item says its group (a menu draws a line between groups) and its first shortcut.
+  const items = layoutMenus([{ id: "file", label: "File" }], [
+    { id: "a.save", title: "Save", menu: { id: "file", group: 2 }, keys: ["Mod+S", "Mod+Shift+S"] },
+    { id: "a.new", title: "New", menu: { id: "file" } }])[0].items;
+  assert.deepEqual(items.map(({ id, group, keys }) => [id, group, keys]), [["a.new", 0, ""], ["a.save", 2, "Mod+S"]]);
 });
 
 test("commands: ids look like owner.action, need a title and run, and respect enabled()", async () => {

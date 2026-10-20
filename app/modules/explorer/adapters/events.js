@@ -170,10 +170,10 @@ export function installExplorerEvents(app) {
 
   app.elements.replaceFileInput.addEventListener("change", (event) => app.replaceWithChosenFile(event));
 
-  app.shell.commands.add({ id: "workspace.rename-selected", title: "Rename Selected", menu: { id: "edit", group: 0, order: 4 }, run: () => {
+  app.shell.commands.add({ id: "workspace.rename-selected", title: "Rename Selected", menu: { id: "edit", group: 2, order: 1 }, run: () => {
     void app.renameSelected();
   } });
-  app.shell.commands.add({ id: "workspace.delete-selected", title: "Delete Selected", menu: { id: "edit", group: 0, order: 5 }, run: () => {
+  app.shell.commands.add({ id: "workspace.delete-selected", title: "Delete Selected", menu: { id: "edit", group: 2, order: 2 }, run: () => {
     void app.deleteSelected();
   } });
   for (const type of builtinTypes.creatable()) { // New Markdown, New Diagram…: every type that says how to create one

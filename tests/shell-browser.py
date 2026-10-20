@@ -82,8 +82,10 @@ async def main():
         # Five menus, in order, each with its items.
         labels = await page.locator('.menu-bar .menu-trigger').all_inner_texts()
         assert labels == ['File', 'Edit', 'Create', 'View', 'Settings'], labels
-        counts = await page.evaluate('[...document.querySelectorAll(".menu-bar .menu-popover")].map((p) => p.children.length)')
-        assert counts == [9, 5, 8, 6, 6], counts  # Create: md, mtree, urldb, bmap, persona, mermaid, html, folder
+        counts = await page.evaluate('[...document.querySelectorAll(".menu-bar .menu-popover")].map((p) => [p.querySelectorAll("button").length, p.querySelectorAll(".menu-separator").length])')
+        assert counts == [[9, 3], [5, 2], [8, 1], [6, 1], [6, 2]], counts  # Create: md, mtree, urldb, bmap, persona, mermaid, html, folder; a line between groups
+        save = await page.evaluate('[...document.querySelectorAll("[data-command=\'workspace.save\'] span")].map((s) => s.textContent)')
+        assert save == ['Save', 'Ctrl+S'], save
         assert await page.locator('#file-menu').is_hidden()
 
         # Opening one closes the others; a click outside closes it.
@@ -283,7 +285,7 @@ async def main():
         assert not errors, errors
         await context.close()
         await browser.close()
-        print(json.dumps({'checks': ['file-type lists from File types', 'five menus with their items', 'one menu open at a time', 'live titles',
+        print(json.dumps({'checks': ['file-type lists from File types', 'five menus with their items, groups and shortcuts', 'one menu open at a time', 'live titles',
                                      'menu item runs its command', 'Ctrl+S runs Save', 'a snapshot compared in the diff tab', 'rename keeps the extension',
                                      'late menus and commands appear', 'Replace File replaces an image', 'the welcome page from its owners', 'status bar items from their owners', 'Settings sections and fields', 'the trace and its tab', 'a diagram previews as a diagram', 'diagram source: highlighting, toolbar, autocomplete (extension)', 'diagram Export As and new diagram (extension)', 'phone menu panel'], 'runtimeErrors': 0}))
 

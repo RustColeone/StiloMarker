@@ -372,7 +372,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
     row.append(indent);
 
     const toggle = document.createElement("span");
-    toggle.className = "icon-button is-ghost";
+    toggle.className = "icon-button is-ghost is-leaf";
     toggle.textContent = "·";
     row.append(toggle);
 
@@ -466,9 +466,9 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       const toggle = document.createElement("button");
       toggle.type = "button";
       toggle.className = "icon-button";
-      toggle.textContent = node.kind === "folder" || isExpandableFile(node)
-        ? (node.expanded ? "▾" : "▸")
-        : "·";
+      const expandable = node.kind === "folder" || isExpandableFile(node);
+      toggle.textContent = expandable ? (node.expanded ? "▾" : "▸") : "·";
+      toggle.classList.toggle("is-leaf", !expandable);
       toggle.addEventListener("click", (event) => {
         event.stopPropagation();
         if (node.kind === "folder" || isExpandableFile(node)) {
@@ -520,7 +520,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
           childRow.append(childIndent);
 
           const childToggle = document.createElement("span");
-          childToggle.className = "icon-button is-ghost";
+          childToggle.className = "icon-button is-ghost is-leaf";
           childToggle.textContent = "·";
           childRow.append(childToggle);
 

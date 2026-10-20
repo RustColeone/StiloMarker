@@ -44,7 +44,7 @@ export function watchPage({ store, log, reloading = () => false, win = globalThi
 // cleared, and an empty project saved so the next start does not fall back to
 // the welcome workspace.
 export function addWorkspaceCommands({ shell, log, doc = globalThis.document }) {
-  shell.commands.add({ id: "workspace.empty-everything", title: "Empty Everything", menu: { id: "settings", group: 0, order: 4 }, danger: true, async run() {
+  shell.commands.add({ id: "workspace.empty-everything", title: "Empty Everything", menu: { id: "settings", group: 2, order: 2 }, danger: true, async run() {
     const confirmed = await shell.confirm({ title: "Empty Everything",
       message: "This deletes your workspace, chat history, and settings, then reloads into a completely empty workspace (no welcome files). This cannot be undone.",
       acceptLabel: "Empty Everything" });

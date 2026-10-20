@@ -130,7 +130,7 @@ export default defineModule({
     addWorkspaceCommands({ shell, log: (...parts) => ctx.log(parts.join(" ")) });
     // Save (Ctrl+S): auto-save keeps the work, so Save also marks a point to
     // compare against later; it says "saved" and History takes a snapshot.
-    shell.commands.add({ id: "workspace.save", title: "Save", menu: { id: "file", group: 0, order: 6 }, keys: ["Mod+S"], async run() {
+    shell.commands.add({ id: "workspace.save", title: "Save", menu: { id: "file", group: 2, order: 1 }, keys: ["Mod+S"], async run() {
       try {
         ctx.log("Workspace save requested");
         await saving.saveActiveFile();

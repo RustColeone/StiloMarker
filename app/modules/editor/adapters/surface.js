@@ -173,7 +173,7 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
     }
     if (changed.includes("showFormatToolbar")) app.refreshFormatToolbar();
   });
-  shell.commands.add({ id: "preview.save-pdf", title: "Save as PDF", menu: { id: "file", group: 0, order: 7 }, run: () => app.printPreviewAsPdf() });
+  shell.commands.add({ id: "preview.save-pdf", title: "Save as PDF", menu: { id: "file", group: 2, order: 2 }, run: () => app.printPreviewAsPdf() });
   // Drawing: while a keystroke is applied the editor has drawn it, and the rest
   // of the app waits (Shell). On each redraw its own parts: the tabs, the shown
   // file, the groups (where the bodies are), the preview pane (a file's preview

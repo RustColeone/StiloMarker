@@ -44,8 +44,12 @@
   --syntax-punctuation: #a3239b;
   --syntax-constant: #795e26;
   --focus-ring: 0 0 0 1px var(--accent);
-  --font-ui: "Segoe UI", Tahoma, sans-serif;
-  --font-mono: "Cascadia Code", Consolas, "Courier New", monospace;
+  /* Each system's own UI font, by name (San Francisco on Apple, Segoe UI on
+     Windows, Noto or Liberation Sans on Linux; "system-ui" is left out, as on
+     some Linux setups it is a font without bold); a code font each has,
+     Liberation Mono keeping Courier New's metrics where the first are absent. */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", "Liberation Sans", Helvetica, Arial, sans-serif;
+  --font-mono: "Cascadia Code", "SF Mono", Menlo, Consolas, "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace;
   /* Source-pane typography (Settings > Appearance). applyEditorFont() overrides
      these on :root; the editor, its gutter and line metrics all derive from them
      so changing one value resizes the whole source pane consistently. */
@@ -154,6 +158,17 @@ body {
   display: none !important;
 }
 
+/* Scrollbars: thin, in the theme's colours. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-dim) 45%, transparent) transparent;
+}
+
+/* A file's row has no twisty to show (its place keeps the names in line). */
+.tree-row .icon-button.is-leaf {
+  visibility: hidden;
+}
+
 /* Honour the OS setting: the gesture still works, it just arrives instantly. */
 @media (prefers-reduced-motion: reduce) {
   .workspace-shell > .sidebar,
@@ -249,8 +264,9 @@ p {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  border-radius: 4px;
   background: var(--accent);
-  color: #ffffff;
+  color: var(--text-on-accent);
   font-size: 12px;
   font-weight: 700;
 }
@@ -324,12 +340,6 @@ p {
   background: var(--surface-2);
 }
 
-.window-caption {
-  font-size: 11px;
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-
 .menu-popover,
 .explorer-context-menu {
   position: absolute;
@@ -360,6 +370,29 @@ p {
   border: 0;
   font-size: 12px;
   touch-action: manipulation;
+}
+
+/* A menu item: its title, and its shortcut at the end; a line between groups. */
+.menu-popover button {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.menu-item-title {
+  flex: 1 1 auto;
+}
+
+.menu-item-keys {
+  flex: none;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.menu-separator {
+  height: 1px;
+  margin: 3px 8px;
+  background: var(--border);
 }
 
 .menu-popover button:hover,
@@ -517,9 +550,10 @@ p {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border-strong);
-  background: var(--surface-1);
-  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
   font-size: 16px;
   line-height: 1;
 }
@@ -527,11 +561,13 @@ p {
 .sidebar-icon-button:hover,
 .sidebar-add-button:hover {
   background: var(--surface-2);
+  color: var(--text);
 }
 
 .sidebar-icon-button.is-active {
-  border-color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   background: var(--accent-soft);
+  color: var(--text);
 }
 
 .sidebar-icon-svg {
@@ -632,10 +668,10 @@ p {
   flex: 1;
 }
 
-.activity-status-mark {
-  width: 18px;
-  height: 3px;
-  background: var(--accent);
+.activity-icon {
+  width: 22px;
+  height: 22px;
+  display: block;
 }
 
 .sidebar {
@@ -3645,9 +3681,17 @@ menu {
 .debug-panel-header > .debug-collapse-button {
   min-height: 24px;
   padding: 0 8px;
-  border: 1px solid var(--border-strong);
-  background: var(--surface-1);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
   font-size: 11px;
+}
+
+.log-toolbar button:hover,
+.debug-panel-header > .debug-collapse-button:hover {
+  background: var(--surface-2);
+  color: var(--text);
 }
 
 .debug-collapse-button {
@@ -4123,18 +4167,13 @@ menu {
     flex: 0 0 auto;
   }
 
-  .topbar .menu-bar,
-  .topbar .window-caption {
+  .topbar .menu-bar {
     display: none;
   }
 
   .brand-cluster {
     flex: 0 0 auto;
     overflow: hidden;
-  }
-
-  .brand-cluster .eyebrow {
-    display: none;
   }
 
   /* Drop the "Stilo Marker" wordmark on phones (the compact "S" mark stays) so

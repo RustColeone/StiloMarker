@@ -38,7 +38,7 @@ export function addProjectCommands(app, { shell, editor, sync }) {
     app.logDebug("action", "Open file manager");
     app.openFileBrowser({ side: identity.account() ? "server" : "local", mode: "manage" });
   } });
-  shell.commands.add({ id: "cloud.import-folder", title: "Import Local Folder", menu: { id: "file", group: 0, order: 4 }, async run() {
+  shell.commands.add({ id: "cloud.import-folder", title: "Import Local Folder", menu: { id: "file", group: 1, order: 1 }, async run() {
     if (!supportsDirectoryAccess()) {
       shell.notify("Folder import is only available in Chromium-based browsers.");
       return;
@@ -57,7 +57,7 @@ export function addProjectCommands(app, { shell, editor, sync }) {
     }
   } });
   const fileInput = document.getElementById("import-file-input");
-  shell.commands.add({ id: "cloud.import-file", title: "Import File or Zip", menu: { id: "file", group: 0, order: 5 }, run: () => fileInput?.click() });
+  shell.commands.add({ id: "cloud.import-file", title: "Import File or Zip", menu: { id: "file", group: 1, order: 2 }, run: () => fileInput?.click() });
   fileInput?.addEventListener("change", async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;

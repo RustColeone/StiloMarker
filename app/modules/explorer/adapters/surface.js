@@ -173,9 +173,9 @@ export function createSurface({ workspace, editor, shell, sync, types, fileMenus
   installExplorerEvents(app);
   // Files, text and images dropped into the source editor are added or inserted here.
   editor.drops.configure((event) => app.handleEditorDrop(event));
-  shell.commands.add({ id: "explorer.export", title: "Export Project Zipped", menu: { id: "file", group: 0, order: 8 },
+  shell.commands.add({ id: "explorer.export", title: "Export Project Zipped", menu: { id: "file", group: 3, order: 1 },
     run: () => app.exportNode(app.controller.getProject().rootId) });
-  shell.commands.add({ id: "explorer.export-selected", title: "Export Selected", menu: { id: "file", group: 0, order: 9 },
+  shell.commands.add({ id: "explorer.export-selected", title: "Export Selected", menu: { id: "file", group: 3, order: 2 },
     run: () => app.exportNode(app.getSelectedNode(app.controller.getProject())?.id ?? app.controller.getProject().rootId) });
   // The phone's pen renames the file on screen (Shell's frame asks with its id).
   shell.commands.add({ id: "explorer.rename-file", title: "Rename File", args: true, run: (nodeId) => app.renameFileById(nodeId) });

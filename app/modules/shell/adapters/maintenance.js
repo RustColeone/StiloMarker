@@ -18,7 +18,7 @@ export function clearAppStorage(store = globalThis.localStorage) {
 }
 
 export function addMaintenanceCommands({ commands, confirm, notify, closeMenus, events, log }) {
-  commands.add({ id: "workspace.reset", title: "Reset to Default Workspace", menu: { id: "settings", group: 0, order: 3 }, async run() {
+  commands.add({ id: "workspace.reset", title: "Reset to Default Workspace", menu: { id: "settings", group: 2, order: 1 }, async run() {
     const confirmed = await confirm({ title: "Reset to Default Workspace",
       message: "This deletes your current workspace, chat history, and settings, then reloads the default welcome workspace. This cannot be undone.",
       acceptLabel: "Reset" });
@@ -27,7 +27,7 @@ export function addMaintenanceCommands({ commands, confirm, notify, closeMenus, 
     log(`Workspace reset to default: keysRemoved=${clearAppStorage()}`);
     globalThis.location.reload();
   } });
-  commands.add({ id: "shell.clear-cache", title: "Clear All Cache", menu: { id: "settings", group: 0, order: 5 }, danger: true, async run() {
+  commands.add({ id: "shell.clear-cache", title: "Clear All Cache", menu: { id: "settings", group: 2, order: 3 }, danger: true, async run() {
     const confirmed = await confirm({ title: "Clear Cached App Data",
       message: "This clears the app's cached shell files and unregisters its service worker, then reloads the page. Your workspace content and settings will stay intact.",
       acceptLabel: "Clear Cache" });

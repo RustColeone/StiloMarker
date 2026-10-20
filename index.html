@@ -18,7 +18,6 @@
         <div class="brand-cluster">
           <div class="brand-mark" aria-hidden="true">S</div>
           <div class="brand-block">
-            <div class="eyebrow">Stilo Marker, a Markdown workspace</div>
             <h1>Stilo Marker</h1>
           </div>
         </div>
@@ -27,8 +26,6 @@
         <div id="mobile-file-list" class="mobile-file-list" role="menu" aria-label="Open files" hidden></div>
 
         <nav class="menu-bar" aria-label="Application menus"></nav>
-
-        <div class="window-caption" aria-hidden="true">Markdown IDE</div>
 
         <div class="topbar-mobile-actions topbar-mobile-only">
           <button id="mobile-view-toggle" class="topbar-mobile-btn" type="button" data-target="preview"
@@ -43,11 +40,10 @@
 
       <div id="workspace-shell" class="workspace-shell">
         <aside class="activity-bar" aria-label="Activity bar">
-          <button id="explorer-toggle-button" class="activity-button" type="button" aria-label="Toggle explorer" title="Explorer">≡</button>
-          <button id="chat-toggle-activity-button" class="activity-button" type="button" aria-label="Toggle chat" title="Chat">AI</button>
-          <button id="settings-button" class="activity-button" type="button" aria-label="Open settings" title="Settings">⋯</button>
+          <button id="explorer-toggle-button" class="activity-button" type="button" aria-label="Toggle explorer" title="Explorer"><svg class="activity-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"/><path d="M15 2v5h5"/><path d="M3 7v13a2 2 0 0 0 2 2h10"/></svg></button>
+          <button id="chat-toggle-activity-button" class="activity-button" type="button" aria-label="Toggle chat" title="Chat"><svg class="activity-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.5L3 21l2-5.7A8.4 8.4 0 1 1 21 11.5z"/><path d="M12 7.5l1 2.3 2.3 1-2.3 1-1 2.3-1-2.3-2.3-1 2.3-1z"/></svg></button>
+          <button id="settings-button" class="activity-button" type="button" aria-label="Open settings" title="Settings"><svg class="activity-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
           <div class="activity-bar-spacer"></div>
-          <div class="activity-status-mark" aria-hidden="true"></div>
         </aside>
 
         <aside id="explorer-panel" class="sidebar" aria-label="Project explorer sidebar" data-page-drop="left">
@@ -59,7 +55,7 @@
             <div class="sidebar-actions">
               <button id="explorer-anchor-button" class="sidebar-icon-button sidebar-anchor-button" type="button" aria-label="Dock or float the explorer" title="Float the explorer (overlay)" aria-pressed="false"><svg class="sidebar-icon-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="16" x2="12" y2="22"/><path d="M9 2h6l-1 6 3 3v2H7v-2l3-3-1-6z"/></svg></button>
               <button id="explorer-filter-button" class="sidebar-icon-button sidebar-funnel-button" type="button" aria-label="Filter items" title="Filter items"><svg class="sidebar-icon-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg></button>
-              <button id="explorer-add-button" class="sidebar-add-button" type="button" aria-label="Add items" title="Add items">+</button>
+              <button id="explorer-add-button" class="sidebar-add-button" type="button" aria-label="Add items" title="Add items"><svg class="sidebar-icon-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
             </div>
           </header>
 

@@ -225,12 +225,12 @@ export default defineModule({
       else pages.show(host, "log");
     }
     commands.add({ id: "shell.run-command", title: "Run Command…", keywords: ["palette", "console", "terminal"], keys: ["F1"],
-      menu: { id: "view", group: 0, order: 6 }, run() {
+      menu: { id: "view", group: 1, order: 1 }, run() {
         showLog();
         globalThis.requestAnimationFrame?.(() => commandLine.focus());
       } });
     commands.add({ id: "shell.reload-window", title: "Reload Window", keywords: ["refresh", "restart", "stuck", "frozen"],
-      menu: { id: "settings", group: 0, order: 2.5 }, run: () => reload.reloadWindow() });
+      menu: { id: "settings", group: 1, order: 1 }, run: () => reload.reloadWindow() });
     commands.add({ id: "shell.pick-theme", title: "Change Theme…", keywords: ["colour", "color", "dark", "light", "appearance"],
       run() {
         settingsDialog.open("appearance");

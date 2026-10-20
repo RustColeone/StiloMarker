@@ -104,8 +104,8 @@ export function createSurface({ shell, workspace, editor, sync }) {
   }
 
   shell.commands.add({ id: "history.create-snapshot", title: "Create Snapshot", menu: { id: "create", group: 1, order: 1 }, run: () => void snapshots.createSnapshotNow() });
-  shell.commands.add({ id: "history.snapshots", title: "Snapshots…", menu: { id: "edit", group: 0, order: 2 }, run: () => void openSnapshotsDialog() });
-  shell.commands.add({ id: "history.workspace-history", title: "Workspace History…", menu: { id: "edit", group: 0, order: 3 }, run: () => void openWorkspaceHistory() });
+  shell.commands.add({ id: "history.snapshots", title: "Snapshots…", menu: { id: "edit", group: 1, order: 1 }, run: () => void openSnapshotsDialog() });
+  shell.commands.add({ id: "history.workspace-history", title: "Workspace History…", menu: { id: "edit", group: 1, order: 2 }, run: () => void openWorkspaceHistory() });
   // Before a reload replaces local edits with the cloud's copy (Sync's), they are kept as snapshots.
   sync.keepers.add(async (files) => {
     const store = snapshots.snapshotStore();

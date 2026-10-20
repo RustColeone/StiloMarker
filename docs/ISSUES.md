@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-20 · release `v0.2.10` (not deployed; v0.2.7 is live)
+Last updated: 2026-10-20 · release `v0.2.11` (not deployed; v0.2.7 is live)
 
 ---
 
@@ -40,6 +40,29 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.11: the frame's chrome
+
+Part of the UI polish (2026-10-20: chrome, and the top bar). Browser only.
+
+- **Icons**: the activity bar's Explorer, Chat and Settings are icons (they
+  were the characters ≡, AI and ⋯); the explorer's + is an icon too, and the
+  stray accent mark at the bottom of the activity bar is gone.
+- **Buttons without boxes**: the explorer's and the Log's buttons are plain
+  until hovered, as in VS Code.
+- **Menus** show a command's shortcut (File → Save, Ctrl+S; View → Run
+  Command…, F1) and a line between groups: File's open / import / save /
+  export, Edit's find / history / selection, View's panels / Run Command…,
+  Settings' settings / Reload Window / the reset commands.
+- **The top bar** names the app once (it said "Stilo Marker, a Markdown
+  workspace", "Stilo Marker" and "Markdown IDE").
+- **Fonts**: each system's own (San Francisco on Apple, Segoe UI on
+  Windows, Noto or Liberation Sans on Linux; before, Apple and Linux fell
+  back to Tahoma or a default), and a code font each has.
+- Thin scrollbars in the theme's colours; a file's row in the explorer no
+  longer shows a dot where a folder has its arrow.
+- Tests: `shell-browser.py` (the menus' groups and Save's shortcut),
+  `shell-module.test.mjs` (each item's group and shortcut).
 
 ### v0.2.10: Markdown's missing syntax, and spaces kept after a list marker
 
