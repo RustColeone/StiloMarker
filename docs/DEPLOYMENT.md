@@ -959,3 +959,32 @@ among them), 27 browser suites.
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261020T012024Z-v0.2.0`.
 172/172 data files (taken with the service stopped), every JSON file valid.
+
+## Verified release: v0.2.7
+
+Deployed on 2026-10-20 at 10:06 UTC, with every release since v0.2.0
+(v0.2.1–v0.2.7): Mermaid diagrams (v0.2.1), static HTML pages and every
+workspace file served sandboxed (v0.2.2, a server change), settings an
+extension contributes (v0.2.3), Diagrams wholly an extension with Quick
+Generate's named overview (v0.2.4, a server change), panels dragged between
+areas (v0.2.5), two previews side by side (v0.2.6), and the open issues:
+the URL album's caret jump, an unreadable access file locking its project,
+unreadable comments and History index files set aside (v0.2.7, a server
+change). App version `0.2.7`; sync compatibility unchanged at `117`. The
+service's command line and environment file are unchanged.
+
+Public checks: ping (`0.2.7`, accounts on, hosting on), the service worker's
+cache label `mdnotes-shell-v0.2.7`, the new files served (Mermaid's and the
+HTML page's modules, the Diagram's own stylesheet, the contributed
+settings), the server's own files refused (`server/mdnotes_server.py`,
+`server/whitelist.json`, `server/stilomarker.env` answer as the app's page),
+an unknown session token answered 403, and a clean journal (no errors). The
+sandbox headers on a workspace file's reply are covered by the HTTP test in
+`sync.test.py` (a page and an SVG), not checked live (that needs a session
+and a file).
+
+Validation: 256 Node tests, all 22 Python suites (the backend self-test
+among them), 29 browser suites.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261020T100550Z-v0.2.7`.
+172/172 data files (taken with the service stopped), every JSON file valid.
