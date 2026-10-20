@@ -1,6 +1,7 @@
-"""Browser regression: pages move between the areas (step 5k).
+"""Browser regression: pages move between the areas (steps 5k and P3).
 
-Right-click a section's header or a tab: Move to Left / Right / Bottom. A
+Right-click a section's header or a tab: Move to Left / Right / Bottom, or
+drag it onto another area. A
 section moved to a tab host becomes a tab (its toolbar in the host's header);
 a tab moved to the left becomes a section; the area it went to shows it; an
 area left without pages says how to fill it; the moves are kept over a
@@ -126,11 +127,28 @@ async def main():
         assert await page.evaluate(WHERE, 'chat-history-toggle-button') == 'side'
         assert await page.evaluate(WHERE, 'log-toolbar') == 'bottom'
 
+        # Dragged: a section onto the side panel, then a tab onto the left sidebar (the explorer's
+        # own drops are files: a page passes through them); kept as Move to… keeps them.
+        await page.locator('.sidebar-panel-toggle[data-panel="session"]').drag_to(page.locator('#chat-panel'), force=True)
+        now = await places()
+        assert now['left'] == ['links'] and now['side'] == ['agent', 'chats', 'session'] and now['sideOpen'] == 'session', now
+        await page.locator('[data-tab-host="side"] [data-page="chats"]').drag_to(page.locator('#explorer-tree'))
+        now = await places()
+        assert now['left'] == ['links', 'chats'] and now['side'] == ['agent', 'session'], now
+        assert await page.evaluate(WHERE, 'chats-page') == 'section:chats'
+        assert await page.evaluate('document.querySelectorAll(".is-page-drop").length') == 0, 'no drop mark left behind'
+        await page.locator('.sidebar-panel-toggle[data-panel="chats"]').drag_to(page.locator('#chat-panel'), force=True)
+        await page.locator('[data-tab-host="side"] [data-page="session"]').drag_to(page.locator('#explorer-tree'))
+        now = await places()
+        assert (now['left'], now['side']) == (['links', 'session'], ['agent', 'chats']), now
+        assert await page.evaluate('JSON.parse(localStorage.getItem("mdnotes.settings.v1")).pageHosts') == {}, 'home again: nothing kept'
+
         assert not errors, errors
         await browser.close()
         print(json.dumps({'checks': ['menu on a section', 'section to a tab host', 'its toolbar in the header', 'the area shows',
                                      'tab to another tab host', 'tab to the left as a section', 'no button in a button',
-                                     'an emptied area says so', 'kept over a reload', 'moved back']}))
+                                     'an emptied area says so', 'kept over a reload', 'moved back', 'dragged between areas',
+                                     'no drop mark left']}))
 
 
 asyncio.run(main())

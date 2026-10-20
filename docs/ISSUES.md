@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-20 · release `v0.2.4` (not deployed; v0.2.0 is live)
+Last updated: 2026-10-20 · release `v0.2.5` (not deployed; v0.2.0 is live)
 
 ---
 
@@ -68,6 +68,14 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.2.5: panels dragged between areas
+
+- A panel's tab (side panel, bottom panel) or its section title (left
+  sidebar) can be dragged onto another area: the area is outlined while it
+  is over it, and dropping moves the panel there, as Move to… does.
+- Tests: `area-pages-browser.py` drags a section onto the side panel and a
+  tab onto the sidebar, and back.
 
 ### v0.2.4: Diagrams wholly an extension
 

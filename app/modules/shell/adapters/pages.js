@@ -26,7 +26,8 @@
 //   pages.onChange(host, listener(id))
 //
 // The areas' pages move (step 5k): right-click a tab or a section's header
-// for Move to Left / Right / Bottom; the page's body (and toolbar) goes to
+// for Move to Left / Right / Bottom, or drag it onto another area (an area's
+// element carries [data-page-drop="<host>"]); the page's body (and toolbar) goes to
 // that host as a section or a tab, the area shows it, and the choice is kept
 // (settings.pageHosts). A page shown when its area shows is told (shown).
 //   pages.move(id, host)   pages.hostOf(id) -> host   pages.areaOf(id) -> "left" | "right" | "bottom"
@@ -89,6 +90,7 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
     toggle.type = "button";
     toggle.className = `sidebar-panel-header sidebar-panel-toggle ${page.headerClass ?? ""}`.trim();
     toggle.dataset.panel = page.id;
+    toggle.draggable = Boolean(AREA_HOSTS[page.host]);
     if (page.body?.id) toggle.setAttribute("aria-controls", page.body.id);
     const caret = doc.createElement("span");
     caret.className = "sidebar-panel-caret";
@@ -173,6 +175,7 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
           const button = doc.createElement("button");
           button.type = "button";
           button.className = strip.dataset.tabClass ?? "chat-tab"; // the host's look
+          button.draggable = Boolean(AREA_HOSTS[host]);
           button.setAttribute("role", "tab");
           button.dataset.page = page.id;
           button.textContent = page.label;
@@ -325,6 +328,38 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
     return remove;
   }
 
+  // ── Dragging a page onto another area (as Move to… does) ──
+  const PAGE_DRAG = "text/stilo-page";
+  const clearDropMarks = () => {
+    for (const element of doc.querySelectorAll(".is-page-drop")) element.classList.remove("is-page-drop");
+  };
+  function startDrag(event, id) {
+    if (!id || !event.dataTransfer) return;
+    event.dataTransfer.setData(PAGE_DRAG, id);
+    event.dataTransfer.effectAllowed = "move";
+    closeMenu();
+  }
+  // An area's element takes a dragged page: marked while one is over it, moved there on the drop.
+  function bindDrop(zone, host) {
+    zone.addEventListener("dragover", (event) => {
+      if (!event.dataTransfer?.types.includes(PAGE_DRAG)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      zone.classList.add("is-page-drop");
+    });
+    zone.addEventListener("dragleave", (event) => {
+      if (!zone.contains(event.relatedTarget)) zone.classList.remove("is-page-drop");
+    });
+    zone.addEventListener("drop", (event) => {
+      const id = event.dataTransfer?.getData(PAGE_DRAG);
+      clearDropMarks();
+      if (!id) return;
+      event.preventDefault();
+      event.stopPropagation();
+      move(id, host);
+    });
+  }
+
   // A host bound the first time a page could be in it: a strip's tabs (and,
   // in an area, their Move to… menu) and its "+" button, or a section host's
   // headers.
@@ -348,6 +383,7 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
         event.stopPropagation();
         openMenu(button.dataset.page, event.clientX, event.clientY);
       });
+      if (area) strip.addEventListener("dragstart", (event) => startDrag(event, event.target.closest?.("[data-page]")?.dataset.page));
     });
     bindOnce(place.plus, (plus) => plus.addEventListener("click", () => {
       pagesOf(host).find((entry) => entry.id === active(host))?.newItem?.();
@@ -364,7 +400,9 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
         event.stopPropagation(); // the section's own menu, not the sidebar's (the Explorer's)
         openMenu(toggle.dataset.panel, event.clientX, event.clientY);
       });
+      container.addEventListener("dragstart", (event) => startDrag(event, event.target.closest?.(".sidebar-panel-toggle")?.dataset.panel));
     });
+    if (area) bindOnce(doc?.querySelector(`[data-page-drop="${host}"]`), (zone) => bindDrop(zone, host));
   }
 
   // The sections follow their kept state, and the viewport while never chosen.
@@ -372,6 +410,7 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
     for (const [host, place] of places) if (place.sections) draw(host);
   };
   settings.on?.((view, changed) => { if (changed.includes("sidebarPanels")) drawSectionHosts(); });
+  doc?.addEventListener("dragend", clearDropMarks);
   events?.on("layout", drawSectionHosts);
   // An area shown: the pages open in it are told (they draw, or load).
   events?.on("area", ({ area, shown }) => {

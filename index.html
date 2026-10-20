@@ -47,7 +47,7 @@
           <div class="activity-status-mark" aria-hidden="true"></div>
         </aside>
 
-        <aside id="explorer-panel" class="sidebar" aria-label="Project explorer sidebar">
+        <aside id="explorer-panel" class="sidebar" aria-label="Project explorer sidebar" data-page-drop="left">
           <header class="sidebar-header">
             <div>
               <div class="eyebrow">Explorer</div>
@@ -197,7 +197,7 @@
 
           <div id="debug-splitter" class="panel-splitter debug-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize debug panel"></div>
 
-          <section id="debug-panel" class="debug-panel" aria-label="Bottom area" hidden>
+          <section id="debug-panel" class="debug-panel" aria-label="Bottom area" data-page-drop="bottom" hidden>
             <!-- A tab host (Shell's pages): the open page's toolbar beside its tabs. -->
             <div class="debug-panel-header area-header">
               <div class="area-tabs" role="tablist" aria-label="Bottom area" data-tab-host="bottom" data-tab-class="area-tab"></div>
@@ -226,7 +226,7 @@
 
         <div id="chat-splitter" class="panel-splitter chat-splitter" role="separator" aria-orientation="vertical" aria-label="Resize chat"></div>
 
-        <aside id="chat-panel" class="chat-panel" aria-label="Chat panel" data-tab-host-pages="side">
+        <aside id="chat-panel" class="chat-panel" aria-label="Chat panel" data-tab-host-pages="side" data-page-drop="side">
           <!-- Toolbar -->
           <header class="chat-toolbar">
             <!-- A tab host (Shell's pages): each feature adds its page; the strip is drawn from them. -->
