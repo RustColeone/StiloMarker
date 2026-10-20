@@ -110,6 +110,24 @@ export default Object.freeze([
     ]
   },
   {
+    "id": "htmlpage",
+    "label": "HTML Page",
+    "kind": "text",
+    "format": "html",
+    "extensions": {
+      ".html": "text/html;charset=utf-8",
+      ".htm": "text/html;charset=utf-8"
+    },
+    "icon": "is-html",
+    "filters": [],
+    "create": {
+      "label": "New HTML Page",
+      "name": "new page",
+      "order": 7
+    },
+    "extension": "html-page"
+  },
+  {
     "id": "mermaid",
     "label": "Mermaid",
     "kind": "text",

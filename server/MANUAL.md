@@ -13,15 +13,16 @@ Stilo Marker is a browser-based Markdown workspace. It lets you write notes, bui
 5. [URL Album Files (.urldb)](#5-url-album-files-urldb)
 6. [Brainstorm Diagram Files (.bmap)](#6-brainstorm-diagram-files-bmap)
 7. [Mermaid Diagrams (.mmd)](#7-mermaid-diagrams-mmd)
-8. [Image Files](#8-image-files)
-9. [Explorer](#9-explorer)
-10. [Source Pane](#10-source-pane)
-11. [Preview Pane](#11-preview-pane)
-12. [Saving and Exporting](#12-saving-and-exporting)
-13. [Collaboration Backend](#13-collaboration-backend)
-14. [Chat Panel](#14-chat-panel)
-15. [Settings](#15-settings)
-16. [Templates](#16-templates)
+8. [HTML Pages (.html)](#8-html-pages-html)
+9. [Image Files](#9-image-files)
+10. [Explorer](#10-explorer)
+11. [Source Pane](#11-source-pane)
+12. [Preview Pane](#12-preview-pane)
+13. [Saving and Exporting](#13-saving-and-exporting)
+14. [Collaboration Backend](#14-collaboration-backend)
+15. [Chat Panel](#15-chat-panel)
+16. [Settings](#16-settings)
+17. [Templates](#17-templates)
 
 ---
 
@@ -78,7 +79,7 @@ node
   sourceVersion number   — (files only) monotonically increasing edit counter
 ```
 
-The file type is determined purely by the file extension (`.md`, `.mtree`, `.urldb`, `.bmap`, `.mmd`, or an image extension).
+The file type is determined purely by the file extension (`.md`, `.mtree`, `.urldb`, `.bmap`, `.mmd`, `.html`, or an image extension).
 
 **Source modes:**
 
@@ -353,7 +354,23 @@ diagram shows; offline, diagrams show as code.
 
 ---
 
-## 8. Image Files
+## 8. HTML Pages (.html)
+
+A `.html` (or `.htm`) file is a web page kept in the workspace: its source is
+highlighted, opening it shows the page in the preview, and Create → New HTML
+Page starts one from a small template. The formatting toolbar offers a
+section, an image and a link.
+
+The preview shows the page as a browser would, with its own styles and
+scripts, inside a sandbox: the page runs on its own and cannot reach the
+app, your account or the workspace (it cannot read your other files, act as
+you, or open windows). A relative image (`<img src="pics/photo.png">`) names
+an image in the workspace and is shown; links to other files of the
+workspace do not open from inside the page.
+
+---
+
+## 9. Image Files
 
 Stilo Marker recognizes: `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.bmp`.
 
@@ -364,7 +381,7 @@ Stilo Marker recognizes: `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.bmp
 
 ---
 
-## 9. Explorer
+## 10. Explorer
 
 The explorer shows the project tree as a collapsible file/folder list.
 
@@ -420,7 +437,7 @@ to Bottom**. The panel stays where you put it; move it back the same way.
 
 ---
 
-## 10. Source Pane
+## 11. Source Pane
 
 A plain-text editor for `.md`, `.mtree`, `.urldb`, and `.bmap` files. Image files show a read-only preview.
 
@@ -435,7 +452,7 @@ The source pane header shows the filename, dirty indicator (`•`), and buttons 
 
 ---
 
-## 11. Preview Pane
+## 12. Preview Pane
 
 Renders the active file's content in read-only mode.
 
@@ -451,7 +468,7 @@ The preview can be shown or hidden with `View > Toggle Preview` or the `×` butt
 
 ---
 
-## 12. Saving and Exporting
+## 13. Saving and Exporting
 
 ### Save
 
@@ -469,7 +486,7 @@ The preview can be shown or hidden with `View > Toggle Preview` or the `×` butt
 
 ---
 
-## 13. Collaboration Backend
+## 14. Collaboration Backend
 
 The Python backend (`server/mdnotes_server.py`) enables real-time multi-user sessions.
 
@@ -542,7 +559,7 @@ When a collaboration session is active, the chat thread list is shared across al
 
 ---
 
-## 14. Chat Panel
+## 15. Chat Panel
 
 The chat panel provides an AI assistant scoped to the current workspace.
 
@@ -673,7 +690,7 @@ When a user asks you to update a character file after new writing:
 
 ---
 
-## 15. Settings
+## 16. Settings
 
 `Settings` menu or the settings panel:
 
@@ -687,7 +704,7 @@ When a user asks you to update a character file after new writing:
 
 ---
 
-## 16. Templates
+## 17. Templates
 
 On first load, Stilo Marker offers to open the built-in template project, which demonstrates all file types:
 

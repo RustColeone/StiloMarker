@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-20 · release `v0.2.1` (not deployed; v0.2.0 is live)
+Last updated: 2026-10-20 · release `v0.2.2` (not deployed; v0.2.0 is live)
 
 ---
 
@@ -68,6 +68,29 @@ file is fixed. Needs a decision: failing closed locks out its owner too.
 ---
 
 ## Fixed
+
+### v0.2.2: static HTML pages
+
+The second extension decided on 2026-10-20. A server change too (a restart
+on deploy).
+
+- `.html` (and `.htm`) files: web pages kept in the workspace. Their source
+  is highlighted, opening one shows the page in the preview, Create → New
+  HTML Page starts one, and the formatting toolbar offers a section, an image
+  and a link.
+- The preview is a sandboxed frame: the page's own styles and scripts run,
+  in an origin of their own, with no reach into the app, the account, the
+  browser's storage or the workspace, and no popups. A relative image of the
+  workspace is embedded as data, so a cloud workspace's image address (which
+  carries your session's token) never reaches the page.
+- Hardened, and older than pages: a file the server answers with (a
+  workspace's image, now a page, an export) carries `Content-Security-Policy:
+  sandbox` and `X-Content-Type-Options: nosniff`, so opened on its own (its
+  address in a tab) it never runs as the app. Before, an SVG with a script,
+  opened that way, could have.
+- The manual has an HTML pages section (8; the later ones moved down by one).
+- Tests: `html-page.test.mjs`, `html-page-browser.py`, and in `sync.test.py`
+  a page and an SVG served sandboxed.
 
 ### v0.2.1: Mermaid diagrams
 

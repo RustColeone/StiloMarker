@@ -77,13 +77,13 @@ async def main():
         options = await page.evaluate('[...document.querySelectorAll("#new-file-type option")].map((o) => [o.value, o.textContent])')
         assert options == [['md', 'Markdown (.md)'], ['mtree', 'MTREE (.mtree)'], ['urldb', 'URL Album (.urldb)'],
                            ['bmap', 'Diagram (.bmap)'], ['persona', 'Character (.persona.skill)'],
-                       ['mermaid', 'Mermaid (.mmd)']], options
+                       ['mermaid', 'Mermaid (.mmd)'], ['htmlpage', 'HTML Page (.html)']], options
 
         # Five menus, in order, each with its items.
         labels = await page.locator('.menu-bar .menu-trigger').all_inner_texts()
         assert labels == ['File', 'Edit', 'Create', 'View', 'Settings'], labels
         counts = await page.evaluate('[...document.querySelectorAll(".menu-bar .menu-popover")].map((p) => p.children.length)')
-        assert counts == [9, 5, 7, 5, 5], counts  # Create: md, mtree, urldb, bmap, persona, mermaid, folder
+        assert counts == [9, 5, 8, 5, 5], counts  # Create: md, mtree, urldb, bmap, persona, mermaid, html, folder
         assert await page.locator('#file-menu').is_hidden()
 
         # Opening one closes the others; a click outside closes it.

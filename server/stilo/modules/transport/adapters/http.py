@@ -62,12 +62,22 @@ class File:
         self.data, self.content_type, self.cache = data, content_type, cache
 
 
+# A file a data route answers with is the users' content (a workspace's image
+# or page, an export): opened on its own (its address in a tab), it must never
+# run as the app. The browser takes it as its type only (nosniff), and as a
+# document it is sandboxed: an origin of its own, no scripts (an SVG's, or an
+# HTML page's). As an <img> or a download it is unaffected.
+FILE_HEADERS = (("X-Content-Type-Options", "nosniff"), ("Content-Security-Policy", "sandbox"))
+
+
 def write_file(handler, reply, allow_headers=()):
     handler.send_response(HTTPStatus.OK)
     send_cors(handler, allow_headers)
     handler.send_header("Content-Type", reply.content_type)
     handler.send_header("Content-Length", str(len(reply.data)))
     handler.send_header("Cache-Control", reply.cache)
+    for name, value in FILE_HEADERS:
+        handler.send_header(name, value)
     handler.end_headers()
     handler.wfile.write(reply.data)
 

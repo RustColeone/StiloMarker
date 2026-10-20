@@ -230,6 +230,24 @@ class ImagesOverHttp(unittest.TestCase):
         self.assertEqual(self.call("GET", "/api/workspaces/asset?token=nobody&path=pics/a.png")[0], 403)
         self.assertEqual(self.call("POST", f"/api/workspaces/asset?token={session}&offset=0", raw=b"x")[0], 400, "no path")
 
+    def test_a_workspace_file_opened_on_its_own_never_runs_as_the_app(self):
+        account = json.loads(self.call("POST", "/api/auth/login", {"username": "amy", "password": "pw"})[2])["token"]
+        created = json.loads(self.call("POST", f"/api/workspaces/create?token={account}", {"team": "red", "path": "", "name": "Site", "version": 117})[2])
+        session = json.loads(self.call("POST", f"/api/workspaces/open?token={account}",
+                                       {"team": "red", "path": created["path"], "version": 117})[2])["token"]
+        page = "<!doctype html><script>document.title = 'ran'</script>"
+        status = self.call("POST", f"/api/operations?token={session}", {"version": 117, "operation": {
+            "type": "create-file", "parentPath": "", "name": "page.html", "content": page}})[0]
+        self.assertEqual(status, 200, "an HTML page is a known type now (the html-page extension)")
+        self.call("POST", f"/api/workspaces/asset?token={session}&path=pics/a.svg&offset=0", raw=b"<svg xmlns='http://www.w3.org/2000/svg'><script>1</script></svg>")
+        for path, kind in (("page.html", "text/html"), ("pics/a.svg", "image/svg+xml")):
+            with self.subTest(path=path):
+                request = urllib.request.Request(f"http://127.0.0.1:{self.port}/api/workspaces/asset?token={session}&path={path}")
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    self.assertEqual(response.headers.get("content-type"), kind)
+                    self.assertEqual(response.headers.get("content-security-policy"), "sandbox", "a document of its own origin, no scripts")
+                    self.assertEqual(response.headers.get("x-content-type-options"), "nosniff")
+
     def test_a_session_that_ended_is_refused_not_a_storage_failure(self):
         session = json.loads(self.call("POST", "/api/session/connect", {"pin": "2468", "displayName": "Ann"})[2])["token"]
         self.assertEqual(self.call("GET", f"/api/session/state?token={session}")[0], 200)
