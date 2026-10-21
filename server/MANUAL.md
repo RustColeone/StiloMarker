@@ -68,6 +68,14 @@ If something can't be kept (the server is unreachable, a folder on disk has
 unsaved files, the Agent is still answering), it says what and asks before
 reloading.
 
+**Installing it.** Browsers that offer it (Chrome and Edge: the install
+button in the address bar; Safari on iPhone and iPad: Share → Add to Home
+Screen) install the app in a window of its own; it opens without the
+internet too. A new version doesn't change an open window under you: the
+status bar says **Update ready**, and Reload Window (or clicking it) starts
+it, keeping your work; other windows of the app follow. Closing every window
+of the app starts it too (the browser's own reload keeps the version).
+
 ---
 
 ## 2. Project Model
@@ -380,8 +388,8 @@ Mermaid Diagram starts one. The formatting toolbar (Settings → Appearance)
 offers a flowchart, a sequence diagram and a mind map to start from.
 
 A diagram with a mistake keeps its code in the preview, with Mermaid's reason
-above it. The Mermaid library is loaded from the internet the first time a
-diagram shows; offline, diagrams show as code.
+above it. The Mermaid library is served with the app, so diagrams show
+offline too.
 
 ---
 

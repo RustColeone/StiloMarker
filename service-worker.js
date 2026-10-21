@@ -1,9 +1,19 @@
-const CACHE_NAME = "mdnotes-shell-v0.2.24";
+const CACHE_NAME = "mdnotes-shell-v0.2.25";
+// The libraries served with the app (vendor/: each in a folder named for its
+// version), kept across the app's versions once used.
+const VENDOR_CACHE = "mdnotes-vendor";
+// MathJax, and the extensions' libraries (their vendor/ folders: EXTENSION_LIBRARIES).
+const VENDOR_FILES = ["./vendor/mathjax/3.2.2/tex-svg.js"];
 // The extensions' files (EXTENSION_FILES), written by tools/protocol-sync.mjs.
 importScripts("./extensions/offline.js");
 const APP_SHELL = [
   "./",
   "./index.html",
+  "./manifest.webmanifest",
+  "./assets/icons/stliomarker-icon.svg",
+  "./assets/icons/icon-192.png",
+  "./assets/icons/icon-512.png",
+  "./assets/icons/icon-maskable-512.png",
   "./app/main.js",
   "./app/extensions.js",
   "./app/modules/shell/model/version.js",
@@ -213,10 +223,22 @@ const APP_SHELL = [
   "./app/modules/editor/adapters/preview.js"
 ];
 
+// A new version installs and waits: an open tab keeps the version it started
+// with (what it imports later comes from that version's cache), until the user
+// takes the new one (Reload Window, which asks it to "take-over") or every tab
+// is closed. A first install has nothing to wait for.
+// The libraries are fetched once (each address names its version); failing
+// that, at their first use.
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll([...APP_SHELL, ...self.EXTENSION_FILES])).then(() => self.skipWaiting())
-  );
+  const libraries = caches.open(VENDOR_CACHE).then((cache) => Promise.all([...VENDOR_FILES, ...self.EXTENSION_LIBRARIES].map((file) =>
+    cache.match(file).then((hit) => hit ?? cache.add(file))))).catch((error) => console.warn("Libraries not kept for offline use yet.", error));
+  event.waitUntil(Promise.all([caches.open(CACHE_NAME).then((cache) => cache.addAll([...APP_SHELL, ...self.EXTENSION_FILES])), libraries]));
+});
+
+self.addEventListener("message", (event) => {
+  const kind = event.data?.type;
+  if (kind === "take-over") { void self.skipWaiting(); return; }
+  if (kind === "version") event.ports[0]?.postMessage({ version: CACHE_NAME.replace("mdnotes-shell-v", "") });
 });
 
 self.addEventListener("activate", (event) => {
@@ -224,7 +246,7 @@ self.addEventListener("activate", (event) => {
     caches.keys().then((keys) =>
       Promise.all(
         keys
-          .filter((key) => key !== CACHE_NAME)
+          .filter((key) => key !== CACHE_NAME && key !== VENDOR_CACHE)
           .map((key) => caches.delete(key))
       )
     ).then(() => self.clients.claim())
@@ -252,18 +274,22 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // API responses are dynamic (server browse, access, workspace state): always
-  // hit the network and never serve a cached copy, or the UI would show stale
-  // data after server-side changes (e.g. a deleted project lingering in a list).
+  // The server's requests go straight to the network, never through this
+  // worker (nor its cache: they are always fresh). A worker kept busy by them
+  // could not be replaced: a waiting version takes over only once the one in
+  // use has nothing in hand, and the app asks the server something every few
+  // seconds.
   if (url.pathname.includes("/api/")) {
-    event.respondWith(
-      fetch(event.request, { cache: "no-store" }).catch(
-        () => new Response(JSON.stringify({ error: "offline" }), {
-          status: 503,
-          headers: { "content-type": "application/json" }
-        })
-      )
-    );
+    return;
+  }
+
+  // A library served with the app: from its cache once fetched (its address
+  // names its version, so it never changes).
+  if (url.pathname.includes("/vendor/")) {
+    event.respondWith(caches.open(VENDOR_CACHE).then((cache) => cache.match(event.request).then((hit) => hit ?? fetch(event.request).then((response) => {
+      if (response.ok && response.type === "basic") void cache.put(event.request, response.clone());
+      return response;
+    }))));
     return;
   }
 
@@ -273,8 +299,10 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // From this version's own cache (a newer version waiting has its own, which
+  // must not reach a tab running this one).
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
+    caches.open(CACHE_NAME).then((cache) => cache.match(event.request)).then((cachedResponse) => {
       if (cachedResponse) {
         return cachedResponse;
       }
@@ -300,7 +328,7 @@ self.addEventListener("fetch", (event) => {
         })
         .catch(() => {
           if (event.request.mode === "navigate") {
-            return caches.match("./index.html");
+            return caches.open(CACHE_NAME).then((cache) => cache.match("./index.html"));
           }
           return new Response("Offline", { status: 503, statusText: "Offline" });
         });

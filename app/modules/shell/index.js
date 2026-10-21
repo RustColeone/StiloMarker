@@ -85,7 +85,7 @@ import contributedThemes from "./model/contributed-themes.js";
 import { addMaintenanceCommands, announceCleared, clearAppStorage, clearedAt, followClears } from "./adapters/maintenance.js";
 import { createRender } from "./adapters/render.js";
 import { createFrame } from "./adapters/frame/index.js";
-import { registerOfflineShell, upgradeApp } from "./adapters/offline.js";
+import { registerOfflineShell, takeUpdate, updateWaiting, upgradeApp } from "./adapters/offline.js";
 import { APP_VERSION } from "./model/version.js";
 import { createLogPanel, flash } from "./adapters/log-panel.js";
 import { createCommandLine, listCommands } from "./adapters/command-line.js";
@@ -222,7 +222,18 @@ export default defineModule({
     // Window reloads keeping the work (the modules' beforeReload steps).
     const commandLine = createCommandLine({ commands, run, log: logPanel.log, showAll: logPanel.showAll });
     const reloadSteps = ctx.registry({ validate: checkReloadStep });
-    const reload = createReload({ steps: reloadSteps, confirm, log: logPanel.log });
+    // Reload Window also starts a new version that is waiting (offline.js).
+    const reload = createReload({ steps: reloadSteps, confirm, log: logPanel.log, reload: async () => {
+      if (updateWaiting()) {
+        dialogs.showToast("Starting the new version… (usually a few seconds)", { duration: 6000 });
+        // Not taken (the browser would not swap them yet): a reload now could stall, so this window stays as it is.
+        if (!await takeUpdate()) {
+          notice("The new version could not start yet. Close the app's other windows, or try Reload Window again in a minute.");
+          return false;
+        }
+      }
+      globalThis.location.reload();
+    } });
     // Another window cleared the app's storage (Reset, Empty Everything): this one follows.
     followClears({ reload: () => reload.reloadNow(), log: (message) => ctx.log(message) });
     function showLog() {
@@ -249,10 +260,29 @@ export default defineModule({
     // The server is where the settings say.
     const server = createServer();
     server.configure({ address: () => settings.serverUrl });
+    // A new version, installed and waiting (this tab keeps its own until it is
+    // reloaded): the status bar says so, and Reload Window (or the item) starts it.
+    const statusBar = createStatusBar({ registry: ctx.registry() });
+    const updateItem = globalThis.document ? statusBar.add({ id: "update", order: 55, dot: true, hidden: true,
+      action: () => void reload.reloadWindow() }) : null;
     // Once the app is there: its files kept for offline use (in a page).
     ctx.whenStarted(() => {
       logPanel.log("response", "Debug log initialized", `panel=${settings.debugPanel ? "visible" : "hidden"}`);
-      if (globalThis.window) void registerOfflineShell();
+      if (!globalThis.window) return;
+      void registerOfflineShell({
+        onUpdate(version) {
+          const which = version ? `Version ${version}` : "A new version";
+          updateItem?.set({ hidden: false, text: "Update ready", tone: "success",
+            title: `${which} is ready. Reload Window keeps your work and starts it.` });
+          logPanel.log("response", "Update ready", version ?? "");
+          dialogs.showToast(`${which} is ready: Reload Window (the status bar's "Update ready") starts it.`, { duration: 5000 });
+        },
+        // Another window started it, and it controls this one now: this one follows (keeping the work).
+        onTakenElsewhere() {
+          logPanel.log("response", "Update started in another window", "reloading this one");
+          void reload.reloadWindow();
+        }
+      });
     });
 
     return {
@@ -271,7 +301,7 @@ export default defineModule({
       settings,
       pages,
       settingsDialog,
-      statusBar: createStatusBar({ registry: ctx.registry() }),
+      statusBar,
       frame,
       log: logPanel.log,
       logLines: logPanel.lines,

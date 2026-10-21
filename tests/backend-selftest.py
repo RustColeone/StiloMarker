@@ -34,7 +34,10 @@ def run_selftest():
     base_url = f"http://{host}:{port}"
 
     try:
-        ping = json.loads(urlopen(f"{base_url}/api/ping").read().decode("utf-8"))
+        with urlopen(f"{base_url}/api/ping") as reply:
+            # The app's service worker leaves the server's requests to the network: the browser must never keep a reply.
+            assert reply.headers.get("Cache-Control") == "no-store", reply.headers.get("Cache-Control")
+            ping = json.loads(reply.read().decode("utf-8"))
         assert ping["message"] == "pong"
 
         chat_status = json.loads(urlopen(f"{base_url}/api/chat/status").read().decode("utf-8"))

@@ -16,7 +16,8 @@ the user's own key and no server; each found by an experiment). Being fixed in
 this order; the storage limit (O0) was fixed in v0.2.19, a copy per workspace
 (O7) in v0.2.20, two windows (O1) in v0.2.21, the Agent and Chats with the
 user's own key and no server (O3) in v0.2.22, offline edits merged per file
-(O4) in v0.2.23, typing in a long chapter (O2) in v0.2.24.
+(O4) in v0.2.23, typing in a long chapter (O2) in v0.2.24, the app as an
+installed web app (O5) in v0.2.25.
 
 ### O2b. Very large single files still lag
 
@@ -25,12 +26,6 @@ second a key; a 450 KB file still takes about 1.5 s a key on the server's
 two slow cores (it could not be measured before): the browser lays out all
 of its 20,000 lines whenever the editor draws. Splitting such a file, or an
 editor that keeps only the visible lines in the page, would fix it.
-
-### O5. Not installable as a PWA; updates mix versions; libraries from a CDN
-
-No web app manifest or icons. A new service worker takes over open tabs at
-once while parts of the app load later (a tab can mix versions). MathJax
-(unpinned `@3`) and Mermaid load from a CDN, so they fail offline.
 
 ### O6. Electron
 
@@ -66,6 +61,51 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.25: the app installs, updates wait for you, and works offline whole
+
+From the stability review (2026-10-21), O5. Browser, and one header on the server.
+
+- **Not installable** (fixed): the app has a web app manifest (its name,
+  a window of its own, its colours) and icons at 192 and 512 pixels, and a
+  maskable one for Android's shapes, so browsers offer to install it.
+- **An update could mix versions in an open tab** (fixed): a new version
+  took over open tabs at once, while parts of the app load later (the
+  Agent page, a diagram's editor), so a tab could run old and new code
+  together. A new version now waits: an open tab keeps the version it
+  started with (served from that version's own files, never the waiting
+  one's), the status bar says **Update ready**, and Reload Window (or the
+  item) starts it, keeping the work. With other windows open, they follow
+  it (each reloads the same way). A plain reload keeps the version, as
+  browsers do; closing every window of the app starts it too. New versions
+  are looked for every half hour and when the page shows again.
+- **Taking a new version could stall the tab** (found while testing this):
+  the browser swaps versions only once the one in use has stopped; it asks
+  it to stop as soon as it is idle only if it is running when the new one
+  asks, and asks again only after it has handled another request from a
+  page. A message to it is not enough (the browser may still count it as
+  work), so a swap could wait for minutes, and a reload made meanwhile
+  could hang the tab. Reload Window now asks for a small file through the
+  version in use (it is then running), asks the new one to take over, and
+  asks for the file again each second until the swap: about a second, a
+  few right after the app started. If it still has not happened after 45 s
+  it does not reload (it says so: close the other windows or try again).
+  The server's requests go straight to the network now, not through the
+  service worker (the server marks its replies never to be kept).
+- **Formulas and diagrams needed the internet** (fixed): MathJax (unpinned
+  `@3`) and Mermaid came from a CDN, so offline formulas and diagrams
+  showed as code. Both are served with the app now, pinned (MathJax in
+  `vendor/`, Mermaid in its extension's own `vendor/` folder; each file's
+  SHA-256 checked by a test), fetched once when the app is first kept for
+  offline use and kept across versions.
+- Tests: `pwa-browser.py` (new: the app served for real with its service
+  worker; the manifest and its icons' sizes; a formula and a diagram, and
+  both again offline; a new version waits, says so, starts on Reload
+  Window, another window follows, and Reload Window right after a reload
+  starts it); `vendor.test.mjs` (new); `command-line.test.mjs` (a reload
+  that declines leaves the page as it was); `backend-selftest.py` (a reply
+  is never kept); `mermaid-browser.py`
+  (offline, the library is the app's own).
 
 ### v0.2.24: typing in a long chapter keeps up
 

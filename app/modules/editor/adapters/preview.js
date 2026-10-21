@@ -18,6 +18,9 @@ import { getNodeIdByPath, getPath, isImageFileName, isMarkdownFileName, isMtreeF
 import { renderMarkdown } from "../model/markdown.js";
 import { ignore } from "../../../kernel/index.js";
 
+// MathJax, served with the app (an absolute address: the print window writes its own page).
+const MATHJAX_URL = new URL("./vendor/mathjax/3.2.2/tex-svg.js", globalThis.document?.baseURI ?? "http://localhost/").href;
+
 export function createPreview(app, previews, codeBlocks = { all: () => [] }) {
   let mathJaxLoadPromise = null; // MathJax loads once, on the first formula
   function hasMathMarkup(value) {
@@ -34,7 +37,7 @@ export function createPreview(app, previews, codeBlocks = { all: () => [] }) {
     };
     mathJaxLoadPromise = new Promise((resolve, reject) => {
       const script = document.createElement("script");
-      script.src = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js";
+      script.src = MATHJAX_URL; // pinned, served with the app (vendor/README.md)
       script.async = true;
       script.onload = () => resolve(globalThis.MathJax);
       script.onerror = () => reject(new Error("MathJax failed to load."));
@@ -181,7 +184,7 @@ export function createPreview(app, previews, codeBlocks = { all: () => [] }) {
         mjx-container[jax="SVG"] > svg { max-width: 100%; }
         @page { size: A4; margin: 14mm; }
       </style>
-      ${includeMath ? '<script>window.MathJax={tex:{inlineMath:[["$","$"],["\\(","\\)"]],displayMath:[["$$","$$"],["\\[","\\]"]]},svg:{fontCache:"global"},startup:{typeset:false}};<\/script><script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"><\/script>' : ""}
+      ${includeMath ? '<script>window.MathJax={tex:{inlineMath:[["$","$"],["\\(","\\)"]],displayMath:[["$$","$$"],["\\[","\\]"]]},svg:{fontCache:"global"},startup:{typeset:false}};<\/script><script async src="' + MATHJAX_URL + '"><\/script>' : ""}
     </head>
     <body>
       <main id="print-root">${previewHtml}</main>

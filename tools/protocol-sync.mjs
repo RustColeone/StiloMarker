@@ -3,7 +3,8 @@
 // browsers cannot import as JSON:
 //   protocol/file-types.json (+ each extension's fileTypes) -> app/modules/file-types/model/builtin-types.js
 //   extensions/*/extension.json -> app/extensions.js (the browser modules to start),
-//                                  extensions/offline.js (their files, for the service worker)
+//                                  extensions/offline.js (their files, and the libraries in their vendor/
+//                                  folders, for the service worker)
 //                                  app/modules/shell/model/contributed-settings.js (their settings)
 //                                  and app/modules/shell/model/contributed-themes.js (their themes)
 //   protocol/sync.contract.json -> app/modules/sync/model/contract.js (its version)
@@ -57,21 +58,24 @@ export const COPIES = [
   } }
 ];
 
-// Every file an extension serves (for the offline cache), from its folder.
-function servedFiles(folder) {
+// Every file an extension serves (for the offline cache), from its folder:
+// its own files, or (libraries: true) the libraries in its vendor/ folders,
+// which the service worker keeps across the app's versions.
+function servedFiles(folder, { libraries = false } = {}) {
   const out = [];
-  const walk = (dir) => {
+  const walk = (dir, inVendor) => {
     for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
       const path = `${dir}/${entry.name}`;
-      if (entry.isDirectory()) walk(path);
-      else if (/\.(js|css|svg|png)$/.test(entry.name)) out.push(`./${path}`);
+      if (entry.isDirectory()) walk(path, inVendor || entry.name === "vendor");
+      else if (inVendor === libraries && /\.(js|css|svg|png)$/.test(entry.name)) out.push(`./${path}`);
     }
   };
-  walk(`extensions/${folder}`);
+  walk(`extensions/${folder}`, false);
   return out.sort();
 }
 COPIES.push({ from: "extensions/*/extension.json", to: "extensions/offline.js", text: () =>
-  `self.EXTENSION_FILES = ${JSON.stringify(["./extensions/offline.js", ...extensions().flatMap((extension) => servedFiles(extension.folder))], null, 2)};\n` });
+  `self.EXTENSION_FILES = ${JSON.stringify(["./extensions/offline.js", ...extensions().flatMap((extension) => servedFiles(extension.folder))], null, 2)};\n` +
+  `self.EXTENSION_LIBRARIES = ${JSON.stringify(extensions().flatMap((extension) => servedFiles(extension.folder, { libraries: true })), null, 2)};\n` });
 
 export function render(copy) {
   const head = `// Written by tools/protocol-sync.mjs from ${copy.from}. Do not edit:\n` +

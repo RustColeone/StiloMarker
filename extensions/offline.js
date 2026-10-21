@@ -31,3 +31,6 @@ self.EXTENSION_FILES = [
   "./extensions/url-album/browser/index.js",
   "./extensions/url-album/browser/model/album.js"
 ];
+self.EXTENSION_LIBRARIES = [
+  "./extensions/mermaid/browser/vendor/mermaid/11.17.2/mermaid.min.js"
+];

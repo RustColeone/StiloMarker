@@ -56,7 +56,12 @@ export function createReload({ steps, confirm, log, reload = () => globalThis.lo
       }
       reloading = true;
       log("response", "Reload Window: work kept, reloading");
-      reload();
+      // reload() may decline (false: a new version that could not start yet); the page stays then.
+      if (await reload() === false) {
+        reloading = false;
+        log("response", "Reload Window: not reloaded");
+        return false;
+      }
       return true;
     } finally {
       busy = false;

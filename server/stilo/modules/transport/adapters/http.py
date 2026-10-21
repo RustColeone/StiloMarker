@@ -20,6 +20,8 @@ def write_json(handler, status, payload, allow_headers=()):
     send_cors(handler, allow_headers)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(data)))
+    # Never kept by the browser: the app's service worker leaves these requests to the network.
+    handler.send_header("Cache-Control", "no-store")
     handler.end_headers()
     handler.wfile.write(data)
 

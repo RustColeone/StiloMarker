@@ -3,9 +3,10 @@
 A ```mermaid block in a note is drawn in its preview (a ```js block stays
 code); a .mmd file previews as its diagram and its source is highlighted; a
 broken diagram keeps its code with Mermaid's reason; and with the library
-unreachable (offline) the block stays code and says why. Isolated: the app's
-APIs are mocked and the project lives in this browser; only the pinned
-Mermaid library is fetched from jsDelivr (the last check blocks it).
+unreachable the block stays code and says why. Isolated: the app's APIs are
+mocked and the project lives in this browser; the pinned Mermaid library is
+served with the app (the extension's vendor/ folder), and nothing is fetched from a CDN (the last
+check makes the library's file fail).
 """
 import asyncio
 import json
@@ -31,6 +32,9 @@ def project():
     return {'id': 'mermaid-test', 'name': 'Diagrams', 'sourceMode': 'memory', 'rootId': 'root', 'activeFileId': 'note', 'nodes': nodes}
 
 
+cdn = []  # anything asked of another origin (none: the libraries are served with the app)
+
+
 async def open_app(browser, offline=False):
     context = await browser.new_context(service_workers='block', viewport={'width': 1400, 'height': 900})
     page = await context.new_page()
@@ -40,12 +44,11 @@ async def open_app(browser, offline=False):
 
     async def route(rt):
         url = urlparse(rt.request.url)
-        if url.netloc == 'cdn.jsdelivr.net' and '/npm/mermaid@' in url.path:
-            if offline:
-                await rt.abort('internetdisconnected')
-            else:
-                await rt.continue_()
-            return
+        if url.netloc != urlparse(BASE).netloc:
+            cdn.append(rt.request.url)
+            await rt.abort('internetdisconnected'); return
+        if offline and '/vendor/mermaid/' in url.path:
+            await rt.abort('internetdisconnected'); return
         if url.path.startswith('/api/'):
             await rt.fulfill(status=200, content_type='application/json', body='{"appVersion":"dev","minSyncVersion":117}')
             return
@@ -104,6 +107,7 @@ async def main():
         assert await page.locator('#preview-output .md-code-block[data-lang="mermaid"] pre').is_visible()
         assert not errors, errors
         await browser.close()
+        assert not cdn, f'nothing is fetched from another origin: {cdn}'
         print(json.dumps({'checks': ['a block in a note drawn', 'its code copyable', 'other languages stay code', 'a .mmd previewed',
                                      'its source highlighted', 'its icon', 'a broken diagram says why', 'no leftovers', 'offline: code with the reason']}))
 

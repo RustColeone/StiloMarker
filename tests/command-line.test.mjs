@@ -108,3 +108,18 @@ test("Reload Window: what could not be kept is said, and the user chooses", asyn
   assert.match(go.asked[0].message, /Slow: still not done/, "a step that hangs counts as a problem");
   assert.equal(go.reloads(), 1);
 });
+
+test("Reload Window: a reload that declines (a new version that could not start yet) leaves the page as it was", async () => {
+  const steps = createRegistry({ owner: "shell", validate: checkReloadStep });
+  const lines = [];
+  let declines = 1;
+  let reloads = 0;
+  const reload = createReload({ steps, log: (kind, message) => lines.push(message), confirm: async () => true,
+    reload: async () => { if (declines > 0) { declines -= 1; return false; } reloads += 1; return undefined; } });
+  assert.equal(await reload.reloadWindow(), false);
+  assert.equal(reload.reloading(), false, "Leave site? still asked: the page stays");
+  assert.ok(lines.includes("Reload Window: not reloaded"));
+  assert.equal(await reload.reloadWindow(), true, "and it can be tried again");
+  assert.equal(reloads, 1);
+  assert.equal(reload.reloading(), true);
+});

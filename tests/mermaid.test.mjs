@@ -34,7 +34,7 @@ test("the source highlighting: diagrams, keywords, links, labels, strings, comme
 });
 
 test("the library: pinned, imported once, tried again after a failed import, its leftovers removed", async () => {
-  assert.match(MERMAID_URL, /^https:\/\/cdn\.jsdelivr\.net\/npm\/mermaid@\d+\.\d+\.\d+\//, "an exact version");
+  assert.match(MERMAID_URL, /\/extensions\/mermaid\/browser\/vendor\/mermaid\/\d+\.\d+\.\d+\/mermaid\.min\.js$/, "an exact version, served with the app");
   const removed = [];
   const doc = { documentElement: { dataset: { theme: "dark" } }, getElementById: (id) => ({ remove: () => removed.push(id) }) };
   let imports = 0, fail = true;
