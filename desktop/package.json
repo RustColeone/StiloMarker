@@ -1,7 +1,7 @@
 {
   "name": "stilo-marker",
   "productName": "Stilo Marker",
-  "version": "0.2.26",
+  "version": "0.2.27",
   "description": "A Markdown workspace: notes, diagrams, characters, writing together.",
   "author": "RustColeone",
   "license": "GPL-3.0-only",
@@ -18,18 +18,68 @@
   "build": {
     "appId": "io.github.rustcoleone.stilomarker",
     "productName": "Stilo Marker",
-    "files": ["main.mjs", "app.mjs", "policy.mjs", "preload.cjs", "package.json"],
-    "extraResources": [
-      { "from": "../index.html", "to": "web/index.html" },
-      { "from": "../manifest.webmanifest", "to": "web/manifest.webmanifest" },
-      { "from": "../app", "to": "web/app" },
-      { "from": "../assets", "to": "web/assets" },
-      { "from": "../extensions", "to": "web/extensions", "filter": ["**/*", "!**/server/**", "!**/*.py"] },
-      { "from": "../vendor", "to": "web/vendor" },
-      { "from": "../Template", "to": "web/Template" }
+    "files": [
+      "main.mjs",
+      "app.mjs",
+      "policy.mjs",
+      "preload.cjs",
+      "package.json"
     ],
-    "linux": { "target": ["AppImage", "deb"], "category": "Office", "icon": "../assets/icons/icon-512.png" },
-    "win": { "target": ["nsis"], "icon": "../assets/icons/icon-512.png" },
-    "mac": { "target": ["dmg"], "category": "public.app-category.productivity", "icon": "../assets/icons/icon-512.png" }
+    "extraResources": [
+      {
+        "from": "../index.html",
+        "to": "web/index.html"
+      },
+      {
+        "from": "../manifest.webmanifest",
+        "to": "web/manifest.webmanifest"
+      },
+      {
+        "from": "../app",
+        "to": "web/app"
+      },
+      {
+        "from": "../assets",
+        "to": "web/assets"
+      },
+      {
+        "from": "../extensions",
+        "to": "web/extensions",
+        "filter": [
+          "**/*",
+          "!**/server/**",
+          "!**/*.py"
+        ]
+      },
+      {
+        "from": "../vendor",
+        "to": "web/vendor"
+      },
+      {
+        "from": "../Template",
+        "to": "web/Template"
+      }
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Office",
+      "icon": "../assets/icons/icon-512.png"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "../assets/icons/icon-512.png"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "../assets/icons/icon-512.png"
+    }
   }
 }

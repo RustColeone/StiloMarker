@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v0.2.26";
+const CACHE_NAME = "mdnotes-shell-v0.2.27";
 // The libraries served with the app (vendor/: each in a folder named for its
 // version), kept across the app's versions once used.
 const VENDOR_CACHE = "mdnotes-vendor";
@@ -228,12 +228,24 @@ const APP_SHELL = [
 // with (what it imports later comes from that version's cache), until the user
 // takes the new one (Reload Window, which asks it to "take-over") or every tab
 // is closed. A first install has nothing to wait for.
+// A version from before 0.2.25 took over open tabs at once, and its pages
+// have no "Update ready" to start a waiting one: replacing such a version,
+// this one still takes over at once (once; from then on, versions wait).
+function tookOverAtOnce(key) {
+  const match = /^mdnotes-shell-v(\d+)\.(\d+)\.(\d+)$/.exec(key);
+  if (!match) return false;
+  const [major, minor, patch] = match.slice(1).map(Number);
+  return major === 0 && (minor < 2 || (minor === 2 && patch < 25));
+}
+
 // The libraries are fetched once (each address names its version); failing
 // that, at their first use.
 self.addEventListener("install", (event) => {
   const libraries = caches.open(VENDOR_CACHE).then((cache) => Promise.all([...VENDOR_FILES, ...self.EXTENSION_LIBRARIES].map((file) =>
     cache.match(file).then((hit) => hit ?? cache.add(file))))).catch((error) => console.warn("Libraries not kept for offline use yet.", error));
-  event.waitUntil(Promise.all([caches.open(CACHE_NAME).then((cache) => cache.addAll([...APP_SHELL, ...self.EXTENSION_FILES])), libraries]));
+  event.waitUntil(Promise.all([caches.open(CACHE_NAME).then((cache) => cache.addAll([...APP_SHELL, ...self.EXTENSION_FILES])), libraries])
+    .then(() => caches.keys())
+    .then((keys) => (keys.some(tookOverAtOnce) ? self.skipWaiting() : undefined)));
 });
 
 self.addEventListener("message", (event) => {

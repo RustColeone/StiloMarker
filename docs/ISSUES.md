@@ -55,6 +55,22 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 
 ## Fixed
 
+### v0.2.27: tabs from before v0.2.25 still get the new version
+
+Found preparing the deploy. Browser only (and the release tool).
+
+- **Open tabs of an older version would have kept it** (fixed before it
+  shipped): versions up to 0.2.24 took over open tabs at once, and their
+  pages have no "Update ready". A version that now waits would have stayed
+  waiting behind them through every reload, until all the app's tabs were
+  closed, while the server had moved on. Replacing a version from before
+  0.2.25, a new one still takes over at once, as those pages expect; from
+  then on, versions wait.
+- **The desktop app's version**: the release tool now sets it with the
+  app's (`desktop/package.json`), and checks it.
+- Tests: `pwa-browser.py` (the app first served as 0.2.24, then this
+  version replaces it without anyone clicking; it fails without the fix).
+
 ### v0.2.26: the desktop app
 
 From the stability review (2026-10-21), O6. A new `desktop/` folder; in the

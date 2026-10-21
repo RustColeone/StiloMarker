@@ -6,13 +6,14 @@ The manifest names the app and its icons (192, 512 and a maskable 512, the
 right sizes). A formula (MathJax) and a Mermaid diagram draw from the
 libraries served with the app; offline, a reload opens the app and draws them
 again (nothing from a CDN).
-A new version, once deployed, waits: the open tab keeps its own, the status
+A version from before 0.2.25 (whose pages have no "Update ready") is replaced
+at once, as it expected. A new version, once deployed, waits: the open tab keeps its own, the status
 bar says "Update ready", and Reload Window (the item) starts it. With two
 windows open, the one that did not start it follows (it reloads into the new
 version, not mixing them). A reload keeps the version and says one waits;
 Reload Window right after it still starts it. No page errors.
 """
-import asyncio, json, os, shutil, socket, subprocess, sys, tempfile, time, urllib.request
+import asyncio, json, os, re, shutil, socket, subprocess, sys, tempfile, time, urllib.request
 from pathlib import Path
 from playwright.async_api import async_playwright
 
@@ -20,6 +21,9 @@ ROOT = Path(__file__).resolve().parents[1]
 TMP = tempfile.TemporaryDirectory()
 SITE = Path(TMP.name) / "site"
 shutil.copytree(ROOT, SITE, ignore=shutil.ignore_patterns(".git", "server", "tests", "docs", "node_modules", "__pycache__", "*.py"))
+# This checkout's version; the app is first served as 0.2.24 (from before versions waited).
+RELEASE = re.search(r'"mdnotes-shell-v([^"]+)"', (SITE / "service-worker.js").read_text()).group(1)
+OLD = "0.2.24"
 
 
 def free_port():
@@ -27,6 +31,7 @@ def free_port():
         probe.bind(("127.0.0.1", 0)); return probe.getsockname()[1]
 
 
+(SITE / "service-worker.js").write_text((SITE / "service-worker.js").read_text().replace(f'"mdnotes-shell-v{RELEASE}"', f'"mdnotes-shell-v{OLD}"'))
 PORT = free_port()
 SERVER = subprocess.Popen([sys.executable, "-m", "http.server", str(PORT), "--bind", "127.0.0.1", "--directory", str(SITE)],
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -85,9 +90,18 @@ async def main():
         assert manifest["name"] == "Stilo Marker" and manifest["display"] == "standalone" and manifest["start"] == "./", manifest
         assert manifest["icons"] == [["192x192", "any", 192, 192], ["512x512", "any", 512, 512], ["512x512", "maskable", 512, 512]], manifest["icons"]
 
-        # Controlled from the next load; the diagram draws from the served library.
+        # Controlled from the next load (by 0.2.24 here).
         await page.reload(wait_until="domcontentloaded")
         await page.wait_for_function("Boolean(navigator.serviceWorker.controller)", timeout=15000)
+        await version_becomes(page, OLD)
+
+        # This version replaces one from before 0.2.25 at once (nobody clicks anything).
+        deploy(OLD, RELEASE)
+        async with page.expect_navigation(timeout=60000):
+            await page.evaluate("navigator.serviceWorker.getRegistration().then((r) => r.update())")
+        await version_becomes(page, RELEASE)
+
+        # The diagram and the formula draw from the served libraries.
         await page.wait_for_selector(DRAWN, timeout=30000)
         await page.wait_for_selector("#preview-output mjx-container svg", timeout=30000)
         first = await asyncio.wait_for(page.evaluate(VERSION), 8)
@@ -150,6 +164,7 @@ async def main():
         assert not errors, errors
         await browser.close()
     print(json.dumps({"checks": ["the manifest: the app and its icons at the sizes it says",
+                                 "a version from before 0.2.25 is replaced at once",
                                  "a formula and a Mermaid diagram from the libraries served with the app; offline, the app and both again",
                                  "a new version waits; the tab keeps its own and says Update ready",
                                  "Reload Window starts it; another window follows into it",
