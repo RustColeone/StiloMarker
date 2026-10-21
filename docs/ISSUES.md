@@ -13,7 +13,7 @@ Last updated: 2026-10-21 · release `v0.2.19` (not deployed; v0.2.16 is live)
 
 From the stability review of 2026-10-21 (the app as a PWA, in Electron, with
 the user's own key and no server; each found by an experiment). Being fixed in
-this order; the storage limit (O0) was fixed in v0.2.19.
+this order (O7 with O1); the storage limit (O0) was fixed in v0.2.19.
 
 ### O1. Two windows on one in-browser workspace overwrite each other
 
@@ -21,6 +21,16 @@ Confirmed (two windows, an edit in each): the later save wins, the other
 window's edit is lost, and neither window sees the other's. Decided: both
 windows live, as two devices on a cloud workspace (one window brokers the
 edits for the others, through the browser).
+
+### O7. Joining a shared session, then reloading, loses the in-browser workspace
+
+Confirmed (an in-browser workspace, a PIN session joined, a reload, the
+session left): the browser keeps one copy, which after joining is the shared
+workspace's; the one kept aside to come back on leaving lives only in memory,
+so after a reload leaving shows an empty workspace and the in-browser one is
+gone. Joining warns that the host's workspace replaces the current one, but
+also keeps it aside as if it were safe. To be fixed with O1: a copy per
+workspace (an in-browser workspace is never overwritten by another's).
 
 ### O2. Typing slows with the size of the file
 
