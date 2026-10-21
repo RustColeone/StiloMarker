@@ -1075,3 +1075,42 @@ among them), 32 browser suites.
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261021T083909Z-v0.2.19`.
 173/173 data files (taken with the service stopped), every JSON file valid.
+
+## Verified release: v0.2.27
+
+Deployed on 2026-10-21 at 22:54 UTC, with every release since v0.2.19
+(v0.2.20–v0.2.27, the stability review's fixes): a copy per workspace
+(v0.2.20), two windows live (v0.2.21), the Agent and Chats with the user's
+own key and no server (v0.2.22), offline edits merged per file (v0.2.23),
+typing in a long chapter (v0.2.24), the app as an installed web app with
+updates that wait and its libraries served with it (v0.2.25), the desktop
+app (v0.2.26, in the repository; nothing changes for the web), and tabs of
+older versions still taking the new one (v0.2.27). App version `0.2.27`;
+sync compatibility unchanged at `117`. The service's command line and
+environment file are unchanged; it was down 1 second.
+
+The server's code changed: `/api/chat/prompt` is gone (v0.2.22; a tab
+left open from before needs a reload for direct Chats replies), and its
+JSON replies say `Cache-Control: no-store` (v0.2.25). Tabs running
+v0.2.19 get v0.2.27 at once (they expected that); from v0.2.25 on, a new
+version waits for Reload Window. A browser downloads MathJax and Mermaid
+(about 5 MB) once, when it installs the new version.
+
+Public checks: ping (`0.2.27`, accounts on, hosting on), a JSON reply's
+`Cache-Control: no-store`, the service worker's cache label
+`mdnotes-shell-v0.2.27`, the new files served (`manifest.webmanifest` as
+`application/manifest+json`, the icons, Sync's `adapters/tabs.js` and
+`model/merge.js`, Shell's `adapters/desktop.js`), MathJax and Mermaid
+served with their listed SHA-256, the server's own files refused
+(`server/mdnotes_server.py`, `server/whitelist.json`,
+`server/stilomarker.env` answer as the app's page), an unknown session
+token answered 403, and a clean journal. A fresh browser on the public site
+(its own welcome workspace, no real data) was controlled by `0.2.27`, kept
+both libraries in `mdnotes-vendor`, opened offline, fetched nothing from a
+CDN, and had no page errors.
+
+Validation: 342 Node tests, all 22 Python suites, 38 browser suites (the
+desktop app's among them, in Electron 44).
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261021T225411Z-v0.2.27`.
+173/173 data files (taken with the service stopped), every JSON file valid.
