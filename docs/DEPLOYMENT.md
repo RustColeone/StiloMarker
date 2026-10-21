@@ -1017,3 +1017,30 @@ among them), 31 browser suites.
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261020T213733Z-v0.2.13`.
 172/172 data files (taken with the service stopped), every JSON file valid.
+
+## Verified release: v0.2.16
+
+Deployed on 2026-10-21 at 02:20 UTC, with every release since v0.2.13
+(v0.2.14–v0.2.16): small things that were wrong (readable toasts, the
+active tab kept in view, a diagram fitted to its pane, v0.2.14), dialogs
+that say what they ask, with Rename Selected keeping the extension out
+(v0.2.15), and menus and tabs (v0.2.16). Browser only: the server's code is
+unchanged. App version `0.2.16`; sync compatibility unchanged at `117`. The
+service's command line and environment file are unchanged; it was down 2
+seconds.
+
+Public checks: ping (`0.2.16`, accounts on, hosting on), the service
+worker's cache label `mdnotes-shell-v0.2.16`, the new files served
+(`app/modules/shell/model/dialog-text.js`, the Diagram's
+`browser/model/fit.js`, listed in `extensions/offline.js`), the server's own
+files refused (`server/mdnotes_server.py`, `server/whitelist.json`,
+`server/stilomarker.env` answer as the app's page), an unknown session token
+answered 403, and a clean journal (no errors). A fresh browser on the public
+site (no account, no workspace) showed `v0.2.16` with no page errors; F1 and
+"change theme" found Change Theme…, which showed the seven theme cards.
+
+Validation: 277 Node tests, all 22 Python suites (the backend self-test
+among them), 31 browser suites.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261021T021959Z-v0.2.16`.
+172/172 data files (taken with the service stopped), every JSON file valid.
