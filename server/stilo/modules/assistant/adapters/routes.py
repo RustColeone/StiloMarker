@@ -92,23 +92,6 @@ def add_routes(transport, *, agent, threads, identity, directory, version):
                               persona=persona, cast=cast, identity=account)
         return run
 
-    def character_prompt(request):
-        """A character's request, built but not sent: for a browser that runs the
-        model itself. It spends no key, so it needs no sign-in."""
-        payload = request.json()
-        if not isinstance(payload, dict) or not isinstance(payload.get("persona"), dict):
-            raise ValueError("A character is required")
-        project = payload.get("project") if isinstance(payload.get("project"), dict) else None
-        try:
-            built, _ = agent.build_persona_payload(payload.get("messages") or [], payload.get("contextFiles") or [],
-                                                   str(payload.get("projectName", "")), project, payload["persona"],
-                                                   payload.get("cast") or [], "")
-        except TypeError as error:
-            raise ValueError(str(error)) from error
-        for key in ("model", "thinking", "reasoning_effort"):
-            built.pop(key, None)
-        return {"payload": built}
-
     def generate(request):
         payload = request.json()
         account_for(str(payload.get("accountToken") or ""), own_key=False)
@@ -164,7 +147,6 @@ def add_routes(transport, *, agent, threads, identity, directory, version):
     transport.add_line_stream_route("POST", "/api/chat", turn)
     transport.add_route("GET", "/api/chat/status", status)
     transport.add_route("POST", "/api/chat/mcp", connections, allow_headers=("Authorization",))
-    transport.add_route("POST", "/api/chat/prompt", character_prompt)
     transport.add_route("POST", "/api/generate", generate)
     transport.add_route("GET", "/api/generated", generated)
     transport.add_route("GET", "/api/chat/workspace", read_threads)

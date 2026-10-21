@@ -15,7 +15,8 @@ import * as persona from "./model/persona.js";
 import { contextFiles, projectSnapshot } from "./model/request.js";
 
 export * from "./model/persona.js";
-export { contextFiles, projectSnapshot } from "./model/request.js";
+export { contextFiles, projectSnapshot, projectTree, serializeContext, walkProjectTree } from "./model/request.js";
+export { buildReplyRequest, characterInstructions, personaTranscript } from "./model/reply-request.js";
 
 export default defineModule({
   name: "characters",

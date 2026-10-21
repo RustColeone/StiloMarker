@@ -1,4 +1,6 @@
-"""Roleplay persona turns: prompt, read-only tools, transcript mapping, limits."""
+"""Roleplay persona turns: prompt, read-only tools, transcript mapping, limits.
+And the server's half of spec/characters/reply-request.cases.json (the
+browser's is reply-request.test.mjs): a character's request as both build it."""
 from types import SimpleNamespace
 import copy, json, sys, unittest
 from pathlib import Path
@@ -190,6 +192,27 @@ class PersonaTurnTests(unittest.TestCase):
         self.assertEqual((status, body['upgradeRequired'], body['minVersion']), (426, True, 117))
         self.assertEqual(saved, [])
         self.assertEqual(call(transport, 'POST', '/api/chat/workspace', FakeRequest({'version': 117, 'threads': []}, query={'token': 't'}))[0], 200)
+
+
+class SharedReplyRequestCases(unittest.TestCase):
+    """spec/characters/reply-request.cases.json, built by the server."""
+
+    def test_cases(self):
+        table = json.loads((Path(__file__).resolve().parents[1] / 'spec/characters/reply-request.cases.json').read_text(encoding='utf-8'))
+        agent = Agent()
+        agent.providers = SimpleNamespace(options=lambda payload: payload)
+        for case in table['cases']:
+            with self.subTest(case['name']):
+                build = lambda: agent.build_persona_payload(case['messages'], case['contextFiles'], case['projectName'],
+                                                            copy.deepcopy(case['project']), case['persona'], case['cast'], case['model'])
+                if 'error' in case:
+                    with self.assertRaises(ValueError) as raised:
+                        build()
+                    self.assertEqual(str(raised.exception), case['error'])
+                    continue
+                payload, used = build()
+                self.assertEqual(payload, case['payload'])
+                self.assertEqual(used, case['usedPaths'])
 
 
 if __name__ == '__main__':

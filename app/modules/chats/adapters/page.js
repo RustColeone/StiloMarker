@@ -7,7 +7,7 @@
 // (through Workspace: giveAgentThreads), and they move into Chats once.
 import { getNodeIdByPath, getPath, isImageFileName, isPersonaFileName } from "../../workspace/index.js";
 import { escapeHtmlAttribute, renderMarkdown } from "../../editor/index.js";
-import { charactersView, contextFiles, parsePersona, personaSummary, projectSnapshot } from "../../characters/index.js";
+import { buildReplyRequest, charactersView, contextFiles, parsePersona, personaSummary, projectSnapshot } from "../../characters/index.js";
 import { createCloudChats } from "./api.js";
 import { createIdbRecordStore } from "./local-records.js";
 import { createLocalChats as createLocalStore } from "../service/local-chats.js";
@@ -127,16 +127,12 @@ export function createChatsPage(app) {
   async function runPersonaReply({ character, cast, transcript, trigger, signal, onText }) {
     const project = controller.getProject();
     if (directRunner()) {
-      const response = await fetch(`${normalizeServerUrl(settings.serverUrl)}/api/chat/prompt`, {
-        method: "POST", headers: { "content-type": "application/json" }, signal,
-        body: JSON.stringify({ projectName: project.name, project: projectSnapshot(project), messages: transcript,
-          contextFiles: contextFiles(project, { contextPaths: trigger?.contextPaths ?? [] }),
-          persona: { path: character.path, name: character.name, content: character.content, temperature: character.temperature },
-          cast: cast.map((member) => ({ name: member.name, summary: personaSummary(member.sheet ?? member.body) })) })
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.message || `Preparing the reply failed (${response.status}).`);
-      return runDirect(data.payload, signal, onText);
+      // Built here as the server builds it (Characters): no server needed.
+      const { payload } = buildReplyRequest({ projectName: project.name, project: projectSnapshot(project), messages: transcript,
+        contextFiles: contextFiles(project, { contextPaths: trigger?.contextPaths ?? [] }),
+        persona: { path: character.path, name: character.name, content: character.content, temperature: character.temperature },
+        cast: cast.map((member) => ({ name: member.name, summary: personaSummary(member.sheet ?? member.body) })) });
+      return runDirect(payload, signal, onText);
     }
     await models.agent.ensureReady({ signedIn: Boolean(identity.account()) });
     let text = "";

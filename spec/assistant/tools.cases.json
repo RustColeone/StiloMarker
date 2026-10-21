@@ -1,0 +1,737 @@
+{
+  "about": "The workspace agent's tools, run against a project (rule 6): the server's (server/stilo/modules/assistant/service/tools.py, model/edits.py) and the browser's, for the agent it runs with the user's own key (app/modules/assistant/model/agent-tools.js). `edits`: edit_file's passages applied to a text (`expect`, or the `error` it says). `turns`: tool calls in order against `project`, each call's `arguments` as the model sends them (JSON text) and the `result` the model is given, and the proposals made; proposal ids are numbered op-1, op-2... in the order they first appear.",
+  "project": {
+    "id": "p",
+    "name": "P",
+    "rootId": "root",
+    "nodes": {
+      "root": {
+        "id": "root",
+        "kind": "folder",
+        "name": "P",
+        "parentId": null,
+        "children": [
+          "n",
+          "c",
+          "i"
+        ]
+      },
+      "n": {
+        "id": "n",
+        "kind": "file",
+        "parentId": "root",
+        "name": "notes.md",
+        "content": "# Notes\n\nOne two three. 你好 🌙 end."
+      },
+      "c": {
+        "id": "c",
+        "kind": "folder",
+        "parentId": "root",
+        "name": "chapters",
+        "children": [
+          "o"
+        ]
+      },
+      "o": {
+        "id": "o",
+        "kind": "file",
+        "parentId": "c",
+        "name": "one.md",
+        "content": "Chapter one."
+      },
+      "i": {
+        "id": "i",
+        "kind": "file",
+        "parentId": "root",
+        "name": "pic.png",
+        "content": "data:image/png;base64,AAAA"
+      }
+    }
+  },
+  "edits": [
+    {
+      "name": "one passage",
+      "text": "Hello world",
+      "edits": [
+        {
+          "find": "world",
+          "replace": "there"
+        }
+      ],
+      "expect": "Hello there"
+    },
+    {
+      "name": "an empty replace deletes",
+      "text": "Hello cruel world",
+      "edits": [
+        {
+          "find": "cruel ",
+          "replace": ""
+        }
+      ],
+      "expect": "Hello world"
+    },
+    {
+      "name": "replace left out deletes too",
+      "text": "Hello cruel world",
+      "edits": [
+        {
+          "find": "cruel "
+        }
+      ],
+      "expect": "Hello world"
+    },
+    {
+      "name": "two passages, given in either order",
+      "text": "a b c d",
+      "edits": [
+        {
+          "find": "d",
+          "replace": "D"
+        },
+        {
+          "find": "a",
+          "replace": "A"
+        }
+      ],
+      "expect": "A b c D"
+    },
+    {
+      "name": "text past the BMP (an emoji, CJK)",
+      "text": "你好 🌙 end",
+      "edits": [
+        {
+          "find": "🌙",
+          "replace": "☀️"
+        },
+        {
+          "find": "end",
+          "replace": "fin"
+        }
+      ],
+      "expect": "你好 ☀️ fin"
+    },
+    {
+      "name": "a passage not there",
+      "text": "Hello",
+      "edits": [
+        {
+          "find": "bye",
+          "replace": "x"
+        }
+      ],
+      "error": "edit 1: find was not found; copy the passage exactly as the file has it (read_file first)"
+    },
+    {
+      "name": "a passage there twice",
+      "text": "la la land",
+      "edits": [
+        {
+          "find": "la",
+          "replace": "x"
+        }
+      ],
+      "error": "edit 1: find matches 3 times; include more surrounding text so it matches once"
+    },
+    {
+      "name": "overlapping occurrences count once",
+      "text": "aaa",
+      "edits": [
+        {
+          "find": "aa",
+          "replace": "b"
+        }
+      ],
+      "expect": "ba"
+    },
+    {
+      "name": "overlapping edits",
+      "text": "abcdef",
+      "edits": [
+        {
+          "find": "abc",
+          "replace": "x"
+        },
+        {
+          "find": "cde",
+          "replace": "y"
+        }
+      ],
+      "error": "edits 1 and 2 overlap; merge them into one edit"
+    },
+    {
+      "name": "an empty find",
+      "text": "abc",
+      "edits": [
+        {
+          "find": "",
+          "replace": "x"
+        }
+      ],
+      "error": "edit 1: find must be the exact text to change (not empty)"
+    },
+    {
+      "name": "a replace that is not text",
+      "text": "abc",
+      "edits": [
+        {
+          "find": "a",
+          "replace": 5
+        }
+      ],
+      "error": "edit 1: replace must be text"
+    },
+    {
+      "name": "an edit that is not an object",
+      "text": "abc",
+      "edits": [
+        "a"
+      ],
+      "error": "edit 1 must be an object with find and replace"
+    },
+    {
+      "name": "no edits",
+      "text": "abc",
+      "edits": [],
+      "error": "edits must be a non-empty list of {find, replace}"
+    },
+    {
+      "name": "edits that are not a list",
+      "text": "abc",
+      "edits": {
+        "find": "a"
+      },
+      "error": "edits must be a non-empty list of {find, replace}"
+    },
+    {
+      "name": "more edits than allowed",
+      "text": "abcdefghijklmnopqrstuvwxyz",
+      "edits": [
+        {
+          "find": "a",
+          "replace": "A"
+        },
+        {
+          "find": "b",
+          "replace": "B"
+        },
+        {
+          "find": "c",
+          "replace": "C"
+        },
+        {
+          "find": "d",
+          "replace": "D"
+        },
+        {
+          "find": "e",
+          "replace": "E"
+        },
+        {
+          "find": "f",
+          "replace": "F"
+        },
+        {
+          "find": "g",
+          "replace": "G"
+        },
+        {
+          "find": "h",
+          "replace": "H"
+        },
+        {
+          "find": "i",
+          "replace": "I"
+        },
+        {
+          "find": "j",
+          "replace": "J"
+        },
+        {
+          "find": "k",
+          "replace": "K"
+        },
+        {
+          "find": "l",
+          "replace": "L"
+        },
+        {
+          "find": "m",
+          "replace": "M"
+        },
+        {
+          "find": "n",
+          "replace": "N"
+        },
+        {
+          "find": "o",
+          "replace": "O"
+        },
+        {
+          "find": "p",
+          "replace": "P"
+        },
+        {
+          "find": "q",
+          "replace": "Q"
+        },
+        {
+          "find": "r",
+          "replace": "R"
+        },
+        {
+          "find": "s",
+          "replace": "S"
+        },
+        {
+          "find": "t",
+          "replace": "T"
+        },
+        {
+          "find": "u",
+          "replace": "U"
+        }
+      ],
+      "error": "at most 20 edits per call; split the change"
+    }
+  ],
+  "turns": [
+    {
+      "name": "reading",
+      "readOnly": false,
+      "calls": [
+        {
+          "tool": "list_files",
+          "arguments": "{}",
+          "result": {
+            "files": [
+              {
+                "path": "notes.md",
+                "kind": "file"
+              },
+              {
+                "path": "chapters",
+                "kind": "folder"
+              },
+              {
+                "path": "chapters/one.md",
+                "kind": "file"
+              },
+              {
+                "path": "pic.png",
+                "kind": "file"
+              }
+            ]
+          }
+        },
+        {
+          "tool": "read_file",
+          "arguments": "{\"path\": \"chapters/one.md\"}",
+          "result": {
+            "content": "Chapter one."
+          }
+        },
+        {
+          "tool": "read_file",
+          "arguments": "{\"path\": \" notes.md \"}",
+          "result": {
+            "content": "# Notes\n\nOne two three. 你好 🌙 end."
+          }
+        },
+        {
+          "tool": "read_file",
+          "arguments": "{\"path\": \"missing.md\"}",
+          "result": {
+            "error": "File not found: missing.md"
+          }
+        },
+        {
+          "tool": "read_file",
+          "arguments": "{\"path\": \"chapters\"}",
+          "result": {
+            "error": "Not a file: chapters"
+          }
+        }
+      ],
+      "proposals": []
+    },
+    {
+      "name": "edit_file, chained on its own proposal",
+      "readOnly": false,
+      "calls": [
+        {
+          "tool": "edit_file",
+          "arguments": "{\"path\": \"notes.md\", \"edits\": [{\"find\": \"two\", \"replace\": \"2\"}]}",
+          "result": {
+            "status": "proposed",
+            "proposalId": "op-1",
+            "edits": 1
+          }
+        },
+        {
+          "tool": "edit_file",
+          "arguments": "{\"path\": \"notes.md\", \"edits\": [{\"find\": \"One 2\", \"replace\": \"1, 2\"}]}",
+          "result": {
+            "status": "proposed",
+            "proposalId": "op-2",
+            "edits": 1
+          }
+        },
+        {
+          "tool": "edit_file",
+          "arguments": "{\"path\": \"notes.md\", \"edits\": [{\"find\": \"two\", \"replace\": \"2\"}]}",
+          "result": {
+            "error": "edit 1: find was not found; copy the passage exactly as the file has it (read_file first)"
+          }
+        }
+      ],
+      "proposals": [
+        {
+          "proposalId": "op-1",
+          "type": "update-file",
+          "path": "notes.md",
+          "content": "# Notes\n\nOne 2 three. 你好 🌙 end.",
+          "preImage": "# Notes\n\nOne two three. 你好 🌙 end.",
+          "edits": [
+            {
+              "find": "two",
+              "replace": "2"
+            }
+          ]
+        },
+        {
+          "proposalId": "op-2",
+          "type": "update-file",
+          "path": "notes.md",
+          "content": "# Notes\n\n1, 2 three. 你好 🌙 end.",
+          "preImage": "# Notes\n\nOne 2 three. 你好 🌙 end.",
+          "edits": [
+            {
+              "find": "One 2",
+              "replace": "1, 2"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "edit_file refusals",
+      "readOnly": false,
+      "calls": [
+        {
+          "tool": "edit_file",
+          "arguments": "{\"path\": \"pic.png\", \"edits\": [{\"find\": \"A\", \"replace\": \"B\"}]}",
+          "result": {
+            "error": "Images cannot be edited as text."
+          }
+        },
+        {
+          "tool": "edit_file",
+          "arguments": "{\"path\": \"missing.md\", \"edits\": [{\"find\": \"A\", \"replace\": \"B\"}]}",
+          "result": {
+            "error": "File not found: missing.md. Use create_file for a new file."
+          }
+        },
+        {
+          "tool": "edit_file",
+          "arguments": "{\"path\": \"\", \"edits\": [{\"find\": \"A\", \"replace\": \"B\"}]}",
+          "result": {
+            "error": "path is required"
+          }
+        },
+        {
+          "tool": "edit_file",
+          "arguments": "{\"path\": \"chapters\", \"edits\": [{\"find\": \"A\", \"replace\": \"B\"}]}",
+          "result": {
+            "error": "File not found: chapters. Use create_file for a new file."
+          }
+        },
+        {
+          "tool": "edit_file",
+          "arguments": "{\"path\": \"notes.md\", \"edits\": [{\"find\": \"One\", \"replace\": \"One\"}]}",
+          "result": {
+            "status": "unchanged",
+            "message": "These edits change nothing."
+          }
+        },
+        {
+          "tool": "edit_file",
+          "arguments": "{\"path\": \"notes.md\", \"edits\": [{\"find\": \"zzz\", \"replace\": \"y\"}]}",
+          "result": {
+            "error": "edit 1: find was not found; copy the passage exactly as the file has it (read_file first)"
+          }
+        }
+      ],
+      "proposals": []
+    },
+    {
+      "name": "edit_file on a file created this turn",
+      "readOnly": false,
+      "calls": [
+        {
+          "tool": "create_file",
+          "arguments": "{\"parentPath\": \"chapters\", \"name\": \"two.md\", \"content\": \"Chapter two.\"}",
+          "result": {
+            "status": "proposed",
+            "proposalId": "op-1"
+          }
+        },
+        {
+          "tool": "edit_file",
+          "arguments": "{\"path\": \"chapters/two.md\", \"edits\": [{\"find\": \"two\", \"replace\": \"2\"}]}",
+          "result": {
+            "status": "proposed",
+            "proposalId": "op-2",
+            "edits": 1
+          }
+        }
+      ],
+      "proposals": [
+        {
+          "proposalId": "op-1",
+          "type": "create-file",
+          "parentPath": "chapters",
+          "name": "two.md",
+          "content": "Chapter two."
+        },
+        {
+          "proposalId": "op-2",
+          "type": "update-file",
+          "path": "chapters/two.md",
+          "content": "Chapter 2.",
+          "preImage": "Chapter two.",
+          "edits": [
+            {
+              "find": "two",
+              "replace": "2"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "proposing changes",
+      "readOnly": false,
+      "calls": [
+        {
+          "tool": "create_file",
+          "arguments": "{\"name\": \"new.md\", \"content\": \"New\"}",
+          "result": {
+            "status": "proposed",
+            "proposalId": "op-1"
+          }
+        },
+        {
+          "tool": "create_folder",
+          "arguments": "{\"parentPath\": \"chapters\", \"name\": \"drafts\"}",
+          "result": {
+            "status": "proposed",
+            "proposalId": "op-2"
+          }
+        },
+        {
+          "tool": "update_file",
+          "arguments": "{\"path\": \"chapters/one.md\", \"content\": \"Chapter 1.\"}",
+          "result": {
+            "status": "proposed",
+            "proposalId": "op-3"
+          }
+        },
+        {
+          "tool": "update_file",
+          "arguments": "{\"path\": \"ghost.md\", \"content\": \"x\"}",
+          "result": {
+            "status": "proposed",
+            "proposalId": "op-4"
+          }
+        },
+        {
+          "tool": "rename_node",
+          "arguments": "{\"path\": \"notes.md\", \"name\": \"renamed.md\"}",
+          "result": {
+            "status": "proposed",
+            "proposalId": "op-5"
+          }
+        },
+        {
+          "tool": "rename_node",
+          "arguments": "{\"path\": \"ghost.md\", \"name\": \"x.md\"}",
+          "result": {
+            "status": "proposed",
+            "proposalId": "op-6"
+          }
+        },
+        {
+          "tool": "delete_node",
+          "arguments": "{\"path\": \" chapters/one.md \"}",
+          "result": {
+            "status": "proposed",
+            "proposalId": "op-7"
+          }
+        },
+        {
+          "tool": "move_node",
+          "arguments": "{\"path\": \"notes.md\", \"parentPath\": \"chapters\"}",
+          "result": {
+            "status": "proposed",
+            "proposalId": "op-8"
+          }
+        },
+        {
+          "tool": "move_node",
+          "arguments": "{\"path\": \"notes.md\", \"parentPath\": \"\", \"index\": \"2\"}",
+          "result": {
+            "status": "proposed",
+            "proposalId": "op-9"
+          }
+        },
+        {
+          "tool": "move_node",
+          "arguments": "{\"path\": \"notes.md\", \"parentPath\": \"\", \"index\": 1.7}",
+          "result": {
+            "status": "proposed",
+            "proposalId": "op-10"
+          }
+        },
+        {
+          "tool": "move_node",
+          "arguments": "{\"path\": \"notes.md\", \"parentPath\": \"\", \"index\": \"x\"}",
+          "result": {
+            "status": "proposed",
+            "proposalId": "op-11"
+          }
+        }
+      ],
+      "proposals": [
+        {
+          "proposalId": "op-1",
+          "type": "create-file",
+          "parentPath": "",
+          "name": "new.md",
+          "content": "New"
+        },
+        {
+          "proposalId": "op-2",
+          "type": "create-folder",
+          "parentPath": "chapters",
+          "name": "drafts"
+        },
+        {
+          "proposalId": "op-3",
+          "type": "update-file",
+          "path": "chapters/one.md",
+          "content": "Chapter 1.",
+          "preImage": "Chapter one."
+        },
+        {
+          "proposalId": "op-4",
+          "type": "update-file",
+          "path": "ghost.md",
+          "content": "x",
+          "preImage": ""
+        },
+        {
+          "proposalId": "op-5",
+          "type": "rename-node",
+          "path": "notes.md",
+          "name": "renamed.md",
+          "preImage": "notes.md"
+        },
+        {
+          "proposalId": "op-6",
+          "type": "rename-node",
+          "path": "ghost.md",
+          "name": "x.md",
+          "preImage": ""
+        },
+        {
+          "proposalId": "op-7",
+          "type": "delete-node",
+          "path": "chapters/one.md"
+        },
+        {
+          "proposalId": "op-8",
+          "type": "move-node",
+          "path": "notes.md",
+          "parentPath": "chapters"
+        },
+        {
+          "proposalId": "op-9",
+          "type": "move-node",
+          "path": "notes.md",
+          "parentPath": "",
+          "index": 2
+        },
+        {
+          "proposalId": "op-10",
+          "type": "move-node",
+          "path": "notes.md",
+          "parentPath": "",
+          "index": 1
+        },
+        {
+          "proposalId": "op-11",
+          "type": "move-node",
+          "path": "notes.md",
+          "parentPath": ""
+        }
+      ]
+    },
+    {
+      "name": "what is not offered",
+      "readOnly": false,
+      "calls": [
+        {
+          "tool": "generate_image",
+          "arguments": "{\"prompt\": \"a moon\", \"name\": \"moon.png\"}",
+          "result": {
+            "error": "Image generation is not available."
+          }
+        },
+        {
+          "tool": "search_web",
+          "arguments": "{\"q\": \"x\"}",
+          "result": {
+            "error": "Unknown tool: search_web"
+          }
+        },
+        {
+          "tool": "read_file",
+          "arguments": "[1, 2]",
+          "result": {
+            "error": "Tool arguments must be an object."
+          }
+        }
+      ],
+      "proposals": []
+    },
+    {
+      "name": "a character only reads",
+      "readOnly": true,
+      "calls": [
+        {
+          "tool": "read_file",
+          "arguments": "{\"path\": \"notes.md\"}",
+          "result": {
+            "content": "# Notes\n\nOne two three. 你好 🌙 end."
+          }
+        },
+        {
+          "tool": "create_file",
+          "arguments": "{\"name\": \"x.md\", \"content\": \"x\"}",
+          "result": {
+            "error": "Characters can read workspace files but cannot change them."
+          }
+        },
+        {
+          "tool": "edit_file",
+          "arguments": "{\"path\": \"notes.md\", \"edits\": [{\"find\": \"One\", \"replace\": \"1\"}]}",
+          "result": {
+            "error": "Characters can read workspace files but cannot change them."
+          }
+        }
+      ],
+      "proposals": []
+    }
+  ]
+}

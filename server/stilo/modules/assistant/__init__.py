@@ -21,8 +21,8 @@ from stilo.kernel import define_module
 from stilo.modules.models import GeneratedImages
 from stilo.modules.sync import VERSION
 from .adapters.routes import add_routes
-from .model.edits import EDIT_FILE_TOOL, EditError, apply_edits, propose_edit  # noqa: F401
-from .model.tools import AGENT_TOOLS  # noqa: F401
+from .adapters.contract import AGENT_TOOLS, EDIT_FILE_TOOL  # noqa: F401
+from .model.edits import EditError, apply_edits, propose_edit  # noqa: F401
 from .service.agent import Agent
 from .service.threads import THREADS_FILE, AgentThreads
 

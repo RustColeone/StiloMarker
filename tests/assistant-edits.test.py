@@ -1,7 +1,9 @@
 """The agent's edit_file (Assistant module): exact passages, one match each,
 no overlaps, all or nothing; edits in one turn build on each other; the
 proposal travels as an update-file with the text it started from and its
-edits; characters cannot use it."""
+edits; characters cannot use it. And the server's half of
+spec/assistant/tools.cases.json (the browser's is agent-tools.test.mjs): the
+agent's tools as both runners run them; edits.MAX_EDITS is the contract's."""
 import copy, json, sys, unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -131,6 +133,74 @@ class RoutesOverHttp(unittest.TestCase):
             finally:
                 httpd.shutdown()
                 httpd.server_close()
+
+
+class SharedToolCases(unittest.TestCase):
+    """spec/assistant/tools.cases.json, run by the server's tools."""
+    TABLE = json.loads((ROOT / "spec/assistant/tools.cases.json").read_text(encoding="utf-8"))
+
+    def test_edit_passages(self):
+        for entry in self.TABLE["edits"]:
+            with self.subTest(entry["name"]):
+                if "error" in entry:
+                    with self.assertRaises(EditError) as raised:
+                        apply_edits(entry["text"], entry["edits"])
+                    self.assertEqual(str(raised.exception), entry["error"])
+                else:
+                    self.assertEqual(apply_edits(entry["text"], entry["edits"]), entry["expect"])
+
+    def test_turns(self):
+        from types import SimpleNamespace
+        from stilo.modules.assistant.service.tools import AgentTools
+
+        class Tools(AgentTools):
+            _req = SimpleNamespace()
+
+            def images_available(self):
+                return False
+
+        tools = Tools()
+        for turn in self.TABLE["turns"]:
+            with self.subTest(turn["name"]):
+                proposals = []
+                results = [tools._execute_tool_call({"function": {"name": call["tool"], "arguments": call["arguments"]}},
+                                                    copy.deepcopy(self.TABLE["project"]), proposals, read_only=turn["readOnly"])
+                           for call in turn["calls"]]
+                names = {}
+
+                def norm(value):
+                    if isinstance(value, dict):
+                        return {k: (names.setdefault(v, f"op-{len(names) + 1}") if k == "proposalId" else norm(v)) for k, v in value.items()}
+                    return [norm(v) for v in value] if isinstance(value, list) else value
+                self.assertEqual(norm(results), [call["result"] for call in turn["calls"]])
+                self.assertEqual(norm(proposals), turn["proposals"])
+
+    def test_first_requests(self):
+        """spec/assistant/request.cases.json: the first request of a turn, as the browser's runner sends it too."""
+        from types import SimpleNamespace
+        from stilo.modules.assistant.adapters.contract import AGENT_TOOLS
+        table = json.loads((ROOT / "spec/assistant/request.cases.json").read_text(encoding="utf-8"))
+        agent = Agent()
+        agent.default_workspace = None
+        for case in table["cases"]:
+            with self.subTest(case["name"]):
+                captured = []
+                agent._ready_route = lambda model, own_key, own_model: SimpleNamespace(model=own_model or model, label="Your key", ready=True)
+                agent._complete = lambda payload, emit: captured.append(copy.deepcopy(payload)) or {"choices": [{"message": {"content": "Done."}}]}
+                result = agent.chat(case["messages"], case["contextFiles"], case["projectName"], client_project=copy.deepcopy(case["project"]),
+                                    override={"apiKey": "k", "model": case["model"]})
+                body = captured[0]
+                body["messages"][0]["content"] = body["messages"][0]["content"].replace(agent.manual_content, "<manual>")
+                if "tools" in body:
+                    self.assertEqual(body["tools"], AGENT_TOOLS)
+                    body["tools"] = "<contract tools>"
+                self.assertEqual(body, case["body"])
+                self.assertEqual(result["contextPaths"], case["contextPaths"])
+
+    def test_the_contract_and_the_edit_rules_agree(self):
+        from stilo.modules.assistant.adapters.contract import LIMITS
+        from stilo.modules.assistant.model.edits import MAX_EDITS
+        self.assertEqual(MAX_EDITS, LIMITS["maxEdits"])
 
 
 if __name__ == "__main__":

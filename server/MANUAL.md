@@ -653,7 +653,7 @@ Chat threads are stored in browser `localStorage` under the key `mdnotes.chat.v1
 
 ### Models and signing in
 
-On a server with accounts, the agent, characters in Chats and Quick Generate need you to be signed in (Settings → Collaboration → Account), because they spend the server's API credit. With **My own API key** (Settings → Agent) no sign-in is needed. The model picker sits in the compose box, next to **Send**. When the server has more than one provider it groups the models by provider (DeepSeek, OpenAI); DeepSeek is the default. The dot and word beside it show whether the agent is ready (green), needs attention such as signing in (amber) or is unavailable (red); hover for details, click to check again or fix it.
+On a server with accounts, the agent, characters in Chats and Quick Generate need you to be signed in (Settings → Collaboration → Account), because they spend the server's API credit. With **My own API key** (Settings → Agent) no sign-in is needed. With **Replies run → Directly from this browser** as well, the agent runs in your browser and calls your API URL itself: no server is needed at all (the endpoint must allow this site; a model on your own computer works too). Connected tools and pictures still need the server. The model picker sits in the compose box, next to **Send**. When the server has more than one provider it groups the models by provider (DeepSeek, OpenAI); DeepSeek is the default. The dot and word beside it show whether the agent is ready (green), needs attention such as signing in (amber) or is unavailable (red); hover for details, click to check again or fix it.
 
 ### Generating images
 
@@ -680,7 +680,7 @@ The panel has two tabs: **Agent** (this assistant) and **Chats**, a small chat a
 
 Where chats are kept: in a cloud workspace, on the server, in one database per project (`conversations.sqlite` in the project folder, hidden in the explorer, kept when the project is published over, and backed up daily). In a workspace kept in the browser, the Chats tab has characters only, stored in this browser; chatting with people needs a cloud workspace. Older Roleplay group chats are moved into Chats the first time the tab opens.
 
-Who writes characters' replies: normally the server, using its models and the model picked in the compose box (sign-in needed). With **My own API key** and **Characters' replies in Chats → Directly from this browser** (Settings → Agent), your browser calls your API URL itself — this can be a model on your own computer, e.g. Ollama at `http://localhost:11434/v1/chat/completions` (allow this site in `OLLAMA_ORIGINS`; the key can be empty). The server prepares the prompt and passes the reply on to everyone in the chat. If your browser closes while writing, the reply is marked interrupted after a minute.
+Who writes characters' replies: normally the server, using its models and the model picked in the compose box (sign-in needed). With **My own API key** and **Replies run → Directly from this browser** (Settings → Agent), your browser calls your API URL itself — this can be a model on your own computer, e.g. Ollama at `http://localhost:11434/v1/chat/completions` (allow this site in `OLLAMA_ORIGINS`; the key can be empty). In a cloud workspace the server prepares the prompt and passes the reply on to everyone in the chat; in a workspace kept in this browser, your browser does it all and no server is needed. If your browser closes while writing, the reply is marked interrupted after a minute.
 
 ### Character files (.persona.skill)
 

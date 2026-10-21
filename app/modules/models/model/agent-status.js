@@ -24,6 +24,23 @@ export function ownKeyReady(settings) {
   return settings.agentSource === "own" && Boolean(trimmed(settings.agentApiKey));
 }
 
+// Replies run in this browser, no server needed ("Directly from this
+// browser"): the user's own endpoint, called from here (the key may be empty
+// for a model on this computer).
+export function runsHere(settings) {
+  return settings.agentSource === "own" && settings.agentRunner === "browser";
+}
+
+function hereStatus(settings) {
+  const model = trimmed(settings.agentModel) || "custom";
+  if (!trimmed(settings.agentApiUrl)) {
+    return { configured: false, localOnly: false, provider: null, model: null, models: [], selectedModel: null,
+      status: "unconfigured", detail: "Enter the API URL in Settings → Agent to run the agent from this browser." };
+  }
+  return { configured: true, localOnly: false, provider: "Your key", model, models: [model], selectedModel: model,
+    status: "ready", detail: "Using your own endpoint, from this browser." };
+}
+
 // What a request carries for the server's proxy in own-key mode (nothing in
 // server mode, or with no key entered: the server's key is used then).
 export function ownKeyOverride(settings) {
@@ -43,6 +60,7 @@ function ownKeyStatus(settings) {
 // The status after the server answered. A server with accounts only lets
 // signed-in users spend its keys; the user's saved model is kept if offered.
 export function statusFromServer(answer, { settings, signedIn }) {
+  if (runsHere(settings)) return hereStatus(settings);
   if (ownKeyReady(settings)) return ownKeyStatus(settings);
   const needsSignIn = Boolean(answer.requiresAccount) && !signedIn;
   const configured = Boolean(answer.configured) && !needsSignIn;
@@ -64,17 +82,26 @@ export function statusFromServer(answer, { settings, signedIn }) {
   };
 }
 
-// The status when the server could not be asked. Own-key mode is still
-// usable optimistically: the actual send surfaces any real failure.
+// The status when the server could not be asked. Replies that run in this
+// browser need none; the user's own key sent through the server does.
 export function statusWithoutServer(error, { settings }) {
-  if (ownKeyReady(settings)) return ownKeyStatus(settings);
+  if (runsHere(settings)) return hereStatus(settings);
+  if (ownKeyReady(settings)) {
+    return { configured: false, provider: null, model: null, models: [], selectedModel: null, status: "offline",
+      detail: "Your key goes through the server, which can't be reached. To work without it, choose “Directly from this browser” in Settings → Agent." };
+  }
   return { configured: false, provider: null, model: null, models: [], selectedModel: null,
     status: error?.status === 403 ? "restricted" : "offline", detail: error instanceof Error ? error.message : String(error) };
 }
 
 // The line in Settings → Agent: { text, ok }.
 export function settingsLine(state, settings) {
-  if (ownKeyReady(settings)) return { text: "Ready — using your own API key.", ok: true };
+  if (runsHere(settings)) {
+    return trimmed(settings.agentApiUrl) ? { text: "Ready — your own endpoint, called from this browser.", ok: true }
+      : { text: "Enter the API URL below to run the agent from this browser.", ok: false };
+  }
+  if (ownKeyReady(settings) && state.status === "offline") return { text: "Server unreachable — your key goes through it. Choose “Directly from this browser” to work without it.", ok: false };
+  if (ownKeyReady(settings)) return { text: "Ready — using your own API key, through this server.", ok: true };
   if (settings.agentSource === "own") return { text: "Enter your API key below to enable the agent.", ok: false };
   if (state.configured) return { text: `Ready — ${state.provider ?? "server"}${state.model ? " · " + state.model : ""}.`, ok: true };
   if (state.status === "signin") {

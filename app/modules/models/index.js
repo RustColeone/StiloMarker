@@ -6,6 +6,8 @@
 // API (also as static exports, for code from before the restructure):
 //   sendChatRequest(serverUrl, payload, onProgress, signal) -> the server agent's answer
 //   runDirectReply({ payload, apiUrl, apiKey, model, signal, onText, tools, onTool }) -> text
+//   streamCompletion({ apiUrl, apiKey, body, signal, onText, onReasoning }) -> { content, toolCalls }:
+//     one streamed request to the user's endpoint (the workspace agent's loop runs over it)
 //   groupByProvider(models, providerOf) -> [[provider, models], ...]
 //   chosenModel(models, saved, fallback) -> model
 // API only: agent, the agent's connection (adapters/agent.js): status() ->
@@ -19,7 +21,7 @@ import { chosenModel, groupByProvider } from "./model/catalog.js";
 import { AGENT_STATUS, createAgentConnection } from "./adapters/agent.js";
 import { addAgentSettings } from "./adapters/settings-section.js";
 
-export { runDirectReply } from "./adapters/direct.js";
+export { runDirectReply, streamCompletion } from "./adapters/direct.js";
 export { chosenModel, groupByProvider } from "./model/catalog.js";
 export { createChatStream } from "./model/stream.js";
 export { sendChatRequest } from "./adapters/server-agent.js";

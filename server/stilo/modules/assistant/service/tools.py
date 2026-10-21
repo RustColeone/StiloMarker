@@ -3,7 +3,6 @@ changes to it (never applied here: they come back as proposals the user keeps
 or drops), and making a picture (generate_image) when the server has an image
 model. A mixin of the Agent (service/agent.py), which holds the request's
 state (`_req`)."""
-import copy
 import json
 import uuid
 
@@ -11,17 +10,17 @@ from stilo.kernel.log import ignore as _ignore
 from stilo.modules.file_types import BUILTIN as FILE_TYPES
 from stilo.modules.models import IMAGE_SIZES
 from stilo.modules.workspace import UPDATE_FILE, node_id_by_path
+from ..adapters.contract import READ_TOOLS, tool_schemas
 from ..model.edits import propose_edit
-from ..model.tools import AGENT_TOOLS
 
 
 class AgentTools:
-    READ_TOOLS = ("list_files", "read_file")
+    READ_TOOLS = READ_TOOLS
 
     @staticmethod
     def _get_tool_schemas() -> list:
-        """The agent's tools (Assistant module)."""
-        return copy.deepcopy(AGENT_TOOLS)
+        """The agent's tools (protocol/agent.json)."""
+        return tool_schemas()
 
     @staticmethod
     def _walk_project_tree(project: dict) -> list:

@@ -32,6 +32,24 @@
       "cases": "spec/characters/sheets.cases.json"
     },
     {
+      "name": "the workspace agent's tools (list_files, read_file, edit_file and the proposals)",
+      "js": "app/modules/assistant/model/agent-tools.js: runTool, applyEdits",
+      "py": "server/stilo/modules/assistant/service/tools.py: _execute_tool_call; model/edits.py: apply_edits, propose_edit",
+      "cases": "spec/assistant/tools.cases.json"
+    },
+    {
+      "name": "the workspace agent's first request (instructions, manual, tree, attached files, conversation, tools)",
+      "js": "app/modules/assistant/service/local-agent.js: runTurnHere, systemPrompt",
+      "py": "server/stilo/modules/assistant/service/agent.py: chat",
+      "cases": "spec/assistant/request.cases.json"
+    },
+    {
+      "name": "a character's request (instructions, sheet and hints, cast, transcript, what it may read, read-only tools)",
+      "js": "app/modules/characters/model/reply-request.js: buildReplyRequest, characterInstructions, personaTranscript",
+      "py": "server/stilo/modules/assistant/service/characters.py: build_persona_payload; characters/model.py: character_instructions",
+      "cases": "spec/characters/reply-request.cases.json"
+    },
+    {
       "name": "rebasing a text patch over another",
       "js": "app/modules/workspace/model/text-patch.js: transformTextPatch (insertAfter false)",
       "py": "server/stilo/modules/sync/model/rebase.py: transform_range",

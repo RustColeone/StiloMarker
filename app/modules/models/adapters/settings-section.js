@@ -25,7 +25,7 @@ export function addAgentSettings({ dialog, settings, agent, doc = globalThis.doc
     $("#agent-own-fields").hidden = !own;
     runner.value = settings.agentRunner === "browser" ? "browser" : "server";
     $("#agent-runner-note").textContent = settings.agentRunner === "browser"
-      ? "Characters' replies call the API URL above straight from this browser, so it can be a model on this computer (e.g. Ollama at http://localhost:11434/v1/chat/completions; allow this site in OLLAMA_ORIGINS). The key may be left empty for a local model. The Agent tab still goes through this server."
+      ? "The Agent and characters' replies call the API URL above straight from this browser, with no server needed, so it can be a model on this computer (e.g. Ollama at http://localhost:11434/v1/chat/completions; allow this site in OLLAMA_ORIGINS). The key may be left empty for a local model; the endpoint must allow this site. Connected tools and pictures need the server."
       : "Your key is sent over HTTPS to this server's proxy for each request and is never stored server-side. It stays in this browser.";
     for (const [selector, key] of KEY_FIELDS) {
       const input = $(selector);
@@ -41,7 +41,10 @@ export function addAgentSettings({ dialog, settings, agent, doc = globalThis.doc
     settings.change({ agentSource: source.value === "own" ? "own" : "server" }, "Settings: Agent source");
     void agent.refresh({ silent: true });
   });
-  runner.addEventListener("change", () => settings.change({ agentRunner: runner.value === "browser" ? "browser" : "server" }, "Settings: Characters' replies"));
+  runner.addEventListener("change", () => {
+    settings.change({ agentRunner: runner.value === "browser" ? "browser" : "server" }, "Settings: where replies run");
+    void agent.refresh({ silent: true });
+  });
   for (const [selector, key] of KEY_FIELDS) {
     const input = $(selector);
     input.addEventListener("input", () => settings.change({ [key]: input.value }, `Settings: ${key}`));

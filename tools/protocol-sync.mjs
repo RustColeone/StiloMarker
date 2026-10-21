@@ -7,6 +7,9 @@
 //                                  app/modules/shell/model/contributed-settings.js (their settings)
 //                                  and app/modules/shell/model/contributed-themes.js (their themes)
 //   protocol/sync.contract.json -> app/modules/sync/model/contract.js (its version)
+//   protocol/agent.json -> app/modules/assistant/model/agent-contract.js (the agent's tools, limits, instructions)
+//                       and app/modules/characters/model/read-tools.js (the tools a character may call)
+//   server/MANUAL.md -> app/modules/assistant/adapters/manual.js (the agent's reference, for the browser's runner)
 // Run after editing a protocol file; tests/structure fails while a copy is stale.
 //   node tools/protocol-sync.mjs           write the copies
 //   node tools/protocol-sync.mjs --check   exit 1 if a copy is stale
@@ -38,6 +41,10 @@ const contributedThemes = () => extensions().flatMap((extension) =>
 export const COPIES = [
   { from: "protocol/file-types.json", to: "app/modules/file-types/model/builtin-types.js", pick: (data) => [...data.types, ...extensionTypes()] },
   { from: "protocol/sync.contract.json", to: "app/modules/sync/model/contract.js", pick: (data) => ({ version: data.version }) },
+  { from: "protocol/agent.json", to: "app/modules/assistant/model/agent-contract.js", pick: ({ about, ...data }) => data },
+  { from: "protocol/agent.json", to: "app/modules/characters/model/read-tools.js", pick: (data) => data.tools.filter((tool) => data.readTools.includes(tool.function.name)) },
+  { from: "server/MANUAL.md", to: "app/modules/assistant/adapters/manual.js", text: () =>
+    `// The user manual, the agent's reference (both runners give it to the model).\nexport default ${JSON.stringify(readFileSync(join(ROOT, "server/MANUAL.md"), "utf8"))};\n` },
   { from: "extensions/*/extension.json", to: "app/modules/shell/model/contributed-settings.js", text: () =>
     `export default Object.freeze(${JSON.stringify(contributedSettings(), null, 2)});\n` },
   { from: "extensions/*/extension.json", to: "app/modules/shell/model/contributed-themes.js", text: () =>

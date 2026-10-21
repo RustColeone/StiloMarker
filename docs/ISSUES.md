@@ -14,19 +14,13 @@ Last updated: 2026-10-21 · release `v0.2.19` (deployed with v0.2.17–v0.2.18; 
 From the stability review of 2026-10-21 (the app as a PWA, in Electron, with
 the user's own key and no server; each found by an experiment). Being fixed in
 this order; the storage limit (O0) was fixed in v0.2.19, a copy per workspace
-(O7) in v0.2.20, two windows (O1) in v0.2.21.
+(O7) in v0.2.20, two windows (O1) in v0.2.21, the Agent and Chats with the
+user's own key and no server (O3) in v0.2.22.
 
 ### O2. Typing slows with the size of the file
 
 Measured on the server (2 slow cores): about 0.25 s a key at 22 KB, 1 s at
 89 KB, 1.3–4.3 s at 450 KB. A long chapter kept in one file lags.
-
-### O3. The agent with the user's own key needs the server
-
-Confirmed (no server, a stand-in model): the Agent sends its request and the
-key through the server's `/api/chat` ("Failed to fetch", the model never
-called, though its status said ready); Chats' "in this browser" replies still
-ask the server for the prompt first.
 
 ### O4. Offline edits to a cloud workspace are not merged on reconnect
 
@@ -74,6 +68,43 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.22: the Agent and Chats with your own key run in this browser, no server needed
+
+From the stability review (2026-10-21), O3, found by an experiment. Browser
+and server.
+
+- **The Agent with the user's own key needed the server** (fixed): it sent
+  its request and the key through the server's `/api/chat`, so without a
+  server it failed ("Failed to fetch"), though its status said ready. With
+  **My own API key** and **Replies run → Directly from this browser**
+  (Settings → Agent), the Agent now runs in this browser and calls the
+  user's endpoint itself: the same instructions, manual, tools and limits as
+  the server's agent, streamed (with a reasoning model's thinking), its
+  proposals reviewed with Keep / Drop as before. Connected tools and
+  pictures still need the server.
+- **Chats' replies "in this browser" asked the server for the prompt first**
+  (fixed): a character's request is now built in this browser, as the
+  server builds it (the sheet, its author's notes only as hints and only
+  when the sheet allows, the cast, the transcript, what characters may read,
+  read-only tools), so a browser-only workspace's characters answer with no
+  server. The server's stateless `/api/chat/prompt` is gone (a tab still on
+  an older version needs a reload for its direct replies).
+- **The status says where replies run, and is honest**: "Ready — your own
+  endpoint, called from this browser"; with the key sent through a server
+  that can't be reached, it says so and how to work without it, instead of
+  "ready".
+- **One description of the agent for both**: its tools, limits and
+  instructions are now `protocol/agent.json`, read by the server and copied
+  for the browser; the browser's tool runner, its first request and a
+  character's request are twins of the server's, each with a shared case
+  table both languages run.
+- Tests: `agent-here-browser.py` (new: no server, a stand-in model on another
+  origin; a turn reads, proposes and answers; Keep; the status through an
+  unreachable server; a character's reply in Chats); `agent-tools.test.mjs`
+  (new) and `assistant-edits.test.py` run `spec/assistant/tools.cases.json`
+  and `spec/assistant/request.cases.json`; `reply-request.test.mjs` (new)
+  and `persona-chat.test.py` run `spec/characters/reply-request.cases.json`.
 
 ### v0.2.21: two windows on one workspace are live in both
 

@@ -2,7 +2,9 @@
 // progress as it streams, stopping it, retrying, and the agent's status in Settings.
 // Part of the Assistant's Agent page: `app` is its shared context (panel.js).
 import { createChatMessage, deriveChatTitle } from "./store.js";
-import { sendChatRequest } from "../../models/index.js";
+import { sendChatRequest, streamCompletion } from "../../models/index.js";
+import { runTurnHere } from "../service/local-agent.js";
+import manual from "./manual.js";
 import { contextFiles, projectSnapshot } from "../../characters/index.js";
 
 export function createTurns(app) {
@@ -87,19 +89,15 @@ export function createTurns(app) {
         throw new Error(agentStatus().detail);
       }
 
-      const response = await sendChatRequest(settings.serverUrl, {
+      const request = {
         projectName: project.name,
-        model: agentStatus().selectedModel ?? undefined,
         messages: thread.messages
           .filter((message) => message.role === "user" || message.role === "assistant")
           .map((message) => ({ role: message.role, content: message.content })),
         contextFiles: attached,
-        project: projectSnapshot(project),
-        ...app.mcpControls.getRequest(),
-        accountToken: identity.token(),
-        // Own-key mode: pass the user's key/url/model so the proxy uses them.
-        ...agent.requestOverride()
-      }, (event) => {
+        project: projectSnapshot(project)
+      };
+      const onEvent = (event) => {
         if (!current() || turn.controller.signal.aborted) return;
         if (event.type === "delta") {
           chatState.streamingText += event.text || "";
@@ -133,7 +131,20 @@ export function createTurns(app) {
           chatState.activity.push(line);
           app.renderChatPanel(controller.getProject());
         }
-      }, turn.controller.signal);
+      };
+      // In this browser with the user's own endpoint (no server), or the server's agent.
+      const response = agent.runsHere?.()
+        ? await runTurnHere({ ...request, manual, model: agent.endpoint().model, onProgress: onEvent, cancelled: () => turn.controller.signal.aborted,
+          complete: (body, handlers) => streamCompletion({ apiUrl: agent.endpoint().apiUrl, apiKey: agent.endpoint().apiKey, body,
+            signal: turn.controller.signal, ...handlers }) })
+        : await sendChatRequest(settings.serverUrl, {
+          ...request,
+          model: agentStatus().selectedModel ?? undefined,
+          ...app.mcpControls.getRequest(),
+          accountToken: identity.token(),
+          // Own-key mode: pass the user's key/url/model so the proxy uses them.
+          ...agent.requestOverride()
+        }, onEvent, turn.controller.signal);
       if (!current()) return;
       if (turn.controller.signal.aborted) throw new DOMException("Stopped", "AbortError");
       thread = chatState.threads.find(candidate => candidate.id === turn.threadId) ?? thread;

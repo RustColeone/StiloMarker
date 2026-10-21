@@ -1,8 +1,10 @@
 // A chat-completions reply put back together from its server-sent lines:
-// the text so far and each tool call's name and arguments. Pure; the
-// server's twin is server/stilo/modules/models/model/chat_stream.py.
-export function createChatStream() {
+// the text so far and each tool call's name and arguments; a reasoning
+// model's chain of thought (reasoning_content) goes to onReasoning as it
+// grows. Pure; the server's twin is server/stilo/modules/models/model/chat_stream.py.
+export function createChatStream({ onReasoning } = {}) {
   let content = "";
+  let reasoning = "";
   const calls = new Map();
   return {
     // One line of the stream; returns the whole text so far when it grew, else null.
@@ -19,6 +21,10 @@ export function createChatStream() {
         if (call.function?.name) slot.function.name = call.function.name;
         if (call.function?.arguments) slot.function.arguments += call.function.arguments;
         calls.set(call.index ?? 0, slot);
+      }
+      if (typeof delta.reasoning_content === "string" && delta.reasoning_content) {
+        reasoning += delta.reasoning_content;
+        onReasoning?.(reasoning);
       }
       if (typeof delta.content === "string" && delta.content) {
         content += delta.content;

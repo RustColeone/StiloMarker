@@ -441,16 +441,6 @@ class ReplyTests(RegistryBase):
         last = self.call('leo', 'messages', pair['id'])['messages'][-1]
         self.assertEqual((last['author'], last['content'], last['state']), (ARIA, 'Half a th', 'interrupted'))
 
-    def test_the_stateless_prompt_needs_no_key(self):
-        transport = FakeTransport()
-        add_assistant_routes(transport, agent=Agent(), threads=None, identity=None, directory=None, version=117)
-        status, body = call(transport, 'POST', '/api/chat/prompt', FakeRequest(
-            {'persona': {'name': 'Aria', 'content': 'A smuggler.'}, 'cast': [],
-             'messages': [{'name': 'You', 'content': 'hi', 'self': False}], 'projectName': 'Novel'}))
-        self.assertEqual(status, 200)
-        self.assertEqual(body['payload']['messages'][-1], {'role': 'user', 'content': 'You: hi'})
-        self.assertNotIn('tools', body['payload'])  # no project sent, so no file tools
-
     def test_people_in_a_pair_get_no_automatic_replies(self):
         pair = self.call('leo', 'start', [AMY])['conversation']
         self.assertEqual(self.reg.chats.send(self.tokens['leo'], 'qa', self.path, pair['id'], '@aria?')['replies'], [])

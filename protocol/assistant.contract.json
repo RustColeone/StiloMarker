@@ -1,12 +1,11 @@
 {
-  "about": "The Assistant's network messages (rule 7): the workspace agent. An agent turn streams its progress as lines (protocol: agentTurnEvents below, heartbeats every 15 seconds, then a result or an error); the browser's Models module calls it and its status (the agent's connection is Models'), Chats asks for a character's request built for a browser that runs the model itself, and the browser's Assistant calls the rest. The server half serves exactly these routes (server/stilo/modules/assistant/adapters/routes.py).",
+  "about": "The Assistant's network messages (rule 7): the workspace agent. An agent turn streams its progress as lines (protocol: agentTurnEvents below, heartbeats every 15 seconds, then a result or an error); the browser's Models module calls it and its status (the agent's connection is Models'), and the browser's Assistant calls the rest (a browser that runs the model itself builds a character's request as the server does: spec/characters/reply-request.cases.json). The server half serves exactly these routes (server/stilo/modules/assistant/adapters/routes.py).",
   "module": "assistant",
   "version": 1,
   "routes": [
     { "method": "POST", "path": "/api/chat", "caller": "models", "body": ["messages", "contextFiles", "projectName", "project", "model", "accountToken", "apiKey", "apiUrl", "apiModel", "mcpServers", "mode", "persona", "cast"], "reply": "lines: agentTurnEvents" },
     { "method": "GET", "path": "/api/chat/status", "caller": "models", "reply": ["configured", "provider", "model", "models", "modelInfo", "imageGeneration", "localOnly", "message", "requiresAccount"] },
     { "method": "POST", "path": "/api/chat/mcp", "headers": ["Authorization"], "body": ["action", "servers"], "reply": ["servers", "message"] },
-    { "method": "POST", "path": "/api/chat/prompt", "caller": "chats", "body": ["messages", "contextFiles", "projectName", "project", "persona", "cast"], "reply": ["payload"] },
     { "method": "POST", "path": "/api/generate", "body": ["subject", "instructions", "contextFiles", "overview", "projectName", "accountToken"], "reply": ["message", "model", "provider", "contextPaths"] },
     { "method": "GET", "path": "/api/generated", "query": ["token", "id"], "reply": "the image's bytes" },
     { "method": "GET", "path": "/api/chat/workspace", "query": ["token"], "reply": ["threads", "revision"] },

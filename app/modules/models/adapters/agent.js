@@ -1,7 +1,7 @@
 // The agent's connection: asks the server whether its agent is set up (and
 // which models it offers), keeps the answer as state others read, and keeps
 // the chosen model. Every change lands in the trace with what changed.
-import { AGENT_STATUS, ownKeyOverride, ownKeyReady, settingsLine, statusFromServer, statusWithoutServer } from "../model/agent-status.js";
+import { AGENT_STATUS, ownKeyOverride, ownKeyReady, runsHere, settingsLine, statusFromServer, statusWithoutServer } from "../model/agent-status.js";
 
 export { AGENT_STATUS };
 
@@ -13,6 +13,11 @@ export function createAgentConnection({ state, server, settings }) {
   async function refresh({ signedIn = lastSignedIn, silent = false } = {}) {
     lastSignedIn = signedIn;
     state.set("checking the agent", { status: "checking", ...(silent ? {} : { detail: "Checking chat backend..." }) });
+    // Replies run in this browser: there is no server to ask.
+    if (runsHere(settings)) {
+      state.set("replies run in this browser", statusWithoutServer(null, { settings }));
+      return state.get();
+    }
     try {
       const answer = await server.request("/api/chat/status", { failure: "Chat status failed." });
       state.set("the server answered", statusFromServer(answer ?? {}, { settings, signedIn }));
@@ -46,6 +51,10 @@ export function createAgentConnection({ state, server, settings }) {
     served,
     ensureReady,
     ownKeyReady: () => ownKeyReady(settings),
+    // The agent and characters run in this browser, with the user's endpoint (no server).
+    runsHere: () => runsHere(settings),
+    endpoint: () => ({ apiUrl: String(settings.agentApiUrl ?? "").trim(), apiKey: String(settings.agentApiKey ?? "").trim(),
+      model: String(settings.agentModel ?? "").trim() || undefined }),
     requestOverride: () => ownKeyOverride(settings),
     settingsLine: () => settingsLine(state.get(), settings)
   });

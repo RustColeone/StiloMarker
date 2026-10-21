@@ -93,5 +93,17 @@ test("the agent's connection: the server's answer, the user's own key, sign-in a
   assert.equal(statusFromServer(answer, { settings: own, signedIn: false }).provider, "Your key");
   assert.equal(statusWithoutServer(new Error("down"), { settings: server }).status, "offline");
   assert.equal(statusWithoutServer(Object.assign(new Error("no"), { status: 403 }), { settings: server }).status, "restricted");
-  assert.equal(statusWithoutServer(new Error("down"), { settings: own }).status, "ready", "own key: usable without the server");
+  // The user's own key goes through the server: without it, that is said (not "ready").
+  const through = statusWithoutServer(new Error("down"), { settings: own });
+  assert.equal(through.status, "offline");
+  assert.match(through.detail, /Directly from this browser/);
+  assert.equal(settingsLine({ ...AGENT_STATUS, ...through }, own).ok, false);
+  // Run in this browser: no server needed; the URL is.
+  const here = { ...own, agentRunner: "browser", agentApiUrl: "http://localhost:11434/v1/chat/completions", agentApiKey: "" };
+  for (const status of [statusWithoutServer(new Error("down"), { settings: here }), statusFromServer(answer, { settings: here, signedIn: false })]) {
+    assert.deepEqual([status.status, status.configured, status.provider], ["ready", true, "Your key"]);
+  }
+  assert.deepEqual(settingsLine(AGENT_STATUS, here), { text: "Ready — your own endpoint, called from this browser.", ok: true });
+  const noUrl = statusWithoutServer(null, { settings: { ...here, agentApiUrl: " " } });
+  assert.deepEqual([noUrl.status, noUrl.configured], ["unconfigured", false]);
 });

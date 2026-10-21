@@ -235,6 +235,7 @@ export {
   hiddenFromCharacters,
   notesMode,
   splitAuthorNotes,
+  splitHeader,
   withoutAuthorNotes,
   initialsFor,
   parsePersona,

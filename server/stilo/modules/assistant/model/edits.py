@@ -2,12 +2,14 @@
 Pure: text and edits in, new text out. A precise error makes the model retry
 with better passages instead of the edit landing somewhere it should not.
 
-The browser's twin is not needed: the result travels as the full new text
+Its twin is the browser's (app/modules/assistant/model/agent-tools.js, for
+the agent it runs with the user's own key); both run
+spec/assistant/tools.cases.json. The result travels as the full new text
 with the text it started from, and the Workspace write path places it."""
 from stilo.modules.file_types import BUILTIN as FILE_TYPES
 from stilo.modules.workspace import node_id_by_path, update_file_operation
 
-MAX_EDITS = 20
+MAX_EDITS = 20   # protocol/agent.json: limits.maxEdits (a test checks they agree)
 
 
 class EditError(ValueError):
@@ -82,29 +84,3 @@ def propose_edit(project: dict | None, proposals: list, path: str, edits, propos
         path, content, base, edits=[{"find": e["find"], "replace": e.get("replace", "")} for e in edits])})
     return {"status": "proposed", "proposalId": proposal_id, "edits": len(edits)}
 
-
-EDIT_FILE_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "edit_file",
-        "description": ("Propose changing exact passages of an existing file, leaving the rest untouched. "
-                        "Prefer this to update_file for any change smaller than most of the file. Each find "
-                        "must be copied exactly from the file (read it first) and occur exactly once; "
-                        "include surrounding text to make it unique."),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "Path to the file."},
-                "edits": {
-                    "type": "array", "maxItems": MAX_EDITS,
-                    "description": "The changes, applied together.",
-                    "items": {"type": "object", "properties": {
-                        "find": {"type": "string", "description": "Exact text in the file, occurring once."},
-                        "replace": {"type": "string", "description": "What it becomes (empty deletes it)."}},
-                        "required": ["find", "replace"]},
-                },
-            },
-            "required": ["path", "edits"],
-        },
-    },
-}
