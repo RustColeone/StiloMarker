@@ -95,7 +95,7 @@ node --test tests/       # raw test runner
 | `local-chats.test.mjs` | Chats in a browser-only workspace: pair reuse, a character answers every private message, group mentions in order with earlier replies visible, invite into a pair starts a group, Stop keeps partial text, unread / search / notes, old Roleplay threads imported, renamed character files followed. |
 | `chats-browser.py` | Browser + real backend + a fake streaming model, two accounts: live private message with unread badge, read clears it, private alias, search and jump, invite into a pair starts a new group (pair kept), group @mention reply watched live by both, narration gets none, private character chat, a reply written by a member's own browser from a local model (CORS fake) reaching everyone live, phone width. |
 | `chats-local-browser.py` | Browser, mocked API, browser-only workspace: characters only (with a note), old Roleplay chat moved into Chats, private character chat, group mention suggestions and @all order, Stop, rename of a character file, kept after reload, tabs never covered, phone width. |
-| `editor-typing-browser.py` | Browser: a long chapter stays correct and incremental while typing (DOM/gutter/caret/highlight per edit, incremental == full render, churn budget, undo/redo, no explorer drift). |
+| `editor-typing-browser.py` | Browser: a long chapter stays correct and incremental while typing (DOM/gutter/caret/highlight per edit, incremental == full render, churn budget, undo/redo, no explorer drift); on an 89 KB chapter a keystroke's own work stays under 40 ms and the editor is drawn right on a pause. |
 | `template-race-browser.py` | Browser: the first-run template never replaces a cloud workspace that restored first. |
 
 ## Adding a test

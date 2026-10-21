@@ -639,7 +639,13 @@ export function createTabs(app) {
       strip.append(tab);
     });
 
-    revealActiveTab(strip);
+    // Nudged into view when the active tab or the tabs changed (measuring it
+    // forces a layout; the strip's own resizes are watched below).
+    const shown = JSON.stringify([active ?? null, tabs.length, extraTabs.length]);
+    if (strip.dataset.revealed !== shown) {
+      strip.dataset.revealed = shown;
+      revealActiveTab(strip);
+    }
   }
 
   // The strip scrolls, so the active tab can sit off-screen after a switch or

@@ -11,7 +11,10 @@ that make that safe, against a novel-length chapter:
   * a keystroke replaces at most a couple of line elements (churn budget);
   * undo/redo round-trips exactly;
   * the explorer does not drift while typing (Chromium scroll anchoring used to
-    pull it up a little on every key).
+    pull it up a little on every key);
+  * on a long chapter (89 KB), typing within a line keeps each keystroke's own
+    work short (v0.2.24: drawn once typing pauses; it was about 225 ms a key),
+    and once typing pauses the editor is drawn right (highlighting, gutter).
 
 Isolated: APIs are mocked and static files come from this checkout.
 """
@@ -183,6 +186,25 @@ async def main():
         pauses = sum(1 for a, b in zip(stamps, stamps[1:]) if b - a > 250)
         assert 1 <= redraws <= seconds / 1.5 + 2 + pauses, f'{redraws} full redraws for 30 keys in {seconds:.1f} s ({pauses} pauses)'
         checks.append(f'typing holds the redraws ({redraws} for 30 keys)')
+
+        # A long chapter: each keystroke's own work stays short (the browser has
+        # drawn the letter; the line, the gutter and suggestions follow on a pause).
+        long_text = "\n".join(f"## Section {i}\n\nSome **bold** text with a [link](notes.md) and `code` in paragraph {i}.\n" for i in range(1000))
+        await page.evaluate('(text) => { const c = __typing.controller; c.createFile(c.getProject().rootId, "chapter.md", text); }', long_text)
+        await page.locator('#explorer-tree .tree-row', has_text='chapter.md').first.click()
+        await page.wait_for_function('document.querySelectorAll("#editor-content > .editor-line").length > 3990', timeout=60000)
+        await page.wait_for_timeout(500)
+        await caret_at(2002, 4)
+        await page.evaluate('''() => { window.__inputs = []; new PerformanceObserver((list) => { for (const e of list.getEntries())
+          if (e.name === "input") window.__inputs.push(e.processingEnd - e.processingStart); }).observe({ type: "event", durationThreshold: 0 }); }''')
+        await page.keyboard.type('quick', delay=120)
+        await page.wait_for_timeout(600)
+        work = sorted(await page.evaluate('window.__inputs'))
+        assert len(work) >= 3 and work[len(work) // 2] < 40, f'a keystroke on a long chapter took {work} ms of work'
+        s = await page.evaluate(STATE)
+        assert s['text'] == s['model'] and 'quick' in s['text'].split('\n')[2002] and not s['badRows'] and not s['badHighlight'] and s['stray'] == 0, \
+            {k: v for k, v in s.items() if k not in ('text', 'model')}
+        checks.append(f'a long chapter: a keystroke\'s own work {round(work[len(work) // 2], 1)} ms, drawn right on a pause')
 
         print(json.dumps({'checks': checks, 'runtimeErrors': len(errors)}, ensure_ascii=False))
         assert not errors, errors

@@ -16,12 +16,15 @@ the user's own key and no server; each found by an experiment). Being fixed in
 this order; the storage limit (O0) was fixed in v0.2.19, a copy per workspace
 (O7) in v0.2.20, two windows (O1) in v0.2.21, the Agent and Chats with the
 user's own key and no server (O3) in v0.2.22, offline edits merged per file
-(O4) in v0.2.23.
+(O4) in v0.2.23, typing in a long chapter (O2) in v0.2.24.
 
-### O2. Typing slows with the size of the file
+### O2b. Very large single files still lag
 
-Measured on the server (2 slow cores): about 0.25 s a key at 22 KB, 1 s at
-89 KB, 1.3–4.3 s at 450 KB. A long chapter kept in one file lags.
+After v0.2.24 a long chapter (about 90 KB) types in well under a tenth of a
+second a key; a 450 KB file still takes about 1.5 s a key on the server's
+two slow cores (it could not be measured before): the browser lays out all
+of its 20,000 lines whenever the editor draws. Splitting such a file, or an
+editor that keeps only the visible lines in the page, would fix it.
 
 ### O5. Not installable as a PWA; updates mix versions; libraries from a CDN
 
@@ -63,6 +66,31 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.24: typing in a long chapter keeps up
+
+From the stability review (2026-10-21), O2, measured. Browser only.
+
+- **Typing slowed with the size of the file** (fixed for long chapters):
+  every key re-drew its line, measured the editor, put the caret back and
+  worked out suggestions, each forcing the browser to lay out the whole
+  editor; once a key took longer than the gap to the next, the app's full
+  redraw ran between keys too, and it got worse quickly. Plain typing
+  within a line (which the browser has already drawn) now only changes the
+  text, its undo history and what is sent; the line's highlighting, the
+  gutter, the caret's overlays and suggestions follow once typing pauses
+  (90 ms), or every 0.4 s in a long burst. A new line, a paste or lines
+  joined are drawn at once, as before. On an 89 KB chapter: a key's own
+  work from about 225 ms to about 2 ms, and from key to screen from about
+  0.75 s to under 0.1 s (two slow cores).
+- **Less work when the app redraws**: the Linked Notes panel is rebuilt only
+  when its links change (a chapter with a thousand links rebuilt it on every
+  pause), and the active tab is scrolled into view only when it changes.
+- **Reading the text and the caret**: from the lines as last drawn, reading
+  again only the line that changed (every line was read on every key).
+- A 450 KB file still lags (O2b).
+- Tests: `editor-typing-browser.py` (a long chapter: a keystroke's own work
+  stays under 40 ms, and the editor is drawn right on a pause).
 
 ### v0.2.23: edits made away from a cloud workspace are merged, file by file
 

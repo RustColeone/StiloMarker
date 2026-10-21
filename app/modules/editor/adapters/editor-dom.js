@@ -80,12 +80,14 @@ export function installDom(ed, app) {
   function cleanLineIndex(lineEl) {
     const tracker = trackEditorDom();
     const cache = app.editorRenderCache;
-    const kids = app.elements.editorContent.children;
-    if (tracker.structural || !lineEl || kids.length !== cache.els.length) return -1;
-    const index = Array.prototype.indexOf.call(kids, lineEl);
-    if (index < 0 || cache.els[index] !== lineEl) return -1;
+    if (tracker.structural || !lineEl || app.elements.editorContent.children.length !== cache.els.length) return -1;
+    // Nothing added or removed since the render: the cache's elements are the
+    // DOM's, in order. (Searching the live child list instead cost a long
+    // chapter tens of milliseconds a keystroke.)
+    const index = cache.els.indexOf(lineEl);
+    if (index < 0) return -1;
     for (const dirty of tracker.dirty) {
-      const at = Array.prototype.indexOf.call(kids, dirty);
+      const at = cache.els.indexOf(dirty);
       if (at < 0 || at < index) return -1;
     }
     return index;
@@ -99,8 +101,24 @@ export function installDom(ed, app) {
       tracker.text = "";
       return "";
     }
-    const parts = new Array(lines.length);
-    for (let i = 0; i < lines.length; i += 1) parts[i] = lines[i].textContent;
+    // Nothing added or removed since the render: the lines as rendered, with
+    // only those changed since read again (every line's textContent was read
+    // on each keystroke before).
+    const cache = app.editorRenderCache;
+    let parts = null;
+    if (!tracker.structural && cache.els.length === lines.length && cache.texts?.length === lines.length) {
+      parts = cache.texts.slice();
+      for (const dirty of tracker.dirty) {
+        const at = cache.els.indexOf(dirty);
+        if (at < 0) { parts = null; break; }
+        parts[at] = dirty.textContent;
+      }
+      if (parts && parts.includes(null)) parts = null;
+    }
+    if (!parts) {
+      parts = new Array(lines.length);
+      for (let i = 0; i < lines.length; i += 1) parts[i] = lines[i].textContent;
+    }
     tracker.text = parts.join("\n");
     return tracker.text;
   }
@@ -313,5 +331,8 @@ export function installDom(ed, app) {
     return domPositionToTextOffset(container, posOffset ?? 0);
   }
 
-  Object.assign(ed, { editorLineEls, trackEditorDom, noteEditorMutations, markEditorDomSynced, cleanLineIndex, getEditorText, findTextNodeAt, textOffsetToDomPosition, domPositionToTextOffset, getEditorSelection, setEditorSelection, getOffsetWithinTextRoot, getEditorTextOffsetFromPoint });
+  // Since the last render, at most one line's text changed and no line was added or removed.
+  const editedOneLine = () => { const tracker = trackEditorDom(); return !tracker.structural && tracker.dirty.size <= 1; };
+
+  Object.assign(ed, { editedOneLine, editorLineEls, trackEditorDom, noteEditorMutations, markEditorDomSynced, cleanLineIndex, getEditorText, findTextNodeAt, textOffsetToDomPosition, domPositionToTextOffset, getEditorSelection, setEditorSelection, getOffsetWithinTextRoot, getEditorTextOffsetFromPoint });
 }

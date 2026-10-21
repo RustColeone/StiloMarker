@@ -19,7 +19,7 @@ import { installToolbar } from "./editor-toolbar.js";
 // What the app calls (the same functions as before the split).
 const API = [
     "applyEditorEdit", "applyEditorRender", "attachSelectionChangeListener", "caretIntoView", "clamp",
-    "clampEditorSelection", "clearEditorDropCaret", "clientColor", "consumeExternalEditorSelection",
+    "clampEditorSelection", "clearEditorDropCaret", "clientColor", "consumeExternalEditorSelection", "editedOneLine",
     "forwardEditorWheel", "getEditorLineHeight", "getEditorSelection", "getEditorText",
     "getEditorTextOffsetFromPoint", "handleEditorKeydown", "handleIndentKeydown", "loadEditorContent",
     "notifyEditorChanged", "onRemoteCursor", "pruneRemoteCursors", "pushEditorHistoryState",

@@ -124,6 +124,53 @@ export function installEditorEvents(app, composing) {
     }
   });
 
+  // Plain typing within a line, which the browser has already drawn: the
+  // model and its history change at once (and the change is sent), while the
+  // line's highlighting, the gutter, the caret's overlays and suggestions are
+  // drawn once typing pauses (DRAW_IDLE), or every DRAW_MAX in a long burst.
+  // Drawing them on every key forced layouts of the whole editor and cost a
+  // long chapter hundreds of milliseconds a key. Anything else (a new line, a
+  // paste, lines joined: the editor's own beforeinput work, or a browser that
+  // added or removed lines) is drawn at once.
+  const DRAW_IDLE = 90;
+  const DRAW_MAX = 400;
+  let drawTimer = null, drawDeadline = 0;
+
+  function drawTyped() {
+    if (drawTimer) clearTimeout(drawTimer);
+    drawTimer = null;
+    drawDeadline = 0;
+    if (composing.now) return; // the composition's end draws
+    const activeFile = app.controller.getActiveFile();
+    if (!activeFile || !isTextFileName(activeFile.name)) return;
+    const currentText = app.getEditorText();
+    const focused = document.activeElement === app.elements.editorContent;
+    const { start, end } = app.getEditorSelection();
+    // Re-rendering a line replaces its DOM, which drops the native caret and
+    // resets scrollTop: both are put back. This is the native-edit path;
+    // applyEditorRender has the same guard.
+    const savedScroll = app.elements.editorContent.scrollTop;
+    app.renderEditorContent(currentText);
+    if (focused) {
+      // Focus can be lost when lines are replaced (seen in some browsers): kept for the next key.
+      if (document.activeElement !== app.elements.editorContent) app.elements.editorContent.focus({ preventScroll: true });
+      app.setEditorSelection(start, end);
+    }
+    app.rememberEditorSelection();
+    app.elements.editorContent.scrollTop = savedScroll;
+    app.syncEditorScroll();
+    if (focused) app.caretIntoView();
+    // Peers' carets follow the text; suggestions are for where the caret is now.
+    app.redrawRemoteCursors();
+    if (focused) app.showEditorAutocomplete();
+  }
+
+  function drawTypedSoon() {
+    const now = performance.now();
+    if (!drawDeadline) drawDeadline = now + DRAW_MAX;
+    if (drawTimer) clearTimeout(drawTimer);
+    drawTimer = setTimeout(drawTyped, Math.max(0, Math.min(DRAW_IDLE, drawDeadline - now)));
+  }
   app.elements.editorContent.addEventListener("input", (event) => {
     if (composing.now) {
       return;
@@ -150,24 +197,14 @@ export function installEditorEvents(app, composing) {
     // model update path can disturb DOM focus/selection state.
     app.pushEditorHistoryState(currentText, start, end);
     app.notifyEditorChanged(currentText);
-    // Re-render syntax highlighting; must restore selection afterward because
-    // innerHTML replacement destroys the native caret. Rebuilding innerHTML also
-    // resets scrollTop to 0, so save/restore it — otherwise caretIntoView() below
-    // re-scrolls from the top and a mid-document edit (e.g. backspace) jumps the
-    // view. This is the native-edit path; applyEditorRender has the same guard.
-    const savedScroll = app.elements.editorContent.scrollTop;
-    app.renderEditorContent(currentText);
-    // Restore focus if innerHTML replacement caused the contenteditable to lose
-    // focus (observed in some browsers); this keeps the caret in place for the
-    // next keystroke rather than falling back to page-level focus.
-    if (document.activeElement !== app.elements.editorContent) {
-      app.elements.editorContent.focus({ preventScroll: true });
+    // Within one line, nothing added or removed: drawn once typing pauses.
+    const withinLine = (inputType === "insertText" && !/[\r\n]/.test(event.data ?? ""))
+      || inputType === "deleteContentBackward" || inputType === "deleteContentForward";
+    if (withinLine && app.editedOneLine()) {
+      drawTypedSoon();
+      return;
     }
-    app.setEditorSelection(start, end);
-    app.rememberEditorSelection();
-    app.elements.editorContent.scrollTop = savedScroll;
-    app.syncEditorScroll();
-    app.caretIntoView();
+    drawTyped();
     if (
       inputType === "insertParagraph" ||
       inputType === "insertLineBreak" ||
@@ -178,9 +215,6 @@ export function installEditorEvents(app, composing) {
         data: app.formatEditorDebugValue(event.data ?? "")
       });
     }
-    // Reposition remote cursor overlays now that the DOM has changed.
-    app.redrawRemoteCursors();
-    app.showEditorAutocomplete();
   });
 
   // File tabs and workspace opens need not move focus into the editor. Restore the
@@ -359,6 +393,7 @@ export function installEditorEvents(app, composing) {
 
   editorResizeObserver?.observe(app.elements.editorScroll);
   editorResizeObserver?.observe(app.elements.sourceBody);
+
 
   // Glyph metrics change when a web font finishes loading: measure again.
   document.fonts?.addEventListener?.("loadingdone", () => {

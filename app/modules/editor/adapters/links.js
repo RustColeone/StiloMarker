@@ -168,9 +168,15 @@ export function createLinks(app) {
     return links;
   }
 
+  // The panel as data first (what each link is and where it leads, who links
+  // here); drawn only when that changed. Rebuilt on every redraw, a chapter
+  // with a thousand links cost its typing pauses half a second.
+  let drawnLinks = "";
+
   function renderLinksPanel(project, activeFile) {
     if (!activeFile || !isMarkdownFileName(activeFile.name)) {
       app.showLinksPanel(false);
+      drawnLinks = "";
       return;
     }
     app.showLinksPanel(true);
@@ -180,47 +186,11 @@ export function createLinks(app) {
     activeSegments.pop();
 
     // Outgoing links
-    const outgoingLinks = cachedMarkdownLinks(activeFile.id, activeFile.content);
-    app.outgoingLinksListEl.replaceChildren();
-    if (outgoingLinks.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "links-item links-item-empty";
-      empty.textContent = "No outgoing links";
-      app.outgoingLinksListEl.append(empty);
-    } else {
-      outgoingLinks.forEach(({ label, href }) => {
-        const item = document.createElement("div");
-        item.className = "links-item";
-        const isExternal = /^(https?:\/\/|mailto:)/i.test(href);
-        let resolvedId = null;
-        if (!isExternal) {
-          const resolvedPath = app.normalizePath([...activeSegments, href].join("/"));
-          resolvedId = getNodeIdByPath(project, resolvedPath);
-        }
-        const missing = !isExternal && !resolvedId;
-        item.classList.toggle("links-item-unresolved", missing);
-
-        const labelEl = document.createElement("span");
-        labelEl.className = "links-item-label";
-        labelEl.textContent = label !== href ? label : "";
-
-        const hrefEl = document.createElement("span");
-        hrefEl.className = "links-item-href";
-        hrefEl.textContent = href;
-
-        item.append(labelEl, hrefEl);
-
-        if (resolvedId) {
-          item.title = getPath(project, resolvedId);
-          item.classList.add("links-item-clickable");
-          item.addEventListener("click", () => app.openFileFromExplorer(resolvedId));
-        } else if (isExternal) {
-          item.classList.add("links-item-clickable");
-          item.addEventListener("click", () => window.open(href, "_blank", "noreferrer"));
-        }
-        app.outgoingLinksListEl.append(item);
-      });
-    }
+    const outgoing = cachedMarkdownLinks(activeFile.id, activeFile.content).map(({ label, href }) => {
+      const external = /^(https?:\/\/|mailto:)/i.test(href);
+      const resolvedId = external ? null : getNodeIdByPath(project, app.normalizePath([...activeSegments, href].join("/")));
+      return { label, href, external, resolvedId, title: resolvedId ? getPath(project, resolvedId) : "" };
+    });
 
     // Backlinks — scan all .md files for links pointing to the active file
     const backlinks = [];
@@ -234,8 +204,46 @@ export function createLinks(app) {
         if (/^(https?:\/\/|mailto:)/i.test(href)) return false;
         return app.normalizePath([...nodeSegments, href].join("/")) === activePath;
       }).length;
-      if (matchCount > 0) backlinks.push({ node, nodePath, matchCount });
+      if (matchCount > 0) backlinks.push({ id: node.id, name: node.name, nodePath, matchCount });
     });
+
+    const drawing = JSON.stringify([activeFile.id, outgoing, backlinks]);
+    if (drawing === drawnLinks) return;
+    drawnLinks = drawing;
+
+    app.outgoingLinksListEl.replaceChildren();
+    if (outgoing.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "links-item links-item-empty";
+      empty.textContent = "No outgoing links";
+      app.outgoingLinksListEl.append(empty);
+    } else {
+      outgoing.forEach(({ label, href, external, resolvedId, title }) => {
+        const item = document.createElement("div");
+        item.className = "links-item";
+        item.classList.toggle("links-item-unresolved", !external && !resolvedId);
+
+        const labelEl = document.createElement("span");
+        labelEl.className = "links-item-label";
+        labelEl.textContent = label !== href ? label : "";
+
+        const hrefEl = document.createElement("span");
+        hrefEl.className = "links-item-href";
+        hrefEl.textContent = href;
+
+        item.append(labelEl, hrefEl);
+
+        if (resolvedId) {
+          item.title = title;
+          item.classList.add("links-item-clickable");
+          item.addEventListener("click", () => app.openFileFromExplorer(resolvedId));
+        } else if (external) {
+          item.classList.add("links-item-clickable");
+          item.addEventListener("click", () => window.open(href, "_blank", "noreferrer"));
+        }
+        app.outgoingLinksListEl.append(item);
+      });
+    }
 
     app.backlinksListEl.replaceChildren();
     if (backlinks.length === 0) {
@@ -244,18 +252,18 @@ export function createLinks(app) {
       empty.textContent = "No backlinks";
       app.backlinksListEl.append(empty);
     } else {
-      backlinks.forEach(({ node, nodePath, matchCount }) => {
+      backlinks.forEach(({ id, name, nodePath, matchCount }) => {
         const item = document.createElement("div");
         item.className = "links-item links-item-clickable";
         item.title = nodePath;
         const labelEl = document.createElement("span");
         labelEl.className = "links-item-label";
-        labelEl.textContent = node.name;
+        labelEl.textContent = name;
         const countEl = document.createElement("span");
         countEl.className = "links-item-count";
         countEl.textContent = matchCount > 1 ? `${matchCount}×` : "";
         item.append(labelEl, countEl);
-        item.addEventListener("click", () => app.openFileFromExplorer(node.id));
+        item.addEventListener("click", () => app.openFileFromExplorer(id));
         app.backlinksListEl.append(item);
       });
     }
