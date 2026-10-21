@@ -35,6 +35,8 @@
 // It tells Workspace where the open project lives (workspace.location).
 // cloudWorkspace() -> { serverUrl, token, team, path } | null: the cloud
 // workspace on screen (signed in, and the open project is it).
+// awayPending() -> whether this tab did something away from the cloud workspace
+// on screen that is not merged in yet (adapters/away.js).
 // windows.state() -> { linked, leading, others, waiting }: this browser's other
 // windows on the same own workspace, linked live (adapters/tabs.js): one keeps
 // the copy and puts their edits in order; publish() reaches them too.
@@ -49,11 +51,12 @@ import { SESSION_STATUS, statusFromSession } from "./service/status.js";
 import { addSessionView } from "./adapters/session-view.js";
 import { createConnection } from "./adapters/connection.js";
 import { createTabLink } from "./adapters/tabs.js";
+import { createAway } from "./adapters/away.js";
 import { addWindowsItem } from "./adapters/windows-item.js";
 import { withWindowView } from "./model/window-view.js";
 import { isFatalSyncError } from "./model/errors.js";
 import { normalizeServerUrl } from "../shell/index.js";
-import { UPDATE_FILE, getPath } from "../workspace/index.js";
+import { UPDATE_FILE, getNodeByPath, getPath } from "../workspace/index.js";
 
 // How long Reload Window waits for this tab's typing to be confirmed.
 const TYPING_WAIT = 5000;
@@ -104,6 +107,11 @@ export default defineModule({
       const { syncedProjectId, serverUrl } = shell.settings;
       return syncedProjectId ? `shared:${normalizeServerUrl(serverUrl)}/${syncedProjectId}` : `shared:${project?.id}`;
     }
+    // What this tab does while away from a cloud workspace, for the merge when
+    // it is back (adapters/away.js; the runtime's mergeAwayIntoServer).
+    const live = () => session.isConnected() && !session.isReconnecting();
+    const away = createAway({ key: () => (mode.get().workspaceMode === "synced" ? workspace.project()?.copyKey?.() ?? null : null),
+      live, log: (message) => ctx.log(message) });
     // A tab switched to its own workspace stays connected, but the shared
     // workspace's changes stay off its screen (switching back loads it afresh).
     const showsShared = () => mode.get().workspaceMode === "synced" || !session.isConnected() || connection.joining();
@@ -134,7 +142,14 @@ export default defineModule({
       onRemoteCursor: (event) => events.emit("remote-cursor", event),
       onHostCounters: (path, counters) => events.emit("host-counters", { path, counters }),
       onPatchConfirmed: () => events.emit("patch-confirmed"),
-      onEvent: (event, { ownClientId }) => events.emit("event", { event, ownClientId })
+      onEvent: (event, { ownClientId }) => events.emit("event", { event, ownClientId }),
+      away: () => away.snapshot(),
+      onAwayMerged({ skipped }) {
+        if (!skipped.length) return;
+        const what = skipped.map((op) => `${op.type === "delete-node" ? "deleting" : op.type === "rename-node" ? "renaming" : op.type === "move-node" ? "moving" : "making"} ${op.path ?? op.name}`);
+        shell.toast(`Changes made offline that no longer fit were left out: ${what.slice(0, 3).join(", ")}${what.length > 3 ? ` and ${what.length - 3} more` : ""}.`);
+        ctx.log(`Left out after being away: ${what.join("; ")}`);
+      }
     });
     connection = createConnection({ session, status, mode, events, workspace, shell: ctx.use("shell"),
       log: (...parts) => ctx.log(parts.join(" ")) });
@@ -186,7 +201,24 @@ export default defineModule({
         if (!isFatalSyncError(error)) shell.notify(error.message);
       }
     }
-    const publish = (operation) => (mode.get().workspaceMode === "synced" ? connection.publish(operation) : publishToWindows(operation));
+    // The new path a rename or move gives (for what follows paths).
+    function movedTo(operation) {
+      const from = String(operation.path ?? "");
+      const name = operation.type === "rename-node" ? String(operation.name ?? "") : from.split("/").pop();
+      const parent = operation.type === "rename-node" ? (from.includes("/") ? from.slice(0, from.lastIndexOf("/")) : "") : String(operation.parentPath ?? "");
+      return parent ? `${parent}/${name}` : name;
+    }
+    // A change to the shared workspace: sent, or (away) noted for the merge
+    // when the session is back (it was dropped before, as a known gap).
+    function publishShared(operation) {
+      if (operation.type === "rename-node" || operation.type === "move-node") away.moved(operation.path, movedTo(operation));
+      if (live()) return connection.publish(operation);
+      if (!["create-file", "create-folder", "rename-node", "move-node", "delete-node"].includes(operation.type)) return undefined;
+      const node = operation.type === "delete-node" ? getNodeByPath(workspace.project().getProject(), operation.path) : null;
+      away.recordOp(operation, node?.kind === "file" ? node.content ?? "" : undefined);
+      return undefined;
+    }
+    const publish = (operation) => (mode.get().workspaceMode === "synced" ? publishShared(operation) : publishToWindows(operation));
     function publishSnapshot() {
       if (mode.get().workspaceMode === "synced") { connection.publishSnapshot(); return; }
       windows()?.scheduleSnapshot(workspace.project().getProject());
@@ -198,6 +230,7 @@ export default defineModule({
     // before the text). Others' carets go the other way.
     const sharing = () => session.isConnected() && mode.get().workspaceMode === "synced";
     workspace.events.on("text-changed", ({ path, previous, next }) => {
+      if (mode.get().workspaceMode === "synced") away.edited(path, previous);
       if (sharing()) session.scheduleTextPatch(path, previous, next);
       else if (mode.get().workspaceMode === "private") windows()?.scheduleTextPatch(path, previous, next);
     });
@@ -206,6 +239,18 @@ export default defineModule({
       if (caret && session.isConnected() && !session.hasPendingPatch(caret.path)) session.scheduleAwareness(caret.path, caret.start, caret.end);
     };
     workspace.events.on("own-caret", showMyCaret);
+    // The server has a file's text again: its base is no longer needed.
+    events.on("patch-confirmed", () => {
+      for (const path of away.snapshot().bases.keys()) if (!session.hasUnsyncedText(path)) away.confirmed(path);
+    });
+    // Someone else's rename or move: bases follow the paths. The server's copy
+    // opened (after a merge, or a reload): nothing left from being away.
+    workspace.events.on("remote-applied", ({ operation }) => {
+      if (mode.get().workspaceMode === "synced" && (operation?.type === "rename-node" || operation?.type === "move-node")) away.moved(operation.path, movedTo(operation));
+    });
+    workspace.events.on("replaced", () => { if (mode.get().workspaceMode === "synced") away.clear(); });
+    events.on("status", ({ next }) => { if (next.status !== "connected") away.keep(); });
+    globalThis.window?.addEventListener("pagehide", () => away.keep());
     // My text arrived: now my caret is right for them too.
     events.on("patch-confirmed", () => { const own = workspace.presence.own(); if (own && session.isConnected()) session.scheduleAwareness(own.path, own.start, own.end); });
     events.on("remote-cursor", (cursor) => workspace.presence.other(cursor));
@@ -304,6 +349,7 @@ export default defineModule({
       keepers: { add(keep) { keepers.add(keep); return () => keepers.delete(keep); } },
       configure(next) { supplied = { ...supplied, ...next }; },
       cloudWorkspace, connectionInfo, publish, publishSnapshot, switchMode: connected("switchMode"),
+      awayPending: () => { const { bases, ops } = away.snapshot(); return bases.size > 0 || ops.length > 0; },
       windows: Object.freeze({ state: () => link.state() }),
       connectSaved: connected("connectSaved"), reconnectLater: connected("reconnectLater") };
   }

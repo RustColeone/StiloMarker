@@ -12,6 +12,7 @@ import { isAuthExpiredError, isFatalSyncError, isUpgradeError } from "../model/e
 import { fingerprintProject, flattenProjectPaths, sanitizeProjectForSync, unsyncedFiles } from "../model/paths.js";
 import { rebaseIncoming } from "../model/rebase.js";
 import { createPatchQueue } from "./patches.js";
+import { mergeOffline } from "./offline-merge.js";
 import { ignore, ignored } from "../../../kernel/index.js";
 
 const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 15000, 30000];
@@ -19,8 +20,11 @@ const isImageName = (name) => builtinTypes.isImage(name);
 const superseded = () => Object.assign(new Error("Workspace open was superseded."), { status: 499 });
 
 // api: adapters/api.js; clock: adapters/page.js (both given by index.js).
+// away() -> { bases, ops }: what this tab did while away (Sync notes it);
+// onAwayMerged({ merged, kept, skipped }): how putting it together went.
 export function createRuntime({ getProject, replaceProject, applyOperation, onStatusChange, onRemoteCursor,
-  onPatchConfirmed, onHostCounters, onEvent, preserveLocalFiles, reauthenticate, uploadAsset: uploadAssetPort, clock, api }) {
+  onPatchConfirmed, onHostCounters, onEvent, preserveLocalFiles, reauthenticate, uploadAsset: uploadAssetPort, clock, api,
+  away = () => ({ bases: new Map(), ops: [] }), onAwayMerged = () => {} }) {
   let connection = null;
   let isApplyingRemote = false;
   let pendingSnapshotTimer = null;
@@ -241,8 +245,7 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
       connection.clientId = session.clientId ?? connection.clientId;
       connection.sessionId = session.sessionId ?? session.workspace ?? connection.sessionId;
       connection.role = session.role ?? connection.role;
-      if (baseBeforeReconnect === Number(session.revision)) await reconcileLocalIntoServer(baseBeforeReconnect);
-      else await reloadFromServer("Loaded the newer cloud version.");
+      await mergeAwayIntoServer(baseBeforeReconnect);
       if (epoch !== generation || !connection) return;
       clearReconnect();
       attachEventStream(reconnectCtx.serverUrl);
@@ -283,47 +286,26 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
     }
   }
 
-  // Push the local copy into the server, but only from the revision it came
-  // from; never relabel older text with a revision learned during recovery.
-  async function reconcileLocalIntoServer(baseRevision) {
+  // What this tab did while away, put together with what others did
+  // meanwhile, file by file (service/offline-merge.js), then the server's copy
+  // (with all of it) opened. What could not be merged is kept in Snapshots;
+  // the server's stands. inStepAt: the revision this tab was last in step with.
+  async function mergeAwayIntoServer(inStepAt) {
     if (!connection) return;
     const epoch = generation;
-    const snapshot = await api.fetchSessionState(connection.serverUrl, connection.token);
-    if (epoch !== generation) return;
-    if (Number(snapshot.revision) !== baseRevision) {
-      await reloadFromServer("Cloud changed during reconnect — loaded its newer version.");
-      return;
-    }
-    presence = snapshot.presence ?? presence;
-    const server = flattenProjectPaths(snapshot.project);
-    const serverFolders = new Set(server.folders.map((f) => f.path));
-    const serverFiles = new Map(server.files.map((f) => [f.path, f.content]));
-    const local = flattenProjectPaths(getProject());
-    const pushOp = async (operation) => {
-      if (epoch !== generation || !connection) throw new Error("Session changed");
-      const result = await api.pushOperation(connection.serverUrl, connection.token, operation);
-      if (epoch !== generation) throw new Error("Session changed");
-      adoptHostCounters(result); // the base stays the ORIGINAL one until the final pull
-    };
-    try {
-      for (const folder of local.folders.slice().sort((a, b) => a.path.split("/").length - b.path.split("/").length)) {
-        if (serverFolders.has(folder.path)) continue;
-        await pushOp({ type: "create-folder", parentPath: folder.parentPath, name: folder.name });
-        serverFolders.add(folder.path);
-      }
-      for (const file of local.files) {
-        if (isImageName(file.name)) continue;
-        const serverContent = serverFiles.get(file.path);
-        if (serverContent === undefined) await pushOp({ type: "create-file", parentPath: file.parentPath, name: file.name, content: file.content });
-        else if (serverContent !== file.content) await pushOp(buildTextPatch(file.path, serverContent, file.content, baseRevision));
-      }
-    } catch (error) {
-      if (error.status !== 409) throw error;
-      await reloadFromServer("Cloud changed during recovery — local edits saved in Snapshots.");
-      return;
-    }
-    // A peer may have changed another file meanwhile, and local node ids differ.
-    await reloadFromServer("Reconnected — changes saved.");
+    const current = () => { if (epoch !== generation || !connection) throw superseded(); };
+    const { bases, ops } = away();
+    const result = await mergeOffline({
+      fetchState: async () => { const state = await api.fetchSessionState(connection.serverUrl, connection.token); current(); return state; },
+      push: async (operation) => { const answer = await api.pushOperation(connection.serverUrl, connection.token, operation); current(); adoptHostCounters(answer); },
+      local: getProject(), unsynced: collectUnsyncedLocalFiles(), bases, ops, inStepAt: Number(inStepAt), buildTextPatch, isImage: isImageName
+    });
+    if (result.kept.size && typeof preserveLocalFiles === "function") await preserveLocalFiles(result.kept);
+    current();
+    onAwayMerged(result);
+    const merged = result.merged.size, kept = result.kept.size;
+    await reloadFromServer(kept ? `Reconnected — ${merged ? `${merged} file(s) merged; ` : ""}${kept} kept in Snapshots (changed here and there).`
+      : merged ? `Reconnected — ${merged} file(s) with changes made away merged.` : "Reconnected.", { handled: new Set([...result.merged, ...result.kept.keys()]) });
   }
 
   // Replace the whole project, declaring the revision it is based on: the
@@ -378,13 +360,13 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
   // Archive conflicting typing BEFORE replacing the local model. If archiving
   // fails, the draft stays on screen and nothing more is sent. Rechecked after
   // each await so typing during the fetch cannot be lost.
-  async function adoptSnapshot(snapshot, epoch) {
+  async function adoptSnapshot(snapshot, epoch, handled = new Set()) {
     if (!snapshot.project?.nodes?.[snapshot.project.rootId]) throw new Error("The server returned an invalid workspace.");
     const serverFiles = new Map(flattenProjectPaths(snapshot.project).files.map((f) => [f.path, f.content]));
     const archived = new Map();
     while (epoch === generation && connection) {
       const toArchive = new Map([...collectUnsyncedLocalFiles()].filter(([path, content]) =>
-        serverFiles.get(path) !== content && archived.get(path) !== content));
+        !handled.has(path) && serverFiles.get(path) !== content && archived.get(path) !== content));
       if (!toArchive.size) break;
       if (typeof preserveLocalFiles !== "function") throw new Error("Cannot preserve local edits — the current draft has been kept on this device.");
       await preserveLocalFiles(toArchive);
@@ -405,7 +387,8 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
     return archived.size;
   }
 
-  function reloadFromServer(detail) {
+  // handled: paths already merged or kept (a merge after being away): not archived again.
+  function reloadFromServer(detail, { handled } = {}) {
     if (!connection) return Promise.resolve();
     if (reloadPromise) return reloadPromise;
     const epoch = generation;
@@ -416,7 +399,7 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
       if (epoch !== generation || !connection) return;
       const snapshot = await api.fetchSessionState(connection.serverUrl, connection.token);
       if (epoch !== generation) return;
-      const saved = await adoptSnapshot(snapshot, epoch);
+      const saved = await adoptSnapshot(snapshot, epoch, handled);
       if (epoch !== generation) return;
       recovering = false;
       emitStatus("connected", saved
@@ -626,26 +609,17 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
     startSession(serverUrl, session, { role: session.role ?? "master", directoryBacked: true });
     reconnectCtx = { serverUrl, accountToken, team, path, device }; // the same device replaces only its own session
     clearReconnect();
-    const serverRevision = Number(session.revision ?? 0);
     const localBase = options.localBaseRevision == null ? NaN : Number(options.localBaseRevision);
-    const localIsCurrent = Number.isFinite(localBase) && localBase === serverRevision;
-    if (options.reconcileLocal && !localIsCurrent) {
-      emitStatus("connected", `Server is at revision ${serverRevision}, ahead of this device (${Number.isFinite(localBase) ? localBase : "unknown"}) — pulling instead of overwriting it.`);
-    }
-    if (options.reconcileLocal && localIsCurrent) {
-      await reconcileLocalIntoServer(localBase);
+    if (options.reconcileLocal) {
+      // Changes made here before (offline, or before a reload): merged in.
+      await mergeAwayIntoServer(localBase);
       if (epoch !== generation) throw superseded();
-      emitStatus("connected", `Opened ${session.workspace} — restored unsynced changes.`);
+      emitStatus("connected", `Opened ${session.workspace} — changes made here merged.`);
     } else {
-      if (options.reconcileLocal) {
-        await reloadFromServer("Loaded the newer cloud workspace.");
-      } else {
-        const snapshot = await api.fetchSessionState(serverUrl, connection.token);
-        if (epoch !== generation) throw superseded();
-        adoptRemote(snapshot); // opening another workspace must not archive the previous one's files
-        presence = snapshot.presence ?? [];
-      }
+      const snapshot = await api.fetchSessionState(serverUrl, connection.token);
       if (epoch !== generation) throw superseded();
+      adoptRemote(snapshot); // opening another workspace must not archive the previous one's files
+      presence = snapshot.presence ?? [];
       emitStatus("connected", `Opened ${session.workspace} at revision ${connection.revision}.`);
     }
     attachEventStream(serverUrl);

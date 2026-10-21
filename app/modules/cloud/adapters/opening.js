@@ -71,8 +71,9 @@ export function createOpening(app) {
       // whole workspace to an old version). A first open of a *different* workspace
       // always pulls, so one project's files can never leak into another.
       const reopeningSameWorkspace = app.settings.syncedProjectId === `${team}/${path}`;
+      // Edits not yet on the server, or files made, moved or deleted while away (Sync notes them).
       const hasUnsavedLocalEdits = Object.values(app.controller.getProject()?.nodes ?? {})
-        .some((node) => node?.kind === "file" && node.dirty);
+        .some((node) => node?.kind === "file" && node.dirty) || Boolean(app.awayPending?.());
       const reconcileLocal = Boolean(options.reconcileLocal)
         || (reopeningSameWorkspace && hasUnsavedLocalEdits);
       // Safety net: snapshot unsaved work before opening. If the server turns out to

@@ -25,6 +25,7 @@ export function createSurface({ shell, workspace, identity, sync, editor, histor
   const app = {
     view: editor.view, identity, history, mode: sync.mode, settings: shell.settings, syncState: sync.status,
     switchWorkspaceMode: (next) => sync.switchMode(next),
+    awayPending: () => sync.awayPending(), // what this tab did away from the workspace, not merged in yet (Sync's)
     logDebug: (...args) => shell.log(...args), // the log panel (Shell's)
     openSettingsDialog: (page) => shell.settingsDialog.open(page),
     // A status panel's border flashes (Settings → Collaboration's server line, by default).

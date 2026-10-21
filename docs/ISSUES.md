@@ -15,18 +15,13 @@ From the stability review of 2026-10-21 (the app as a PWA, in Electron, with
 the user's own key and no server; each found by an experiment). Being fixed in
 this order; the storage limit (O0) was fixed in v0.2.19, a copy per workspace
 (O7) in v0.2.20, two windows (O1) in v0.2.21, the Agent and Chats with the
-user's own key and no server (O3) in v0.2.22.
+user's own key and no server (O3) in v0.2.22, offline edits merged per file
+(O4) in v0.2.23.
 
 ### O2. Typing slows with the size of the file
 
 Measured on the server (2 slow cores): about 0.25 s a key at 22 KB, 1 s at
 89 KB, 1.3–4.3 s at 450 KB. A long chapter kept in one file lags.
-
-### O4. Offline edits to a cloud workspace are not merged on reconnect
-
-By design so far: pushed only if nobody changed the workspace meanwhile;
-otherwise the server's version opens and the offline edits are kept in
-Snapshots, even when they touched other files. To be merged per file.
 
 ### O5. Not installable as a PWA; updates mix versions; libraries from a CDN
 
@@ -68,6 +63,34 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.23: edits made away from a cloud workspace are merged, file by file
+
+From the stability review (2026-10-21), O4. Browser only.
+
+- **Offline edits were all or nothing** (fixed): when a tab got back to a
+  cloud workspace someone had changed meanwhile, the server's version opened
+  and every edit made away went to Snapshots, even in files nobody else
+  touched. Now each file is put together on its own: a file only this tab
+  changed gets its edit; a file both changed is merged line by line where
+  that is sure (changes to different lines); where both changed the same
+  lines (or one inserted right at the other's change, or the file was
+  removed meanwhile) this tab's text is kept in Snapshots, the other stands,
+  and that is said. Also after a reload while the server could not be
+  reached (what was done away is kept in this browser).
+- **Files and places changed away**: files and folders made away are made;
+  renames and moves are made again where they still fit; a deletion only of
+  what nobody changed meanwhile (else it is left out, and said). These were
+  dropped before.
+- **Coming back unchanged could still lose edits**: with nobody else's
+  changes, an offline session that both made a file and edited another sent
+  the new file first and then edits based on the old revision, which the
+  server refused, so they went to Snapshots. Text now goes first.
+- Tests: `offline-merge-browser.py` (new, with a real backend: edits on
+  different lines merged, a new file made, the same line kept in Snapshots
+  and said, a reload while away); `offline-merge.test.mjs` and
+  `sync-merge.test.mjs` (new: the merge's rules, a stand-in server; the
+  line diff on every small pair of texts).
 
 ### v0.2.22: the Agent and Chats with your own key run in this browser, no server needed
 

@@ -513,6 +513,12 @@ The preview can be shown or hidden with `View > Toggle Preview` or the `×` butt
 ### Save
 
 `File > Save` (`Ctrl+S`) — saves to the active storage mode:
+- A cloud workspace while the server can't be reached: keep working. When it
+  is back, what you did is put together with what others did meanwhile, file
+  by file: your edits to files nobody else touched go in, edits to different
+  lines of one file are merged, and new files are made. Where you and someone
+  else changed the same lines, theirs stays and yours is kept in Snapshots
+  (you are told). This works after a reload too.
 - `memory` (an in-browser workspace): kept in this browser (IndexedDB), with no
   small size limit; changes are saved as you type when Auto-save is on. If the
   browser can't save it (its storage is full), a red "Not saved in this
