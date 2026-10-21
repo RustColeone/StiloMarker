@@ -8,7 +8,7 @@ const FIELDS = [
   ["#display-name-input", "displayName", (value) => value.trim()]
 ];
 
-export function addCollaborationSettings({ dialog, settings, doc = globalThis.document }) {
+export function addCollaborationSettings({ dialog, settings, desktop = false, doc = globalThis.document }) {
   const body = doc?.querySelector("#settings-panel-collaboration");
   if (!body) return;
   const reconnect = body.querySelector("#auto-reconnect-input");
@@ -30,6 +30,8 @@ export function addCollaborationSettings({ dialog, settings, doc = globalThis.do
   const username = body.querySelector("#account-username-input");
   if (username) username.value = settings.accountUsername ?? "";
 
+  // In the desktop build, blank is no server at all (there is no "same origin" to reach).
+  if (desktop) body.querySelector("#server-url-input").placeholder = "https://… (blank: no server, this app on its own)";
   dialog.addPage({ id: "collaboration", label: "Collaboration", order: 30, body });
   dialog.onOpen(show);
   settings.on((view, changed) => { if (changed.some((key) => ["serverUrl", "serverPin", "displayName", "autoReconnect"].includes(key))) show(); });

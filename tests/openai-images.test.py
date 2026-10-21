@@ -239,7 +239,9 @@ class ImageToolTests(unittest.TestCase):
         self.assertEqual((op['type'], op['parentPath'], op['name'], op['content']), ('create-file', 'Art', 'lighthouse.webp', ''))
         image = op['generatedImage']
         self.assertEqual(image['mime'], 'image/webp')
-        self.assertNotIn('b64', json.dumps(result))  # no image bytes in the chat
+        chat = json.dumps(result)  # no image bytes in the chat (an id may contain "b64" by chance)
+        self.assertNotIn('b64_json', chat)
+        self.assertNotIn(base64.b64encode(PNG).decode(), chat)
         self.assertEqual(self.proxy.generated.load(image['id'], 'leo'), (PNG, 'image/webp'))
         self.assertIsNone(self.proxy.generated.load(image['id'], 'someone-else'))
         told = json.loads(seen[1]['messages'][-1]['content'])

@@ -76,6 +76,12 @@ status bar says **Update ready**, and Reload Window (or clicking it) starts
 it, keeping your work; other windows of the app follow. Closing every window
 of the app starts it too (the browser's own reload keeps the version).
 
+**The desktop app** (`desktop/`, see its README) is the same app in a window
+of its own, with no server needed (a Server URL in Settings → Collaboration
+connects it to one). Closing it with unsaved work asks first; links open in
+your browser; a newer release shows "Update available" in the status bar,
+which opens its download page.
+
 ---
 
 ## 2. Project Model

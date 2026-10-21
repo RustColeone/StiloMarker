@@ -27,7 +27,7 @@ export default defineModule({
   },
   start(ctx) {
     const shell = ctx.use("shell");
-    addCollaborationSettings({ dialog: shell.settingsDialog, settings: shell.settings });
+    addCollaborationSettings({ dialog: shell.settingsDialog, settings: shell.settings, desktop: shell.desktop });
     let parts = null;
     addServerItem({ shell, sync: ctx.use("sync"), identity: ctx.use("identity"), ping: () => parts?.pingCurrentServer() });
     if (globalThis.document) {

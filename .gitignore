@@ -13,3 +13,7 @@ server/stilomarker.env
 
 # Per-team cloud workspace storage (runtime data)
 data/
+
+# The desktop build's tools and output (npm install / npm run dist in desktop/)
+desktop/node_modules/
+desktop/dist/

@@ -17,7 +17,7 @@ this order; the storage limit (O0) was fixed in v0.2.19, a copy per workspace
 (O7) in v0.2.20, two windows (O1) in v0.2.21, the Agent and Chats with the
 user's own key and no server (O3) in v0.2.22, offline edits merged per file
 (O4) in v0.2.23, typing in a long chapter (O2) in v0.2.24, the app as an
-installed web app (O5) in v0.2.25.
+installed web app (O5) in v0.2.25, the desktop app (O6) in v0.2.26.
 
 ### O2b. Very large single files still lag
 
@@ -26,13 +26,6 @@ second a key; a 450 KB file still takes about 1.5 s a key on the server's
 two slow cores (it could not be measured before): the browser lays out all
 of its 20,000 lines whenever the editor draws. Splitting such a file, or an
 editor that keeps only the visible lines in the page, would fix it.
-
-### O6. Electron
-
-Not packaged yet. Known needs: a fixed custom scheme (not `file://`, not a
-random port), the leave-page question handled by the main process (it
-silently blocks closing), links opened outside, a no-server mode, and an
-update channel (a desktop build can't update itself as the web does).
 
 ## Accepted
 
@@ -61,6 +54,46 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.26: the desktop app
+
+From the stability review (2026-10-21), O6. A new `desktop/` folder; in the
+web app only Shell's update item and the Server URL field's hint change.
+
+- **The app in a window of its own** (Electron, `desktop/`), from its own
+  files, with no server needed: writing, diagrams, formulas, and the Agent
+  and Chats with the user's own key (O3) work on their own.
+- **One fixed origin**, `app://stilo/`: not `file://` (no origin of its own)
+  and not a local port (a different one each start would lose the
+  workspace and settings kept in the browser's storage).
+- **No server unless one is named**: the server's addresses answer at once
+  as offline (as the web app's service worker answered), so nothing waits;
+  with a Server URL, the app talks to that server (it allows other origins).
+- **Closing with unsaved work asks** (Leave or Stay); Electron otherwise
+  keeps the window open without a word.
+- **Links open in the system's browser** (or mail app) and the window only
+  ever shows the app; the page gets no Node or Electron, only a bridge of
+  three calls (its release, a newer one, that one's download page).
+- **Updates**: the desktop app can't update itself as the web app does; it
+  looks at the project's GitHub releases at start and every six hours, and
+  "Update available" in the status bar opens the newer release's page.
+- One instance (a second start shows the first's window); no service worker.
+- Not done here: no build has been made or published (`npm run dist` needs
+  npm, which the server does not have), nor signed; updates are downloaded
+  by hand.
+- A test that failed by chance (about one run in seven hundred):
+  `openai-images.test.py` checked that no "b64" appeared in the agent's
+  reply, and a random proposal id could contain it; it now looks for the
+  image's data itself.
+- Tests: `desktop.test.mjs` (new: what the window may load, the no-server
+  answer, where links go, which releases are newer, that the build carries
+  exactly the allowed files at the app's version, the bridge's three calls
+  in an isolated, sandboxed window) and `desktop-browser.py` (new: the app
+  in Electron 44 on a virtual display: loaded from `app://stilo/`, no
+  server, nothing else served, no service worker; a formula and a diagram;
+  a link and a navigation away open outside; a newer release shown and
+  opened; closing with unsaved work asks, Stay keeps the window and Leave
+  closes it; reopened, the work is there; a second start hands over).
 
 ### v0.2.25: the app installs, updates wait for you, and works offline whole
 

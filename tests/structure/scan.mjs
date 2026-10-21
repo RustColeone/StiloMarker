@@ -9,7 +9,7 @@ import { COPIES, extensions } from "../../tools/protocol-sync.mjs";
 export const ROOT = normalize(join(dirname(fileURLToPath(import.meta.url)), "../.."));
 
 // The shipped code. Tests, tools and docs may spell anything.
-const SCOPE = ["app", "extensions", "server", "index.html", "service-worker.js"];
+const SCOPE = ["app", "extensions", "server", "desktop", "index.html", "service-worker.js"];
 const SKIP = new Set(["node_modules", "__pycache__", "data", "vendor"]);
 const CODE = /\.(m?js|py|html|css)$/;
 

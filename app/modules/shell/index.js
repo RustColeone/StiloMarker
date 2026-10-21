@@ -86,6 +86,7 @@ import { addMaintenanceCommands, announceCleared, clearAppStorage, clearedAt, fo
 import { createRender } from "./adapters/render.js";
 import { createFrame } from "./adapters/frame/index.js";
 import { registerOfflineShell, takeUpdate, updateWaiting, upgradeApp } from "./adapters/offline.js";
+import { desktopBridge, watchReleases } from "./adapters/desktop.js";
 import { APP_VERSION } from "./model/version.js";
 import { createLogPanel, flash } from "./adapters/log-panel.js";
 import { createCommandLine, listCommands } from "./adapters/command-line.js";
@@ -262,13 +263,24 @@ export default defineModule({
     server.configure({ address: () => settings.serverUrl });
     // A new version, installed and waiting (this tab keeps its own until it is
     // reloaded): the status bar says so, and Reload Window (or the item) starts it.
+    // In the desktop build, a newer release: the item opens its download page.
+    const desktop = desktopBridge();
     const statusBar = createStatusBar({ registry: ctx.registry() });
     const updateItem = globalThis.document ? statusBar.add({ id: "update", order: 55, dot: true, hidden: true,
-      action: () => void reload.reloadWindow() }) : null;
-    // Once the app is there: its files kept for offline use (in a page).
+      action: () => void (desktop ? desktop.openUpdate() : reload.reloadWindow()) }) : null;
+    // Once the app is there: its files kept for offline use (in a page), or the desktop build's releases watched.
     ctx.whenStarted(() => {
       logPanel.log("response", "Debug log initialized", `panel=${settings.debugPanel ? "visible" : "hidden"}`);
       if (!globalThis.window) return;
+      if (desktop) {
+        watchReleases({ bridge: desktop, log: (message, detail) => logPanel.log("failed", message, detail),
+          onUpdate({ version }) {
+            updateItem?.set({ hidden: false, text: "Update available", tone: "success",
+              title: `Version ${version} is out. Click to download it.` });
+            logPanel.log("response", "Update available", version);
+          } });
+        return;
+      }
       void registerOfflineShell({
         onUpdate(version) {
           const which = version ? `Version ${version}` : "A new version";
@@ -286,6 +298,7 @@ export default defineModule({
     });
 
     return {
+      desktop: Boolean(desktop), // running in the desktop build (desktop/), not a browser
       commands: { add: commands.add, get: commands.get, all: commands.all, onChange: commands.onChange },
       menus: { add: menus.add, all: menus.all },
       run,
