@@ -64,7 +64,7 @@ export function createTrash({ shell, identity }) {
         shell.toast(restored.path === entry.path ? `Restored ${restored.path}` : `Restored as ${restored.path}`);
       })));
       if (entry.removable) actions.append(button("Delete now", () => act(async () => {
-        if (!await shell.confirm({ title: "Delete for good", message: `Remove ${entry.path} and its history now? This cannot be undone.`, acceptLabel: "Delete" })) return;
+        if (!await shell.confirm({ title: "Delete for good", message: `Remove ${entry.path} and its history now? This cannot be undone.`, acceptLabel: "Delete", danger: true })) return;
         await remove(team, entry.id);
       }), true));
       row.append(text, actions);

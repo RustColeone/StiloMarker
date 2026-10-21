@@ -19,7 +19,7 @@ export function createThreads(app) {
   async function deleteChatThread(threadId) {
     const thread = chatState.threads.find((entry) => entry.id === threadId);
     if (!thread) return;
-    const ok = await showConfirmDialog({ title: "Delete conversation", message: `Delete “${thread.title}”? It is removed for everyone in this workspace.`, acceptLabel: "Delete" });
+    const ok = await showConfirmDialog({ message: `Delete “${thread.title}”? It is removed for everyone in this workspace.`, acceptLabel: "Delete", danger: true });
     if (!ok) return;
     thread.deleted = true;
     thread.updatedAt = Date.now();

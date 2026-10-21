@@ -69,7 +69,7 @@ export function createSurface({ shell, workspace, editor, sync }) {
   // The dialogs, loaded the first time they open.
   const shared = () => ({
     controller: controller(), showToast: app.showToast, notify: (message) => shell.notify(message),
-    confirmAction: (message) => shell.confirm(String(message)),
+    confirmAction: (message, options = {}) => shell.confirm({ message: String(message), ...options }),
     formatSnapshotTime: snapshots.formatSnapshotTime, formatBytes: snapshots.formatBytes, projectPaths: snapshots.projectPaths,
     writeAtPathOperations: snapshots.writeAtPathOperations, applyHistoryOperations: snapshots.applyHistoryOperations
   });

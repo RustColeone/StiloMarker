@@ -129,13 +129,32 @@ async def main():
         await page.wait_for_selector('#preview-diff-view', state='hidden')
         assert not await page.locator('#preview-output').is_hidden()
 
-        # The rename dialog keeps ".md" out of the field and puts it back.
+        # The rename dialog keeps ".md" out of the field and puts it back; it
+        # names the file and says Rename (no message repeating its title).
         await page.evaluate('() => { void window.__shellTest.renameFileById("a"); }')
         await page.wait_for_selector('#input-dialog[open]')
         assert await page.locator('#input-dialog-input').input_value() == 'notes'
+        words = await page.evaluate('[document.querySelector("#input-dialog-title").textContent, document.querySelector("#input-dialog-message").hidden, document.querySelector("#input-dialog-submit-button").textContent]')
+        assert words == ['Rename notes.md', True, 'Rename'], words
         await page.locator('#input-dialog-input').fill('ideas')
         await page.locator('#input-dialog-input').press('Enter')
         await page.wait_for_selector('.tree-row[title="ideas.md"]', timeout=10000)
+        # Rename Selected keeps the extension out too (it passed it under another name).
+        await page.click('.tree-row[title="ideas.md"]')
+        await page.evaluate('() => { void window.__shellTest.shell.run("workspace.rename-selected"); }')
+        await page.wait_for_selector('#input-dialog[open]')
+        assert await page.locator('#input-dialog-input').input_value() == 'ideas'
+        await page.keyboard.press('Escape')
+        # Deleting asks with the question as its title and a red Delete.
+        await page.evaluate('() => { void window.__shellTest.shell.run("workspace.delete-selected"); }')
+        await page.wait_for_selector('#confirm-dialog[open]')
+        asked = await page.evaluate('''() => { const button = document.querySelector("#confirm-dialog-accept-button");
+          return [document.querySelector("#confirm-dialog-title").textContent, document.querySelector("#confirm-dialog-message").hidden,
+            button.textContent, button.classList.contains("is-danger"), getComputedStyle(button).backgroundColor]; }''')
+        assert asked == ['Delete ideas.md?', True, 'Delete', True, 'rgb(199, 78, 57)'], asked
+        await page.keyboard.press('Escape')
+        await page.wait_for_selector('#confirm-dialog', state='hidden')
+        assert await page.locator('.tree-row[title="ideas.md"]').count() == 1, 'Escape kept the file'
 
         # Something added after start-up (as a module or an extension would) appears.
         await page.evaluate('''() => {
@@ -301,7 +320,7 @@ async def main():
         await context.close()
         await browser.close()
         print(json.dumps({'checks': ['file-type lists from File types', 'five menus with their items, groups and shortcuts', 'one menu open at a time', 'live titles',
-                                     'menu item runs its command', 'Ctrl+S runs Save', 'a snapshot compared in the diff tab', 'rename keeps the extension',
+                                     'menu item runs its command', 'Ctrl+S runs Save', 'a snapshot compared in the diff tab', 'rename keeps the extension (both ways in); delete asks plainly',
                                      'late menus and commands appear', 'Replace File replaces an image', 'the welcome page from its owners', 'status bar items from their owners', 'Settings sections and fields', 'the trace and its tab', 'a diagram previews as a diagram, fitted', 'diagram source: highlighting, toolbar, autocomplete (extension)', 'diagram Export As and new diagram (extension)', 'phone menu panel'], 'runtimeErrors': 0}))
 
 

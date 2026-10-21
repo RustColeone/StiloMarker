@@ -69,7 +69,7 @@ async def main():
         await page.locator('#browser-list .browser-item:has-text("Novel")').click()
         await page.click("#browser-delete-btn")
         await page.wait_for_selector("#confirm-dialog[open]")
-        message = await page.locator("#confirm-dialog-message").inner_text()
+        message = await page.locator("#confirm-dialog").inner_text()
         assert "Trash keeps it for 30 days" in message, message
         await page.click("#confirm-dialog-accept-button")
         await page.wait_for_function('![...document.querySelectorAll("#browser-list .browser-item-label")].some((e) => e.textContent === "Novel")')

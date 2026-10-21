@@ -71,7 +71,7 @@ async def main():
         # Open Workspace History and back up by hand.
         async def confirm():
             await pg.wait_for_selector("#confirm-dialog[open]", timeout=10000)
-            msg = await pg.locator("#confirm-dialog-message").inner_text()
+            msg = await pg.locator("#confirm-dialog").inner_text()  # the question (title) and its message
             await pg.click("#confirm-dialog-accept-button"); return msg
         async def open_history():
             await pg.evaluate("() => document.querySelector('[data-command=\"history.workspace-history\"]').click()")

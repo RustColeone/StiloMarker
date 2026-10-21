@@ -147,7 +147,7 @@ async def main():
         assert '[Stream]\nurl = https://img.example/river.jpg' in refs and '[River]' not in refs, refs
         await menu(entry_row('r', 'Tower'), 'Delete')
         await page.wait_for_selector('#confirm-dialog[open]')
-        assert 'Tower' in await page.locator('#confirm-dialog-message').inner_text()
+        assert 'Tower' in await page.locator('#confirm-dialog').inner_text()  # its title asks it: "Delete Tower?"
         await page.click('#confirm-dialog-accept-button')
         await page.wait_for_function('![...document.querySelectorAll(\'.tree-row-derived[data-node-id="r"] .tree-label\')].some((e) => e.textContent === "Tower")')
         assert '[Tower]' not in await saved('refs.urldb')

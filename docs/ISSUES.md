@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-20 · release `v0.2.14` (not deployed; v0.2.13 is live)
+Last updated: 2026-10-21 · release `v0.2.15` (not deployed; v0.2.13 is live)
 
 ---
 
@@ -40,6 +40,33 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.15: dialogs that say what they ask
+
+Part of the polish decided 2026-10-20 ("Dialogs"). Browser only.
+
+- **A question is the dialog's title**: "Delete welcome.md?" instead of
+  CONFIRM / Confirm Action with the question in small grey text; what more
+  it has to say is the text under it. A notice is titled by its first
+  sentence (they were all "Message"). The fixed eyebrows (Confirm, Notice,
+  Rename) are gone, and a message that only repeated its title.
+- **Buttons say what they do and look it**: Delete, Restore, Bring Back,
+  Rename, Add… instead of Confirm and Save; the one that does it is the
+  highlighted one, and red when it destroys something (deleting a file, a
+  snapshot, a conversation, for good from the Trash; Reset to Default
+  Workspace; Empty Everything). Each theme's red keeps 4.5:1 with its text
+  (the themes test checks it).
+- **Rename Selected kept the extension in the field** (fixed): it passed it
+  under another name than the dialog reads, so `welcome.md` could be renamed
+  to `welcome` by accident. Both renames keep it out now, and the box says
+  which: "Keep .md at the end". Its row was laid out on two lines.
+- Tests: `dialogs.test.mjs` (a question split into title and message),
+  `themes.test.mjs` (the red's contrast), `shell-browser.py` (rename's
+  words, Rename Selected's extension, delete's title and red Delete);
+  `url-album-browser.py`, `workspace-history-browser.py` and
+  `trash-browser.py` read the whole question. `identity-browser.py`'s
+  reloads wait for the page, not for the network to go quiet (a slow request
+  elsewhere once held that past 30 s); the app's own state is waited for next.
 
 ### v0.2.14: small things that were wrong
 

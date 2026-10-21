@@ -27,7 +27,7 @@ export function createManage(app) {
     if (targets.length === 0) return;
     const label = targets.length === 1 ? `"${targets[0].name}"` : `${targets.length} items`;
     const it = targets.length === 1 ? "it" : "them";
-    const confirmed = await app.showConfirmDialog({ title: "Delete", acceptLabel: "Delete", message: provider.id === "server"
+    const confirmed = await app.showConfirmDialog({ acceptLabel: "Delete", danger: true, message: provider.id === "server"
       ? `Delete ${label}? The team's Trash keeps ${it} for 30 days, where the owner can restore ${it}.`
       : `Delete ${label}? This permanently removes ${it} and cannot be undone.` });
     if (!confirmed) return;

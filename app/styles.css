@@ -3653,8 +3653,9 @@ menu {
   width: 100%;
 }
 
-/* Rename dialog's "auto file extension" checkbox row: inline, not full-width. */
-.input-dialog-ext-row {
+/* Rename dialog's "keep the extension" checkbox row: inline, not full-width
+   (the form's labels are grids otherwise). */
+.app-dialog-form label.input-dialog-ext-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3972,9 +3973,42 @@ menu {
   font-size: 11px;
 }
 
-/* A confirm's message may come in paragraphs (Reload Window's problems). */
-#confirm-dialog-message {
+/* A small dialog: its question as the title, its message as text under it
+   (in paragraphs when it has them: Reload Window's problems), the button
+   that does it highlighted, red when it destroys something. */
+.dialog-message {
+  max-width: 60ch;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
   white-space: pre-line;
+}
+
+.app-dialog .dialog-header:not(:has(.dialog-close-corner)):not(:has(.subtle-label)) {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.app-dialog .dialog-header h2 {
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.dialog-actions button {
+  border-radius: 4px;
+}
+
+.dialog-actions button.is-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-weight: 600;
+}
+
+.dialog-actions button.is-danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--editor);
 }
 
 .editor-line.is-empty {

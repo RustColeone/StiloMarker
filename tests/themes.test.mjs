@@ -86,6 +86,7 @@ test("themes: every theme is readable (text, links and highlighted source agains
     for (const token of THEME_TOKENS.filter((name) => name.startsWith("syntax-"))) at(token, "editor", strict ? 7 : 4);
     at("status-text", "status-bg", 4.5);
     at("text-on-accent", "accent", 4.5);
+    at("editor", "danger", 4.5); // a destructive button: the page's colour on red
   }
 });
 

@@ -213,7 +213,7 @@ export function createChatsPage(app) {
           scrollToBottom: () => { chatsToBottom = true; },
           scrollToBottomIfNear: () => { if (isChatNearBottom(chatsEl.messageList)) chatsToBottom = true; },
           toast: showToast,
-          confirm: (message) => showConfirmDialog({ title: "Leave group", message, acceptLabel: "Leave" }),
+          confirm: (message) => showConfirmDialog({ message, acceptLabel: "Leave" }),
           openFile: (nodeId) => openFileFromExplorer(nodeId)
         });
         rerender();

@@ -107,7 +107,9 @@ async def main():
         assert saved["accountUsername"] == "amy" and saved["accountPassword"] == "pw" and list(saved["accountSuccess"].values()) == ["amy"], saved
         ok("signing in shows the account and its team, and stores the sign-in")
 
-        await page.reload(wait_until="networkidle")
+        # The page loaded (not "network idle": a slow request elsewhere once held that
+        # past 30 s); the next line waits for what matters, the account signed in again.
+        await page.reload(wait_until="domcontentloaded")
         await page.wait_for_function("Boolean(window.__id) && window.__id.identity.account()?.username === 'amy'", timeout=15000)
         ok("a reload signs in again by itself")
 
@@ -153,7 +155,7 @@ async def main():
         assert await page.is_visible("#account-login-fields")
         saved = await stored(page)
         assert saved["accountUsername"] == "amy" and saved["accountPassword"] == "" and saved["accountSuccess"] == {}, saved
-        await page.reload(wait_until="networkidle")
+        await page.reload(wait_until="domcontentloaded")
         await page.wait_for_function("Boolean(window.__id)")
         await page.wait_for_timeout(1500)
         assert await page.evaluate("window.__id.identity.account()") is None

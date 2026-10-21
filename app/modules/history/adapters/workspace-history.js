@@ -211,7 +211,8 @@ export function createWorkspaceHistory(deps) {
     const state = historyState.status.get(path);
     const ok = await confirmAction(state === "deleted"
       ? `Bring back "${path}" from ${formatSnapshotTime(backup.createdAt)}?`
-      : `Replace "${path}" with its version from ${formatSnapshotTime(backup.createdAt)}? Take a snapshot first if you want to keep the current text.`);
+      : `Replace "${path}" with its version from ${formatSnapshotTime(backup.createdAt)}? Take a snapshot first if you want to keep the current text.`,
+      { acceptLabel: state === "deleted" ? "Bring Back" : "Replace" });
     if (!ok) return;
     historyState.busy = true;
     renderWorkspaceHistoryFiles();
@@ -242,7 +243,7 @@ export function createWorkspaceHistory(deps) {
     const removed = historyState.created ?? [];
     const ok = await confirmAction(`Restore the whole workspace to ${formatSnapshotTime(backup.createdAt)}? `
       + `${changed.length} file(s) are brought back or replaced and ${removed.length} file(s) created since are removed. `
-      + "The current state is backed up first, so you can undo this from Workspace History.");
+      + "The current state is backed up first, so you can undo this from Workspace History.", { acceptLabel: "Restore Workspace" });
     if (!ok) return;
     historyState.busy = true;
     renderWorkspaceHistoryFiles();

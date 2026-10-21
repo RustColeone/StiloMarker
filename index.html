@@ -630,14 +630,11 @@
     <dialog id="notice-dialog" class="app-dialog">
       <form method="dialog" class="app-dialog-form">
         <header class="dialog-header">
-          <div>
-            <div class="eyebrow">Notice</div>
-            <h2 id="notice-dialog-title">Message</h2>
-          </div>
-          <p id="notice-dialog-message" class="subtle-label">Message</p>
+          <h2 id="notice-dialog-title">Notice</h2>
         </header>
+        <p id="notice-dialog-message" class="dialog-message"></p>
         <menu class="dialog-actions">
-          <button id="notice-dialog-close-button" value="default" type="submit">OK</button>
+          <button id="notice-dialog-close-button" class="is-primary" value="default" type="submit">OK</button>
         </menu>
       </form>
     </dialog>
@@ -645,15 +642,12 @@
     <dialog id="confirm-dialog" class="app-dialog">
       <form method="dialog" class="app-dialog-form">
         <header class="dialog-header">
-          <div>
-            <div class="eyebrow">Confirm</div>
-            <h2 id="confirm-dialog-title">Confirm Action</h2>
-          </div>
-          <p id="confirm-dialog-message" class="subtle-label">Are you sure?</p>
+          <h2 id="confirm-dialog-title">Are you sure?</h2>
         </header>
+        <p id="confirm-dialog-message" class="dialog-message"></p>
         <menu class="dialog-actions">
           <button value="cancel" type="submit">Cancel</button>
-          <button id="confirm-dialog-accept-button" value="accept" type="submit">Confirm</button>
+          <button id="confirm-dialog-accept-button" class="is-primary" value="accept" type="submit">OK</button>
         </menu>
       </form>
     </dialog>
@@ -661,12 +655,9 @@
     <dialog id="input-dialog" class="app-dialog">
       <form method="dialog" class="app-dialog-form">
         <header class="dialog-header">
-          <div>
-            <div class="eyebrow">Rename</div>
-            <h2 id="input-dialog-title">Rename Item</h2>
-          </div>
-          <p id="input-dialog-message" class="subtle-label">Enter a value.</p>
+          <h2 id="input-dialog-title">Rename</h2>
         </header>
+        <p id="input-dialog-message" class="dialog-message" hidden></p>
         <label>
           <span id="input-dialog-label">Name</span>
           <input id="input-dialog-input" type="text" autocomplete="off">
@@ -677,7 +668,7 @@
         </label>
         <menu class="dialog-actions">
           <button id="input-dialog-cancel-button" value="cancel" type="button">Cancel</button>
-          <button id="input-dialog-submit-button" value="accept" type="submit">Save</button>
+          <button id="input-dialog-submit-button" class="is-primary" value="accept" type="submit">Save</button>
         </menu>
       </form>
     </dialog>

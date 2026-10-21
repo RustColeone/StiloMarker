@@ -117,7 +117,7 @@ export function createAdding(app) {
       return false;
     }
 
-    if (!await app.confirmAction(`Add ${file.name} to the current folder and insert a markdown image reference?`)) {
+    if (!await app.confirmAction(`Add ${file.name} to the current folder and insert a markdown image reference?`, { acceptLabel: "Add" })) {
       return false;
     }
 

@@ -172,7 +172,7 @@ export function createSnapshotsDialog(deps) {
     if (!node) {
       // The file was deleted since. Snapshots outlive their file, so recreate it
       // (and any missing folders) instead of refusing.
-      const ok = await confirmAction(`"${path.split("/").pop()}" no longer exists. Bring it back from its ${formatSnapshotTime(createdAt)} snapshot?`);
+      const ok = await confirmAction(`"${path.split("/").pop()}" no longer exists. Bring it back from its ${formatSnapshotTime(createdAt)} snapshot?`, { acceptLabel: "Bring Back" });
       if (!ok) return;
       const ops = writeAtPathOperations(path, content, projectPaths(project).folders);
       try {
@@ -185,7 +185,7 @@ export function createSnapshotsDialog(deps) {
       return;
     }
     if (content === String(node.content ?? "")) { showToast("Already matches this version"); return; }
-    const ok = await confirmAction(`Restore "${path.split("/").pop()}" to its ${formatSnapshotTime(createdAt)} snapshot? Current content is replaced (you can snapshot first to keep it).`);
+    const ok = await confirmAction(`Restore "${path.split("/").pop()}" to its ${formatSnapshotTime(createdAt)} snapshot? Current content is replaced (you can snapshot first to keep it).`, { acceptLabel: "Restore" });
     if (!ok) return;
     // One write: the open file changes through the editor (undo works), and
     // the change is sent as a patch that merges with anyone else's edits.
@@ -218,7 +218,7 @@ export function createSnapshotsDialog(deps) {
   el.deleteBtn?.addEventListener("click", async () => {
     const selected = snapshotsVersions.find((v) => v.id === snapshotsSelectedId);
     if (!selected) return;
-    const ok = await confirmAction(`Delete the ${formatSnapshotTime(selected.createdAt)} snapshot of "${(snapshotsViewPath || "").split("/").pop()}"? This can't be undone.`);
+    const ok = await confirmAction(`Delete the ${formatSnapshotTime(selected.createdAt)} snapshot of "${(snapshotsViewPath || "").split("/").pop()}"? This can't be undone.`, { acceptLabel: "Delete", danger: true });
     if (!ok) return;
     await snapshotStore().remove(selected.id);
     snapshotsSelectedId = null;

@@ -47,7 +47,7 @@ export function createNaming(app) {
       return;
     }
     const currentPath = getPath(project, node.id);
-    const name = await app.promptForName("Rename file", node.name, { suffix: app.fileExtensionOf(node.name) });
+    const name = await app.promptForName(`Rename ${node.name}`, node.name, { suffix: app.fileExtensionOf(node.name), submitLabel: "Rename" });
     if (!name || name === node.name) {
       return;
     }
@@ -142,7 +142,7 @@ export function createNaming(app) {
     const selected = app.getSelectedPart(project);
     if (selected) {
       const { file, parts, part } = selected;
-      const nextName = await app.promptForName(`Rename ${part.name}`, part.name);
+      const nextName = await app.promptForName(`Rename ${part.name}`, part.name, { submitLabel: "Rename" });
       if (!nextName) {
         return;
       }
@@ -166,8 +166,8 @@ export function createNaming(app) {
     }
     const currentPath = getPath(project, node.id);
     // Folders have no extension → the auto-extension toggle is hidden for them.
-    const name = await app.promptForName("Rename item", node.name, {
-      extension: node.kind === "file" ? app.fileExtensionOf(node.name) : ""
+    const name = await app.promptForName(`Rename ${node.name}`, node.name, {
+      suffix: node.kind === "file" ? app.fileExtensionOf(node.name) : "", submitLabel: "Rename"
     });
     if (!name) {
       return;
@@ -192,7 +192,7 @@ export function createNaming(app) {
     const selected = app.getSelectedPart(project);
     if (selected) {
       const { file, parts, part } = selected;
-      if (!await app.confirmAction(`Delete ${part.name}?`)) {
+      if (!await app.confirmAction(`Delete ${part.name}?`, { acceptLabel: "Delete", danger: true })) {
         return;
       }
 
@@ -212,7 +212,7 @@ export function createNaming(app) {
       return;
     }
     const path = getPath(project, node.id);
-    if (!await app.confirmAction(`Delete ${node.name}?`)) {
+    if (!await app.confirmAction(`Delete ${node.name}?`, { acceptLabel: "Delete", danger: true })) {
       return;
     }
     const removedName = node.name;

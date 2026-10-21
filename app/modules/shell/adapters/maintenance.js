@@ -21,7 +21,7 @@ export function addMaintenanceCommands({ commands, confirm, notify, closeMenus, 
   commands.add({ id: "workspace.reset", title: "Reset to Default Workspace", menu: { id: "settings", group: 2, order: 1 }, async run() {
     const confirmed = await confirm({ title: "Reset to Default Workspace",
       message: "This deletes your current workspace, chat history, and settings, then reloads the default welcome workspace. This cannot be undone.",
-      acceptLabel: "Reset" });
+      acceptLabel: "Reset", danger: true });
     if (!confirmed) return;
     closeMenus();
     log(`Workspace reset to default: keysRemoved=${clearAppStorage()}`);

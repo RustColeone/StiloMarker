@@ -49,7 +49,7 @@ export function createSurface({ workspace, editor, shell, sync, types, fileMenus
     publishSnapshot: () => sync.publishSnapshot(),
     notify: (message) => shell.notify(message),
     showToast: (message, options) => shell.toast(message, options),
-    confirmAction: (message) => shell.confirm(String(message)),
+    confirmAction: (message, options = {}) => shell.confirm({ message: String(message), ...options }),
     // Drawing the app again is asked of Shell; the app listens.
     render: (project) => shell.render(project),
     updateStatus: (project) => shell.render(project, { only: "status" }),

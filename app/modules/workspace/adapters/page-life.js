@@ -47,7 +47,7 @@ export function addWorkspaceCommands({ shell, log, doc = globalThis.document }) 
   shell.commands.add({ id: "workspace.empty-everything", title: "Empty Everything", menu: { id: "settings", group: 2, order: 2 }, danger: true, async run() {
     const confirmed = await shell.confirm({ title: "Empty Everything",
       message: "This deletes your workspace, chat history, and settings, then reloads into a completely empty workspace (no welcome files). This cannot be undone.",
-      acceptLabel: "Empty Everything" });
+      acceptLabel: "Empty Everything", danger: true });
     if (!confirmed) return;
     shell.closeMenus();
     shell.clearAppStorage();

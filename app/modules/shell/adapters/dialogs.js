@@ -1,5 +1,9 @@
 // The app's modal dialogs (notice, confirm, input, form), toasts and copying text.
-// Shell owns these page elements; nothing else queries them.
+// Shell owns these page elements; nothing else queries them. A notice or a
+// confirm given only its text takes its first sentence as the title (the
+// rest is the message: model/dialog-text.js); a confirm's button says what it
+// does (acceptLabel) and is red when it destroys something (danger).
+import { splitQuestion } from "../model/dialog-text.js";
 
 export function createDialogs(doc = document) {
   const el = (id) => doc.getElementById(id);
@@ -15,17 +19,25 @@ export function createDialogs(doc = document) {
     submit: el("input-dialog-submit-button"), cancel: el("input-dialog-cancel-button")
   };
 
-  function showNotice(message, title = "Message") {
-    notice.title.textContent = title;
-    notice.message.textContent = String(message);
+  // The title, and the message under it (none when it only says the title again).
+  function words(box, title, message) {
+    const said = title ? { title, message: String(message ?? "") } : splitQuestion(message, "Notice");
+    box.title.textContent = said.title;
+    box.message.textContent = said.message.trim() === said.title.trim() ? "" : said.message;
+    box.message.hidden = !box.message.textContent;
+  }
+
+  function showNotice(message, title) {
+    words(notice, title, message);
     if (!notice.dialog.open) notice.dialog.showModal();
   }
 
-  function showConfirm({ title = "Confirm Action", message, acceptLabel = "Confirm" }) {
+  function showConfirm({ title, message, acceptLabel = "OK", danger = false }) {
     return new Promise((resolve) => {
-      confirmBox.title.textContent = title;
-      confirmBox.message.textContent = message;
+      const said = title ? { title, message } : splitQuestion(message);
+      words(confirmBox, said.title, said.message);
       confirmBox.accept.textContent = acceptLabel;
+      confirmBox.accept.classList.toggle("is-danger", Boolean(danger));
       confirmBox.dialog.addEventListener("close", () => resolve(confirmBox.dialog.returnValue === "accept"), { once: true });
       confirmBox.dialog.showModal();
     });
@@ -34,17 +46,20 @@ export function createDialogs(doc = document) {
   // Asks for one line of text. `suffix` (e.g. ".md" for a rename) is kept out
   // of the field while "keep" is ticked, so it can't be edited by accident,
   // and put back on save. Resolves to the text, or null when cancelled.
-  function showInput({ title = "Rename Item", message = "Enter a value.", label = "Name", value = "", submitLabel = "Save", suffix = "" }) {
+  function showInput({ title = "Rename", message = "", label = "Name", value = "", submitLabel = "Save", suffix = "" }) {
     return new Promise((resolve) => {
-      input.title.textContent = title;
-      input.message.textContent = message;
+      words(input, title, message);
       input.label.textContent = label;
       input.submit.textContent = submitLabel;
       const end = String(suffix || "");
       const hasSuffix = end.length > 0;
       const endsWithSuffix = (v) => v.toLowerCase().endsWith(end.toLowerCase());
       const strip = (v) => (hasSuffix && endsWithSuffix(v) ? v.slice(0, -end.length) : v);
-      if (input.keepSuffixRow) input.keepSuffixRow.hidden = !hasSuffix;
+      if (input.keepSuffixRow) {
+        input.keepSuffixRow.hidden = !hasSuffix;
+        const text = input.keepSuffixRow.querySelector("span");
+        if (text) text.textContent = `Keep ${end} at the end (out of the field, so it isn't changed by accident)`;
+      }
       if (input.keepSuffix) input.keepSuffix.checked = hasSuffix;
       input.field.value = hasSuffix ? strip(value) : value;
 
@@ -84,7 +99,7 @@ export function createDialogs(doc = document) {
           <p id="form-dialog-message" class="subtle-label"></p></header>
         <div class="form-dialog-fields"></div>
         <menu class="dialog-actions"><button value="cancel" type="submit" formnovalidate>Cancel</button>
-          <button id="form-dialog-submit-button" value="accept" type="submit">Save</button></menu>
+          <button id="form-dialog-submit-button" class="is-primary" value="accept" type="submit">Save</button></menu>
       </form>`;
     doc.body.append(dialog);
     const pick = (selector) => dialog.querySelector(selector);

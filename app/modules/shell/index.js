@@ -11,9 +11,12 @@
 //   menus.add({ id, label, order })
 //   run(id, ...args)              -> Promise<boolean>
 //   closeMenus()
-//   notice(message, title?)       a blocking message, also logged
-//   notify(message)               the same, titled "Message"
-//   confirm(message | {title, message, acceptLabel}) -> Promise<boolean>
+//   notice(message, title?)       a blocking message, also logged (no title: its
+//                                 first sentence is the title, model/dialog-text.js)
+//   notify(message)               the same
+//   confirm(message | {title?, message, acceptLabel?, danger?}) -> Promise<boolean>
+//                                 (no title: the question's first sentence; danger:
+//                                 its button red, for what destroys something)
 //   input({title, message, label, value, submitLabel, suffix}) -> Promise<string|null>
 //   form({eyebrow, title, message, fields: [{ name, label, value, type: text|url, multiline, placeholder }],
 //         submitLabel}) -> Promise<{ name: value } | null>
@@ -152,7 +155,7 @@ export default defineModule({
       } });
     }
 
-    function notice(message, title = "Message") {
+    function notice(message, title) {
       ctx.log(`notice: ${message}`);
       dialogs.showNotice(message, title);
     }
