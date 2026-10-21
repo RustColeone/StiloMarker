@@ -1316,6 +1316,40 @@ p {
   cursor: pointer;
 }
 
+/* A tab's × shows on the active tab and on hover (its place kept, so tabs
+   don't shift); an unsaved tab shows its dot there instead, the × on hover. */
+.editor-tab .tab-close {
+  visibility: hidden;
+}
+
+.editor-tab:hover .tab-close,
+.editor-tab.is-active .tab-close,
+.editor-tab:focus-visible .tab-close {
+  visibility: visible;
+}
+
+.editor-tab .tab-dirty:empty {
+  display: none;
+}
+
+.editor-tab .tab-dirty.is-dirty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 2px;
+}
+
+.editor-tab .tab-dirty.is-dirty + .tab-close,
+.editor-tab:hover .tab-dirty.is-dirty {
+  display: none;
+}
+
+.editor-tab:hover .tab-dirty.is-dirty + .tab-close {
+  display: inline-flex;
+}
+
 .editor-tab:hover .tab-close,
 .editor-tab.is-active .tab-close {
   color: var(--text);

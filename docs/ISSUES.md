@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-21 · release `v0.2.15` (not deployed; v0.2.13 is live)
+Last updated: 2026-10-21 · release `v0.2.16` (not deployed; v0.2.13 is live)
 
 ---
 
@@ -40,6 +40,21 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.16: menus and tabs
+
+Part of the polish decided 2026-10-20 ("Menus and tabs"). Browser only.
+
+- **The explorer's menus are grouped**: a line between opening, the
+  clipboard, a new folder, new files, adding a file, renaming and deleting,
+  and exporting (a file type's own entries, such as a diagram's Export As,
+  join their group, or come last). The menu bar had them since v0.2.11; the
+  tab menu already had them.
+- **A tab's × shows on the active tab and on hover** (its place is kept, so
+  tabs don't shift); an unsaved tab shows its dot there instead, and the ×
+  when hovered, as in VS Code.
+- Tests: `shell-browser.py` (the explorer menu's groups), `tab-menu-browser.py`
+  (the ×, the dot, on hover).
 
 ### v0.2.15: dialogs that say what they ask
 

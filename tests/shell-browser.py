@@ -298,6 +298,10 @@ async def main():
         # Diagrams are an extension (extensions/bmap-diagram): its Export As in the
         # explorer's menu, and a new diagram's first content.
         await page.locator('.tree-row[title="welcome.bmap"]').click(button='right')
+        # Its menu draws a line between groups: open | copy | rename, delete | export (Export As with them).
+        layout = await page.evaluate('''[...document.querySelector("#explorer-context-menu").children].map((c) =>
+            c.classList.contains("menu-separator") ? "|" : (c.querySelector(":scope > button") ?? c).textContent.trim())''')
+        assert layout == ['Open Source', 'Open Preview', '|', 'Copy', '|', 'Rename', 'Delete', '|', 'Export', 'Export As'], layout
         await page.locator('#explorer-context-menu').get_by_text('Export As', exact=True).hover()
         async with page.expect_download() as download:
             await page.locator('#explorer-context-menu').get_by_text('Vector (SVG)', exact=True).click()
@@ -321,7 +325,7 @@ async def main():
         await browser.close()
         print(json.dumps({'checks': ['file-type lists from File types', 'five menus with their items, groups and shortcuts', 'one menu open at a time', 'live titles',
                                      'menu item runs its command', 'Ctrl+S runs Save', 'a snapshot compared in the diff tab', 'rename keeps the extension (both ways in); delete asks plainly',
-                                     'late menus and commands appear', 'Replace File replaces an image', 'the welcome page from its owners', 'status bar items from their owners', 'Settings sections and fields', 'the trace and its tab', 'a diagram previews as a diagram, fitted', 'diagram source: highlighting, toolbar, autocomplete (extension)', 'diagram Export As and new diagram (extension)', 'phone menu panel'], 'runtimeErrors': 0}))
+                                     'late menus and commands appear', 'Replace File replaces an image', 'the welcome page from its owners', 'status bar items from their owners', 'Settings sections and fields', 'the trace and its tab', 'a diagram previews as a diagram, fitted', 'diagram source: highlighting, toolbar, autocomplete (extension)', 'explorer menu groups; diagram Export As and new diagram (extension)', 'phone menu panel'], 'runtimeErrors': 0}))
 
 
 asyncio.run(main())

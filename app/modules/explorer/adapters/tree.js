@@ -14,6 +14,19 @@ function getFileIconClass(node) {
 
 const isExpandableFile = (node) => node.kind === "file" && builtinTypes.typeOf(node.name)?.expandable === true;
 
+// A menu entry's group (a line is drawn between groups): opening, the
+// clipboard, a new folder, new files, adding a file, renaming and deleting,
+// exporting; anything else (a file type's own entries) last. An entry with a
+// submenu goes by its entries'.
+const MENU_GROUPS = { "open-source": "open", "open-preview": "open", copy: "clipboard", paste: "clipboard",
+  "new-folder": "folder", "add-file": "add", "add-part": "create", rename: "edit", "rename-part": "edit",
+  "replace-file": "edit", delete: "edit", "delete-part": "edit", export: "export" };
+function menuGroupOf([, action, submenu]) {
+  const actions = action ? [action] : (submenu ?? []).map(([, subAction]) => subAction);
+  const groups = new Set(actions.map((each) => MENU_GROUPS[each] ?? (each?.startsWith("new-") ? "create" : each?.startsWith("export") ? "export" : "more")));
+  return groups.size === 1 ? [...groups][0] : "more";
+}
+
 function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenPart, onToggleFolder, onSelectNode, onAction, canPasteTarget, canPreviewFile, rootEntries = () => [], onDragNodeStart, onDragPartStart, getFilterMode, getAssetPreviewSrc, listParts, getPartAdder, getSelectedTarget, markOf = () => null, extraEntriesFor = () => [] }) {
   let menuTarget = null;
   let currentProject = null;
@@ -161,7 +174,14 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       onAction(action, actionTarget, { dryRun: false });
     };
 
-    entries.forEach(([label, action, submenu]) => {
+    entries.forEach((entry, index) => {
+      const [label, action, submenu] = entry;
+      if (index && mode !== "filter" && menuGroupOf(entry) !== menuGroupOf(entries[index - 1])) {
+        const line = document.createElement("div");
+        line.className = "menu-separator";
+        line.setAttribute("role", "separator");
+        contextMenu.append(line);
+      }
       if (Array.isArray(submenu) && submenu.length) {
         // Entry with a hover-reveal submenu (e.g. "Export As").
         const wrapper = document.createElement("div");

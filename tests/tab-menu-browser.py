@@ -97,6 +97,23 @@ async def main():
         await page.set_viewport_size({'width': 1400, 'height': 900})
         await page.wait_for_timeout(300)
 
+        # A tab's × shows on the active tab and on hover; an unsaved tab shows its dot there, the × on hover.
+        closes = '''() => [...document.querySelectorAll("#source-tab-strip .editor-tab")].map((t) => [t.querySelector(".tab-title").textContent,
+          getComputedStyle(t.querySelector(".tab-close")).visibility, getComputedStyle(t.querySelector(".tab-close")).display === "none"])'''
+        await page.mouse.move(700, 600)
+        assert await page.evaluate(closes) == [['welcome.md', 'visible', False], ['MeitanteiCure.mtree', 'hidden', False], ['LULUKA.urldb', 'hidden', False]], await page.evaluate(closes)
+        await page.locator('#source-tab-strip .editor-tab', has_text='MeitanteiCure.mtree').hover()
+        assert (await page.evaluate(closes))[1] == ['MeitanteiCure.mtree', 'visible', False]
+        await page.evaluate('''() => { const strip = document.querySelector("#source-tab-strip");
+          strip.querySelector(".editor-tab .tab-dirty").classList.add("is-dirty"); strip.querySelector(".editor-tab .tab-dirty").textContent = "●"; }''')
+        await page.mouse.move(700, 600)
+        dot = '''() => { const t = document.querySelector("#source-tab-strip .editor-tab"); return [getComputedStyle(t.querySelector(".tab-dirty")).display !== "none",
+          getComputedStyle(t.querySelector(".tab-close")).display !== "none"]; }'''
+        assert await page.evaluate(dot) == [True, False], 'unsaved: the dot, not the ×'
+        await page.locator('#source-tab-strip .editor-tab', has_text='welcome.md').hover()
+        assert await page.evaluate(dot) == [False, True], 'hovered: the ×'
+        await page.mouse.move(700, 600)
+
         # The menu of a source tab: the view it is in ticked, a one-view file not previewable.
         entries = await tab_menu('source', 'MeitanteiCure.mtree')
         labels = [label for label, _, _ in entries]
@@ -213,7 +230,7 @@ async def main():
 
         assert not errors, errors
         await browser.close()
-        print(json.dumps({'checks': ['active tab in view', 'menu entries', 'escape', 'default layout', 'open as preview in the same group', 'two previews side by side', 'the preview back', 'source back', 'the label switches views', 'phone with a mixed group', 'copy path',
+        print(json.dumps({'checks': ['active tab in view', 'a tab\'s × on hover, an unsaved tab\'s dot', 'menu entries', 'escape', 'default layout', 'open as preview in the same group', 'two previews side by side', 'the preview back', 'source back', 'the label switches views', 'phone with a mixed group', 'copy path',
                                      'close to the right', 'close others', 'press outside', 'close all']}))
 
 
