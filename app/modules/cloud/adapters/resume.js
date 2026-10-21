@@ -69,12 +69,14 @@ export function createResume(app, { sync, doc = globalThis.document, win = globa
   return {
     sessionRestorer,
     resumeSession: () => sessionRestorer.run(),
-    // The welcome page offers Resume unless the remembered workspace is already open or opening.
+    // The welcome page offers Resume unless the remembered workspace is already
+    // open or opening (a page that opened its copy is on it while it waits to
+    // reconnect: offline, Resume tries now).
     resumeTarget() {
       const target = rememberedWorkspace(settings.lastWorkspace);
       const alreadyOpen = target && settings.syncedProjectId === `${target.team}/${target.path}`
         && mode.get().workspaceMode === "synced"
-        && (["connected", "reconnecting"].includes(syncState.status) || sessionRestorer.isPending());
+        && (["connected", "reconnecting"].includes(syncState.status) || (sessionRestorer.isPending() && syncState.status !== "offline"));
       return target && !alreadyOpen ? (target.path.split("/").pop() || target.team) : null;
     }
   };

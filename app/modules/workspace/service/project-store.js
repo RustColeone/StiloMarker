@@ -1,5 +1,8 @@
 // The open project, held in memory: changes go through it, and listeners hear
-// about each one. No input or output; saving it is someone else's job.
+// about each one. No input or output; saving it is someone else's job. It
+// also says which of this browser's copies the project is saved as
+// (copyKey()): the one it opened with; a replace names its own, or keeps the
+// key when the project stays the same one (same id), or asks keyOf(next).
 import {
   ROOT_ID,
   applySyncOperation,
@@ -24,8 +27,9 @@ function seedDefaultProject() {
   return project;
 }
 
-function createProjectController(initialProject = seedDefaultProject()) {
+function createProjectController(initialProject = seedDefaultProject(), { copyKey: initialKey = null, keyOf = (next) => `local:${next?.id}` } = {}) {
   let project = initialProject;
+  let copyKey = initialKey ?? keyOf(initialProject);
   const listeners = new Set();
 
   function emit() {
@@ -49,7 +53,9 @@ function createProjectController(initialProject = seedDefaultProject()) {
     getProject() {
       return project;
     },
-    replaceProject(nextProject) {
+    copyKey: () => copyKey,
+    replaceProject(nextProject, { copyKey: key = null } = {}) {
+      copyKey = key ?? (nextProject?.id === project?.id ? copyKey : keyOf(nextProject));
       project = nextProject;
       emit();
     },

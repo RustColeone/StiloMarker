@@ -7,8 +7,9 @@
 //   applyRemote(clientId, op)      Sync's: someone else's change, announced before
 //                                  ("remote-change": the Editor keeps the caret in
 //                                  place) and after ("remote-applied")
-//   replace(project, { keepView }) Sync's: the project replaced (a reload); announced
-//                                  as "replacing" and "replaced" (the Editor keeps the view)
+//   replace(project, { keepView, copyKey }) Sync's: the project replaced (a reload, a
+//                                  shared workspace's content: saved as the copy named);
+//                                  announced as "replacing" and "replaced" (the Editor keeps the view)
 //   editing.configure({ shows(id), apply(next) })  the Editor: the file it shows whole,
 //                                  and applying an edit to it as if typed (the write path)
 //   presence                       carets: own (the Editor's) and others' (Sync's)
@@ -36,9 +37,9 @@ export function createShared({ store, events }) {
     events.emit("remote-applied", { clientId, operation });
   }
 
-  function replace(project, { keepView = false } = {}) {
+  function replace(project, { keepView = false, copyKey = null } = {}) {
     events.emit("replacing", { keepView });
-    store().replaceProject(project);
+    store().replaceProject(project, { copyKey });
     events.emit("replaced", { keepView });
   }
 

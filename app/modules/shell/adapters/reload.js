@@ -63,7 +63,13 @@ export function createReload({ steps, confirm, log, reload = () => globalThis.lo
     }
   }
 
-  return { reloadWindow, reloading: () => reloading };
+  // Reloaded at once, keeping nothing (the app's storage was cleared): no "Leave site?" either.
+  function reloadNow() {
+    reloading = true;
+    reload();
+  }
+
+  return { reloadWindow, reloadNow, reloading: () => reloading };
 }
 
 // What a reload step must be (the registry's check).

@@ -614,15 +614,12 @@
     <dialog id="accept-connection-dialog" class="app-dialog">
       <form method="dialog" class="app-dialog-form">
         <header class="dialog-header">
-          <div>
-            <div class="eyebrow">Collaboration</div>
-            <h2>Connect to Server?</h2>
-          </div>
-          <p id="accept-connection-message" class="subtle-label">If you join as a peer, the host&#8217;s workspace will replace your current content.</p>
+          <h2>Join the Shared Session?</h2>
         </header>
+        <p id="accept-connection-message" class="dialog-message">The host&#8217;s workspace opens in place of yours. Yours stays in this browser: switch back to it at any time.</p>
         <menu class="dialog-actions">
           <button value="cancel" type="submit">Cancel</button>
-          <button id="accept-connection-accept-button" value="accept" type="submit">Connect</button>
+          <button id="accept-connection-accept-button" class="is-primary" value="accept" type="submit">Join</button>
         </menu>
       </form>
     </dialog>

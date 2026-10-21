@@ -84,11 +84,30 @@ export default defineModule({
     // (Cloud: configure).
     const keepers = new Set();
     let supplied = { reauthenticate: async () => null };
+    const shell = ctx.use("shell"), identity = ctx.use("identity");
+    // Which of this browser's copies a shared workspace's content is saved as:
+    // its own, named for the server and session (never this browser's own
+    // workspace's). This browser's own workspace hosted for guests (a PIN
+    // session's master) stays its own.
+    const hostingOwn = () => session.isConnected() && !session.isDirectoryBacked() && session.getRole() === "master";
+    function sharedCopyKey(project) {
+      const info = session.getConnectionInfo();
+      if (info?.sessionId) return `shared:${normalizeServerUrl(info.serverUrl)}/${info.sessionId}`;
+      const { syncedProjectId, serverUrl } = shell.settings;
+      return syncedProjectId ? `shared:${normalizeServerUrl(serverUrl)}/${syncedProjectId}` : `shared:${project?.id}`;
+    }
+    // A tab switched to its own workspace stays connected, but the shared
+    // workspace's changes stay off its screen (switching back loads it afresh).
+    const showsShared = () => mode.get().workspaceMode === "synced" || !session.isConnected() || connection.joining();
     session = createCollaborationRuntime({
       getProject: () => workspace.project().getProject(),
       // Through Workspace, which the Editor hears (adapters/shared.js there).
-      replaceProject: (project) => workspace.replace(project, { keepView: session.isReconnecting() }),
+      replaceProject(project) {
+        if (!showsShared()) return;
+        workspace.replace(project, { keepView: session.isReconnecting(), copyKey: hostingOwn() ? null : sharedCopyKey(project) });
+      },
       applyOperation(clientId, operation) {
+        if (!showsShared()) return;
         try {
           workspace.applyRemote(clientId, operation);
         } catch (error) {
@@ -129,10 +148,23 @@ export default defineModule({
     events.on("status", () => workspace.presence.keep(status.presence.map((person) => person.clientId).filter(Boolean)));
 
     const connected = (name) => (...args) => connection[name](...args);
+    // The page opened a shared workspace's copy: it is on screen as shared (not
+    // yet connected) until it resumes, so it is never taken for this browser's
+    // own; with nothing to resume it, this browser's own workspace comes back.
+    // Opened as this browser's own, it is no cloud workspace's copy (a reopen
+    // must pull, never push this one's files into it).
+    if (workspace.copies.isLocal(workspace.copies.restoredKey()) && shell.settings.syncedProjectId) {
+      shell.settings.change({ syncedProjectId: null }, "the page opened this browser's own workspace");
+    }
+    if (String(workspace.copies.restoredKey() ?? "").startsWith("shared:")) {
+      mode.share(null);
+      const { syncedProjectId, lastWorkspace, autoReconnect, wasConnected, serverPin } = shell.settings;
+      const resumable = (syncedProjectId && lastWorkspace?.team) || (autoReconnect && wasConnected && serverPin);
+      if (!resumable) ctx.whenStarted(() => connection.switchMode("private"));
+    }
     // The cloud workspace on screen, for code that talks to the server about it
     // (snapshots, comments, the agent's conversations): null unless signed in
     // and the open project is that workspace.
-    const shell = ctx.use("shell"), identity = ctx.use("identity");
     function cloudWorkspace() {
       const token = identity.token();
       const { lastWorkspace: ws, serverUrl, syncedProjectId } = shell.settings;
@@ -153,6 +185,8 @@ export default defineModule({
       confirmed: (project, ids) => (mode.get().workspaceMode !== "synced" ? ids
         : session.isConnected?.() ? ids.filter((id) => !session.hasUnsyncedText?.(getPath(project, id))) : []),
       assetsKey: () => connectionInfo()?.token ?? "",
+      // A project opened in this tab while it works on a shared workspace is that workspace's content.
+      copyKey: (project) => (mode.get().workspaceMode === "synced" && !hostingOwn() ? sharedCopyKey(project) : workspace.copies.localKey(project)),
       key(project) {
         const connection = connectionInfo();
         if (connection?.sessionId) return `cloud:${normalizeServerUrl(connection.serverUrl)}/${connection.sessionId}`;

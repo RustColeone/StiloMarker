@@ -21,8 +21,11 @@
 //                   In a page Workspace opens it itself at the start: the project
 //                   this browser kept, else a seed project, and on a first visit
 //                   the welcome template when it arrives (events "started-over" { project })
-//   project()       -> that store
+//   project()       -> that store; copyKey() names the copy of this browser it is saved as
 //   restoredProject() -> the project this browser kept, as the page started with it (or null)
+//   copies: this browser's copies, one per workspace (adapters/browser-copy.js):
+//     restoredKey() (the one the page started with), load(key) -> the project or
+//     null, ownKey() -> the last own workspace's key, localKey(project), isLocal(key)
 //   attach(ports)   for code from before the restructure, which still edits and
 //                   syncs: { commit(path, previous, next, source), replace(operation, source) }
 //   parts.add(provider) -> remove()    an extension point: a kind of file that
@@ -82,7 +85,7 @@ export { seedDefaultProject } from "./service/project-store.js";
 export { buildTextPatch, isTextPatch } from "./model/text-patch.js";
 export { bytesToDataUrl, dataUrlToBlob, dataUrlToBytes, decodeTextBytes, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent } from "./adapters/file-content.js";
 export { createZip, downloadBlob, extractZipEntries } from "./adapters/zip.js";
-export { loadProject, saveProject } from "./adapters/browser-copy.js";
+export { isLocalKey, loadProject, localKey, saveProject } from "./adapters/browser-copy.js";
 export { buildProjectFromDirectoryHandle, buildSourceIndex, importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./adapters/disk-folders.js";
 export { createProjectOpfs, deleteOpfsEntry, exportProjectModelOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs, importProjectModelOpfs, listOpfsDir, mkdirOpfs, openProjectOpfs, saveProjectOpfs, supportsOpfs } from "./adapters/device-folders.js";
 export { createProjectSaveQueue, savedFileIds, snapshotProject } from "./adapters/save-queue.js";
@@ -91,7 +94,7 @@ import { addStatusItems } from "./adapters/status-items.js";
 import { createLocation } from "./adapters/location.js";
 import { createShared } from "./adapters/shared.js";
 import { addWorkspaceCommands, reattachDeviceFolder, watchPage } from "./adapters/page-life.js";
-import { loadProject } from "./adapters/browser-copy.js";
+import { isLocalKey, loadCopy, loadProject, localKey, ownKey } from "./adapters/browser-copy.js";
 import { loadTemplateProject } from "./adapters/template.js";
 
 export default defineModule({
@@ -119,15 +122,17 @@ export default defineModule({
     // Where the project lives, in the status bar: drawn as the project changes;
     // and a red item while this browser's copy can't be written.
     const status = addStatusItems({ shell, log: (message) => ctx.log(message) });
-    const saving = createSaving({ store: () => store, settings: shell.settings, log: (...parts) => ctx.log(...parts), report: status.reportCopy });
+    // Nothing is kept once the app's storage was cleared while this page was open (Reset, Empty Everything).
+    const startedAt = Date.now();
+    const cleared = () => (shell.clearedAt?.() ?? 0) >= startedAt;
+    const saving = createSaving({ store: () => store, settings: shell.settings, log: (...parts) => ctx.log(...parts), report: status.reportCopy, cleared });
     // Auto-save is a setting in Settings → Appearance; turned on, it saves what is waiting.
     shell.settingsDialog.fields.add({ page: "appearance", id: "auto-save-input", order: 100, key: "autoSave", control: "checkbox",
       label: "Auto-save (cloud, local workspace & browser cache; real folders still use Ctrl+S)", read: (s) => s.autoSave !== false });
     shell.settings.on((view, changed) => { if (changed.includes("autoSave") && view.autoSave && store) saving.scheduleAutoSave(); });
     // This browser's copy when the page hides (not once the app was cleared
     // while this page was open), and a warning before leaving unsaved changes.
-    const startedAt = Date.now();
-    watchPage({ store: () => store, keep: () => saving.keepNow(), cleared: () => shell.clearedAt() >= startedAt, reloading: () => shell.reloading() });
+    watchPage({ store: () => store, keep: () => saving.keepNow(), cleared, reloading: () => shell.reloading() });
     // Reload Window (Shell) writes everything first, after Sync's typing is confirmed.
     shell.beforeReload.add({ id: "workspace.files", label: "Your files", order: 20, keep: () => (store ? saving.keepAll() : "") });
     addWorkspaceCommands({ shell, log: (...parts) => ctx.log(parts.join(" ")) });
@@ -142,9 +147,11 @@ export default defineModule({
       }
       events.emit("saved", {});
     } });
-    function openProject(project) {
+    // copyKey: the copy it was read from (else its own id's); a project opened
+    // later in its place is saved as the location says (Sync: shared or own).
+    function openProject(project, { copyKey = null } = {}) {
       if (store) throw new Error("The workspace already has a project open; use project().replaceProject()");
-      store = createProjectController(project);
+      store = createProjectController(project, { copyKey, keyOf: (next) => location.copyKey(next) });
       store.subscribe(status.draw);
       // Each change is saved (this browser's copy, a local project's folder,
       // auto-save) and the app asked to draw it (Shell holds that while typing).
@@ -185,10 +192,12 @@ export default defineModule({
     }
     // In a page, the project opens at once: the one this browser kept, else a
     // seed project until the template arrives. Its name shows in the title bar.
+    // A copy kept by v0.2.19 or before was a shared workspace's content when a session was open then.
     let restored = null;
     if (globalThis.window) {
-      restored = await loadProject({ clearedAt: shell.clearedAt() });
-      openProject(restored ?? seedDefaultProject());
+      const { syncedProjectId, wasConnected, serverPin } = shell.settings;
+      restored = await loadProject({ clearedAt: shell.clearedAt(), wasShared: Boolean(syncedProjectId || (wasConnected && serverPin)) });
+      openProject(restored?.project ?? seedDefaultProject(), { copyKey: restored?.key });
       if (!restored) ctx.whenStarted(installTemplate);
       shell.events.on("render", ({ project }) => {
         const label = globalThis.document?.getElementById("project-name-label");
@@ -198,7 +207,8 @@ export default defineModule({
     return {
       openProject,
       project: () => store,
-      restoredProject: () => restored,
+      restoredProject: () => restored?.project ?? null,
+      copies: Object.freeze({ restoredKey: () => restored?.key ?? null, load: loadCopy, ownKey, localKey, isLocal: isLocalKey }),
       write: writer.write,
       patchOperation: writer.patchOperation,
       asPatch: writer.asPatch,

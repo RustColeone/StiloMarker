@@ -1,8 +1,12 @@
 // Saving the open project (moved from main.js when Workspace took saving):
-//   - this browser's copy (IndexedDB, adapters/browser-copy.js): a trailing
-//     write after edits; as the page may go away, what changed is journaled at
-//     once and the write begun. A write that fails is reported (report(error),
-//     report(null) once one succeeds again): the user is told, never silently;
+//   - this browser's copy of it (IndexedDB, adapters/browser-copy.js), the
+//     one the project store names (copyKey: each workspace has its own, so
+//     one is never written over another's): a trailing write after edits;
+//     a write pending for one copy is written as the project switches to
+//     another; as the page may go away, what changed is journaled at once
+//     and the write begun. A write that fails is reported (report(error),
+//     report(null) once one succeeds again): the user is told, never silently.
+//     Nothing is written once the app's storage was cleared (cleared());
 //   - a local (on-device) project mirrored to its folder, debounced per folder;
 //   - auto-save, when idle and every 15 s, which clears a file's dirty mark
 //     once it is durably stored (a real folder on disk saves only on Save);
@@ -24,8 +28,11 @@ const dirtyFileIds = (project) => Object.values(project.nodes)
 
 // store(): the open project's store; settings: Shell's; log(...): the module log;
 // report(error | null): this browser's copy failed, or works again;
+// cleared(): the app's storage was cleared while this page was open;
 // io: the writes (tests give their own).
-export function createSaving({ store, settings, log, report = () => {}, io = { saveProject, saveProjectToHandles, keepJournal } }) {
+export function createSaving({ store, settings, log, report = () => {}, cleared = () => false, io = { saveProject, saveProjectToHandles, keepJournal } }) {
+  // The copy the open project is saved as (a stub store names none: its own id's).
+  const copyKey = () => store().copyKey?.() ?? `local:${store().getProject()?.id}`;
   // What the app above says (attach): busy() while an IME composition is under
   // way; scope() names the workspace a save belongs to (a save that finishes
   // after a switch confirms nothing); shared() when the project is a shared
@@ -41,7 +48,10 @@ export function createSaving({ store, settings, log, report = () => {}, io = { s
   let recoveryPending = null;
 
   function scheduleRecoverySave(project) {
-    recoveryPending = project;
+    const key = copyKey();
+    // The project switched copies: what was waiting is written to its own now.
+    if (recoveryPending && recoveryPending.key !== key) void flushRecoverySave();
+    recoveryPending = { project, key };
     const now = performance.now();
     if (!recoveryDeadline) recoveryDeadline = now + RECOVERY_SAVE_MAX_MS;
     if (recoveryTimer) clearTimeout(recoveryTimer);
@@ -53,11 +63,11 @@ export function createSaving({ store, settings, log, report = () => {}, io = { s
     if (recoveryTimer) clearTimeout(recoveryTimer);
     recoveryTimer = null;
     recoveryDeadline = 0;
-    const project = recoveryPending;
+    const pending = recoveryPending;
     recoveryPending = null;
-    if (!project) return;
+    if (!pending || cleared()) return;
     try {
-      await io.saveProject(project);
+      await io.saveProject(pending.project, pending.key);
       report(null);
     } catch (error) {
       log("browser recovery save failed:", error.message);
@@ -67,8 +77,11 @@ export function createSaving({ store, settings, log, report = () => {}, io = { s
 
   // The page may go: what changed is journaled at once, and the write begun.
   function keepNow(project = store().getProject()) {
-    try { io.keepJournal?.(project); } catch (error) { log("browser journal failed:", error.message); }
-    recoveryPending = project;
+    if (cleared()) return;
+    const key = copyKey();
+    try { io.keepJournal?.(project, key); } catch (error) { log("browser journal failed:", error.message); }
+    if (recoveryPending && recoveryPending.key !== key) void flushRecoverySave();
+    recoveryPending = { project, key };
     void flushRecoverySave();
   }
 
@@ -107,8 +120,9 @@ export function createSaving({ store, settings, log, report = () => {}, io = { s
   async function runAutoSave(reason) {
     if (!settings.autoSave) return;
     // Don't churn a render (markManySaved) mid-IME-composition; wait until it ends.
-    if (hooks.busy()) return;
+    if (hooks.busy() || cleared()) return;
     const project = snapshotProject(store().getProject());
+    const key = copyKey();
     const scope = hooks.scope();
     if (project.sourceMode === "filesystem") return; // explicit save only
     const dirty = dirtyFileIds(project);
@@ -117,7 +131,7 @@ export function createSaving({ store, settings, log, report = () => {}, io = { s
       if (project.sourceMode === "opfs") {
         await io.saveProjectToHandles(project);
       } else {
-        await io.saveProject(project); // propagate quota/storage errors before clearing dirty
+        await io.saveProject(project, key); // propagate quota/storage errors before clearing dirty
         report(null);
       }
       if (scope !== hooks.scope()) return;
@@ -142,11 +156,12 @@ export function createSaving({ store, settings, log, report = () => {}, io = { s
   // ---- Save (the command): the open file, to its folder or this browser.
   async function saveActiveFile() {
     const saved = snapshotProject(store().getProject());
+    const key = copyKey();
     const scope = hooks.scope();
     const activeId = saved.activeFileId;
-    if (!activeId) return;
+    if (!activeId || cleared()) return;
     const wroteToDisk = await io.saveProjectToHandles(saved);
-    if (!wroteToDisk) await io.saveProject(saved);
+    if (!wroteToDisk) await io.saveProject(saved, key);
     if (scope !== hooks.scope()) return;
     const current = store().getProject();
     if (!savedFileIds(current, saved).includes(activeId)) return;
@@ -157,11 +172,13 @@ export function createSaving({ store, settings, log, report = () => {}, io = { s
   // local project's folder, auto-save's marks). Says what it could not keep.
   async function keepAll() {
     const project = store().getProject();
+    if (cleared()) return "";
+    if (recoveryPending && recoveryPending.key !== copyKey()) await flushRecoverySave();
     if (recoveryTimer) clearTimeout(recoveryTimer);
     recoveryTimer = null;
     recoveryDeadline = 0;
     recoveryPending = null;
-    try { await io.saveProject(project); } catch (error) { report(error); return `this browser's copy could not be written (${error.message}).`; }
+    try { await io.saveProject(project, copyKey()); } catch (error) { report(error); return `this browser's copy could not be written (${error.message}).`; }
     if (project.sourceMode === "opfs" && project.handles?.[project.rootId]) {
       try { await io.saveProjectToHandles(project); } catch (error) { return `the project's folder could not be written (${error.message}).`; }
     }

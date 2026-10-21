@@ -13,11 +13,12 @@ export function createConnection({ session, status, mode, events, workspace, she
   const settings = shell.settings;
   // The shared-session section's border flashes on joining (or failing to).
   const flash = (type) => shell.flash(doc?.getElementById("connect-server-button")?.closest(".settings-section"), type);
-  // Before joining, the user agrees: the host's workspace will replace theirs.
+  // Before joining, the user agrees: the host's workspace opens in place of
+  // theirs (which this browser keeps, as its own copy, to switch back to).
   function confirmJoin() {
     const dialog = doc.getElementById("accept-connection-dialog");
     const message = doc.getElementById("accept-connection-message");
-    if (message) message.textContent = "If you join as a peer, the host\u2019s workspace will replace your current content. Export your work first if you want to keep it.";
+    if (message) message.textContent = "The host\u2019s workspace opens in place of yours. Yours stays in this browser: switch back to it at any time with the \u25d1 Private switch.";
     return new Promise((resolve) => {
       dialog.addEventListener("close", () => resolve(dialog.returnValue === "accept"), { once: true });
       dialog.showModal();
@@ -39,6 +40,12 @@ export function createConnection({ session, status, mode, events, workspace, she
 
   // Connect with the saved address, PIN and name. `auto` skips asking (the user
   // agreed to this session when they first joined it).
+  // The project on screen before joining: a client's is replaced by the host's
+  // as it connects, and this is what is kept aside (to come back on leaving).
+  // A join shows the host's workspace when it arrives, unless the user
+  // switched to their own meanwhile (joinShows false): that choice stands.
+  let joiningFrom = null;
+  let joinShows = false;
   async function connectSaved({ auto = false } = {}) {
     if (reconnect.connecting) return false;
     if (!settings.serverPin) {
@@ -46,6 +53,8 @@ export function createConnection({ session, status, mode, events, workspace, she
       throw new Error("PIN is required.");
     }
     reconnect.connecting = true;
+    joiningFrom = controller().getProject();
+    joinShows = true;
     try {
       await session.connect(settings.serverUrl, settings.serverPin, settings.displayName);
       settings.change({ wasConnected: true }, "joined a session");
@@ -56,6 +65,8 @@ export function createConnection({ session, status, mode, events, workspace, she
       return true;
     } finally {
       reconnect.connecting = false;
+      joiningFrom = null;
+      joinShows = false;
     }
   }
 
@@ -102,20 +113,35 @@ export function createConnection({ session, status, mode, events, workspace, she
   }
 
   // ── The shared workspace or this tab's own ──
+  // Back to this tab's own workspace: as this browser last saved it (another
+  // window may have changed it since; after a reload nothing is kept aside in
+  // memory, and the pointer names it), else as kept aside. With neither, the
+  // shared content stays on screen, as this browser's own from now on.
+  async function leaveShared() {
+    const copies = workspace.copies;
+    const kept = mode.get().privateProject;
+    const key = kept ? copies.localKey(kept) : await copies.ownKey();
+    const stored = await copies.load(key);
+    if (mode.get().workspaceMode !== "synced") return; // left meanwhile
+    // Said first: an automatic resume of the shared workspace no longer applies.
+    events.emit("switched", { mode: "private" });
+    const keptNow = mode.leave();
+    const back = stored ?? keptNow ?? controller().getProject();
+    controller().replaceProject(back, { copyKey: copies.localKey(back) });
+    // The local project is no longer a cloud workspace's content.
+    settings.change({ syncedProjectId: null }, "back to this tab's own workspace");
+    redraw();
+  }
+
   function switchMode(next) {
+    if (next === "private") joinShows = false;
     if (next === mode.get().workspaceMode) return;
     if (next === "synced") {
-      mode.share(controller().getProject());
+      mode.share(joiningFrom ?? controller().getProject());
       // Loading from the server replaces the project, which draws it.
       session.reloadFromServer("Switched to synced workspace.").catch(ignored("loading the synced workspace failed"));
     } else {
-      // Said first: an automatic resume of the shared workspace no longer applies.
-      events.emit("switched", { mode: "private" });
-      const kept = mode.leave();
-      if (kept) controller().replaceProject(kept);
-      // The local project is no longer a cloud workspace's content.
-      settings.change({ syncedProjectId: null }, "back to this tab's own workspace");
-      redraw();
+      void leaveShared().catch((error) => { shell.notify(`Could not go back to your own workspace: ${error.message}`); });
     }
   }
 
@@ -141,12 +167,19 @@ export function createConnection({ session, status, mode, events, workspace, she
     }
     if (before !== "connected" && next.status === "connected" && !synced) {
       // A client agreed before connecting: just sync.
-      if (status.role === "client") { switchMode("synced"); return; }
+      if (status.role === "client") {
+        if (!reconnect.connecting || joinShows) switchMode("synced");
+        return;
+      }
       // The master already pushed its project as the workspace: share it, no reload.
       if (status.role === "master") { mode.share(controller().getProject()); redraw(); return; }
     }
     if (next.status === "offline") reconnectLater(); // dropped with a session intended
-    if (next.status === "offline" && synced) {
+    // Only a session that was there can drop (connecting starts by saying
+    // "offline": a page that opened a shared workspace's copy stays on it
+    // while it rejoins).
+    const dropped = ["connected", "reconnecting", "sync-error"].includes(before);
+    if (next.status === "offline" && synced && dropped) {
       // A cloud workspace stays on screen and stays synced: its edits are kept
       // here and sent when the stream is back (going private here is what once
       // lost work for good). Only a PIN or guest session goes back to the
@@ -225,5 +258,6 @@ export function createConnection({ session, status, mode, events, workspace, she
     settings.change({ wasConnected: false }, "auto-reconnect turned off");
   });
 
-  return { connectSaved, reconnectLater, switchMode, publish, publishSnapshot };
+  // joining(): a PIN session is being joined to be shown (its workspace arrives before the tab switches to it).
+  return { connectSaved, reconnectLater, switchMode, publish, publishSnapshot, joining: () => reconnect.connecting && joinShows };
 }

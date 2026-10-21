@@ -22,12 +22,36 @@ export function clearAppStorage(store = globalThis.localStorage) {
   return keys.length;
 }
 
+// The app's other windows in this browser are told its storage was cleared
+// (once what replaces it is written): they reload too, keeping nothing, since
+// what they hold was just deleted. One channel per page, so a page never
+// hears its own announcement.
+const CHANNEL = "mdnotes-app";
+let channel = null;
+function appChannel() {
+  // Only in a page (in Node an open channel keeps the process running).
+  if (!channel && globalThis.window && globalThis.BroadcastChannel) channel = new BroadcastChannel(CHANNEL);
+  return channel;
+}
+export function announceCleared() {
+  try { appChannel()?.postMessage({ type: "cleared" }); } catch (error) { ignore(error, "other windows reload when they are next used"); }
+}
+export function followClears({ reload, log }) {
+  const listening = appChannel();
+  if (!listening) return;
+  listening.addEventListener("message", (event) => {
+    if (event.data?.type !== "cleared") return;
+    log("The app's storage was cleared in another window: reloading");
+    reload();
+  });
+}
+
 // When this app's storage was last cleared (0: never).
 export function clearedAt(store = globalThis.localStorage) {
   try { return Number(store?.getItem(CLEARED_KEY)) || 0; } catch (error) { ignore(error, "storage is blocked: never cleared, as far as can be told"); return 0; }
 }
 
-export function addMaintenanceCommands({ commands, confirm, notify, closeMenus, events, log }) {
+export function addMaintenanceCommands({ commands, confirm, notify, closeMenus, events, log, reloadNow = () => globalThis.location.reload() }) {
   commands.add({ id: "workspace.reset", title: "Reset to Default Workspace", menu: { id: "settings", group: 2, order: 1 }, async run() {
     const confirmed = await confirm({ title: "Reset to Default Workspace",
       message: "This deletes your current workspace, chat history, and settings, then reloads the default welcome workspace. This cannot be undone.",
@@ -35,7 +59,8 @@ export function addMaintenanceCommands({ commands, confirm, notify, closeMenus, 
     if (!confirmed) return;
     closeMenus();
     log(`Workspace reset to default: keysRemoved=${clearAppStorage()}`);
-    globalThis.location.reload();
+    announceCleared();
+    reloadNow();
   } });
   commands.add({ id: "shell.clear-cache", title: "Clear All Cache", menu: { id: "settings", group: 2, order: 3 }, danger: true, async run() {
     const confirmed = await confirm({ title: "Clear Cached App Data",

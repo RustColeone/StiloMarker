@@ -5,7 +5,7 @@
 // with a file that has unsaved changes (not while Reload Window, which kept
 // them, reloads).
 import { getOpfsDirectoryHandle, supportsOpfs } from "./device-folders.js";
-import { saveProject } from "./browser-copy.js";
+import { clearCopies, saveProject } from "./browser-copy.js";
 import { ROOT_ID, createProject } from "../model/project.js";
 
 export async function reattachDeviceFolder({ store, settings, log }) {
@@ -42,8 +42,8 @@ export function watchPage({ store, keep, cleared = () => false, reloading = () =
 }
 
 // Empty Everything (Settings menu): everything the app keeps in this browser
-// cleared, and an empty project saved so the next start does not fall back to
-// the welcome workspace.
+// cleared (every workspace's copy too), and an empty project saved so the
+// next start does not fall back to the welcome workspace.
 export function addWorkspaceCommands({ shell, log, doc = globalThis.document }) {
   shell.commands.add({ id: "workspace.empty-everything", title: "Empty Everything", menu: { id: "settings", group: 2, order: 2 }, danger: true, async run() {
     const confirmed = await shell.confirm({ title: "Empty Everything",
@@ -53,11 +53,13 @@ export function addWorkspaceCommands({ shell, log, doc = globalThis.document }) 
     shell.closeMenus();
     shell.clearAppStorage();
     try {
+      await clearCopies();
       await saveProject(createProject("Workspace"));
     } catch (error) {
       log(`Emptying could not write the empty workspace: ${error.message}`); // the next start finds none and opens the welcome
     }
     log("Workspace emptied");
+    shell.announceCleared?.();
     globalThis.location.reload();
   } });
 }

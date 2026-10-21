@@ -36,6 +36,7 @@
 //                            A full redraw waits while a module is busy (adapters/render.js)
 //   holdRendering(busyNow)   a module busy in a way a redraw would disturb (the Editor typing)
 //   clearAppStorage()        remove every key the app keeps in this browser
+//   announceCleared()        tell the app's other windows (they reload, keeping nothing)
 //   clearedAt()              when that was last done (0: never): data kept elsewhere
 //                            (IndexedDB) and saved before it is to be dropped
 //   registerOffline()        keep the app's files for offline use (the service worker)
@@ -81,7 +82,7 @@ import { applyTheme } from "./adapters/theme.js";
 import { createThemePicker } from "./adapters/theme-picker.js";
 import { usableThemes } from "./model/themes.js";
 import contributedThemes from "./model/contributed-themes.js";
-import { addMaintenanceCommands, clearAppStorage, clearedAt } from "./adapters/maintenance.js";
+import { addMaintenanceCommands, announceCleared, clearAppStorage, clearedAt, followClears } from "./adapters/maintenance.js";
 import { createRender } from "./adapters/render.js";
 import { createFrame } from "./adapters/frame/index.js";
 import { registerOfflineShell, upgradeApp } from "./adapters/offline.js";
@@ -198,7 +199,7 @@ export default defineModule({
 
     const redraw = createRender(events);
     addMaintenanceCommands({ commands, confirm, notify: (message) => notice(message), closeMenus: () => menuBar.close(), events,
-      log: (message) => ctx.log(message) });
+      log: (message) => ctx.log(message), reloadNow: () => reload.reloadNow() });
 
     // The frame: the areas around the editor and what shows in them (desktop and phone).
     frame = createFrame({ settings, events, registry: ctx.registry(), pages, commands, run, closeMenus: () => menuBar.close(),
@@ -222,6 +223,8 @@ export default defineModule({
     const commandLine = createCommandLine({ commands, run, log: logPanel.log, showAll: logPanel.showAll });
     const reloadSteps = ctx.registry({ validate: checkReloadStep });
     const reload = createReload({ steps: reloadSteps, confirm, log: logPanel.log });
+    // Another window cleared the app's storage (Reset, Empty Everything): this one follows.
+    followClears({ reload: () => reload.reloadNow(), log: (message) => ctx.log(message) });
     function showLog() {
       const area = pages.areaOf("log") ?? "bottom";
       if (!frame.shown(area)) frame.toggle(area);
@@ -280,6 +283,7 @@ export default defineModule({
       render: redraw.render,
       holdRendering: redraw.holdWhile,
       clearAppStorage,
+      announceCleared,
       clearedAt: () => clearedAt(),
       registerOffline: () => registerOfflineShell(),
       events: { on: events.on }

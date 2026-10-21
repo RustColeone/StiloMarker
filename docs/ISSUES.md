@@ -13,7 +13,8 @@ Last updated: 2026-10-21 · release `v0.2.19` (deployed with v0.2.17–v0.2.18; 
 
 From the stability review of 2026-10-21 (the app as a PWA, in Electron, with
 the user's own key and no server; each found by an experiment). Being fixed in
-this order (O7 with O1); the storage limit (O0) was fixed in v0.2.19.
+this order; the storage limit (O0) was fixed in v0.2.19, a copy per workspace
+(O7) in v0.2.20.
 
 ### O1. Two windows on one in-browser workspace overwrite each other
 
@@ -21,16 +22,6 @@ Confirmed (two windows, an edit in each): the later save wins, the other
 window's edit is lost, and neither window sees the other's. Decided: both
 windows live, as two devices on a cloud workspace (one window brokers the
 edits for the others, through the browser).
-
-### O7. Joining a shared session, then reloading, loses the in-browser workspace
-
-Confirmed (an in-browser workspace, a PIN session joined, a reload, the
-session left): the browser keeps one copy, which after joining is the shared
-workspace's; the one kept aside to come back on leaving lives only in memory,
-so after a reload leaving shows an empty workspace and the in-browser one is
-gone. Joining warns that the host's workspace replaces the current one, but
-also keeps it aside as if it were safe. To be fixed with O1: a copy per
-workspace (an in-browser workspace is never overwritten by another's).
 
 ### O2. Typing slows with the size of the file
 
@@ -90,6 +81,64 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.20: a copy per workspace; the own workspace is never lost to a shared one
+
+From the stability review (2026-10-21), O7, found by an experiment. Browser only.
+
+- **Joining a shared session, then reloading, lost the in-browser workspace**
+  (fixed; O7): this browser kept one copy, which after joining was the
+  shared workspace's, and the one kept aside to come back to lived only in
+  memory, so after a reload switching back showed the wrong workspace and
+  the in-browser one was gone. Now each workspace has its own copy in this
+  browser (the in-browser one, and each shared or cloud workspace's), so
+  none is written over another's; switching back (◑ Private), leaving a
+  cloud workspace or signing out brings the own workspace back as it was
+  last saved, after a reload too.
+- **Switched to Private, the host's changes replaced the guest's own
+  workspace on screen**: a guest who switched to their own workspace (◑
+  Private) stays in the session, and the host's next change was applied to
+  the workspace on screen, or (not fitting it) replaced it with the
+  host's. The shared workspace's changes now stay off the screen until the
+  guest switches back, which loads it afresh.
+- **A switch to Private during a rejoin stands**: a page reopened on a
+  shared workspace rejoins it in the background; switching to the own
+  workspace meanwhile was undone when the session arrived.
+- **A guest kept the wrong workspace aside**: a guest's own project was
+  replaced by the host's as it connected, and the host's was then kept aside
+  as if it were theirs. The project from before the connect is kept now.
+- **A page that opens on a shared workspace stays on it while it rejoins**:
+  connecting starts by saying "offline", which was taken for a dropped
+  session and switched to the own workspace mid-rejoin; only a session that
+  was there can drop now. Such a page is shared (not yet connected) from the
+  start, so its files are never taken for the own workspace's, and nothing
+  is marked saved until the server confirms it.
+- **A copy that names something it lacks still opens** (the file it shows,
+  a child): it opened to a blank page with "Node not found" before.
+- **The file shown is kept as the page goes**: the journal kept only
+  changed files, so switching files just before closing could reopen on the
+  previous one; and a page that changed nothing since it opened journals
+  nothing (it wrote the whole workspace, which fails past ~5 MB).
+- **A cloud workspace's id on an own copy is dropped**: a page that opens
+  this browser's own workspace is no cloud workspace's copy, so reopening
+  the cloud workspace pulls it instead of pushing these files into it.
+- **Reset and Empty Everything in one window**: other open windows of the
+  app reload too, writing nothing back (before, a window left open could
+  save its workspace over the emptied one).
+- The "Connect to Server?" dialog is now "Join the Shared Session?" and says
+  what happens: the host's workspace opens in place of yours, which stays in
+  this browser.
+- Moved over once: v0.2.19's copy and its journal (as this browser's own
+  workspace, or as a shared one's when a session was open then).
+- The welcome page still offers Resume while a page on a cloud workspace
+  waits offline to reconnect.
+- Tests: `own-workspace-browser.py` (new, with a real backend: a guest's
+  own copy untouched beside the shared one, typing reaching the server and
+  only the shared copy, the host's later change kept off the own workspace
+  while Private, switching back without and after reloads);
+  `browser-copy-browser.py` (v0.2.19's copy moved over and repaired, the
+  file shown journaled, nothing journaled when nothing changed, a new
+  project a copy of its own, another window following Reset).
 
 ### v0.2.19: this browser's copy in IndexedDB; a failing save said
 

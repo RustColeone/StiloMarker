@@ -517,6 +517,10 @@ The preview can be shown or hidden with `View > Toggle Preview` or the `×` butt
   small size limit; changes are saved as you type when Auto-save is on. If the
   browser can't save it (its storage is full), a red "Not saved in this
   browser" item shows in the status bar: export the project to keep the work.
+  Joining a shared session or opening a cloud workspace never writes over it:
+  each workspace has its own copy in this browser, and switching back (◑
+  Private, leaving, or signing out) brings yours back as you left it, after a
+  reload too.
 - `opfs` / `directory`: writes files back to disk.
 
 ### Export
