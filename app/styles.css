@@ -825,110 +825,49 @@ p {
   flex: 0 0 auto;
 }
 
-.tree-icon.is-folder,
-.tree-icon.is-folder-open {
-  width: 15px;
-  height: 11px;
-  margin-top: 1px;
-  border: 1px solid #c38f00;
-  background: #dcb14a;
+/* A file's icon (explorer rows and tabs): its type's shape (an SVG mask,
+   --file-icon) in its type's colour (--file-icon-color). A type an extension
+   adds sets both in its own stylesheet. */
+.file-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  background-color: var(--file-icon-color, var(--text-dim));
+  -webkit-mask: var(--file-icon) center / contain no-repeat;
+  mask: var(--file-icon) center / contain no-repeat;
 }
 
-.tree-icon.is-folder::before,
-.tree-icon.is-folder-open::before {
-  content: "";
-  position: absolute;
-  top: -3px;
-  left: 1px;
-  width: 7px;
-  height: 3px;
-  background: #dcb14a;
-  border: 1px solid #c38f00;
-  border-bottom: 0;
+.file-icon.is-file {
+  --file-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/%3E%3Cpath d='M14 2v6h6'/%3E%3C/svg%3E");
+  --file-icon-color: var(--text-dim);
 }
-
-.tree-icon.is-folder-open {
-  background: #e7c46a;
+.file-icon.is-md {
+  --file-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='5' width='20' height='14' rx='2'/%3E%3Cpath d='M6 15V9l3 3 3-3v6'/%3E%3Cpath d='M17 9v6m-2.5-2.5L17 15l2.5-2.5'/%3E%3C/svg%3E");
+  --file-icon-color: #4f8fdc;
 }
-
-.tree-icon.is-md,
-.tree-icon.is-persona,
-.tree-icon.is-mtree,
-.tree-icon.is-remote-image,
-.tree-icon.is-file {
-  border: 1px solid var(--border-strong);
-  background: var(--surface-0);
+.file-icon.is-mtree {
+  --file-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='2' width='6' height='6' rx='1'/%3E%3Crect x='2' y='16' width='6' height='6' rx='1'/%3E%3Crect x='16' y='16' width='6' height='6' rx='1'/%3E%3Cpath d='M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3M12 12V8'/%3E%3C/svg%3E");
+  --file-icon-color: #a774d6;
 }
-
-.tree-icon.is-md {
-  border-color: #3a7bd5;
-  background: rgba(58, 123, 213, 0.14);
+.file-icon.is-persona {
+  --file-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='8' r='5'/%3E%3Cpath d='M20 21a8 8 0 0 0-16 0'/%3E%3C/svg%3E");
+  --file-icon-color: #d08a3a;
 }
-
-.tree-icon.is-mtree {
-  border-color: #c586c0;
-  background: rgba(197, 134, 192, 0.16);
+.file-icon.is-image {
+  --file-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21'/%3E%3C/svg%3E");
+  --file-icon-color: #2aa198;
 }
-
-.tree-icon.is-remote-image {
-  border-color: var(--accent);
-  background: rgba(14, 99, 156, 0.14);
+.file-icon.is-remote-image {
+  --file-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21'/%3E%3C/svg%3E");
+  --file-icon-color: #2aa198;
 }
-
-.tree-icon.is-md::before,
-.tree-icon.is-persona::before,
-.tree-icon.is-mtree::before,
-.tree-icon.is-remote-image::before,
-.tree-icon.is-file::before {
-  content: "";
-  position: absolute;
-  top: -1px;
-  right: -1px;
-  width: 5px;
-  height: 5px;
-  background: var(--sidebar);
-  clip-path: polygon(0 0, 100% 0, 100% 100%);
-  border-left: 1px solid var(--border-strong);
-  border-bottom: 1px solid var(--border-strong);
+.file-icon.is-folder {
+  --file-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black'%3E%3Cpath d='M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'/%3E%3C/svg%3E");
+  --file-icon-color: #d9a520;
 }
-
-.tree-icon.is-md::after,
-.tree-icon.is-persona::after,
-.tree-icon.is-mtree::after,
-.tree-icon.is-remote-image::after {
-  position: absolute;
-  inset: 2px 1px 1px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 7px;
-  font-weight: 700;
-}
-
-.tree-icon.is-md::after {
-  content: "MD";
-  color: var(--accent);
-}
-
-.tree-icon.is-mtree::after {
-  content: "MT";
-  color: #8a5cff;
-}
-
-.tree-icon.is-remote-image::after {
-  content: "IMG";
-  color: var(--accent-strong);
-  font-size: 6px;
-}
-
-.tree-icon.is-persona {
-  border-color: #d08a3a;
-  background: rgba(208, 138, 58, 0.15);
-}
-
-.tree-icon.is-persona::after {
-  content: "PC";
-  color: #c07a2a;
+.file-icon.is-folder-open {
+  --file-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2'/%3E%3C/svg%3E");
+  --file-icon-color: #d9a520;
 }
 
 .tree-row.is-project-root {
@@ -1254,23 +1193,9 @@ p {
   border-right: 0;
 }
 
-.tab-file-icon {
-  width: 12px;
+.tab-file-icon.file-icon {
+  width: 14px;
   height: 14px;
-  position: relative;
-  border: 1px solid var(--accent);
-  background: var(--accent-soft);
-}
-
-.tab-file-icon::after {
-  content: "";
-  position: absolute;
-  top: -1px;
-  right: -1px;
-  width: 5px;
-  height: 5px;
-  background: var(--editor);
-  clip-path: polygon(0 0, 100% 0, 100% 100%);
 }
 
 .tab-title {
@@ -2852,6 +2777,12 @@ p {
 
 .status-item-grow {
   justify-content: flex-end;
+  margin-left: auto;
+}
+
+/* With it hidden (no collaborators), the next item shown keeps the right side. */
+.status-item-grow[hidden] + .status-item:not([hidden]),
+.status-item-grow[hidden] + .status-item[hidden] + .status-item:not([hidden]) {
   margin-left: auto;
 }
 

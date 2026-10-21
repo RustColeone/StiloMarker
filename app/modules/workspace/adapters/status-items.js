@@ -1,6 +1,7 @@
 // Workspace's items in the status bar: where the open project lives (a folder
-// on disk, a workspace on this device, or this browser), and whether this
-// browser can edit a folder on disk in place. draw(project) after each change.
+// on disk, a workspace on this device, or this browser), and, only when it
+// can't, that this browser can't edit a folder on disk in place (that it can
+// is no news). draw(project) after each change.
 import { supportsDirectoryAccess } from "./disk-folders.js";
 
 export function addStatusItems({ shell, log }) {
@@ -19,7 +20,7 @@ export function addStatusItems({ shell, log }) {
     source.set({ text: live ? "Live directory" : project.sourceMode === "opfs" ? "Local workspace" : "In-browser workspace",
       tone: live ? "success" : "warning" });
     const supported = supportsDirectoryAccess();
-    browser.set({ text: supported ? "Chromium directory access available" : "Fallback import/export mode", tone: supported ? "success" : "warning" });
+    browser.set({ hidden: supported, text: supported ? "Folder access available" : "No folder access (import/export instead)", tone: supported ? "success" : "warning" });
   }
   return draw;
 }

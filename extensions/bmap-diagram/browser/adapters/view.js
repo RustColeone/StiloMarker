@@ -2174,6 +2174,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     }
   }
 
+  const travel = (g, event) => Math.abs(g.startClient.x - event.clientX) + Math.abs(g.startClient.y - event.clientY); // px since the gesture began
   function handlePointerUp(event) {
     if (!gesture) {
       return;
@@ -2182,8 +2183,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     stopGesture(false);
 
     if (finishedGesture.kind === "pan") {
-      const movedDistance = Math.abs(finishedGesture.startClient.x - event.clientX)
-        + Math.abs(finishedGesture.startClient.y - event.clientY);
+      const movedDistance = travel(finishedGesture, event);
       if (finishedGesture.fromButton === 0 && movedDistance < 4) {
         // A stationary primary-button tap/click on empty canvas clears the
         // current selection — tap-to-deselect (touch and left-click).
@@ -2199,8 +2199,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     }
 
     if (finishedGesture.kind === "move-node") {
-      const movedDistance = Math.abs(finishedGesture.startClient.x - event.clientX)
-        + Math.abs(finishedGesture.startClient.y - event.clientY);
+      const movedDistance = travel(finishedGesture, event);
       if (movedDistance > 3) {
         // Swallow the click that the browser fires after this drag so it does
         // not collapse a multi-selection back down to the single dragged node.
@@ -2208,7 +2207,8 @@ function createBmapView({ container, ...defaultOptions } = {}) {
         window.setTimeout(() => { clickSuppressed = false; }, 0);
       }
       renderScene();
-      commitAst("bmap:move-node");
+      const from = finishedGesture.startPositions; // a click that moved nothing saves nothing (a save rewrites every node's size)
+      if (ast.nodes.some((node) => from.has(node.id) && (from.get(node.id).x !== node.pos.x || from.get(node.id).y !== node.pos.y))) commitAst("bmap:move-node");
       return;
     }
 
@@ -2218,8 +2218,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       const maxX = Math.max(finishedGesture.startWorld.x, endWorld.x);
       const minY = Math.min(finishedGesture.startWorld.y, endWorld.y);
       const maxY = Math.max(finishedGesture.startWorld.y, endWorld.y);
-      const movedDistance = Math.abs(finishedGesture.startClient.x - event.clientX)
-        + Math.abs(finishedGesture.startClient.y - event.clientY);
+      const movedDistance = travel(finishedGesture, event);
 
       // A negligible drag is just a click on empty space: clear the selection
       // (unless the user was Ctrl-adding, in which case leave it untouched).
@@ -2277,7 +2276,8 @@ function createBmapView({ container, ...defaultOptions } = {}) {
 
     if (finishedGesture.kind === "resize-node") {
       renderScene();
-      commitAst("bmap:resize-node");
+      const node = getNodeById(finishedGesture.nodeId), now = node && getNodeRect(node), was = finishedGesture.startRect;
+      if (now && ["x", "y", "width", "height"].some((key) => now[key] !== was[key])) commitAst("bmap:resize-node");
       return;
     }
 

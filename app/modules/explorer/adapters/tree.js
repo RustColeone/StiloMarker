@@ -498,7 +498,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       row.append(toggle);
 
       const icon = document.createElement("span");
-      icon.className = `tree-icon ${getFileIconClass(node)}`;
+      icon.className = `tree-icon file-icon ${getFileIconClass(node)}`;
       icon.setAttribute("aria-hidden", "true");
       row.append(icon);
 
@@ -545,7 +545,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
           childRow.append(childToggle);
 
           const childIcon = document.createElement("span");
-          childIcon.className = "tree-icon is-remote-image";
+          childIcon.className = "tree-icon file-icon is-remote-image";
           childIcon.setAttribute("aria-hidden", "true");
           childRow.append(childIcon);
 

@@ -34,7 +34,8 @@ export function addSessionView({ shell, status, mode, doc = globalThis.document 
   function draw() {
     const s = status;
     const count = s.presence.length;
-    item.set({ text: count === 1 ? "1 collaborator online" : `${count} collaborators online` });
+    // Nobody else here is no news: the item shows once someone is.
+    item.set({ hidden: count === 0, text: count === 1 ? "1 collaborator online" : `${count} collaborators online` });
     item.extra?.replaceChildren(...s.presence.slice(0, 6).map((entry) => {
       const dot = doc.createElement("span");
       dot.className = "peer-badge-dot";

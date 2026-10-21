@@ -1,40 +1,9 @@
 /* Diagrams' look: their icon in the explorer, their source highlighting and
    the diagram editor. Loaded by the extension's module when it starts
    (moved here from app/styles.css, in the same order). */
-.tree-icon.is-bmap {
-  border: 1px solid var(--border-strong);
-  background: var(--surface-0);
-}
-.tree-icon.is-bmap::before {
-  content: "";
-  position: absolute;
-  top: -1px;
-  right: -1px;
-  width: 5px;
-  height: 5px;
-  background: var(--sidebar);
-  clip-path: polygon(0 0, 100% 0, 100% 100%);
-  border-left: 1px solid var(--border-strong);
-  border-bottom: 1px solid var(--border-strong);
-}
-.tree-icon.is-bmap::after {
-  position: absolute;
-  inset: 2px 1px 1px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 7px;
-  font-weight: 700;
-}
-
-.tree-icon.is-bmap {
-  border-color: #3dba72;
-  background: rgba(61, 186, 114, 0.14);
-}
-
-.tree-icon.is-bmap::after {
-  content: "BM";
-  color: #3dba72;
+.file-icon.is-bmap {
+  --file-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='8' height='8' rx='2'/%3E%3Cpath d='M7 11v4a2 2 0 0 0 2 2h4'/%3E%3Crect x='13' y='13' width='8' height='8' rx='2'/%3E%3C/svg%3E");
+  --file-icon-color: #3dba72;
 }
 
 /* ── .bmap syntax tokens ──────────────────────────────────────────────────── */

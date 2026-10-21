@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-21 · release `v0.2.16` (deployed with v0.2.14–v0.2.15; public checks passed)
+Last updated: 2026-10-21 · release `v0.2.17` (not deployed; v0.2.16 is live)
 
 ---
 
@@ -40,6 +40,31 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.17: file icons, a quieter status bar, a diagram click that changed the file
+
+Asked for 2026-10-21 (file icons; the status bar quieter, its information
+still there when it isn't 0). Browser only.
+
+- **File icons**: each file type has its own icon in the explorer and on its
+  tabs (Markdown's M↓, a tree for module maps, a person for characters, a
+  picture for images and album entries, a diagram, Mermaid's branches, an
+  HTML page's </>, an album's pictures, folders open and closed), in its
+  own colour, instead of two or three letters in a box. An extension draws
+  its own type's icon in its own stylesheet; images have their own icon
+  class (`is-image`).
+- **A quieter status bar**: "0 collaborators online", a file's "v0.0.0" (no
+  snapshot, sitting or edit yet) and "Chromium directory access available"
+  are no news and no longer show; the collaborators and the version show
+  once there are some, and a browser that can't edit folders in place says
+  so. The rest stays where it was.
+- **A click on a diagram node changed the file** (fixed): in edit mode,
+  pressing and releasing on a node without moving it saved the whole
+  diagram, which writes every node's size in its own form (`width: 240px`
+  became `width: 240` and `height: 90` was added) and marked the file
+  changed. A move or a resize now saves only when something moved.
+- Tests: `shell-browser.py` (the quiet items; a click on a node saves
+  nothing, a drag moves it).
 
 ### v0.2.16: menus and tabs
 

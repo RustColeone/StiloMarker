@@ -6,6 +6,7 @@
 // What the groups show is the Editor's view (app.view, service/view.js).
 import { normalizeServerUrl } from "../../shell/index.js";
 import { getPath } from "../../workspace/index.js";
+import { builtinTypes } from "../../file-types/index.js";
 import { filesIn, groupsFromSaved, sameTab, savedGroups } from "../service/view.js";
 
 export function createTabs(app) {
@@ -530,7 +531,7 @@ export function createTabs(app) {
       tab.draggable = true;
 
       const icon = document.createElement("span");
-      icon.className = "tab-file-icon";
+      icon.className = `tab-file-icon file-icon ${builtinTypes.typeOf(file.name)?.icon ?? "is-file"}`;
       icon.setAttribute("aria-hidden", "true");
 
       const title = document.createElement("span");

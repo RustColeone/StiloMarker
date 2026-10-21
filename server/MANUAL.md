@@ -44,7 +44,9 @@ Stilo Marker is a browser-based Markdown workspace. It lets you write notes, bui
 - **Source pane** — text editor for the active file; also shows image previews.
 - **Preview pane** — rendered output (HTML for Markdown, SVG tree for MTREE, album grid for URLDB, interactive canvas for BMAP).
 - **Chat panel** — AI assistant sidebar wired to the backend chat proxy.
-- **Status bar** — shows active file, source/preview mode, and sync status.
+- **Status bar** — where the project lives, the server's state, collaborators
+  online and the open file's version (each once there is something to show),
+  and the file's length.
 
 Panels can be toggled from the `View` menu.
 

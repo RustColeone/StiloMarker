@@ -88,7 +88,7 @@ export default Object.freeze([
       ".jpeg",
       ".webp"
     ],
-    "icon": "is-file",
+    "icon": "is-image",
     "filters": [
       "images"
     ]

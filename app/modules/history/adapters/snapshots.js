@@ -82,7 +82,8 @@ export function createSnapshots(app) {
     }
     const path = getPath(project, file.id);
     const text = fileVersionLabel(file, path);
-    if (!text) {
+    // No snapshot, sitting or edit yet ("0.0.0") is no news: nothing to show.
+    if (!text || text === "0.0.0") {
       item.set({ hidden: true });
       return;
     }
