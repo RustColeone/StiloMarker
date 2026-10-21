@@ -1044,3 +1044,34 @@ among them), 31 browser suites.
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261021T021959Z-v0.2.16`.
 172/172 data files (taken with the service stopped), every JSON file valid.
+
+## Verified release: v0.2.19
+
+Deployed on 2026-10-21 at 08:39 UTC, with every release since v0.2.16
+(v0.2.17–v0.2.19): file icons, a quieter status bar and a diagram click that
+no longer rewrites the file (v0.2.17), the diagram's floating inspector
+(v0.2.18), and this browser's copy of the workspace in IndexedDB with a
+failing save said (v0.2.19). Browser only: the server's code is unchanged.
+App version `0.2.19`; sync compatibility unchanged at `117`. The service's
+command line and environment file are unchanged; it was down 1 second.
+
+v0.2.19 moves each browser's copy from localStorage to IndexedDB on its first
+load of the new version. A tab left open from before the update keeps saving
+the old way until it is reloaded.
+
+Public checks: ping (`0.2.19`, accounts on, hosting on), the service
+worker's cache label `mdnotes-shell-v0.2.19`, the new files served
+(`workspace/adapters/browser-copy.js`, the Diagram's `model/fit.js`, the
+file types with the image icon), the server's own files refused
+(`server/mdnotes_server.py`, `server/whitelist.json`,
+`server/stilomarker.env` answer as the app's page), an unknown session token
+answered 403, and a clean journal (no errors). A fresh browser on the public
+site with an old-style copy seeded in localStorage (a throwaway project, no
+real data) opened it at `v0.2.19`, moved it to IndexedDB (the old key gone),
+kept it across a reload, and showed the file icons; no page errors.
+
+Validation: 277 Node tests, all 22 Python suites (the backend self-test
+among them), 32 browser suites.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261021T083909Z-v0.2.19`.
+173/173 data files (taken with the service stopped), every JSON file valid.
