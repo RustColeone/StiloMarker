@@ -8,6 +8,7 @@ const ROOT_ID = "root";
 // The operations that change a project, by name (the server spells them in its Workspace too).
 const UPDATE_FILE = "update-file";
 const PATCH_FILE = "patch-file";
+const REPLACE_PROJECT = "replace-project";
 
 // File types belong to the File types module (protocol/file-types.json);
 // these helpers only ask it.
@@ -397,7 +398,7 @@ function applySyncOperation(project, operation) {
     throw new Error("Sync operation is required.");
   }
 
-  if (operation.type === "replace-project") {
+  if (operation.type === REPLACE_PROJECT) {
     if (!operation.project) {
       throw new Error("Replace-project operation requires project data.");
     }
@@ -479,6 +480,7 @@ function applySyncOperation(project, operation) {
 export {
   UPDATE_FILE,
   PATCH_FILE,
+  REPLACE_PROJECT,
   cloneModelData,
   describeFileTypes,
   fileBaseName,

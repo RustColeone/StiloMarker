@@ -35,6 +35,9 @@
 // It tells Workspace where the open project lives (workspace.location).
 // cloudWorkspace() -> { serverUrl, token, team, path } | null: the cloud
 // workspace on screen (signed in, and the open project is it).
+// windows.state() -> { linked, leading, others, waiting }: this browser's other
+// windows on the same own workspace, linked live (adapters/tabs.js): one keeps
+// the copy and puts their edits in order; publish() reaches them too.
 //   transformTextPatch   sanitizeProjectForSync
 import { createLiveView, defineModule, ignore, ignored } from "../../kernel/index.js";
 import * as api from "./adapters/api.js";
@@ -45,8 +48,12 @@ import { LOCAL_MODE, createMode } from "./service/mode.js";
 import { SESSION_STATUS, statusFromSession } from "./service/status.js";
 import { addSessionView } from "./adapters/session-view.js";
 import { createConnection } from "./adapters/connection.js";
+import { createTabLink } from "./adapters/tabs.js";
+import { addWindowsItem } from "./adapters/windows-item.js";
+import { withWindowView } from "./model/window-view.js";
+import { isFatalSyncError } from "./model/errors.js";
 import { normalizeServerUrl } from "../shell/index.js";
-import { getPath } from "../workspace/index.js";
+import { UPDATE_FILE, getPath } from "../workspace/index.js";
 
 // How long Reload Window waits for this tab's typing to be confirmed.
 const TYPING_WAIT = 5000;
@@ -65,8 +72,9 @@ export default defineModule({
   uses: ["shell", "file-types", "workspace", "identity"],
   owns: {
     names: ["sync protocol number"],
-    elements: ["the Session panel", "the collaborators in the status bar"],
-    state: ["the live session", "the session's status", "unconfirmed typing", "shared or local work, and the local project kept aside"],
+    elements: ["the Session panel", "the collaborators in the status bar", "the linked windows in the status bar"],
+    state: ["the live session", "the session's status", "unconfirmed typing", "shared or local work, and the local project kept aside",
+      "the link between this browser's windows on one workspace"],
     rules: ["rebasing a text patch"]
   },
   start(ctx) {
@@ -131,13 +139,69 @@ export default defineModule({
     connection = createConnection({ session, status, mode, events, workspace, shell: ctx.use("shell"),
       log: (...parts) => ctx.log(parts.join(" ")) });
 
+    // This browser's other windows on the same own workspace, linked live
+    // (adapters/tabs.js): one keeps this browser's copy and puts their edits
+    // in order; the others follow it, as devices follow the server. A window
+    // on a shared workspace is on no link (the server links them).
+    const windowsItem = globalThis.document ? addWindowsItem({ shell }) : { draw() {} };
+    const link = createTabLink({
+      createRuntime: (options) => createRuntime(options),
+      getProject: () => workspace.project().getProject(),
+      replace: (project) => workspace.replace(withWindowView(workspace.project().getProject(), project), { keepView: true }),
+      applyOperation: (clientId, operation) => workspace.applyRemote(clientId, operation),
+      async preserveLocalFiles(files) { for (const keep of keepers) await keep(files); },
+      onChange: (state) => windowsItem.draw(state),
+      // The window that keeps the workspace saved it: what this one confirmed is saved too.
+      onSaved: () => void workspace.saving.runAutoSave("the other window saved"),
+      // The window that kept the workspace went: this one writes its copy, all of it, now.
+      onTakeOver: () => workspace.copies.takeOver(),
+      log: (message) => ctx.log(message)
+    });
+    const linkKey = () => {
+      if (mode.get().workspaceMode !== "private") return null;
+      const key = workspace.project()?.copyKey?.() ?? null;
+      return workspace.copies.isLocal(key) ? key : null;
+    };
+    const followLink = () => link.follow(linkKey());
+    workspace.project()?.subscribe(followLink);
+    mode.on(followLink);
+    workspace.events.on("copy-saved", ({ project }) => link.saved(project));
+    globalThis.window?.addEventListener("pagehide", () => link.flush());
+    const windows = () => (link.runtime()?.isConnected() ? link.runtime() : null);
+
+    // A change made here: to the shared workspace (the server), or to this
+    // browser's other windows on this one.
+    async function publishToWindows(operation) {
+      const runtime = windows();
+      if (!runtime) return;
+      const op = operation.type === UPDATE_FILE && operation.baseRevision === undefined ? { ...operation, baseRevision: runtime.getRevision() } : operation;
+      try {
+        await runtime.publishOperation(op);
+      } catch (error) {
+        if (error?.status === 409) {
+          shell.notify("Another window changed that file first: its version is shown now (yours is kept in Snapshots).");
+          runtime.reloadFromServer("Another window changed it first.").catch(ignored("taking the other window's version failed"));
+          return;
+        }
+        if (!isFatalSyncError(error)) shell.notify(error.message);
+      }
+    }
+    const publish = (operation) => (mode.get().workspaceMode === "synced" ? connection.publish(operation) : publishToWindows(operation));
+    function publishSnapshot() {
+      if (mode.get().workspaceMode === "synced") { connection.publishSnapshot(); return; }
+      windows()?.scheduleSnapshot(workspace.project().getProject());
+    }
+
     // What the Editor does, heard through Workspace: typing is sent as a patch,
     // an image replaced whole is published, my caret is shown to the others
     // (not while my text for that file is still on its way: they would see it
     // before the text). Others' carets go the other way.
     const sharing = () => session.isConnected() && mode.get().workspaceMode === "synced";
-    workspace.events.on("text-changed", ({ path, previous, next }) => { if (sharing()) session.scheduleTextPatch(path, previous, next); });
-    workspace.events.on("file-replaced", ({ operation }) => void connection.publish(operation));
+    workspace.events.on("text-changed", ({ path, previous, next }) => {
+      if (sharing()) session.scheduleTextPatch(path, previous, next);
+      else if (mode.get().workspaceMode === "private") windows()?.scheduleTextPatch(path, previous, next);
+    });
+    workspace.events.on("file-replaced", ({ operation }) => void publish(operation));
     const showMyCaret = (caret) => {
       if (caret && session.isConnected() && !session.hasPendingPatch(caret.path)) session.scheduleAwareness(caret.path, caret.start, caret.end);
     };
@@ -182,8 +246,16 @@ export default defineModule({
       // A reader may open the shared workspace but not change it.
       readOnly: () => mode.get().workspaceMode === "synced" && status.role === "reader",
       // A shared workspace's durable home is the server: only text it confirmed is saved.
-      confirmed: (project, ids) => (mode.get().workspaceMode !== "synced" ? ids
-        : session.isConnected?.() ? ids.filter((id) => !session.hasUnsyncedText?.(getPath(project, id))) : []),
+      confirmed(project, ids) {
+        if (mode.get().workspaceMode === "synced") return session.isConnected?.() ? ids.filter((id) => !session.hasUnsyncedText?.(getPath(project, id))) : [];
+        // Another window keeps this workspace: saved once it has saved what this one sent.
+        if (!link.following()) return ids;
+        const runtime = link.runtime();
+        if (!runtime || !link.linked() || link.savedRevision() < runtime.getRevision()) return [];
+        return ids.filter((id) => !runtime.hasUnsyncedText(getPath(project, id)));
+      },
+      // Another window keeps this workspace's copy in this browser.
+      ownsCopy: () => !link.following(),
       assetsKey: () => connectionInfo()?.token ?? "",
       // A project opened in this tab while it works on a shared workspace is that workspace's content.
       copyKey: (project) => (mode.get().workspaceMode === "synced" && !hostingOwn() ? sharedCopyKey(project) : workspace.copies.localKey(project)),
@@ -208,25 +280,31 @@ export default defineModule({
     // A reload opens the server's copy, keeping unconfirmed typing in
     // Snapshots (History's keeper), so whatever is still on its way is said.
     shell.beforeReload.add({ id: "sync.typing", label: "Shared edits", order: 10, async keep() {
+      // The server's, or (this browser's own workspace) the window that keeps it.
+      const confirming = () => (mode.get().workspaceMode === "synced" ? session : link.following() ? link.runtime() : null);
       const unconfirmed = () => {
-        if (mode.get().workspaceMode !== "synced") return [];
+        const runtime = confirming();
+        if (!runtime) return [];
         const project = workspace.project().getProject();
         const files = Object.values(project.nodes).filter((node) => node.kind === "file");
         // Offline or reconnecting, nothing is confirmed: the files still marked as changed are what is waiting.
-        if (!session.isConnected() || session.isReconnecting()) return files.filter((node) => node.dirty);
-        return files.filter((node) => session.hasUnsyncedText(getPath(project, node.id)));
+        if (!runtime.isConnected() || runtime.isReconnecting()) return files.filter((node) => node.dirty);
+        return files.filter((node) => runtime.hasUnsyncedText(getPath(project, node.id)));
       };
       const until = Date.now() + TYPING_WAIT;
-      while (unconfirmed().length && Date.now() < until && session.isConnected()) await new Promise((resolve) => setTimeout(resolve, 100));
+      while (unconfirmed().length && Date.now() < until && confirming()?.isConnected()) await new Promise((resolve) => setTimeout(resolve, 100));
       const left = unconfirmed().map((node) => node.name);
       if (!left.length) return "";
       const names = left.length > 5 ? `${left.slice(0, 5).join(", ")} and ${left.length - 5} more` : left.join(", ");
-      return `changes in ${names} are not confirmed by the server yet. If you reload now, the server's copy opens and these changes are kept in Snapshots.`;
+      return mode.get().workspaceMode === "synced"
+        ? `changes in ${names} are not confirmed by the server yet. If you reload now, the server's copy opens and these changes are kept in Snapshots.`
+        : `changes in ${names} have not reached the window that keeps this workspace yet. If you reload now, they may be lost.`;
     } });
     return { createCollaborationRuntime, syncVersion, mode, status, session: () => session, events: { on: events.on },
       keepers: { add(keep) { keepers.add(keep); return () => keepers.delete(keep); } },
       configure(next) { supplied = { ...supplied, ...next }; },
-      cloudWorkspace, connectionInfo, publish: connected("publish"), publishSnapshot: connected("publishSnapshot"), switchMode: connected("switchMode"),
+      cloudWorkspace, connectionInfo, publish, publishSnapshot, switchMode: connected("switchMode"),
+      windows: Object.freeze({ state: () => link.state() }),
       connectSaved: connected("connectSaved"), reconnectLater: connected("reconnectLater") };
   }
 });

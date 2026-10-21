@@ -25,7 +25,8 @@
 //   restoredProject() -> the project this browser kept, as the page started with it (or null)
 //   copies: this browser's copies, one per workspace (adapters/browser-copy.js):
 //     restoredKey() (the one the page started with), load(key) -> the project or
-//     null, ownKey() -> the last own workspace's key, localKey(project), isLocal(key)
+//     null, ownKey() -> the last own workspace's key, localKey(project), isLocal(key),
+//     takeOver() (another window kept this workspace and went: this one writes it all)
 //   attach(ports)   for code from before the restructure, which still edits and
 //                   syncs: { commit(path, previous, next, source), replace(operation, source) }
 //   parts.add(provider) -> remove()    an extension point: a kind of file that
@@ -42,7 +43,8 @@
 //   parts.of(name) -> the provider for a file name, or null
 //   location: where the open project lives (Sync configures it): key(project),
 //     assetSrc(project, node) (an image's address), resolveAsset(project, fromNodeId, url)
-//   events "saved": the user saved (Save, Ctrl+S); History takes a snapshot
+//   events "saved": the user saved (Save, Ctrl+S); History takes a snapshot;
+//     "copy-saved" ({ project }): this browser's copy of it was written
 //   What the Editor and Sync share (adapters/shared.js): typed(path, previous, next),
 //     applyRemote(clientId, op), replace(project, { keepView }), editing.configure({ shows, apply }),
 //     presence (carets); events "text-changed", "remote-change", "remote-applied",
@@ -94,14 +96,14 @@ import { addStatusItems } from "./adapters/status-items.js";
 import { createLocation } from "./adapters/location.js";
 import { createShared } from "./adapters/shared.js";
 import { addWorkspaceCommands, reattachDeviceFolder, watchPage } from "./adapters/page-life.js";
-import { isLocalKey, loadCopy, loadProject, localKey, ownKey } from "./adapters/browser-copy.js";
+import { isLocalKey, loadCopy, loadProject, localKey, ownKey, takeOver } from "./adapters/browser-copy.js";
 import { loadTemplateProject } from "./adapters/template.js";
 
 export default defineModule({
   name: "workspace",
   level: 2,
   uses: ["shell", "file-types"],
-  owns: { events: ["written"], registries: ["file parts"], storage: ["this browser's copy of the project", "a project's folder"], names: ["operation update-file", "operation patch-file", "operation replace-project"] },
+  owns: { events: ["written", "copy-saved"], registries: ["file parts"], storage: ["this browser's copy of the project", "a project's folder"], names: ["operation update-file", "operation patch-file", "operation replace-project"] },
   async start(ctx) {
     const events = ctx.emitter();
     let store = null;
@@ -125,7 +127,8 @@ export default defineModule({
     // Nothing is kept once the app's storage was cleared while this page was open (Reset, Empty Everything).
     const startedAt = Date.now();
     const cleared = () => (shell.clearedAt?.() ?? 0) >= startedAt;
-    const saving = createSaving({ store: () => store, settings: shell.settings, log: (...parts) => ctx.log(...parts), report: status.reportCopy, cleared });
+    const saving = createSaving({ store: () => store, settings: shell.settings, log: (...parts) => ctx.log(...parts), report: status.reportCopy, cleared,
+      saved: (project) => events.emit("copy-saved", { project }) });
     // Auto-save is a setting in Settings → Appearance; turned on, it saves what is waiting.
     shell.settingsDialog.fields.add({ page: "appearance", id: "auto-save-input", order: 100, key: "autoSave", control: "checkbox",
       label: "Auto-save (cloud, local workspace & browser cache; real folders still use Ctrl+S)", read: (s) => s.autoSave !== false });
@@ -165,7 +168,7 @@ export default defineModule({
       // files the server has confirmed (Sync tells the location).
       if (globalThis.window) {
         saving.attach({ busy: () => [...savingHolds].some((busy) => busy()), scope: () => location.key(store.getProject()),
-          shared: () => location.shared(), confirmed: (project, ids) => location.confirmed(project, ids) });
+          shared: () => location.shared(), confirmed: (project, ids) => location.confirmed(project, ids), ownsCopy: () => location.ownsCopy() });
       }
       // A project opened from a folder on this device keeps saving to it after a reload.
       void reattachDeviceFolder({ store, settings: shell.settings, log: (...parts) => ctx.log(parts.join(" ")) });
@@ -208,7 +211,13 @@ export default defineModule({
       openProject,
       project: () => store,
       restoredProject: () => restored?.project ?? null,
-      copies: Object.freeze({ restoredKey: () => restored?.key ?? null, load: loadCopy, ownKey, localKey, isLocal: isLocalKey }),
+      copies: Object.freeze({ restoredKey: () => restored?.key ?? null, load: loadCopy, ownKey, localKey, isLocal: isLocalKey,
+        // Another window kept this workspace and went: this one writes its copy now, all of it.
+        takeOver() {
+          if (!store) return;
+          takeOver(store.copyKey());
+          saving.schedule(store.getProject());
+        } }),
       write: writer.write,
       patchOperation: writer.patchOperation,
       asPatch: writer.asPatch,

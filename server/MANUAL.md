@@ -520,7 +520,10 @@ The preview can be shown or hidden with `View > Toggle Preview` or the `×` butt
   Joining a shared session or opening a cloud workspace never writes over it:
   each workspace has its own copy in this browser, and switching back (◑
   Private, leaving, or signing out) brings yours back as you left it, after a
-  reload too.
+  reload too. Open in two windows (or tabs) of the same browser, a workspace
+  is live in both: what you do in one shows in the other, and the status bar
+  says "2 windows". The window that opened it first keeps it in the browser;
+  when it closes, another takes over.
 - `opfs` / `directory`: writes files back to disk.
 
 ### Export

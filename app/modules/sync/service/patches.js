@@ -56,6 +56,15 @@ export function createPatchQueue(ports) {
     });
   }
 
+  // Everything waiting, sent now (the page is going). A file with a patch
+  // still on its way keeps the rest waiting.
+  function flushAll() {
+    for (const [path, entry] of [...queued]) {
+      ports.clock.clearTimeout(entry.timer);
+      flush(path);
+    }
+  }
+
   // A rename or move changes paths (a folder's: all of its descendants'). A
   // queued patch for the OLD path would be refused; it follows the file instead.
   // A patch already in flight left under the old path and settles by itself.
@@ -112,6 +121,7 @@ export function createPatchQueue(ports) {
       inFlight.clear();
     },
     forgetEdits: () => edited.clear(),
+    flushAll,
     inFlight: (path) => inFlight.get(path),
     queued: (path) => queued.get(path),
     hasQueued: (path) => queued.has(path),

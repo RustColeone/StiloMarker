@@ -6,7 +6,9 @@
 //     another; as the page may go away, what changed is journaled at once
 //     and the write begun. A write that fails is reported (report(error),
 //     report(null) once one succeeds again): the user is told, never silently.
-//     Nothing is written once the app's storage was cleared (cleared());
+//     Nothing is written once the app's storage was cleared (cleared()),
+//     nor by a window that follows another on the same workspace (that one
+//     keeps the copy: ownsCopy(), Sync's); saved(project) hears each write;
 //   - a local (on-device) project mirrored to its folder, debounced per folder;
 //   - auto-save, when idle and every 15 s, which clears a file's dirty mark
 //     once it is durably stored (a real folder on disk saves only on Save);
@@ -29,15 +31,20 @@ const dirtyFileIds = (project) => Object.values(project.nodes)
 // store(): the open project's store; settings: Shell's; log(...): the module log;
 // report(error | null): this browser's copy failed, or works again;
 // cleared(): the app's storage was cleared while this page was open;
+// saved(project): this browser's copy of `project` was written;
 // io: the writes (tests give their own).
-export function createSaving({ store, settings, log, report = () => {}, cleared = () => false, io = { saveProject, saveProjectToHandles, keepJournal } }) {
+export function createSaving({ store, settings, log, report = () => {}, cleared = () => false, saved = () => {},
+  io = { saveProject, saveProjectToHandles, keepJournal } }) {
   // The copy the open project is saved as (a stub store names none: its own id's).
   const copyKey = () => store().copyKey?.() ?? `local:${store().getProject()?.id}`;
   // What the app above says (attach): busy() while an IME composition is under
   // way; scope() names the workspace a save belongs to (a save that finishes
   // after a switch confirms nothing); shared() when the project is a shared
-  // workspace; confirmed(project, ids) the files the server has confirmed.
-  let hooks = { busy: () => false, scope: () => "local", shared: () => false, confirmed: (project, ids) => ids };
+  // workspace; confirmed(project, ids) the files the server (or the window
+  // that keeps this workspace) has confirmed; ownsCopy() unless another
+  // window on this workspace keeps its copy.
+  let hooks = { busy: () => false, scope: () => "local", shared: () => false, confirmed: (project, ids) => ids, ownsCopy: () => true };
+  const writes = () => !cleared() && hooks.ownsCopy();
   let attached = false;
 
   // ---- This browser's copy. Serialising the whole project used to run on
@@ -65,10 +72,11 @@ export function createSaving({ store, settings, log, report = () => {}, cleared 
     recoveryDeadline = 0;
     const pending = recoveryPending;
     recoveryPending = null;
-    if (!pending || cleared()) return;
+    if (!pending || !writes()) return;
     try {
       await io.saveProject(pending.project, pending.key);
       report(null);
+      saved(pending.project);
     } catch (error) {
       log("browser recovery save failed:", error.message);
       report(error);
@@ -77,7 +85,7 @@ export function createSaving({ store, settings, log, report = () => {}, cleared 
 
   // The page may go: what changed is journaled at once, and the write begun.
   function keepNow(project = store().getProject()) {
-    if (cleared()) return;
+    if (!writes()) return;
     const key = copyKey();
     try { io.keepJournal?.(project, key); } catch (error) { log("browser journal failed:", error.message); }
     if (recoveryPending && recoveryPending.key !== key) void flushRecoverySave();
@@ -98,6 +106,7 @@ export function createSaving({ store, settings, log, report = () => {}, cleared 
     // Capture this workspace: switching views must not redirect its pending save.
     folderTimers.set(root, setTimeout(() => {
       folderTimers.delete(root);
+      if (!writes()) return;
       void io.saveProjectToHandles(project).catch((error) => log("local workspace save failed:", error.message));
     }, 500));
   }
@@ -128,11 +137,15 @@ export function createSaving({ store, settings, log, report = () => {}, cleared 
     const dirty = dirtyFileIds(project);
     if (!dirty.length) return;
     try {
-      if (project.sourceMode === "opfs") {
+      // Another window keeps this workspace: it writes; this one only marks what it saved.
+      if (!hooks.ownsCopy()) {
+        // nothing written here
+      } else if (project.sourceMode === "opfs") {
         await io.saveProjectToHandles(project);
       } else {
         await io.saveProject(project, key); // propagate quota/storage errors before clearing dirty
         report(null);
+        saved(project);
       }
       if (scope !== hooks.scope()) return;
       const unchanged = new Set(savedFileIds(store().getProject(), project));
@@ -160,8 +173,10 @@ export function createSaving({ store, settings, log, report = () => {}, cleared 
     const scope = hooks.scope();
     const activeId = saved.activeFileId;
     if (!activeId || cleared()) return;
-    const wroteToDisk = await io.saveProjectToHandles(saved);
-    if (!wroteToDisk) await io.saveProject(saved, key);
+    if (hooks.ownsCopy()) {
+      const wroteToDisk = await io.saveProjectToHandles(saved);
+      if (!wroteToDisk) await io.saveProject(saved, key);
+    }
     if (scope !== hooks.scope()) return;
     const current = store().getProject();
     if (!savedFileIds(current, saved).includes(activeId)) return;
@@ -173,6 +188,8 @@ export function createSaving({ store, settings, log, report = () => {}, cleared 
   async function keepAll() {
     const project = store().getProject();
     if (cleared()) return "";
+    // Another window keeps this workspace: what is confirmed is marked.
+    if (!hooks.ownsCopy()) { await runAutoSave("reload"); return ""; }
     if (recoveryPending && recoveryPending.key !== copyKey()) await flushRecoverySave();
     if (recoveryTimer) clearTimeout(recoveryTimer);
     recoveryTimer = null;

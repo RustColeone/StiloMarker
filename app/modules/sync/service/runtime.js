@@ -668,6 +668,8 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
     connect, openWorkspace, resumeConnection, hostForGuests, disconnect, leaveOnPageHide,
     publishOperation, publishSnapshot, scheduleSnapshot, scheduleAwareness, reloadFromServer,
     scheduleTextPatch: patches.schedule,
+    // Typing still waiting, sent now (the page is going).
+    flushPatches: () => patches.flushAll(),
     remapPatchPath: patches.remap,
     dropPatchPath: patches.drop,
     hasPendingPatch: (path) => patches.hasQueued(path),

@@ -154,8 +154,13 @@ function changesOf(project, key) {
 
 // Saves are one at a time, in order (a later one compares against the earlier).
 let queue = Promise.resolve();
+// When things happened, in order: a journal written, a save asked for. A
+// save asked for after the journal holds all of it: once written, the
+// journal goes (left, it would bring older text back after a crash).
+let moments = 0;
+const journaled = new Map(); // copy key -> the moment its journal was written
 
-async function write(project, key) {
+async function write(project, key, moment) {
   // Not a browser (Node, a test): there is nowhere to keep a copy, which is no failure.
   if (!globalThis.indexedDB && !globalThis.localStorage) return { nodes: 0 };
   const db = await openDatabase();
@@ -177,12 +182,17 @@ async function write(project, key) {
   for (const [id, node] of changed) written.nodes.set(id, copyOf(node));
   for (const id of removed) written.nodes.delete(id);
   written.meta = meta;
+  if (journaled.has(key) && journaled.get(key) < moment) {
+    journaled.delete(key);
+    try { globalThis.localStorage?.removeItem(JOURNAL + key); } catch (error) { ignore(error, "the journal stays; the next load applies what it holds"); }
+  }
   return { nodes: changed.length };
 }
 
 // Resolves once written; rejects with the reason when it couldn't be.
 function saveProject(project, key = localKey(project)) {
-  const next = queue.then(() => write(project, key));
+  const moment = ++moments;
+  const next = queue.then(() => write(project, key, moment));
   queue = next.catch((error) => ignore(error, "a failed save is reported by its caller; the next one tries again"));
   return next;
 }
@@ -193,8 +203,9 @@ function keepJournal(project, key = localKey(project)) {
   const store = globalThis.localStorage;
   if (!store || !project) return;
   const { whole, changed, removed, meta } = changesOf(project, key);
-  if (!whole && !changed.length && !removed.length && meta === written.meta) { store.removeItem(JOURNAL + key); point(key); return; }
+  if (!whole && !changed.length && !removed.length && meta === written.meta) { store.removeItem(JOURNAL + key); journaled.delete(key); point(key); return; }
   store.setItem(JOURNAL + key, JSON.stringify({ meta: metaOf(project, key, Date.now()), whole, nodes: Object.fromEntries(changed), removed }));
+  journaled.set(key, ++moments);
   point(key);
 }
 
@@ -363,6 +374,14 @@ async function ownKey() {
   return readPointer().own ?? null;
 }
 
+// This page takes over a copy another window wrote (it kept the workspace
+// and went): its journal is older than what this page holds, and the next
+// save writes all of the copy.
+function takeOver(key) {
+  try { globalThis.localStorage?.removeItem(JOURNAL + key); } catch (error) { ignore(error, "the journal stays; this page writes over it"); }
+  written = { key: null, nodes: new Map(), meta: "" };
+}
+
 // Every copy let go of (Empty Everything; the pointer and journals went with
 // the app's other keys): the next save starts afresh.
 async function clearCopies() {
@@ -376,4 +395,4 @@ async function clearCopies() {
   await finished(tx);
 }
 
-export { clearCopies, isLocalKey, keepJournal, loadCopy, loadProject, localKey, ownKey, saveProject };
+export { clearCopies, isLocalKey, keepJournal, loadCopy, loadProject, localKey, ownKey, saveProject, takeOver };

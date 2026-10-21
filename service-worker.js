@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v0.2.20";
+const CACHE_NAME = "mdnotes-shell-v0.2.21";
 // The extensions' files (EXTENSION_FILES), written by tools/protocol-sync.mjs.
 importScripts("./extensions/offline.js");
 const APP_SHELL = [
@@ -179,6 +179,11 @@ const APP_SHELL = [
   "./app/modules/sync/service/patches.js",
   "./app/modules/sync/adapters/api.js",
   "./app/modules/sync/adapters/page.js",
+  "./app/modules/sync/adapters/tabs.js",
+  "./app/modules/sync/adapters/windows-item.js",
+  "./app/modules/sync/model/rebase-log.js",
+  "./app/modules/sync/model/window-view.js",
+  "./app/modules/sync/service/broker.js",
   "./app/modules/models/index.js",
   "./app/modules/models/model/stream.js",
   "./app/modules/models/model/agent-status.js",

@@ -14,14 +14,7 @@ Last updated: 2026-10-21 · release `v0.2.19` (deployed with v0.2.17–v0.2.18; 
 From the stability review of 2026-10-21 (the app as a PWA, in Electron, with
 the user's own key and no server; each found by an experiment). Being fixed in
 this order; the storage limit (O0) was fixed in v0.2.19, a copy per workspace
-(O7) in v0.2.20.
-
-### O1. Two windows on one in-browser workspace overwrite each other
-
-Confirmed (two windows, an edit in each): the later save wins, the other
-window's edit is lost, and neither window sees the other's. Decided: both
-windows live, as two devices on a cloud workspace (one window brokers the
-edits for the others, through the browser).
+(O7) in v0.2.20, two windows (O1) in v0.2.21.
 
 ### O2. Typing slows with the size of the file
 
@@ -81,6 +74,50 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.21: two windows on one workspace are live in both
+
+From the stability review (2026-10-21), O1, found by an experiment;
+decided "Live in both". Browser only.
+
+- **Two windows on one of this browser's workspaces overwrote each other**
+  (fixed; O1): each saved its own copy, the later save won, the other
+  window's edit was lost, and neither saw the other's. Now they are linked:
+  what is typed or changed in one shows in the others at once (typing in
+  one file in both at once ends the same in both, as with two devices on a
+  cloud workspace).
+- **One window keeps the workspace**: the one that opened it first puts the
+  windows' edits in order and alone writes this browser's copy (and its
+  folder, for a project on this device); the others send it their changes,
+  and their changed marks clear once it has saved them. When it closes (or
+  crashes), the next window takes over where it stopped, and a new or
+  reloaded window joins whichever keeps it.
+- **A window alone starts nothing**: its link starts when another window
+  opens the same workspace, so a single window works as before.
+- **A window joining always gets what the keeping window shows**: should a
+  change ever reach that window other than through the link, the link
+  starts again from its copy and the other windows reload it, rather than a
+  joining window (or one taking over) taking older text.
+- The status bar says "2 windows" while they are linked, and warns when a
+  window has waited a while for the one that keeps the workspace (its
+  changes then stay marked as unsaved).
+- Reload Window waits for this window's changes to reach the one that keeps
+  the workspace, and says when they haven't.
+- **A journal could bring older text back** (since v0.2.19): what changed
+  is journaled as a page hides, and the journal stayed after the next save,
+  so after a crash the next load laid its older text over newer. A journal
+  now goes once a save that began after it lands; a window that takes over
+  a workspace drops the journal of the one that went (it holds more).
+- A browser that never answers for the lock that links windows leaves the
+  window unlinked after 3 s (it saves its own copy, as before).
+- Tests: `linked-windows-browser.py` (new: typing both ways, both in one
+  file at once, a new file, only the first window writing the copy, the
+  first closing and the other taking over, a third and a reloaded window
+  joining, the experiment's edit in each window); `tab-link.test.mjs` (new:
+  two production runtimes over a real BroadcastChannel, a crash and a
+  takeover, a change that bypassed the link); `browser-copy-browser.py` (a journal goes once a later save
+  lands); `sync-broker.test.mjs` (new: the broker's order and refusals,
+  a follower's copy, the rebase log answering as the server's does).
 
 ### v0.2.20: a copy per workspace; the own workspace is never lost to a shared one
 

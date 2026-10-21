@@ -19,7 +19,8 @@ export function createLocation() {
     readOnly: () => false,            // this tab may only read it
     confirmed: (project, ids) => ids, // the files the server has confirmed (all, when not shared)
     assetsKey: () => "",              // what images' addresses depend on (the connection's token)
-    copyKey: (project) => localKey(project) // the copy a project newly opened here is saved as
+    copyKey: (project) => localKey(project), // the copy a project newly opened here is saved as
+    ownsCopy: () => true              // this window keeps the copy (not when another window on it does)
   };
   const assetSrc = (project, node) => (node ? where.assetSrc(project, node) : "");
   return Object.freeze({
@@ -30,6 +31,7 @@ export function createLocation() {
     confirmed: (project, ids) => where.confirmed(project, ids),
     assetsKey: () => where.assetsKey(),
     copyKey: (project) => where.copyKey(project),
+    ownsCopy: () => where.ownsCopy(),
     assetSrc,
     // A link written in a file (relative to it) to the image it names, as an address;
     // anything else (a web address, an anchor, a missing file) is left as written.

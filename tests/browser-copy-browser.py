@@ -173,6 +173,19 @@ async def main():
         await page.wait_for_selector('.app-toast:has-text("Saved in this browser again")', timeout=15000)
         assert await page.evaluate('document.querySelector("#status-storage-item").hidden')
 
+        # A journal goes once a later save lands (left, a crash would bring its older text back).
+        await page.evaluate('() => { const c = window.__copyTest.controller; c.updateContent("a", c.getProject().nodes.a.content + " hidden"); }')
+        assert await page.evaluate(f"() => {{ window.dispatchEvent(new PageTransitionEvent('pagehide', {{ persisted: true }})); "
+                                   f"return Boolean(localStorage.getItem('{JOURNAL}')); }}"), 'journaled as the page hides'
+        await page.wait_for_function(f'!localStorage.getItem("{JOURNAL}")', timeout=5000)
+        await page.evaluate('() => { const c = window.__copyTest.controller; c.updateContent("a", c.getProject().nodes.a.content + " later"); }')
+        await page.wait_for_function('!Object.values(window.__copyTest.controller.getProject().nodes).some((n) => n.dirty)', timeout=15000)
+        later = watch(await context.new_page())
+        await later.goto(BASE, wait_until='domcontentloaded')
+        await load(later)
+        assert (await later.evaluate(FILES))[1][1].endswith('hidden later'), await later.evaluate(FILES)
+        await later.close()
+
         # A new project is a copy of its own: the earlier one stays; the next load opens the new one.
         await page.evaluate('''() => { const c = window.__copyTest.controller, p = c.getProject();
             c.replaceProject({ ...p, id: "second", name: "Second", activeFileId: "a", nodes: { root: { ...p.nodes.root, children: ["a"] }, a: p.nodes.a } }); }''')
@@ -222,6 +235,7 @@ async def main():
         print(json.dumps({'checks': ["v0.2.19's copy and journal moved over once, the old database removed; one naming nodes it lacks still opens", 'an older localStorage copy moved over once',
                                      'a workspace past 5 MB saved and reloaded', 'a failing write said (notice, red item), unsaved kept marked',
                                      "journaled as the page goes (the file shown too), there on the next load; nothing journaled when nothing changed", 'saving again said',
+                                     'a journal goes once a later save lands',
                                      'a new project is a copy of its own; the next load opens it',
                                      'Reset and Empty Everything leave no old copy; another window follows, writing nothing back'], 'runtimeErrors': 0}))
 

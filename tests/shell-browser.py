@@ -190,11 +190,11 @@ async def main():
         # The status bar: each item added by its owner, in order; the count
         # follows the selection; the server item opens Settings → Collaboration.
         items = await page.evaluate('[...document.querySelectorAll(".status-bar > *")].map((e) => e.id)')
-        assert items == ['status-source-item', 'status-storage-item', 'status-browser-item', 'status-server-item', 'status-presence-item',
-                         'status-version-item', 'status-charcount-item'], items
-        # Quiet: no collaborators, this browser's folder access and a copy that saves are no news.
-        quiet = await page.evaluate('["presence", "browser", "storage"].map((id) => document.querySelector(`#status-${id}-item`).hidden)')
-        assert quiet == [True, True, True], quiet
+        assert items == ['status-source-item', 'status-storage-item', 'status-windows-item', 'status-browser-item', 'status-server-item',
+                         'status-presence-item', 'status-version-item', 'status-charcount-item'], items
+        # Quiet: no collaborators, this browser's folder access, a copy that saves and one window are no news.
+        quiet = await page.evaluate('["presence", "browser", "storage", "windows"].map((id) => document.querySelector(`#status-${id}-item`).hidden)')
+        assert quiet == [True, True, True, True], quiet
         await page.click('#editor-content')
         await page.keyboard.press('Control+a')
         await page.wait_for_function('/ \\/ .* chars$/.test(document.querySelector("#status-charcount-text").textContent)')
