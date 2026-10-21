@@ -513,7 +513,10 @@ The preview can be shown or hidden with `View > Toggle Preview` or the `×` butt
 ### Save
 
 `File > Save` (`Ctrl+S`) — saves to the active storage mode:
-- `memory`: persists to `localStorage`.
+- `memory` (an in-browser workspace): kept in this browser (IndexedDB), with no
+  small size limit; changes are saved as you type when Auto-save is on. If the
+  browser can't save it (its storage is full), a red "Not saved in this
+  browser" item shows in the status bar: export the project to keep the work.
 - `opfs` / `directory`: writes files back to disk.
 
 ### Export

@@ -5,13 +5,53 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-21 · release `v0.2.18` (not deployed; v0.2.16 is live)
+Last updated: 2026-10-21 · release `v0.2.19` (not deployed; v0.2.16 is live)
 
 ---
 
 ## Open
 
-None. Items 3, 4 and 5 were fixed in v0.2.7; 1 and 2 are accepted (below).
+From the stability review of 2026-10-21 (the app as a PWA, in Electron, with
+the user's own key and no server; each found by an experiment). Being fixed in
+this order; the storage limit (O0) was fixed in v0.2.19.
+
+### O1. Two windows on one in-browser workspace overwrite each other
+
+Confirmed (two windows, an edit in each): the later save wins, the other
+window's edit is lost, and neither window sees the other's. Decided: both
+windows live, as two devices on a cloud workspace (one window brokers the
+edits for the others, through the browser).
+
+### O2. Typing slows with the size of the file
+
+Measured on the server (2 slow cores): about 0.25 s a key at 22 KB, 1 s at
+89 KB, 1.3–4.3 s at 450 KB. A long chapter kept in one file lags.
+
+### O3. The agent with the user's own key needs the server
+
+Confirmed (no server, a stand-in model): the Agent sends its request and the
+key through the server's `/api/chat` ("Failed to fetch", the model never
+called, though its status said ready); Chats' "in this browser" replies still
+ask the server for the prompt first.
+
+### O4. Offline edits to a cloud workspace are not merged on reconnect
+
+By design so far: pushed only if nobody changed the workspace meanwhile;
+otherwise the server's version opens and the offline edits are kept in
+Snapshots, even when they touched other files. To be merged per file.
+
+### O5. Not installable as a PWA; updates mix versions; libraries from a CDN
+
+No web app manifest or icons. A new service worker takes over open tabs at
+once while parts of the app load later (a tab can mix versions). MathJax
+(unpinned `@3`) and Mermaid load from a CDN, so they fail offline.
+
+### O6. Electron
+
+Not packaged yet. Known needs: a fixed custom scheme (not `file://`, not a
+random port), the leave-page question handled by the main process (it
+silently blocks closing), links opened outside, a no-server mode, and an
+update channel (a desktop build can't update itself as the web does).
 
 ## Accepted
 
@@ -40,6 +80,33 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.19: this browser's copy in IndexedDB; a failing save said
+
+From the stability review (2026-10-21), found by an experiment. Browser only.
+
+- **Work stopped being saved past ~5 MB** (fixed; O0): the in-browser
+  workspace lived in localStorage, which holds about 5 MB per site; once the
+  workspace passed it (a few pasted images), nothing was saved any more,
+  only logged, and a reload lost the large file and every edit after it. The
+  copy now lives in IndexedDB (no such limit), a record per file: a save
+  writes only what changed. An older copy is moved over once.
+- **A save that fails is said**: a notice the first time, and a red "Not
+  saved in this browser" item in the status bar while it lasts (it explains
+  and tries again with each change); "Saved in this browser again" once a
+  save works.
+- **Kept as the page goes**: an IndexedDB write begun as a tab closes may
+  never land, so what changed since the last save is also written at once to
+  a small journal (localStorage) and applied on the next load.
+- **The browser is asked to keep the data** (`navigator.storage.persist()`)
+  once something is saved, so it isn't cleared under storage pressure.
+- Reset to Default Workspace and Empty Everything leave no older copy behind
+  (Shell notes when the app's storage was cleared; Workspace drops a copy
+  saved before).
+- Tests: `browser-copy-browser.py` (moved over once, a workspace past 5 MB
+  saved and reloaded, a failing write said and kept marked, journaled as the
+  page goes, saving again said, Reset and Empty Everything);
+  `url-album-browser.py` reads the stored copy through `helpers/browser_copy.py`.
 
 ### v0.2.18: the diagram's inspector floats
 

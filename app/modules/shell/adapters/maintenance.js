@@ -3,9 +3,13 @@
 // them (Reset to Default Workspace; Clear All Cache). Workspace adds Empty
 // Everything, which also writes an empty project.
 import { clearOfflineShellData } from "./offline.js";
+import { ignore } from "../../../kernel/index.js";
 
 // Remove every key this app keeps in this browser (project, settings, chats,
-// view positions, and any future "mdnotes." key). Returns how many.
+// view positions, and any future "mdnotes." key), and note when: a module
+// keeping data elsewhere (IndexedDB) drops what it saved before (clearedAt).
+// Returns how many keys.
+const CLEARED_KEY = "mdnotes.cleared-at.v1";
 export function clearAppStorage(store = globalThis.localStorage) {
   if (!store) return 0;
   const keys = [];
@@ -14,7 +18,13 @@ export function clearAppStorage(store = globalThis.localStorage) {
     if (key && key.startsWith("mdnotes.")) keys.push(key);
   }
   keys.forEach((key) => store.removeItem(key));
+  store.setItem(CLEARED_KEY, String(Date.now()));
   return keys.length;
+}
+
+// When this app's storage was last cleared (0: never).
+export function clearedAt(store = globalThis.localStorage) {
+  try { return Number(store?.getItem(CLEARED_KEY)) || 0; } catch (error) { ignore(error, "storage is blocked: never cleared, as far as can be told"); return 0; }
 }
 
 export function addMaintenanceCommands({ commands, confirm, notify, closeMenus, events, log }) {

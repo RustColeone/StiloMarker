@@ -1,13 +1,15 @@
 // Saving the open project (moved from main.js when Workspace took saving):
-//   - this browser's copy (localStorage): a trailing write after edits, and
-//     written at once whenever the page may go away;
+//   - this browser's copy (IndexedDB, adapters/browser-copy.js): a trailing
+//     write after edits; as the page may go away, what changed is journaled at
+//     once and the write begun. A write that fails is reported (report(error),
+//     report(null) once one succeeds again): the user is told, never silently;
 //   - a local (on-device) project mirrored to its folder, debounced per folder;
 //   - auto-save, when idle and every 15 s, which clears a file's dirty mark
 //     once it is durably stored (a real folder on disk saves only on Save);
 //   - the Save command for the open file.
 // Whether a file of a shared workspace is durably stored is the session's to
 // say (Sync, above Workspace): the hooks given to attach() answer it.
-import { saveProject } from "./browser-copy.js";
+import { keepJournal, saveProject } from "./browser-copy.js";
 import { saveProjectToHandles } from "./disk-folders.js";
 import { savedFileIds, snapshotProject } from "./save-queue.js";
 
@@ -21,8 +23,9 @@ const dirtyFileIds = (project) => Object.values(project.nodes)
   .map((node) => node.id);
 
 // store(): the open project's store; settings: Shell's; log(...): the module log;
-// io: the two writes (tests give their own).
-export function createSaving({ store, settings, log, io = { saveProject, saveProjectToHandles } }) {
+// report(error | null): this browser's copy failed, or works again;
+// io: the writes (tests give their own).
+export function createSaving({ store, settings, log, report = () => {}, io = { saveProject, saveProjectToHandles, keepJournal } }) {
   // What the app above says (attach): busy() while an IME composition is under
   // way; scope() names the workspace a save belongs to (a save that finishes
   // after a switch confirms nothing); shared() when the project is a shared
@@ -45,15 +48,28 @@ export function createSaving({ store, settings, log, io = { saveProject, savePro
     recoveryTimer = setTimeout(flushRecoverySave, Math.max(0, Math.min(RECOVERY_SAVE_IDLE_MS, recoveryDeadline - now)));
   }
 
-  function flushRecoverySave() {
+  // Resolves once written (or once the failure is reported).
+  async function flushRecoverySave() {
     if (recoveryTimer) clearTimeout(recoveryTimer);
     recoveryTimer = null;
     recoveryDeadline = 0;
     const project = recoveryPending;
     recoveryPending = null;
     if (!project) return;
-    try { io.saveProject(project); }
-    catch (error) { log("browser recovery save failed:", error.message); }
+    try {
+      await io.saveProject(project);
+      report(null);
+    } catch (error) {
+      log("browser recovery save failed:", error.message);
+      report(error);
+    }
+  }
+
+  // The page may go: what changed is journaled at once, and the write begun.
+  function keepNow(project = store().getProject()) {
+    try { io.keepJournal?.(project); } catch (error) { log("browser journal failed:", error.message); }
+    recoveryPending = project;
+    void flushRecoverySave();
   }
 
   // ---- A local (OPFS) project mirrors changes to its folder. Debounced per
@@ -101,7 +117,8 @@ export function createSaving({ store, settings, log, io = { saveProject, savePro
       if (project.sourceMode === "opfs") {
         await io.saveProjectToHandles(project);
       } else {
-        io.saveProject(project); // propagate quota/storage errors before clearing dirty
+        await io.saveProject(project); // propagate quota/storage errors before clearing dirty
+        report(null);
       }
       if (scope !== hooks.scope()) return;
       const unchanged = new Set(savedFileIds(store().getProject(), project));
@@ -118,6 +135,7 @@ export function createSaving({ store, settings, log, io = { saveProject, savePro
       }
     } catch (error) {
       log("auto-save failed:", error.message);
+      if (project.sourceMode !== "opfs") report(error);
     }
   }
 
@@ -128,7 +146,7 @@ export function createSaving({ store, settings, log, io = { saveProject, savePro
     const activeId = saved.activeFileId;
     if (!activeId) return;
     const wroteToDisk = await io.saveProjectToHandles(saved);
-    if (!wroteToDisk) io.saveProject(saved);
+    if (!wroteToDisk) await io.saveProject(saved);
     if (scope !== hooks.scope()) return;
     const current = store().getProject();
     if (!savedFileIds(current, saved).includes(activeId)) return;
@@ -143,7 +161,7 @@ export function createSaving({ store, settings, log, io = { saveProject, savePro
     recoveryTimer = null;
     recoveryDeadline = 0;
     recoveryPending = null;
-    try { io.saveProject(project); } catch (error) { return `this browser's copy could not be written (${error.message}).`; }
+    try { await io.saveProject(project); } catch (error) { report(error); return `this browser's copy could not be written (${error.message}).`; }
     if (project.sourceMode === "opfs" && project.handles?.[project.rootId]) {
       try { await io.saveProjectToHandles(project); } catch (error) { return `the project's folder could not be written (${error.message}).`; }
     }
@@ -172,9 +190,9 @@ export function createSaving({ store, settings, log, io = { saveProject, savePro
     attached = true;
     hooks = { ...hooks, ...given };
     // Anything that might end the page's life gets the pending copy written now.
-    window.addEventListener("pagehide", () => { flushRecoverySave(); });
+    window.addEventListener("pagehide", () => { void flushRecoverySave(); });
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") flushRecoverySave();
+      if (document.visibilityState === "hidden") void flushRecoverySave();
     });
     // A safety net, so a long typing session (the idle timer keeps resetting)
     // still gets saved regularly.
@@ -183,6 +201,6 @@ export function createSaving({ store, settings, log, io = { saveProject, savePro
     }, AUTOSAVE_PERIODIC_MS);
   }
 
-  return Object.freeze({ attach, schedule, scheduleAutoSave, runAutoSave, saveActiveFile, keepAll, flush: flushRecoverySave, dirtyFileIds });
+  return Object.freeze({ attach, schedule, scheduleAutoSave, runAutoSave, saveActiveFile, keepAll, keepNow, flush: flushRecoverySave, dirtyFileIds });
 }
 

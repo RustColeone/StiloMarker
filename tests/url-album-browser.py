@@ -4,10 +4,12 @@ own, the table and entry previews, highlighting and the toolbar's Entry
 snippet, adding, renaming, deleting, copying and dragging entries between
 albums, and an entry dropped into Markdown as an image. Static files from this
 checkout; the album's text is read back from the browser's saved copy."""
-import asyncio, json, mimetypes, os
+import asyncio, json, mimetypes, os, sys
 from pathlib import Path
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from helpers.browser_copy import STORED_FILE
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get('STILO_TEST_URL', 'http://127.0.0.1:8765')
@@ -56,9 +58,7 @@ async def main():
         await page.goto(BASE, wait_until='networkidle')
 
         async def saved(name):
-            return await page.evaluate('''(name) => { window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
-              const project = JSON.parse(localStorage.getItem("mdnotes.project.v1"));
-              return Object.values(project.nodes).find((node) => node.name === name)?.content ?? null; }''', name)
+            return await page.evaluate(STORED_FILE, name)  # the copy this browser keeps (IndexedDB)
 
         def entry_row(album, name):
             return page.locator(f'.tree-row-derived[data-node-id="{album}"]:has(.tree-label:text-is("{name}"))')

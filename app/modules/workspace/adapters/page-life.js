@@ -1,8 +1,9 @@
 // What Workspace does as the page comes and goes: reattach the on-device
 // folder the project was opened from (a reload keeps saving to it without
-// asking again), keep this browser's copy when the page hides, and warn before
-// leaving with a file that has unsaved changes (not while Reload Window,
-// which kept them, reloads).
+// asking again), keep this browser's copy when the page hides (not once the
+// app's storage was cleared: Reset, Empty Everything), and warn before leaving
+// with a file that has unsaved changes (not while Reload Window, which kept
+// them, reloads).
 import { getOpfsDirectoryHandle, supportsOpfs } from "./device-folders.js";
 import { saveProject } from "./browser-copy.js";
 import { ROOT_ID, createProject } from "../model/project.js";
@@ -26,11 +27,11 @@ export async function reattachDeviceFolder({ store, settings, log }) {
   }
 }
 
-// reloading(): Shell's Reload Window, which kept the work first, is reloading.
-export function watchPage({ store, log, reloading = () => false, win = globalThis.window, doc = globalThis.document }) {
-  const keepCopy = () => {
-    try { saveProject(store().getProject()); } catch (error) { log("Browser recovery save failed", error.message); }
-  };
+// keep(): this browser's copy kept now (Workspace's saving); cleared(): the
+// app's storage was cleared while this page was open; reloading(): Shell's
+// Reload Window, which kept the work first, is reloading.
+export function watchPage({ store, keep, cleared = () => false, reloading = () => false, win = globalThis.window, doc = globalThis.document }) {
+  const keepCopy = () => { if (!cleared()) keep(); };
   win?.addEventListener("pagehide", keepCopy);
   doc?.addEventListener("visibilitychange", () => { if (doc.visibilityState === "hidden") keepCopy(); });
   win?.addEventListener("beforeunload", (event) => {
@@ -51,7 +52,11 @@ export function addWorkspaceCommands({ shell, log, doc = globalThis.document }) 
     if (!confirmed) return;
     shell.closeMenus();
     shell.clearAppStorage();
-    saveProject(createProject("Workspace"));
+    try {
+      await saveProject(createProject("Workspace"));
+    } catch (error) {
+      log(`Emptying could not write the empty workspace: ${error.message}`); // the next start finds none and opens the welcome
+    }
     log("Workspace emptied");
     globalThis.location.reload();
   } });

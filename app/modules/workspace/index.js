@@ -99,7 +99,7 @@ export default defineModule({
   level: 2,
   uses: ["shell", "file-types"],
   owns: { events: ["written"], registries: ["file parts"], storage: ["this browser's copy of the project", "a project's folder"], names: ["operation update-file", "operation patch-file", "operation replace-project"] },
-  start(ctx) {
+  async start(ctx) {
     const events = ctx.emitter();
     let store = null;
     const read = (path) => {
@@ -115,16 +115,19 @@ export default defineModule({
     const savingHolds = new Set();
     const parts = ctx.registry({ validate: checkParts });
     // Saving: this browser's copy, a local project's folder, auto-save, Save.
-    const saving = createSaving({ store: () => store, settings: ctx.use("shell").settings, log: (...parts) => ctx.log(...parts) });
-    // Auto-save is a setting in Settings → Appearance; turned on, it saves what is waiting.
     const shell = ctx.use("shell");
+    // Where the project lives, in the status bar: drawn as the project changes;
+    // and a red item while this browser's copy can't be written.
+    const status = addStatusItems({ shell, log: (message) => ctx.log(message) });
+    const saving = createSaving({ store: () => store, settings: shell.settings, log: (...parts) => ctx.log(...parts), report: status.reportCopy });
+    // Auto-save is a setting in Settings → Appearance; turned on, it saves what is waiting.
     shell.settingsDialog.fields.add({ page: "appearance", id: "auto-save-input", order: 100, key: "autoSave", control: "checkbox",
       label: "Auto-save (cloud, local workspace & browser cache; real folders still use Ctrl+S)", read: (s) => s.autoSave !== false });
     shell.settings.on((view, changed) => { if (changed.includes("autoSave") && view.autoSave && store) saving.scheduleAutoSave(); });
-    // Where the project lives, in the status bar: drawn as the project changes.
-    const drawStatus = addStatusItems({ shell, log: (message) => ctx.log(message) });
-    // This browser's copy when the page hides, and a warning before leaving unsaved changes.
-    watchPage({ store: () => store, log: (...parts) => ctx.log(parts.join(" ")), reloading: () => shell.reloading() });
+    // This browser's copy when the page hides (not once the app was cleared
+    // while this page was open), and a warning before leaving unsaved changes.
+    const startedAt = Date.now();
+    watchPage({ store: () => store, keep: () => saving.keepNow(), cleared: () => shell.clearedAt() >= startedAt, reloading: () => shell.reloading() });
     // Reload Window (Shell) writes everything first, after Sync's typing is confirmed.
     shell.beforeReload.add({ id: "workspace.files", label: "Your files", order: 20, keep: () => (store ? saving.keepAll() : "") });
     addWorkspaceCommands({ shell, log: (...parts) => ctx.log(parts.join(" ")) });
@@ -142,14 +145,14 @@ export default defineModule({
     function openProject(project) {
       if (store) throw new Error("The workspace already has a project open; use project().replaceProject()");
       store = createProjectController(project);
-      store.subscribe(drawStatus);
+      store.subscribe(status.draw);
       // Each change is saved (this browser's copy, a local project's folder,
       // auto-save) and the app asked to draw it (Shell holds that while typing).
       store.subscribe((next) => {
         saving.schedule(next);
         shell.render(next);
       });
-      drawStatus(store.getProject());
+      status.draw(store.getProject());
       // Saving's questions (in a page): busy while the Editor holds it (an IME
       // composition), the workspace a save belongs to, shared or not, and which
       // files the server has confirmed (Sync tells the location).
@@ -184,7 +187,7 @@ export default defineModule({
     // seed project until the template arrives. Its name shows in the title bar.
     let restored = null;
     if (globalThis.window) {
-      restored = loadProject();
+      restored = await loadProject({ clearedAt: shell.clearedAt() });
       openProject(restored ?? seedDefaultProject());
       if (!restored) ctx.whenStarted(installTemplate);
       shell.events.on("render", ({ project }) => {

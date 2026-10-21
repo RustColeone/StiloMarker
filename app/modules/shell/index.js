@@ -36,6 +36,8 @@
 //                            A full redraw waits while a module is busy (adapters/render.js)
 //   holdRendering(busyNow)   a module busy in a way a redraw would disturb (the Editor typing)
 //   clearAppStorage()        remove every key the app keeps in this browser
+//   clearedAt()              when that was last done (0: never): data kept elsewhere
+//                            (IndexedDB) and saved before it is to be dropped
 //   registerOffline()        keep the app's files for offline use (the service worker)
 //   events "clearing-caches" before Clear All Cache reloads: drop what you cache
 //   pages                    features as pages in tab hosts, like a browser's tabs:
@@ -79,7 +81,7 @@ import { applyTheme } from "./adapters/theme.js";
 import { createThemePicker } from "./adapters/theme-picker.js";
 import { usableThemes } from "./model/themes.js";
 import contributedThemes from "./model/contributed-themes.js";
-import { addMaintenanceCommands, clearAppStorage } from "./adapters/maintenance.js";
+import { addMaintenanceCommands, clearAppStorage, clearedAt } from "./adapters/maintenance.js";
 import { createRender } from "./adapters/render.js";
 import { createFrame } from "./adapters/frame/index.js";
 import { registerOfflineShell, upgradeApp } from "./adapters/offline.js";
@@ -278,6 +280,7 @@ export default defineModule({
       render: redraw.render,
       holdRendering: redraw.holdWhile,
       clearAppStorage,
+      clearedAt: () => clearedAt(),
       registerOffline: () => registerOfflineShell(),
       events: { on: events.on }
     };
