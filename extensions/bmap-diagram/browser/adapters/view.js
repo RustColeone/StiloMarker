@@ -927,7 +927,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
   let connectPreview = null;
   let currentDocumentKey = null;
   let interactionMode = "readonly";
-  let inspectorCollapsed = false;
+  let inspectorCollapsed = false, helpOpen = false; // the inspector folded by its ×; the editing tips asked for (?)
   let snapStep = MIN_SNAP_STEP;
   let activeOptions = {
     onCommit: null,
@@ -993,7 +993,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
   }
 
   function toggleInspectorCollapsed() {
-    inspectorCollapsed = !inspectorCollapsed;
+    if (helpOpen && !selection.length) helpOpen = false; else inspectorCollapsed = !inspectorCollapsed; // the tips' × closes them
     renderScene();
   }
 
@@ -1942,6 +1942,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       selectAll();
       return;
     }
+    if (event.key === "Escape" && (selection.length || helpOpen)) { consume(); selection = []; helpOpen = false; renderScene(); return; } // closes the inspector
     if (mod && key === "c") {
       consume();
       if (selection.length) {
@@ -3340,14 +3341,9 @@ function createBmapView({ container, ...defaultOptions } = {}) {
       inspector = buildMultiMixedInspector(nodes, connectors);
     }
 
-    const collapseBtn = document.createElement("button");
-    collapseBtn.type = "button";
-    collapseBtn.className = "bmap-inspector-collapse-btn";
-    collapseBtn.title = inspectorCollapsed ? "Show inspector" : "Collapse inspector";
-    const collapseGlyph = document.createElement("span");
-    collapseGlyph.className = "bmap-inspector-collapse-glyph";
-    collapseGlyph.textContent = inspectorCollapsed ? "\u2039" : "\u203A";
-    collapseBtn.append(collapseGlyph);
+    // Its × folds it to a tab at the diagram's right edge, which opens it again.
+    const collapseBtn = Object.assign(document.createElement("button"), { type: "button", className: "bmap-inspector-collapse-btn", title: inspectorCollapsed ? "Show the inspector" : "Close the inspector" });
+    collapseBtn.append(Object.assign(document.createElement("span"), { className: "bmap-inspector-collapse-glyph", textContent: inspectorCollapsed ? "\u2039" : "\u00D7" }));
     collapseBtn.setAttribute("aria-expanded", String(!inspectorCollapsed));
     collapseBtn.addEventListener("click", toggleInspectorCollapsed);
 
@@ -3406,6 +3402,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     const workspace = document.createElement("div");
     workspace.className = "bmap-workspace";
     workspace.classList.toggle("is-inspector-collapsed", inspectorCollapsed);
+    workspace.classList.toggle("has-inspector", selection.length > 0 || helpOpen || ast.parseErrors.length > 0); // it floats over the diagram
 
     const stage = document.createElement("div");
     stage.className = "bmap-stage";
@@ -3456,6 +3453,7 @@ function createBmapView({ container, ...defaultOptions } = {}) {
         applyViewportTransform();
       }),
       makeControlButton("⊡", "Fit the diagram", () => fitToContent()),
+      isEditingEnabled() ? makeControlButton("?", "Editing tips", () => { helpOpen = !helpOpen; inspectorCollapsed = false; renderScene(); }) : "",
     );
 
     const nodeMap = new Map(ast.nodes.map((node) => [node.id, node]));

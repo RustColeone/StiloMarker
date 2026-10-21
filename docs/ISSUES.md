@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-21 · release `v0.2.17` (not deployed; v0.2.16 is live)
+Last updated: 2026-10-21 · release `v0.2.18` (not deployed; v0.2.16 is live)
 
 ---
 
@@ -40,6 +40,21 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.18: the diagram's inspector floats
+
+Decided 2026-10-21 ("Float over it"): in edit mode the inspector took a
+fixed 320 px column beside the diagram, even with nothing selected, which
+left a narrow pane's diagram a sliver (about 100 px with the Agent panel
+open). Browser only.
+
+- **The diagram keeps its width**: the inspector floats over its right side
+  only while a node or connector is selected (or the diagram has errors to
+  list); its × folds it to a tab at the edge, Escape closes it; the zoom and
+  edit buttons step to its left while it is open. The editing tips moved
+  behind a ? button. On a phone it still docks under the diagram.
+- Tests: `shell-browser.py` (no inspector with nothing selected; selected,
+  it floats and the diagram keeps its width; Escape closes it).
 
 ### v0.2.17: file icons, a quieter status bar, a diagram click that changed the file
 

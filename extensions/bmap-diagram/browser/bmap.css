@@ -149,6 +149,56 @@
   column-gap: 0;
 }
 
+/* The inspector floats over the diagram's right side, so the diagram keeps
+   its width: shown while something is selected, the editing tips are asked
+   for (?) or the diagram has errors to list; its × folds it to a tab at the
+   edge. (On a narrow screen it docks under the diagram instead, below.) */
+.bmap-workspace,
+.bmap-workspace.is-inspector-collapsed {
+  position: relative;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.bmap-workspace > .bmap-inspector {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  bottom: 10px;
+  z-index: 6;
+  width: min(300px, calc(100% - 64px));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.bmap-workspace:not(.has-inspector) > .bmap-inspector {
+  display: none;
+}
+
+.bmap-workspace > .bmap-inspector.is-collapsed {
+  width: 30px;
+  box-shadow: none;
+}
+
+.bmap-workspace:not(.is-inspector-collapsed) .bmap-inspector-collapse-btn {
+  top: 10px;
+  right: 10px;
+  left: auto;
+  transform: none;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  background: transparent;
+  font-size: 16px;
+}
+
+.bmap-workspace:not(.is-inspector-collapsed) .bmap-inspector-header {
+  padding-right: 26px;
+}
+
+/* The zoom and edit buttons step to the open inspector's left. */
+.bmap-workspace.has-inspector:not(.is-inspector-collapsed) .bmap-controls {
+  right: calc(min(300px, 100% - 64px) + 10px);
+}
+
 .bmap-stage {
   position: relative;
   min-width: 0;
@@ -1168,6 +1218,18 @@
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(140px, 1fr) auto;
     column-gap: 12px;
+  }
+
+  .bmap-workspace > .bmap-inspector,
+  .bmap-workspace > .bmap-inspector.is-collapsed {
+    position: relative;
+    inset: auto;
+    width: auto;
+    box-shadow: none;
+  }
+
+  .bmap-workspace.has-inspector:not(.is-inspector-collapsed) .bmap-controls {
+    right: 12px;
   }
 
   .bmap-stage {

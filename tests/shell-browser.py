@@ -299,9 +299,20 @@ async def main():
             return r.left >= c.left && r.right <= c.right && r.top >= c.top && r.bottom <= c.bottom; })?.dataset.nodeId; }''')
         assert node_id, 'a node in view'
         node = page.locator(f'#preview-output .bmap-node[data-node-id="{node_id}"]')
+        inspector = '''() => [getComputedStyle(document.querySelector("#preview-output .bmap-inspector")).display,
+          Math.round(document.querySelector("#preview-output .bmap-canvas").getBoundingClientRect().width)]'''
+        shown, width = await page.evaluate(inspector)
+        assert shown == 'none', 'nothing selected: no inspector'
         await node.click()
         await page.wait_for_timeout(300)
         assert await page.evaluate(diagram) == before, 'a click on a node rewrote the diagram'
+        assert await page.evaluate(inspector) == ['flex', width], 'selected: the inspector floats over the diagram, which keeps its width'
+        await page.locator('#preview-output .bmap-canvas').focus()
+        await page.keyboard.press('Escape')
+        await page.wait_for_timeout(200)
+        assert (await page.evaluate(inspector))[0] == 'none', 'Escape closes it'
+        await node.click()
+        await page.wait_for_timeout(200)
         box = await node.bounding_box()
         await page.mouse.move(box['x'] + box['width'] / 2, box['y'] + 10)
         await page.mouse.down()
@@ -353,7 +364,7 @@ async def main():
         await browser.close()
         print(json.dumps({'checks': ['file-type lists from File types', 'five menus with their items, groups and shortcuts', 'one menu open at a time', 'live titles',
                                      'menu item runs its command', 'Ctrl+S runs Save', 'a snapshot compared in the diff tab', 'rename keeps the extension (both ways in); delete asks plainly',
-                                     'late menus and commands appear', 'Replace File replaces an image', 'the welcome page from its owners', 'status bar items from their owners', 'Settings sections and fields', 'the trace and its tab', 'a diagram previews as a diagram, fitted; a click saves nothing, a drag moves', 'diagram source: highlighting, toolbar, autocomplete (extension)', 'explorer menu groups; diagram Export As and new diagram (extension)', 'phone menu panel'], 'runtimeErrors': 0}))
+                                     'late menus and commands appear', 'Replace File replaces an image', 'the welcome page from its owners', 'status bar items from their owners', 'Settings sections and fields', 'the trace and its tab', 'a diagram previews as a diagram, fitted; its inspector floats; a click saves nothing, a drag moves', 'diagram source: highlighting, toolbar, autocomplete (extension)', 'explorer menu groups; diagram Export As and new diagram (extension)', 'phone menu panel'], 'runtimeErrors': 0}))
 
 
 asyncio.run(main())

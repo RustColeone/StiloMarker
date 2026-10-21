@@ -345,6 +345,9 @@ In the preview pane the diagram is rendered as an interactive SVG/HTML canvas:
 - Drag nodes to reposition them.
 - Click a node with a linked `file` to open a popup showing that file's content.
 - The canvas auto-saves changes back to the `.bmap` source.
+- In edit mode (✎), selecting a node or connector opens the inspector over
+  the diagram's right side (on a phone, under it); its × folds it to a tab
+  at the edge and Escape closes it. ? shows the editing tips.
 - Opened, a diagram fits its pane (zoomed out to at most 50%; a bigger one
   shows its top-left part), and keeps fitting as the pane resizes until you
   pan or zoom. A diagram you looked at before opens where you left it. ⊡
