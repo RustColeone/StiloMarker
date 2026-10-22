@@ -3399,10 +3399,10 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     root.classList.toggle("is-readonly", !isEditingEnabled());
 
     const toolbar = buildToolbar();
-    const workspace = document.createElement("div");
-    workspace.className = "bmap-workspace";
-    workspace.classList.toggle("is-inspector-collapsed", inspectorCollapsed);
-    workspace.classList.toggle("has-inspector", selection.length > 0 || helpOpen || ast.parseErrors.length > 0); // it floats over the diagram
+    const workArea = document.createElement("div");
+    workArea.className = "bmap-workspace";
+    workArea.classList.toggle("is-inspector-collapsed", inspectorCollapsed);
+    workArea.classList.toggle("has-inspector", selection.length > 0 || helpOpen || ast.parseErrors.length > 0); // it floats over the diagram
 
     const stage = document.createElement("div");
     stage.className = "bmap-stage";
@@ -3631,8 +3631,8 @@ function createBmapView({ container, ...defaultOptions } = {}) {
         if (!isEditingEnabled()) {
           return;
         }
-        const types = event.dataTransfer?.types ?? [];
-        if (!types.includes("text/mdnotes-file-id")) {
+        const offered = event.dataTransfer?.types ?? [];
+        if (!offered.includes("text/mdnotes-file-id")) {
           return;
         }
         event.preventDefault();
@@ -3780,8 +3780,8 @@ function createBmapView({ container, ...defaultOptions } = {}) {
     canvas.append(inner, controls);
     stage.append(canvas);
     stage.append(buildStatusFloat());
-    workspace.append(stage, buildInspector());
-    root.append(toolbar, workspace);
+    workArea.append(stage, buildInspector());
+    root.append(toolbar, workArea);
     container.append(root);
 
     if (prevInspectorScroll) {

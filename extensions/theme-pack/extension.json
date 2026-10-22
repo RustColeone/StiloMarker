@@ -1,6 +1,7 @@
 {
   "about": "More themes for the page: Paper, Midnight, Forest and High Contrast. A theme is data only: the colour tokens it changes from its base (Light or Dark), declared here ('contributes.themes') and copied for the browser by tools/protocol-sync.mjs, so Settings shows them and the page applies one before any code runs. The tokens are listed in app/modules/shell/model/themes.js. Adding a theme is one entry here.",
   "name": "theme-pack",
+  "api": 1,
   "contributes": {
     "themes": [
       {

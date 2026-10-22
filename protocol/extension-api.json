@@ -1,0 +1,51 @@
+{
+  "about": "The extension API: everything an extension (extensions/<name>/) may use of the app, so the core can be frozen and later features come as extensions. Each extension declares the version it is written for ('api' in its extension.json). Adding to this list is not a new version; removing or changing anything listed is, and every extension then declares the new one. tests/structure checks that every extension declares this version and uses only what is listed (static imports, the modules it uses, their members, and the members of what editor.parts() and workspace.project() return), that everything listed still exists, and that docs/EXTENSIONS.md describes all of it. 'alias' is the name an extension's code gives a module's API (the name it is checked under).",
+  "version": 1,
+  "manifest": ["about", "name", "api", "browser", "fileTypes", "contributes"],
+  "contributes": ["settings", "themes"],
+  "kernel": {
+    "static": ["defineModule", "ignore"],
+    "context": ["use", "log"]
+  },
+  "modules": {
+    "shell": {
+      "alias": "shell",
+      "members": ["commands", "menus", "notice", "notify", "confirm", "input", "form", "toast", "copyText", "render", "settings", "pages", "settingsDialog", "statusBar"]
+    },
+    "file-types": {
+      "alias": "types",
+      "members": ["typeOf", "is", "isKnown", "isText", "isImage", "formatOf", "extensionOf", "baseName", "mimeOf", "extensionsOf", "all"],
+      "static": ["builtinTypes"]
+    },
+    "workspace": {
+      "alias": "workspace",
+      "members": ["write", "fits", "isStale", "project", "parts", "events", "location"],
+      "static": ["getPath", "getNode", "getNodeIdByPath", "findChildByName", "isImageFileName", "fileBaseName", "fileTypeExtension", "downloadBlob"],
+      "project": ["getProject", "getActiveFile", "subscribe", "createFile"]
+    },
+    "editor": {
+      "alias": "editor",
+      "members": ["previews", "codeBlocks", "highlighters", "toolbars", "completions", "paneViews", "view", "parts"],
+      "static": ["renderMarkdown", "escapeHtmlAttribute", "getRelativeProjectPath", "normalizePath"],
+      "parts": ["getViewState", "openFileFromExplorer", "updateFileContentFromPreview", "setActiveSourceFile", "setPreviewFile", "typesetPreview", "highlightMarkdownSource", "handleIndentKeydown"]
+    },
+    "explorer": {
+      "alias": "explorer",
+      "members": ["fileMenus", "rootMenus", "newFiles"],
+      "static": ["suggestUniqueFileName"]
+    },
+    "identity": {
+      "alias": "identity",
+      "members": ["account", "token", "events"]
+    },
+    "sync": {
+      "alias": "sync",
+      "members": ["publish", "status", "events"]
+    },
+    "assistant": {
+      "alias": "assistant",
+      "members": [],
+      "static": ["sendGenerationRequest"]
+    }
+  }
+}

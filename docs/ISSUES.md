@@ -62,6 +62,34 @@ that come close together are said (v0.2.36).
 
 ## Fixed
 
+### v0.2.37: the extension API, version 1
+
+Asked for (2026-10-22): settle and document the extension surface, with a
+declaration and tests, before freezing the core.
+
+- **What an extension may use** is listed in `protocol/extension-api.json`
+  (version 1): the manifest's fields; the kernel's `defineModule` and
+  `ignore` and the module context's `use` and `log`; and per module (Shell,
+  File types, Workspace, Editor, Explorer, Identity, Sync, Assistant) the
+  members, the static exports, and what `editor.parts()` and
+  `workspace.project()` return, as the extensions use them today plus the
+  core's other public extension points. `docs/EXTENSIONS.md` (new) describes
+  all of it, with the callbacks' shapes, a skeleton and the steps to add an
+  extension.
+- **Each extension declares the version** it is written for (`"api": 1` in
+  its `extension.json`; all seven now do). One written for another version is
+  refused when the browser's copies are written, and the server leaves its
+  file types out, saying so.
+- **Held both ways by tests**: an extension imports, uses and calls only what
+  is listed; everything listed still exists in the modules; the page names
+  all of it. Adding to the list is not a new version; removing or changing
+  anything is.
+- Two variables in the diagram editor were named like modules' APIs
+  (`types`, a drag's data types; `workspace`, an element) and are renamed:
+  extensions keep those names for the APIs.
+- Tests: `extension-api.test.mjs` (new) and `file-types.test.py` (an
+  extension for another version left out).
+
 ### v0.2.36: a shaky connection is said
 
 Asked for (2026-10-22): O8 is accepted (A3), "but we should warn user about a

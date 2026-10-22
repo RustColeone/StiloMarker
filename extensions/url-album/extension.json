@@ -1,6 +1,7 @@
 {
   "about": "The URL album: a file of named image links, each entry shown under its album in the explorer, opened and previewed on its own, moved between albums and dropped into Markdown as an image. Everything about it lives in this folder; the core only offers extension points. Both ends read 'fileTypes' (the server through File types, the browser through the copy tools/protocol-sync.mjs writes); 'browser' is the module the page starts.",
   "name": "url-album",
+  "api": 1,
   "browser": "browser/index.js",
   "fileTypes": [
     {

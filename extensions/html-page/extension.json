@@ -1,6 +1,7 @@
 {
   "about": "Static HTML pages: .html (and .htm) files, edited as source and previewed in a sandboxed frame. The frame has scripts but never the app's origin (sandbox=\"allow-scripts\", no allow-same-origin): a page cannot reach the app, the account or the workspace; its relative images are embedded as data, so no address with a session token reaches it. Everything about it lives in this folder; the core only offers extension points. Both ends read 'fileTypes' (the server through File types, the browser through the copy tools/protocol-sync.mjs writes); 'browser' is the module the page starts.",
   "name": "html-page",
+  "api": 1,
   "browser": "browser/index.js",
   "fileTypes": [
     {

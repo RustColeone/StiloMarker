@@ -1,6 +1,7 @@
 {
   "about": "Mermaid diagrams: .mmd (and .mermaid) files, edited as text and previewed as their diagram, and ```mermaid blocks drawn in Markdown previews. The Mermaid library is served from this folder (browser/vendor/, pinned; the app's vendor/README.md lists it), loaded the first time a diagram shows (strict mode). Everything about it lives in this folder; the core only offers extension points (File types, the Editor's previews, codeBlocks, highlighters and toolbars, the Explorer's new files). Both ends read 'fileTypes' (the server through File types, the browser through the copy tools/protocol-sync.mjs writes); 'browser' is the module the page starts.",
   "name": "mermaid",
+  "api": 1,
   "browser": "browser/index.js",
   "fileTypes": [
     {

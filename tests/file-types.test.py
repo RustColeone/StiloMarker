@@ -33,6 +33,19 @@ class FileTypeParity(unittest.TestCase):
         missing = [name for name in kept if BUILTIN.is_known(name) and not BUILTIN.is_reserved(name)]
         self.assertEqual(missing, [])
 
+    def test_an_extension_for_another_api_version_is_left_out(self):
+        import tempfile
+        from stilo.modules.file_types.adapters.data import load_types
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, version in (("current", 1), ("newer", 2)):
+                folder = Path(tmp) / name
+                folder.mkdir()
+                (folder / "extension.json").write_text(json.dumps({"name": name, "api": version, "fileTypes": [
+                    {"id": f"{name}type", "label": name, "kind": "text", "format": name, "extensions": {f".{name}x": "text/plain"}, "icon": "is-file", "filters": []}]}))
+            ids = [entry["id"] for entry in load_types(tmp)]
+        self.assertIn("currenttype", ids)
+        self.assertNotIn("newertype", ids)
+
     def test_mime_types(self):
         self.assertEqual(BUILTIN.mime_of("a.JPG"), "image/jpeg")
         self.assertEqual(BUILTIN.extensions_of("persona"), [".persona.skill"])

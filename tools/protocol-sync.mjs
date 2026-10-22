@@ -21,12 +21,23 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
+// The extension API this app offers (protocol/extension-api.json, docs/EXTENSIONS.md).
+export const EXTENSION_API = JSON.parse(readFileSync(join(ROOT, "protocol/extension-api.json"), "utf8")).version;
+
+// An extension written for another API version is refused, before any copy names it.
+export function checkManifest(folder, manifest) {
+  if (manifest.api !== EXTENSION_API) {
+    throw new Error(`extensions/${folder} is written for extension API ${manifest.api ?? "(none)"}; this app offers ${EXTENSION_API} (docs/EXTENSIONS.md)`);
+  }
+  return manifest;
+}
+
 // Every extension's manifest, by folder name.
 export function extensions() {
   const base = join(ROOT, "extensions");
   if (!existsSync(base)) return [];
   return readdirSync(base).sort().filter((name) => existsSync(join(base, name, "extension.json")))
-    .map((name) => ({ folder: name, ...JSON.parse(readFileSync(join(base, name, "extension.json"), "utf8")) }));
+    .map((name) => ({ folder: name, ...checkManifest(name, JSON.parse(readFileSync(join(base, name, "extension.json"), "utf8"))) }));
 }
 
 const extensionTypes = () => extensions().flatMap((extension) =>
