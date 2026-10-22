@@ -61,6 +61,43 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 
 ## Fixed
 
+### v0.2.35: accounts with hashed passwords, and admins who manage them
+
+Before freezing the core (2026-10-22), the last of four. Asked for: hashed
+passwords, a one-time conversion of the account file, and an admin page;
+the first admin named on the command line ("Command line (Recommended)").
+
+- **Passwords hashed** (`identity/model/passwords.py`: salted scrypt,
+  n=2^14, r=8, p=1, compared in constant time). An account file from before
+  keeps them as typed: they still sign in (no one is locked out by the
+  update), and the server says at every load how many need converting.
+- **`server/accounts.py`** (new): `convert --admin <name>` hashes every
+  password once and names the first admin; `list`, `add`, `password`,
+  `admin [--off]`, `remove`. Passwords are asked for (or read from standard
+  input with `--password-stdin`), never given on the command line or
+  printed. The file is written whole and at once, readable by its owner
+  only. The rules are Identity's (`model/accounts.py`, pure), shared with
+  the admin page: names and team names checked, a new password of at least
+  8 characters, and the last admin can be neither removed nor made ordinary.
+- **Settings → Accounts** (new, for an admin): the accounts, their teams and
+  who is an admin (never a password or its hash); add an account, set a
+  password, change teams, make or unmake an admin, remove one. The server
+  keeps the rules and its reason for a refusal is shown. Routes
+  `GET /api/accounts` and `POST /api/accounts` (admins only; in Identity's
+  contract), and the sign-in reply says whether the account is an admin.
+- **A removed account is signed out at once**: an account token whose account
+  is gone from the file no longer works (it did until a restart).
+- A form's password field is taken as typed (not trimmed) and asks the
+  browser for a new password, not a saved one.
+- Tests: `accounts.test.py` (new: hashing, the rules, the file written whole
+  and private, the command line, the admin operations) and
+  `accounts-browser.py` (new, a real backend: an ordinary account sees no
+  page; the admin's list; add, password, teams, remove (signed out at once),
+  a short password refused, the last admin kept); `identity.test.mjs` and
+  `identity.test.py` (the account carries `admin`; a missing flag reads as
+  not an admin); `shell-browser.py` counts only the Settings tabs shown (the
+  Accounts tab is there, hidden, for anyone not an admin).
+
 ### v0.2.34: a live PIN session is never joined again by itself
 
 Found by the desktop test still failing now and then after v0.2.32: the

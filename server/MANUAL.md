@@ -681,6 +681,30 @@ Browser B ──GET /api/events/stream──▶   │ (SSE)
 | Session PIN (default `2468`) | `client` | All operations except `replace-project` |
 | Master PIN (default `1367`) | `master` | All operations including `replace-project` |
 
+### Accounts
+
+A server with an account file (`--whitelist`, or `MDNOTES_WHITELIST`) has
+accounts: each has a name, a password, teams (the folders of projects it can
+open) and may be an **admin**. Passwords are kept hashed (salted scrypt); an
+account file written before that keeps them as typed, and they still sign in
+until it is converted once, on the server:
+
+    python3 server/accounts.py convert --admin <name>
+
+which hashes every password and makes `<name>` the first admin. The same tool
+lists the accounts (`list`), adds one (`add <name> --teams red,blue
+[--admin]`), sets a new password (`password <name>`), makes or unmakes an admin
+(`admin <name> [--off]`) and removes one (`remove <name>`); passwords are
+asked for, never given on the command line or printed. A running server reads
+the file again within seconds.
+
+An admin, signed in, also has **Settings → Accounts**: the accounts, their
+teams and who is an admin; **Add Account…**, **Password…**, **Teams…**, the
+**Admin** box and **Remove** on each. A new password needs at least 8
+characters. The last admin can be neither removed nor made an ordinary account
+(make someone else an admin first). A removed account is signed out at once;
+its projects stay.
+
 ### Chat workspace sync
 
 When a collaboration session is active, the chat thread list is shared across all participants. Any change a participant makes to their chat history is pushed to the server and broadcast to all other connected clients via the `chat-workspace-update` SSE event type.

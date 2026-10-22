@@ -55,7 +55,7 @@ test("signing in, out and in again by itself", async () => {
     assert.equal(h.identity.account(), null);
 
     await h.identity.signIn(" amy ", "pw");
-    assert.deepEqual({ ...h.identity.account(), teams: [...h.identity.account().teams] }, { token: "t1", username: "amy", teams: ["red"] });
+    assert.deepEqual({ ...h.identity.account(), teams: [...h.identity.account().teams] }, { token: "t1", username: "amy", teams: ["red"], admin: false });
     assert.throws(() => { h.identity.account().teams.push("x"); }, TypeError, "callers cannot change the account");
     assert.deepEqual(h.stored, { username: "amy", password: "pw", proven: { [SERVER]: "amy" } });
     assert.equal(h.identity.canRestore(), true);

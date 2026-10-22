@@ -86,9 +86,9 @@ export function createDialogs(doc = document) {
   }
 
   // Asks for several values at once. Each field: { name, label, value?,
-  // type?: "text" | "url", multiline?: true, placeholder? }. The dialog is made on
+  // type?: "text" | "url" | "password", multiline?: true, placeholder? }. The dialog is made on
   // first use; field elements are #form-dialog-field-<name>. Resolves to
-  // { name: trimmed text } or null when cancelled.
+  // { name: trimmed text (a password as typed) } or null when cancelled.
   let form = null;
   function makeForm() {
     const dialog = doc.createElement("dialog");
@@ -123,7 +123,7 @@ export function createDialogs(doc = document) {
         if (field.multiline) control.rows = 4;
         else control.type = field.type ?? "text";
         control.id = `form-dialog-field-${field.name}`;
-        control.autocomplete = "off";
+        control.autocomplete = field.type === "password" ? "new-password" : "off";
         control.placeholder = field.placeholder ?? "";
         control.value = field.value ?? "";
         label.append(caption, control);
@@ -132,7 +132,7 @@ export function createDialogs(doc = document) {
       form.fields.replaceChildren(...inputs.map((input) => input.label));
       form.dialog.addEventListener("close", () => {
         resolve(form.dialog.returnValue === "accept"
-          ? Object.fromEntries(inputs.map((input) => [input.name, input.control.value.trim()]))
+          ? Object.fromEntries(inputs.map((input) => [input.name, input.control.type === "password" ? input.control.value : input.control.value.trim()]))
           : null);
       }, { once: true });
       form.dialog.returnValue = "";

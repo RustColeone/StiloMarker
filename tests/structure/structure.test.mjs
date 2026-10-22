@@ -215,7 +215,7 @@ test("the contracts list every message the code sends and handles (rule 7)", () 
 
   // Types the browser checks on server messages: each in the contract.
   // These are the browser's own words, not messages.
-  const local = new Set(["node", "connector", "del", "add", "same", "image", "text", "link", "touchcancel"]);
+  const local = new Set(["node", "connector", "del", "add", "same", "image", "text", "link", "touchcancel", "password"]);
   const checked = new Set();
   for (const file of files.filter((f) => f.startsWith("app/") || f.startsWith("extensions/"))) {
     for (const m of read(file).matchAll(/\.type === "([a-z-]+)"/g)) if (!local.has(m[1])) checked.add(m[1]);

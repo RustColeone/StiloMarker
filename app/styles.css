@@ -7150,3 +7150,39 @@ pre.proposal-diff-block {
   justify-self: start;
   margin: 4px 0 0 22px;
 }
+
+/* Settings → Accounts (an admin's): the accounts as a compact table. */
+.accounts-admin-actions {
+  margin: 8px 0;
+}
+
+.accounts-admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.accounts-admin-table th,
+.accounts-admin-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.accounts-admin-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.accounts-admin-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.accounts-admin-status {
+  min-height: 16px;
+  color: var(--danger);
+}

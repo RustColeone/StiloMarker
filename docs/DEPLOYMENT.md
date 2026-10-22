@@ -32,6 +32,14 @@ Use `node tools/release-version.mjs 0.1.22` to set the next app release and
 5. Verify public JavaScript assets, the service-worker cache label, and sync in
    a temporary guest workspace. Never use a real writing project for smoke tests.
 
+Accounts (from v0.2.35): the account file may keep its passwords as typed
+until it is converted; the server still signs them in and logs how many
+remain. Convert once, as the service's user, in the service checkout (the
+running server reads the file again within seconds; back the file up first,
+privately):
+
+    python3 server/accounts.py convert --admin <name>
+
 The service restart briefly disconnects tabs. They reconnect; incompatible old
 clients are asked to reload. A conflicting local draft is kept in Snapshots under
 “Recovery: local edits before cloud reload” before loading the cloud version.

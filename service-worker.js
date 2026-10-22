@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v0.2.34";
+const CACHE_NAME = "mdnotes-shell-v0.2.35";
 // The libraries served with the app (vendor/: each in a folder named for its
 // version), kept across the app's versions once used.
 const VENDOR_CACHE = "mdnotes-vendor";
@@ -23,6 +23,7 @@ const APP_SHELL = [
   "./app/domain/project-model.js",
   "./app/services/persona-service.js",
   "./app/modules/identity/adapters/stored-sign-in.js",
+  "./app/modules/identity/adapters/admin-page.js",
   "./app/modules/workspace/adapters/template.js",
   "./app/kernel/index.js",
   "./app/kernel/trace.js",

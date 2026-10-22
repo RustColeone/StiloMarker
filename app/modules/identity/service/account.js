@@ -5,7 +5,7 @@
 import { mayRestore, provenAfterSignIn, provenAfterSignOut } from "../model/credentials.js";
 
 export function createAccount({ api, server, events, log }) {
-  let current = null; // { token, username, teams }
+  let current = null; // { token, username, teams, admin }
   let credentials = { read: () => ({}), write() {} };
 
   function set(next) {
@@ -20,7 +20,7 @@ export function createAccount({ api, server, events, log }) {
     if (!isCurrent()) throw Object.assign(new Error("Session restoration cancelled."), { status: 499 });
     credentials.write({ username: result.username, password, proven: provenAfterSignIn(credentials.read().proven, server.url(), result.username) });
     log(`signed in as ${result.username}`);
-    set({ token: result.token, username: result.username, teams: result.teams ?? [] });
+    set({ token: result.token, username: result.username, teams: result.teams ?? [], admin: result.admin === true });
     return result;
   }
 

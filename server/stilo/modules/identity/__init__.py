@@ -7,11 +7,14 @@ Static, for code from before the restructure:
     Identity, AccountStore, UserPrefs, open_identity(account_file, data_dir)
     ACCOUNT_FILE, ACCESS_FILE, PREFS_FILE
     ROLES, can(role, action)
+    read_accounts(path), write_accounts(path, users), accounts (the rules for
+    changing them, model/accounts.py): for server/accounts.py
 
 API (started by the kernel; config: accounts (an AccountStore), data_dir):
     the Identity (service/identity.py): require(token), require_team(...),
-    access(...), may_open(...), role(...), can(...), claim(...), team_members(team)...
-    It serves the sign-in route (and the ping says whether there are accounts);
+    access(...), may_open(...), role(...), can(...), claim(...), team_members(team)...,
+    accounts_list(token), accounts_change(token, change) (admins only).
+    It serves the sign-in and accounts routes (and the ping says whether there are accounts);
     who may open a project is read and set through Projects' routes.
 """
 from types import SimpleNamespace
@@ -19,7 +22,8 @@ from types import SimpleNamespace
 from stilo.kernel import define_module
 from .adapters import access_file
 from .adapters.access_file import ACCESS_FILE  # noqa: F401
-from .adapters.account_file import ACCOUNT_FILE, AccountStore  # noqa: F401
+from .adapters.account_file import ACCOUNT_FILE, AccountStore, read_accounts, write_accounts  # noqa: F401
+from .model import accounts  # noqa: F401
 from .adapters.prefs_file import PREFS_FILE, UserPrefs  # noqa: F401
 from .adapters.routes import add_routes
 from .model.access import ROLES, can, refusal  # noqa: F401

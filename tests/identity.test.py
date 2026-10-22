@@ -57,7 +57,7 @@ class SigningIn(unittest.TestCase):
             reply = identity.login(" amy ", "pw")
             self.assertEqual((reply["username"], reply["teams"], reply["lastWorkspace"]), ("amy", ["red"], None))
             token = reply["token"]
-            self.assertEqual(identity.who(token), {"username": "amy", "teams": ["red"]})
+            self.assertEqual(identity.who(token), {"username": "amy", "teams": ["red"], "admin": False})
             store.path.write_text(json.dumps({"users": [{"username": "amy", "password": "pw", "teams": ["red", "blue"]}]}))
             store._checked = 0
             self.assertEqual(identity.require(token)["teams"], ["red", "blue"])

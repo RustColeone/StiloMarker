@@ -5,7 +5,7 @@
   "owns": {
     "names": ["account file", "access file", "account prefs file"],
     "state": ["account sign-ins"],
-    "routes": ["/api/auth/login"],
+    "routes": ["/api/auth/login", "/api/accounts"],
     "rules": ["who may open a project", "roles", "what each role may do"]
   }
 }

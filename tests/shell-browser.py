@@ -207,7 +207,7 @@ async def main():
         # declared by Shell, the Editor, Workspace and the diagram, each showing
         # its setting; a change takes effect whoever owns it.
         await page.evaluate('window.__shellTest.shell.settingsDialog.open("appearance")')
-        tabs = await page.evaluate('[...document.querySelectorAll("#settings-tab-strip [data-page]")].map((b) => [b.dataset.page, b.getAttribute("aria-selected")])')
+        tabs = await page.evaluate('[...document.querySelectorAll("#settings-tab-strip [data-page]")].filter((b) => !b.hidden).map((b) => [b.dataset.page, b.getAttribute("aria-selected")])')
         assert tabs == [['appearance', 'true'], ['agent', 'false'], ['collaboration', 'false']], tabs
         fields = await page.evaluate('[...document.querySelectorAll("#settings-panel-appearance [data-settings-fields] select, #settings-panel-appearance [data-settings-fields] input")].map((c) => c.id)')
         assert fields == ['explorer-select', 'explorer-anchor-select', 'preview-select', 'source-font-size-select',

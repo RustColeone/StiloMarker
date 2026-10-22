@@ -5,6 +5,7 @@ import secrets
 import threading
 
 from stilo.kernel.log import log as _log
+from ..model import accounts as account_rules
 from ..model.access import can, changed_access, may_open, owned_by_other, owner_record, require_owner, role_of
 
 
@@ -34,17 +35,22 @@ class Identity:
         with self._lock:
             self._tokens[token] = identity["username"]
         _log("AUTH", f"{identity['username']} logged in", teams=identity["teams"])
-        return {"token": token, "username": identity["username"], "teams": identity["teams"],
+        return {"token": token, "username": identity["username"], "teams": identity["teams"], "admin": identity["admin"],
                 "lastWorkspace": self.prefs.get(identity["username"]).get("lastWorkspace")}
 
     def who(self, token: str) -> dict | None:
-        """{username, teams} for an account token, or None. Teams are read from
-        the account file each time, so a change there applies at once."""
+        """{username, teams, admin} for an account token, or None. They are read
+        from the account file each time, so a change there applies at once, and
+        an account removed from it is signed out."""
         with self._lock:
             username = self._tokens.get(token)
         if username is None:
             return None
-        return {"username": username, "teams": self.accounts.teams_for(username)}
+        if not self.accounts.exists(username):
+            with self._lock:
+                self._tokens.pop(token, None)
+            return None
+        return {"username": username, "teams": self.accounts.teams_for(username), "admin": self.accounts.is_admin(username)}
 
     def require(self, token: str) -> dict:
         identity = self.who(token)
@@ -60,6 +66,46 @@ class Identity:
             raise PermissionError("You are not a member of that team")
         return team
 
+    # ---- the admin page (admins only; the rules are model/accounts.py) -------
+
+    def _require_admin(self, token: str) -> dict:
+        identity = self.require(token)
+        if not identity["admin"]:
+            raise PermissionError("Only an admin can manage accounts")
+        return identity
+
+    def accounts_list(self, token: str) -> list[dict]:
+        """Every account, its teams and whether it is an admin (never a password)."""
+        self._require_admin(token)
+        self.accounts.refresh(0)
+        return account_rules.listing(self.accounts.users)
+
+    def accounts_change(self, token: str, change: dict) -> list[dict]:
+        """One change (add, password, teams, admin, remove), kept in the account
+        file; the accounts as they then are. A removed account is signed out."""
+        admin = self._require_admin(token)
+        action, username = str(change.get("action", "")), str(change.get("username", "")).strip()
+        with self._lock:
+            self.accounts.refresh(0)  # the file as it is now (server/accounts.py may have changed it)
+            users = self.accounts.users
+            if action == "add":
+                users = account_rules.add_account(users, username, str(change.get("password", "")), change.get("teams") or [], change.get("admin") is True)
+            elif action == "password":
+                users = account_rules.set_password(users, username, str(change.get("password", "")))
+            elif action == "teams":
+                users = account_rules.set_teams(users, username, change.get("teams") or [])
+            elif action == "admin":
+                users = account_rules.set_admin(users, username, change.get("admin") is True)
+            elif action == "remove":
+                users = account_rules.remove_account(users, username)
+            else:
+                raise ValueError(f"Unknown change: {action!r}")
+            self.accounts.save(users)
+            if action == "remove":
+                self._tokens = {token: name for token, name in self._tokens.items() if name != username}
+        _log("AUTH", f"{admin['username']} changed accounts: {action} {username}")
+        return account_rules.listing(self.accounts.users)
+
     def logout(self, token: str) -> None:
         with self._lock:
             self._tokens.pop(token, None)
@@ -68,7 +114,7 @@ class Identity:
         return self.accounts.team_members(team)
 
     def member(self, username: str) -> dict:
-        return {"username": username, "teams": self.accounts.teams_for(username)}
+        return {"username": username, "teams": self.accounts.teams_for(username), "admin": self.accounts.is_admin(username)}
 
     def remember_workspace(self, username: str, team: str, path: str) -> None:
         self.prefs.set_last_workspace(username, team, path)
