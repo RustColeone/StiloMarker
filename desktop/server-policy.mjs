@@ -70,10 +70,31 @@ export function forwardHeaders(headers) {
 // accounts and data: this app's folder: accounts.json, if one is put there),
 // where it listens and its PINs.
 // It ends with the app (parentPid), even when the app does not quit cleanly.
+// The account file of the server this app runs, beside its other data.
+export const ACCOUNTS_FILE = "accounts.json";
+
 export function serverArgs({ script, port, lan, pin, masterPin, staticDir, dataDir, join, parentPid = null }) {
   return [script, "--host", lan ? "0.0.0.0" : "127.0.0.1", "--port", String(port), "--pin", pin, "--master-pin", masterPin,
-    "--static-dir", staticDir, "--state-file", join(dataDir, "session-state.json"), "--whitelist", join(dataDir, "accounts.json"),
+    "--static-dir", staticDir, "--state-file", join(dataDir, "session-state.json"), "--whitelist", join(dataDir, ACCOUNTS_FILE),
     "--data-dir", join(dataDir, "data"), ...(parentPid ? ["--parent-pid", String(parentPid)] : [])];
+}
+
+// The server's own tool (server/accounts.py: its rules and its hashing)
+// making the first admin of that file: the password goes on standard input,
+// and the name after "--", so no name is taken for an option.
+export function firstAdminArgs({ script, dataDir, username, join }) {
+  return [script, "--file", join(dataDir, ACCOUNTS_FILE), "--password-stdin", "add", "--admin", "--", username];
+}
+
+// How many accounts an account file's text holds (0 for none, or for one that does not read).
+export function accountCount(text) {
+  try {
+    const data = JSON.parse(text);
+    return Array.isArray(data?.users) ? data.users.length : 0;
+  } catch (error) {
+    if (error instanceof SyntaxError) return 0; // not an account file: no accounts to speak of
+    throw error;
+  }
 }
 
 // The Pythons to try, in order: the one named in STILO_PYTHON, then the usual names.

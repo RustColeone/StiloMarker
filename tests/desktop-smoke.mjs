@@ -8,7 +8,8 @@
 //   STILO_SMOKE_PHASE    "first" (a fresh profile) or "again" (the same, reopened);
 //                        "serve" (a fresh profile: runs a server, shares on it),
 //                        "serve-again" (the same, reopened: back on it by itself),
-//                        "remote" (another server: STILO_SMOKE_REMOTE, its PIN STILO_SMOKE_REMOTE_PIN)
+//                        "remote" (another server: STILO_SMOKE_REMOTE, its PIN STILO_SMOKE_REMOTE_PIN),
+//                        "accounts" (a fresh profile: accounts turned on, the first admin signed in)
 //   STILO_SMOKE_PORT     the port for the server it runs
 import { createServer } from "node:http";
 import { app } from "electron";
@@ -185,6 +186,27 @@ async function serveAgain(win) {
   finish();
 }
 
+// Accounts on the server this app runs: off at first; turned on from
+// Settings → Server (the first admin asked there), then signed in as it.
+async function accounts(win) {
+  const contents = win.webContents;
+  await chooseServer(contents, "local", { port: Number(process.env.STILO_SMOKE_PORT) });
+  await until(contents, "document.querySelector('#desktop-server-status').textContent.startsWith('Running')", "the server running", 60);
+  const said = () => page(contents, "return document.querySelector('#desktop-server-accounts-status').textContent;");
+  found.before = await said();
+  await page(contents, 'document.querySelector("#desktop-server-accounts-on").click();');
+  await until(contents, "document.querySelector('#form-dialog')?.open === true", "the first admin asked", 10);
+  await page(contents, `document.querySelector("#form-dialog-field-username").value = "leo";
+    document.querySelector("#form-dialog-field-password").value = "a long password";
+    document.querySelector("#form-dialog-field-again").value = "a long password";
+    document.querySelector("#form-dialog-submit-button").click();`);
+  await until(contents, "window.__ui.identity.account()?.admin === true", "signed in as the admin", 30);
+  found.after = await said();
+  found.button = await page(contents, 'return document.querySelector("#desktop-server-accounts-on").hidden;');
+  found.accountsPage = await page(contents, 'return !document.querySelector(\'#settings-tab-strip [data-page="accounts"]\')?.hidden;');
+  finish();
+}
+
 async function remote(win) {
   const contents = win.webContents;
   await chooseServer(contents, "remote", { url: process.env.STILO_SMOKE_REMOTE });
@@ -218,7 +240,7 @@ start({ root, userData, feed,
     win.webContents.once("did-finish-load", async () => {
       try {
         await until(win.webContents, 'window.__ui && document.querySelector("#explorer-tree .tree-row")', "the app started");
-        await ({ again, serve, "serve-again": serveAgain, remote }[phase] ?? first)(win);
+        await ({ again, serve, "serve-again": serveAgain, remote, accounts }[phase] ?? first)(win);
       } catch (error) {
         finish({ failed: String(error?.message ?? error) });
       }

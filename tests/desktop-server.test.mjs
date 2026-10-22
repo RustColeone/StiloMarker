@@ -1,16 +1,17 @@
 // The desktop app's server (desktop/server-policy.mjs, desktop/server.mjs):
 // the choice kept, where requests go, the server's command line, which Python
 // runs it; and the server itself started, answering, and stopped (this
-// computer's Python, a temporary folder). The app in Electron: desktop-browser.py.
+// computer's Python, a temporary folder); its accounts counted, and its first
+// admin made by the server's own tool. The app in Electron: desktop-browser.py.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { forwardHeaders, forwardTarget, forwardUrl, lanAddresses, LOCAL_PORT, pythonCandidates, pythonUsable, serverAddress,
-  serverArgs, serverChoice } from "../desktop/server-policy.mjs";
+import { ACCOUNTS_FILE, accountCount, firstAdminArgs, forwardHeaders, forwardTarget, forwardUrl, lanAddresses, LOCAL_PORT, pythonCandidates,
+  pythonUsable, serverAddress, serverArgs, serverChoice } from "../desktop/server-policy.mjs";
 import { createLocalServer, findPython } from "../desktop/server.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -128,4 +129,39 @@ test("desktop server: without a usable Python it says so", async () => {
   const state = await server.start({ port: 8765, lan: false, pin: "1", masterPin: "2" });
   assert.equal(state.status, "failed");
   assert.match(state.reason, /Python 3\.10 or later/);
+});
+
+test("desktop server: its accounts: the file, how many, the tool's command line", () => {
+  const args = firstAdminArgs({ script: "/app/server/accounts.py", dataDir: "/data", username: "--admin", join });
+  assert.deepEqual(args, ["/app/server/accounts.py", "--file", join("/data", ACCOUNTS_FILE), "--password-stdin", "add", "--admin", "--", "--admin"],
+    "the password on standard input; a name after --, never an option");
+  assert.ok(serverArgs({ script: "s", port: 1, lan: false, pin: "1", masterPin: "2", staticDir: "/w", dataDir: "/data", join })
+    .join(" ").includes(`--whitelist ${join("/data", ACCOUNTS_FILE)}`), "the server reads the same file");
+  assert.equal(accountCount('{"users": [{"username": "a"}, {"username": "b"}]}'), 2);
+  assert.equal(accountCount('{"users": []}'), 0);
+  assert.equal(accountCount("not json"), 0);
+});
+
+test("desktop server: its first admin, made by the server's own tool, and only the first", { timeout: 60000 }, async (t) => {
+  if (!await findPython()) { t.skip("no Python 3.10 or later here"); return; }
+  const dataDir = await mkdtemp(join(tmpdir(), "stilo-desktop-accounts-"));
+  const server = createLocalServer({ serverDir: join(ROOT, "server"), staticDir: ROOT, dataDir });
+  try {
+    assert.equal(await server.accounts(), 0, "none at first: PINs only");
+    const short = await server.firstAdmin("leo", "short");
+    assert.match(short.error, /at least 8 characters/, "the server's rules, its words");
+    assert.equal(await server.accounts(), 0);
+    assert.deepEqual(await server.firstAdmin("leo", "a long password"), { ok: true });
+    assert.equal(await server.accounts(), 1);
+    const file = join(dataDir, ACCOUNTS_FILE);
+    const [account] = JSON.parse(await readFile(file, "utf8")).users;
+    assert.deepEqual([account.username, account.admin], ["leo", true]);
+    assert.match(account.password, /^scrypt\$/, "hashed");
+    if (process.platform !== "win32") assert.equal((await stat(file)).mode & 0o777, 0o600, "readable by its owner only");
+    const again = await server.firstAdmin("mia", "another long one");
+    assert.match(again.error, /accounts already/, "only the first; the admins manage the rest");
+    assert.equal(await server.accounts(), 1);
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
 });

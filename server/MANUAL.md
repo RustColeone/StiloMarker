@@ -89,6 +89,12 @@ where other devices open it (in their browser) and the PIN they join with;
 remembers: next time it starts the server again and gets back on it by
 itself. Running a server here needs Python 3.10 or later.
 
+That server takes PINs only until **Turn On Accounts…** (under it): you name
+its first admin and a password (at least 8 characters), the app makes the
+account and signs you in as it. From then on others sign in with accounts
+the admin adds in **Settings → Accounts**. There is no default account or
+password; turning accounts on is offered only while there are none.
+
 ---
 
 ## 2. Project Model
@@ -704,6 +710,9 @@ lists the accounts (`list`), adds one (`add <name> --teams red,blue
 (`admin <name> [--off]`) and removes one (`remove <name>`); passwords are
 asked for, never given on the command line or printed. A running server reads
 the file again within seconds.
+
+(In the desktop app, the server it runs gets its first admin from
+**Settings → Server → Turn On Accounts…** instead.)
 
 An admin, signed in, also has **Settings → Accounts**: the accounts, their
 teams and who is an admin; **Add Account…**, **Password…**, **Teams…**, the

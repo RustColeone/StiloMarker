@@ -141,14 +141,20 @@ export function start({ root = webRoot(), server = serverRoot(), userData = null
   const tell = () => { if (win && !win.isDestroyed()) win.webContents.send("stilo:server-changed", serverState()); };
   const local = createLocalServer({ serverDir: server, staticDir: root, dataDir: join(app.getPath("userData"), "server"), onState: tell });
   const target = () => (choice.connect === "local" ? (local.state().status === "running" ? local.state().local : null) : forwardTarget(choice));
+  // How many accounts the server this app runs has (0: it takes PINs only).
+  let accountsHere = 0;
+  const countAccounts = async () => {
+    accountsHere = await local.accounts().catch((error) => { console.warn("Could not read the server's account file:", error.message); return accountsHere; });
+  };
   const serverState = () => ({ connect: choice.connect, remoteUrl: choice.remoteUrl, port: choice.local.port, lan: choice.local.lan,
-    pin: choice.local.pin, masterPin: choice.local.masterPin, local: local.state() });
+    pin: choice.local.pin, masterPin: choice.local.masterPin, local: local.state(), accounts: accountsHere });
   async function apply(next) {
     choice = serverChoice(next);
     await mkdir(app.getPath("userData"), { recursive: true });
     await writeFile(settingsFile(), `${JSON.stringify(choice, null, 2)}\n`, { mode: 0o600 });
     if (choice.connect === "local") await local.start(choice.local);
     else await local.stop();
+    await countAccounts();
     tell();
     return serverState();
   }
@@ -177,6 +183,15 @@ export function start({ root = webRoot(), server = serverRoot(), userData = null
     ipcMain.handle("stilo:server-choose", (event, next) => {
       if (!fromApp(event) || !next || typeof next !== "object") return null;
       return apply({ ...choice, ...next, local: { ...choice.local, ...(next.local ?? {}), pin: choice.local.pin, masterPin: choice.local.masterPin } });
+    });
+    // Accounts on the server this app runs: its first admin (whoever has this
+    // app is trusted with that, as shell access is on a hosted server).
+    ipcMain.handle("stilo:server-first-admin", async (event, request) => {
+      if (!fromApp(event) || typeof request?.username !== "string" || typeof request?.password !== "string") return null;
+      const made = await local.firstAdmin(request.username.slice(0, 200), request.password.slice(0, 1024));
+      await countAccounts();
+      tell();
+      return made;
     });
     // The app draws its own menus; macOS needs its application and Edit menus (copy and paste).
     Menu.setApplicationMenu(process.platform === "darwin"

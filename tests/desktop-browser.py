@@ -45,7 +45,7 @@ for entry in WEB:
     (shutil.copytree(source, SITE / entry, ignore=shutil.ignore_patterns("server", "__pycache__", "*.py")) if source.is_dir()
      else (SITE.mkdir(exist_ok=True), shutil.copy(source, SITE / entry)))
 with open(SITE / "app/main.js", "ab") as main:
-    main.write(app_hook("window.__ui = { shell, controller, sync: modules.sync };"))
+    main.write(app_hook("window.__ui = { shell, controller, sync: modules.sync, identity };"))
 # A fresh profile starts with one note (a formula, a link, a diagram), shown in the preview.
 NOTE = {"id": "smoke", "name": "Smoke", "sourceMode": "memory", "rootId": "root", "activeFileId": "n", "nodes": {
     "root": {"id": "root", "kind": "folder", "name": "Smoke", "children": ["n"], "expanded": True},
@@ -187,6 +187,15 @@ try:
         assert far["ping"] == [200, "pong"] and far["none"] == [503, "offline"], far
     finally:
         other.terminate()
+
+    # Accounts on the server this app runs: off; turned on from Settings → Server; the first admin signed in.
+    ACCOUNTED = Path(TMP.name) / "accounted"
+    turned = result(electron("accounts", profile=ACCOUNTED, extra={"STILO_SMOKE_PORT": str(free_port())}))
+    assert not turned.get("failed"), turned
+    assert turned["before"].startswith("Accounts: off") and turned["after"].startswith("Accounts: on (1)"), turned
+    assert turned["button"] is True and turned["accountsPage"] is True, turned
+    kept = json.loads((ACCOUNTED / "server" / "accounts.json").read_text())["users"]
+    assert [(u["username"], u.get("admin")) for u in kept] == [("leo", True)] and kept[0]["password"].startswith("scrypt$"), "hashed, an admin"
 finally:
     TMP.cleanup()
 
@@ -198,4 +207,5 @@ print(json.dumps({"checks": ["loads from app://stilo/; no server, answered at on
                              "reopened: the work is there; a second start hands over and quits",
                              "its server: run here, reached through the app, shared on; someone else joins and finds the typing",
                              "reopened: the server starts again and the app is back on its session by itself; quit: it stops",
-                             "another server: reached and joined; none: offline"], "runtimeErrors": 0}))
+                             "another server: reached and joined; none: offline",
+                             "accounts: off, turned on from Settings → Server, the first admin (hashed) signed in"], "runtimeErrors": 0}))

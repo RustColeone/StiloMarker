@@ -94,7 +94,7 @@ test("desktop: the build carries the app's files and the server's code, never it
 test("desktop: the page gets only the bridge's calls, in an isolated, sandboxed window", () => {
   const preload = readFileSync(join(ROOT, "desktop/preload.cjs"), "utf8");
   assert.deepEqual([...preload.matchAll(/ipcRenderer\.invoke\("([^"]+)"/g)].map((m) => m[1]),
-    ["stilo:version", "stilo:check-update", "stilo:open-update", "stilo:server-state", "stilo:server-choose"]);
+    ["stilo:version", "stilo:check-update", "stilo:open-update", "stilo:server-state", "stilo:server-choose", "stilo:server-first-admin"]);
   assert.deepEqual([...preload.matchAll(/ipcRenderer\.on\("([^"]+)"/g)].map((m) => m[1]), ["stilo:server-changed"]);
   const main = readFileSync(join(ROOT, "desktop/app.mjs"), "utf8");
   for (const setting of ["contextIsolation: true", "sandbox: true", "nodeIntegration: false"]) assert.ok(main.includes(setting), setting);

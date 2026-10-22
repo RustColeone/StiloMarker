@@ -9,7 +9,7 @@
 // The choice is kept by the desktop app: at the next start that server is
 // started again, and the app reconnects to its session as it would to any
 // (Remember & reconnect).
-export function addDesktopServer({ dialog, settings, sync, ping = () => {}, log = () => {}, doc = globalThis.document,
+export function addDesktopServer({ dialog, settings, sync, shell, identity, ping = () => {}, log = () => {}, doc = globalThis.document,
   bridge = globalThis.window?.stiloDesktop?.server }) {
   if (!bridge || !doc) return null;
   // A page of the Settings dialog, beside the others (their panels are in index.html).
@@ -30,6 +30,10 @@ export function addDesktopServer({ dialog, settings, sync, ping = () => {}, log 
       <div class="desktop-server-local">
         <label>Port <input id="desktop-server-port" type="number" min="1024" max="65535" step="1"></label>
         <label class="checkbox-row"><input id="desktop-server-lan" type="checkbox"><span>Other devices on this network can connect</span></label>
+        <div class="desktop-server-accounts">
+          <span id="desktop-server-accounts-status" class="subtle-label"></span>
+          <button id="desktop-server-accounts-on" type="button" hidden>Turn On Accounts…</button>
+        </div>
       </div>
       <label class="checkbox-row"><input type="radio" name="desktop-server" value="remote"><span>Connect to another server</span></label>
       <div class="desktop-server-remote">
@@ -66,6 +70,39 @@ export function addDesktopServer({ dialog, settings, sync, ping = () => {}, log 
     $(".desktop-server-remote").hidden = next.connect !== "remote";
     $("#desktop-server-status").textContent = describe(next);
     $("#desktop-server-join").hidden = !(next.connect === "local" && next.local?.status === "running");
+    const accounts = Number(next.accounts ?? 0);
+    $("#desktop-server-accounts-status").textContent = accounts
+      ? `Accounts: on (${accounts}). An admin manages them in Settings → Accounts.`
+      : "Accounts: off. Others join with the session's PIN.";
+    $("#desktop-server-accounts-on").hidden = accounts > 0 || next.connect !== "local";
+  }
+
+  // Accounts on this computer's server: the first admin, asked here (whoever
+  // has this app is trusted with that, as shell access is on a hosted
+  // server), made by the server's own tool, then signed in.
+  async function turnOnAccounts() {
+    const values = await shell.form({ eyebrow: "Server", title: "Turn On Accounts", submitLabel: "Turn On",
+      message: "The first account is this server's admin: it adds the others in Settings → Accounts. A password needs at least 8 characters.",
+      fields: [{ name: "username", label: "Admin's name" }, { name: "password", label: "Password", type: "password" },
+        { name: "again", label: "Password again", type: "password" }] });
+    if (!values) return;
+    if (values.password !== values.again) { shell.notify("The two passwords differ."); return; }
+    const made = await bridge.firstAdmin(values.username, values.password);
+    if (!made?.ok) { shell.notify(made?.error ?? "The account was not made."); return; }
+    log("Accounts turned on", values.username);
+    ping();
+    // The server reads its account file again within seconds: signed in once it has.
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      try {
+        await identity.signIn(values.username, values.password);
+        shell.toast(`Accounts are on: you are signed in as ${values.username}, this server's admin.`, { duration: 6000 });
+        return;
+      } catch (error) {
+        log("Signing in as the new admin: not yet", error.message);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
+    shell.notify(`Accounts are on. Sign in as ${values.username} in Settings → Collaboration.`);
   }
 
   // The server came up (or changed): the app finds it, and a session it was
@@ -114,9 +151,10 @@ export function addDesktopServer({ dialog, settings, sync, ping = () => {}, log 
   });
   $("#desktop-server-apply").addEventListener("click", () => void choose());
   $("#desktop-server-join").addEventListener("click", () => void join());
+  $("#desktop-server-accounts-on").addEventListener("click", () => void turnOnAccounts());
   bridge.onChange((next) => { const was = state; show(next); if (was?.local?.status !== next.local?.status) void followed(next); });
   void bridge.state().then((next) => { if (next) show(next); });
 
   dialog.addPage({ id: "desktop-server", label: "Server", order: 25, body: panel });
-  return { show, choose, join };
+  return { show, choose, join, turnOnAccounts };
 }

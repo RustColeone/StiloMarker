@@ -62,6 +62,36 @@ that come close together are said (v0.2.36).
 
 ## Fixed
 
+### v0.2.38: accounts in the desktop app, turned on from its Server page
+
+Asked (2026-10-22): what happens for a user setting up accounts in the
+desktop app, and could it give an initial account and password? Chosen: set
+up in the app, no default password ("A").
+
+- **Turn On Accounts…** (new, Settings → Server, when the app runs its own
+  server): the first admin's name and password (twice) are asked; the
+  desktop app makes the account with the server's own tool
+  (`server/accounts.py add --admin`, the password on standard input, the
+  name after `--`), so the rules and the hashing are the server's; the
+  server reads the file again within seconds and the app signs in as the
+  admin, who then has Settings → Accounts. Before, the desktop server had no
+  account file and no way to make one without a terminal.
+- **Only the first**: refused once the server has accounts (the admins
+  manage the rest); the page says whether accounts are on and how many.
+  There is no default account or password, so a server open to the network
+  never has a guessable admin. Turning accounts off is not offered (projects
+  belong to accounts by then).
+- Desktop: `desktop/server.mjs` (`accounts()`, `firstAdmin()`),
+  `server-policy.mjs` (`ACCOUNTS_FILE`, `firstAdminArgs`, `accountCount`), a
+  bridge call (`stilo:server-first-admin`; the server's state carries the
+  count), and the page (`cloud/adapters/desktop-server.js`).
+- Tests: `desktop-server.test.mjs` (the tool's command line; the first admin
+  made by the real tool, hashed, readable by its owner only; a short
+  password refused in the server's words; a second refused),
+  `desktop.test.mjs` (the bridge's calls), `desktop-browser.py` (a new phase
+  in Electron: off, turned on from the page, the first admin hashed and
+  signed in, Settings → Accounts shown).
+
 ### v0.2.37: the extension API, version 1
 
 Asked for (2026-10-22): settle and document the extension surface, with a

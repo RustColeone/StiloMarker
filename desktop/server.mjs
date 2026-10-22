@@ -3,13 +3,14 @@
 // Python, its state, accounts and data in this app's folder, listening on
 // this computer only or (lan) for other devices on the network too. Its
 // state is told as it changes: stopped, starting, running (port, the
-// addresses others use), failed (why).
+// addresses others use), failed (why). Its accounts: how many there are,
+// and the first admin made (after that, the admins manage them in the app).
 import { execFile, spawn } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { connect, createServer } from "node:net";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
-import { lanAddresses, pythonCandidates, pythonUsable, serverArgs } from "./server-policy.mjs";
+import { ACCOUNTS_FILE, accountCount, firstAdminArgs, lanAddresses, pythonCandidates, pythonUsable, serverArgs } from "./server-policy.mjs";
 
 const ASK_PYTHON = "import sys; print('%d.%d' % sys.version_info[:2])";
 const UP_WITHIN = 20000; // ms for the server to take connections
@@ -121,5 +122,35 @@ export function createLocalServer({ serverDir, staticDir, dataDir, onState = () 
     return set({ status: "running", port: listening, lan, addresses, local: `http://127.0.0.1:${listening}`, python: found.version });
   }
 
-  return { start, stop, kill, state: () => state };
+  // How many accounts the server has (only that leaves the file).
+  async function accounts() {
+    try {
+      return accountCount(await readFile(join(dataDir, ACCOUNTS_FILE), "utf8"));
+    } catch (error) {
+      if (error.code === "ENOENT") return 0; // none yet: the server takes PINs only
+      throw error;
+    }
+  }
+
+  // The first admin, made with the server's own tool (its rules, its hashing),
+  // the password on standard input: { ok: true } or { error }. Refused once
+  // the server has accounts: the admins manage them in Settings → Accounts.
+  async function firstAdmin(username, password) {
+    if (await accounts()) return { error: "This server has accounts already: an admin manages them in Settings → Accounts." };
+    const found = await python();
+    if (!found) return { error: "Python 3.10 or later is needed to run a server on this computer (python.org)." };
+    await mkdir(dataDir, { recursive: true });
+    const args = [...found.pre, ...firstAdminArgs({ script: join(serverDir, "accounts.py"), dataDir, username, join })];
+    return new Promise((resolve) => {
+      const tool = spawn(found.cmd, args, { cwd: serverDir, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+      let said = "";
+      tool.stdout.resume(); // "Added …": nothing to keep
+      tool.stderr.on("data", (chunk) => { said = (said + chunk).slice(-2000); });
+      tool.on("error", (error) => resolve({ error: error.message }));
+      tool.on("exit", (code) => resolve(code === 0 ? { ok: true } : { error: lastLine(said).replace(/^accounts:\s*/, "") || "The account was not made." }));
+      tool.stdin.end(`${password}\n`);
+    });
+  }
+
+  return { start, stop, kill, state: () => state, accounts, firstAdmin };
 }

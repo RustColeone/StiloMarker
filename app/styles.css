@@ -7028,6 +7028,18 @@ pre.proposal-diff-block {
   user-select: text;
 }
 
+/* Its accounts: on or off, and the first admin. */
+.desktop-server-accounts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.desktop-server-accounts button[hidden] {
+  display: none;
+}
+
 /* Find in Files (editor/adapters/search-files.js): a section of the left area
    (or a tab, moved); its results scroll inside it, so the file tree keeps its room. */
 .search-files {

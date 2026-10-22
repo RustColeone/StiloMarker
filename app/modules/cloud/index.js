@@ -30,7 +30,7 @@ export default defineModule({
     const shell = ctx.use("shell");
     addCollaborationSettings({ dialog: shell.settingsDialog, settings: shell.settings, desktop: shell.desktop });
     // The desktop app: the server it connects to, or runs (Settings → Server).
-    if (shell.desktop) addDesktopServer({ dialog: shell.settingsDialog, settings: shell.settings, sync: ctx.use("sync"),
+    if (shell.desktop) addDesktopServer({ dialog: shell.settingsDialog, settings: shell.settings, sync: ctx.use("sync"), shell, identity: ctx.use("identity"),
       ping: () => parts?.pingCurrentServer(), log: (message, detail) => shell.log("response", message, detail ?? "") });
     let parts = null;
     addServerItem({ shell, sync: ctx.use("sync"), identity: ctx.use("identity"), ping: () => parts?.pingCurrentServer() });
