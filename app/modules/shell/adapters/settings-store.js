@@ -56,6 +56,8 @@ function coreDefaults() {
     // app can auto-reconnect on next load or after a dropped connection.
     wasConnected: false,
     showFormatToolbar: false,
+    // The browser's spelling check in the source editor (its own dictionary, its language).
+    spellcheck: false,
     // Accounts mode (state 3) auto-restore. Credentials are plaintext (matching
     // the server whitelist choice). accountSuccess maps a normalized server URL
     // to the username that last logged in there successfully — auto-login only

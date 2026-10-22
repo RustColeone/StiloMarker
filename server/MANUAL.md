@@ -855,6 +855,11 @@ When a user asks you to update a character file after new writing:
   navy), **Forest** (dark green) and **High Contrast** (black, white and bright
   outlines). A click applies it at once; it is kept in this browser.
   `Change Theme…` (type it in the Log's command line) opens the cards.
+- **Check spelling** — Settings → Appearance: the browser's spelling check
+  in the source editor (off at first), with the browser's own dictionary and
+  language; a misspelled word is underlined, and a right click offers its
+  suggestions (in the desktop app too, with Add to Dictionary). Kept in this
+  browser.
 
 ---
 

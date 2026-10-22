@@ -110,4 +110,5 @@ export function addEditorSettings({ dialog, settings, doc = globalThis.document 
   dialog.fields.add({ page, id: "indent-style-select", order: 80, label: "Tab Key Inserts", key: "indentStyle", control: "select",
     options: [["tab", "Tab"], ["spaces", "4 Spaces"]] });
   dialog.fields.add({ page, id: "format-toolbar-input", order: 90, label: "Show markdown formatting toolbar", key: "showFormatToolbar", control: "checkbox" });
+  dialog.fields.add({ page, id: "spellcheck-input", order: 95, label: "Check spelling (the browser's dictionary)", key: "spellcheck", control: "checkbox" });
 }

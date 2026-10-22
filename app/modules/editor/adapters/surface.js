@@ -178,6 +178,7 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
       }
     }
     if (changed.includes("showFormatToolbar")) app.refreshFormatToolbar();
+    if (changed.includes("spellcheck")) app.elements.editorContent.spellcheck = Boolean(settings.spellcheck);
   });
   shell.commands.add({ id: "preview.save-pdf", title: "Save as PDF", menu: { id: "file", group: 2, order: 2 }, run: () => app.printPreviewAsPdf() });
   // Drawing: while a keystroke is applied the editor has drawn it, and the rest

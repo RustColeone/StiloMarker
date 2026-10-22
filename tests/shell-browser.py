@@ -212,7 +212,7 @@ async def main():
         fields = await page.evaluate('[...document.querySelectorAll("#settings-panel-appearance [data-settings-fields] select, #settings-panel-appearance [data-settings-fields] input")].map((c) => c.id)')
         assert fields == ['explorer-select', 'explorer-anchor-select', 'preview-select', 'source-font-size-select',
                           'source-font-family-select', 'source-font-custom-input', 'word-wrap-select', 'indent-style-select',
-                          'format-toolbar-input', 'auto-save-input', 'bmap-generate-scope-select', 'bmap-auto-pan-input'], fields
+                          'format-toolbar-input', 'spellcheck-input', 'auto-save-input', 'bmap-generate-scope-select', 'bmap-auto-pan-input'], fields
         # A field is a row: its name on the left, its control at the row's right end.
         row = await page.evaluate('''() => { const select = document.querySelector("#explorer-select"), label = select.closest("label").getBoundingClientRect(),
             box = select.getBoundingClientRect(); return { right: Math.round(label.right - box.right), indent: Math.round(box.left - label.left), oneLine: box.top - label.top < 20 }; }''')

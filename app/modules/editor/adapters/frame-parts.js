@@ -53,6 +53,7 @@ export function installFrameParts(app, shell) {
   });
   shell.events.on("layout", () => app.refreshFormatToolbar());
   app.elements.app.dataset.wordWrap = app.settings.wordWrap ? "on" : "off";
+  app.elements.editorContent.spellcheck = Boolean(app.settings.spellcheck);
   app.elements.app.style.setProperty("--indent-tab-size", "4");
 
   // The groups' tab strips' overflow menus.

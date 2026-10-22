@@ -128,8 +128,14 @@ async function chooseServer(contents, connect, { port = 0, url = "" } = {}) {
 const status = (contents) => page(contents, "return document.querySelector('#desktop-server-status')?.textContent ?? '';");
 const connected = 'window.__ui.sync.status.status === "connected"';
 
+// Every change of Sync's status from now on, with what it said (for a failure's report).
+const watchStatus = (contents) => page(contents, `window.__statuses = [];
+  window.__ui.sync.events.on("status", ({ next }) => window.__statuses.push(next.status + " (" + (next.role ?? "-") + "): " + (next.detail ?? "")));
+  return true;`);
+
 async function serve(win) {
   const contents = win.webContents;
+  await watchStatus(contents);
   await chooseServer(contents, "local", { port: Number(process.env.STILO_SMOKE_PORT) });
   await until(contents, "document.querySelector('#desktop-server-status').textContent.startsWith('Running')", "the server running", 60);
   found.status = await status(contents);
@@ -156,6 +162,7 @@ async function serve(win) {
   process.stdout.write(`SERVING ${JSON.stringify(found.server)}\n`); // desktop-browser.py joins it as someone else now
   await pause(Number(process.env.STILO_SMOKE_HOLD ?? 8000));
   found.syncLog = await syncLog();
+  found.statuses = await page(contents, "return window.__statuses;");
   finish();
 }
 

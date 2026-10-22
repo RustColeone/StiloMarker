@@ -1,5 +1,6 @@
-// The desktop build's rules (desktop/policy.mjs), and that the build carries
-// the files they allow, at the app's version. The app in Electron itself:
+// The desktop build's rules (desktop/policy.mjs), its right-click menu
+// (desktop/context-menu.mjs), and that the build carries the files they
+// allow (and every module its main process imports), at the app's version. The app in Electron itself:
 // desktop-browser.py.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -8,6 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { FEED, ORIGIN, WEB_ENTRIES, isNewer, linkAction, noServer, route, updateFrom } from "../desktop/policy.mjs";
 import { desktopBridge, watchReleases } from "../app/modules/shell/adapters/desktop.js";
+import { contextMenuTemplate } from "../desktop/context-menu.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const json = (path) => JSON.parse(readFileSync(join(ROOT, path), "utf8"));
@@ -119,4 +121,37 @@ test("desktop: the app tells of a newer release once, and says when it could not
   }
   assert.deepEqual(told, ["0.3.0", "0.3.1"]);
   assert.deepEqual(logged, ["Looking for a newer release failed: offline"]);
+});
+
+test("desktop: the right-click menu: a misspelled word's suggestions, then cut, copy and paste", () => {
+  const calls = [];
+  const tools = { replace: (word) => calls.push(["replace", word]), learn: (word) => calls.push(["learn", word]) };
+  const editFlags = { canCut: true, canCopy: true, canPaste: true, canSelectAll: true };
+  const menu = contextMenuTemplate({ isEditable: true, misspelledWord: "teh", dictionarySuggestions: ["the", "tech", "ten", "tea", "eh", "toe"], editFlags }, tools);
+  assert.deepEqual(menu.map((item) => item.label ?? item.type),
+    ["the", "tech", "ten", "tea", "eh", "Add to Dictionary", "separator", "Cut", "Copy", "Paste", "separator", "Select All"], "five suggestions at most");
+  menu[0].click();
+  menu[5].click();
+  assert.deepEqual(calls, [["replace", "the"], ["learn", "teh"]]);
+  const none = contextMenuTemplate({ isEditable: true, misspelledWord: "zzqx", dictionarySuggestions: [], editFlags }, tools);
+  assert.deepEqual([none[0].label, none[0].enabled], ["No Suggestions", false]);
+  const plain = contextMenuTemplate({ isEditable: true, editFlags: { canPaste: true } }, tools);
+  assert.deepEqual(plain.map((item) => [item.label ?? item.type, item.enabled]),
+    [["Cut", false], ["Copy", false], ["Paste", true], ["separator", undefined], ["Select All", true]], "what the place allows");
+  assert.deepEqual(contextMenuTemplate({ isEditable: false, selectionText: "words", editFlags: { canCopy: true } }, tools).map((item) => item.label), ["Copy"]);
+  assert.deepEqual(contextMenuTemplate({ isEditable: false, selectionText: "", editFlags: {} }, tools), [], "nowhere to type, nothing selected: no menu");
+});
+
+test("desktop: every module the main process imports is in the build", () => {
+  const files = new Set(json("desktop/package.json").build.files);
+  const seen = new Set(["main.mjs"]);
+  const queue = ["main.mjs"];
+  while (queue.length) {
+    const file = queue.shift();
+    assert.ok(files.has(file), `desktop/${file} is in the build's files`);
+    for (const [, target] of readFileSync(join(ROOT, "desktop", file), "utf8").matchAll(/from "\.\/([\w.-]+\.(?:mjs|cjs))"/g)) {
+      if (!seen.has(target)) { seen.add(target); queue.push(target); }
+    }
+  }
+  assert.ok(seen.has("context-menu.mjs") && seen.has("server-policy.mjs"), [...seen].join(", "));
 });

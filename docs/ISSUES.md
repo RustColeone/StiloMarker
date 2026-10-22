@@ -61,6 +61,26 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 
 ## Fixed
 
+### v0.2.33: a spelling check, as a setting
+
+Before freezing the core (2026-10-22), the third of four. Asked for:
+"Spellcheck as a setting, toggle in a setting is fine."
+
+- **Check spelling** (new, Settings → Appearance, off at first): the
+  browser's spelling check in the source editor, with its own dictionary and
+  language; kept in this browser.
+- **The desktop app's right-click menu** (new): Electron shows none of its
+  own, so a right click in the desktop app did nothing (no Cut, Copy or
+  Paste either). It now shows a misspelled word's suggestions and Add to
+  Dictionary where the page checks spelling, then Cut, Copy, Paste and
+  Select All as the place allows (`desktop/context-menu.mjs`, pure: Electron's
+  details in, a menu out).
+- Tests: `spellcheck-browser.py` (new: off at first, on from Settings, kept
+  over a reload, off again); `desktop.test.mjs` (the menu for a misspelled
+  word, one with no suggestions, a plain field, selected text, nothing; and
+  every module the main process imports is in the build's files, so a
+  packaged app never misses one).
+
 ### v0.2.32: the desktop app keeps its live session when its server's state changes
 
 Found by the desktop test failing now and then (2026-10-22). Browser only.

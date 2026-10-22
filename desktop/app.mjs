@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { contextMenuTemplate } from "./context-menu.mjs";
 import { FEED, ORIGIN, SCHEME, linkAction, noServer, route, updateFrom } from "./policy.mjs";
 import { createLocalServer } from "./server.mjs";
 import { forwardHeaders, forwardTarget, forwardUrl, serverChoice } from "./server-policy.mjs";
@@ -97,6 +98,15 @@ function openWindow({ root, ask, openExternal }) {
     if (action === "external") void openExternal(url);
   });
   contents.on("will-prevent-unload", (event) => { if (ask(win)) event.preventDefault(); });
+  // The right-click menu (Electron shows none of its own): a misspelled word's
+  // suggestions where the page checks spelling, then cut, copy and paste.
+  contents.on("context-menu", (event, params) => {
+    const template = contextMenuTemplate(params, {
+      replace: (word) => contents.replaceMisspelling(word),
+      learn: (word) => contents.session.addWordToSpellCheckerDictionary(word)
+    });
+    if (template.length) Menu.buildFromTemplate(template).popup({ window: win });
+  });
   void win.loadURL(`${ORIGIN}/`);
   return win;
 }
