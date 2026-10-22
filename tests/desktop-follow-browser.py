@@ -1,12 +1,14 @@
-"""Browser regression: the desktop app's Server page leaves a live session
-alone when its server's state changes (v0.2.32).
+"""Browser regression: a live PIN session is not joined again by itself
+(v0.2.32, v0.2.34): not when the desktop app's server changes state, nor
+when the app resumes (the network or the page coming back).
 
 In the desktop app (a stand-in for its bridge, window.stiloDesktop), the tab
 is in a PIN session; the server then reports a change of state (as it does
 while it starts, or after Share This Workspace). The app used to join again
 with the PIN it had saved, dropping the live session (and, right after
-sharing, taking the server's copy over typing not yet sent): it now joins
-only when it is not in a session. No page errors.
+sharing, taking the server's copy over typing not yet sent), and so did a
+resume, which cannot reopen a PIN session in place: an automatic join now
+leaves a live session alone. No page errors.
 
 Isolated: APIs are mocked and static files come from this checkout.
 """
@@ -80,13 +82,19 @@ async def main():
         await page.evaluate('window.__d.sync.connectSaved({ auto: false })')
         await page.wait_for_function('window.__d.sync.status.status === "connected" && window.__d.controller.getActiveFile()?.content === "Shared text."')
         assert len(connects) == 1, connects
+        # The network comes back, or the page does (a resume, which cannot reopen a PIN session in place).
+        await page.evaluate('window.dispatchEvent(new Event("online"))')
+        await page.wait_for_timeout(1500)
+        state = await page.evaluate('({ status: window.__d.sync.status.status, client: window.__d.sync.status.clientId })')
+        assert len(connects) == 1 and state == {'status': 'connected', 'client': 'desk-1'}, ('after a resume', connects, state)
         # The server's state changes while the tab is in its session (starting, then running again).
         await page.evaluate('window.__fireServer({ status: "starting" })')
         await page.evaluate('window.__fireServer({ status: "running" })')
         await page.wait_for_timeout(1500)
         state = await page.evaluate('({ status: window.__d.sync.status.status, client: window.__d.sync.status.clientId })')
-        assert len(connects) == 1 and state == {'status': 'connected', 'client': 'desk-1'}, (connects, state)
-        print(json.dumps({'checks': ['in a session, a change of the server\'s state leaves it as it is (no second join)'], 'runtimeErrors': len(errors)}))
+        assert len(connects) == 1 and state == {'status': 'connected', 'client': 'desk-1'}, ('after the server changed state', connects, state)
+        print(json.dumps({'checks': ['in a session, a resume (the network back) leaves it as it is (no second join)',
+                                    'nor does a change of the server\'s state'], 'runtimeErrors': len(errors)}))
         assert not errors, errors
         await browser.close()
 

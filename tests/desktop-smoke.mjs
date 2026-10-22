@@ -109,7 +109,11 @@ async function again(win) {
     return file.content.includes("The end. First words kept.");`);
   found.ready = true; // desktop-browser.py starts a second instance now: it must hand over and quit
   process.stdout.write("READY\n");
-  await pause(Number(process.env.STILO_SMOKE_HOLD ?? 6000));
+  // Held until the second start has come (a loaded machine may take a while
+  // to start it), so it finds this one and hands over.
+  const deadline = Date.now() + 45000;
+  while (!secondStarts && Date.now() < deadline) await pause(200);
+  await pause(500);
   found.focusedBySecond = secondStarts;
   finish();
 }

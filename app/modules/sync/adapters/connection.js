@@ -48,6 +48,12 @@ export function createConnection({ session, status, mode, events, workspace, she
   let joinShows = false;
   async function connectSaved({ auto = false } = {}) {
     if (reconnect.connecting) return false;
+    // Joining by itself (auto: a resume, a retry, the desktop app's server
+    // coming up) is for a session that was lost: one that is live is left as
+    // it is. Joining again would drop it first and, with the PIN saved since
+    // (Share This Workspace saves the guest's), come back as someone else and
+    // take the server's copy over typing not yet sent.
+    if (auto && ["connected", "reconnecting"].includes(status.status)) return true;
     if (!settings.serverPin) {
       if (auto) return false;
       throw new Error("PIN is required.");

@@ -223,7 +223,17 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
   }
 
   async function resumeConnection() {
-    if (!connection || !reconnectCtx) return false;
+    if (!connection) return false;
+    if (!reconnectCtx) {
+      // A PIN or guest session cannot be opened again, but its stream can: a
+      // fresh one on the same token replaces one that may have died quietly
+      // (what was missed arrives with it). A token the server forgot fails
+      // there, and the session is joined again as after any drop.
+      connection.eventSource?.close();
+      connection.eventSource = null;
+      attachEventStream(connection.serverUrl);
+      return true;
+    }
     if (!reconnecting) handleStreamError();
     if (reconnectTimer) clock.clearTimeout(reconnectTimer);
     reconnectTimer = null;

@@ -36,6 +36,7 @@ function harness(t) {
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
   globalThis.fetch = async (url, options = {}) => {
     if (url.includes('/workspaces/open')) return hooks.open ? hooks.open() : json({ token: 'session', clientId: 'me', workspace: 'team/test', revision: server.revision });
+    if (url.includes('/session/connect')) { posts.push({ type: 'connect' }); return json({ token: 'pin-token', clientId: 'me', sessionId: 'default', role: 'client', revision: server.revision }); }
     if (url.includes('/session/state') && options.method === 'GET') {
       if (hooks.get) return hooks.get();
       return json(structuredClone(server));
@@ -392,5 +393,20 @@ test('a sleeping tab pauses heartbeats and waits for foreground to reconnect', a
   globalThis.document.visibilityState = 'visible';
   await h.runtime.resumeConnection();
   assert.equal(h.runtime.isReconnecting(), false);
+  assert.equal(h.statuses.at(-1).status, 'connected');
+});
+
+test('resuming a PIN session opens a fresh stream on the same token, without joining again', async (t) => {
+  const h = harness(t);
+  await h.runtime.connect('https://example.test', '1234', 'me'); await settle();
+  assert.equal(h.posts.filter((p) => p.type === 'connect').length, 1);
+  h.edit('typed, not yet confirmed');
+  assert.equal(await h.runtime.resumeConnection(), true);
+  await settle();
+  assert.equal(h.posts.filter((p) => p.type === 'connect').length, 1, 'no second join');
+  assert.equal(h.streams.length, 2);
+  assert.ok(h.streams[0].closed && !h.streams[1].closed, 'the old stream closed, a new one open');
+  assert.match(h.streams[1].url, /pin-token/);
+  assert.equal(h.local().nodes.file.content, 'typed, not yet confirmed', 'the typing stays');
   assert.equal(h.statuses.at(-1).status, 'connected');
 });

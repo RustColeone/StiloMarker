@@ -61,6 +61,34 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 
 ## Fixed
 
+### v0.2.34: a live PIN session is never joined again by itself
+
+Found by the desktop test still failing now and then after v0.2.32: the
+status of every change, recorded, showed a second join right after Share
+This Workspace with no drop between. Browser only.
+
+- **A resume dropped a live PIN session** (fixed): Cloud's resume (at start,
+  when the page or the network comes back, and as a retry while the server
+  could not be reached) reconnects a session it cannot reopen in place, and a
+  PIN session never could, so it joined again even when it was live. Joining
+  drops the session first; with the PIN saved since (Share This Workspace
+  saves the guest's) the app came back as someone else, and the server's copy
+  replaced typing not yet sent. This was not only the desktop app's: any tab
+  in a PIN session did it when the network or the tab came back.
+- **Joining by itself leaves a live session alone** (`connectSaved({ auto })`,
+  for every automatic caller: a resume, a retry, the desktop app's server
+  coming up; v0.2.32's guard on the last one alone is folded into it).
+- **A PIN session resumes in place**: its stream is opened again on the same
+  token (a quietly dead stream replaced, what was missed arriving with it),
+  as a cloud workspace's resume does; a token the server no longer knows
+  fails there, and the session is joined again as after any drop.
+- Tests: `desktop-follow-browser.py` (a resume, then a change of the desktop
+  server's state: no second join; each fails without the fix);
+  `collaboration-runtime.test.mjs` (a PIN session's resume: a fresh stream on
+  the same token, no second join, the typing kept); `desktop-smoke.mjs`'s
+  reopened app waits for the second start (up to 45 s, not 6 s, which a
+  loaded machine sometimes outlasted).
+
 ### v0.2.33: a spelling check, as a setting
 
 Before freezing the core (2026-10-22), the third of four. Asked for:
