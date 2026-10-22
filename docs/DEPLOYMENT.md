@@ -1114,3 +1114,31 @@ desktop app's among them, in Electron 44).
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261021T225411Z-v0.2.27`.
 173/173 data files (taken with the service stopped), every JSON file valid.
+
+## Verified release: v0.2.29
+
+Deployed on 2026-10-22 at 09:02 UTC, with v0.2.28: a very long file types
+like a short one (v0.2.28: only the lines in view are in the page), and the
+desktop app's server (v0.2.29; in the repository, nothing changes for the
+web but Settings → Server existing only in the desktop app). App version
+`0.2.29`; sync compatibility unchanged at `117`. The service's command
+line and environment file are unchanged (the server's new `--parent-pid`
+is not used here); it was down under a second.
+
+Public checks: ping (`0.2.29`, accounts on, hosting on), a JSON reply's
+`Cache-Control: no-store`, the service worker's cache label
+`mdnotes-shell-v0.2.29`, the new files served (the Editor's
+`adapters/editor-window.js`, Cloud's `adapters/desktop-server.js`), the
+server's own files refused (`server/mdnotes_server.py`,
+`server/stilo/kernel/parent.py`, `server/whitelist.json`,
+`server/stilomarker.env` answer as the app's page), an unknown session
+token answered 403, and a clean journal. A fresh browser on the public site
+(its own welcome workspace, no real data) was controlled by `0.2.29`, kept
+both libraries, opened offline, fetched nothing from a CDN, and had no page
+errors.
+
+Validation: 349 Node tests, all 23 Python suites, 39 browser suites (the
+desktop app's in Electron 44, with its server).
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261022T090204Z-v0.2.29`.
+173/173 data files (taken with the service stopped), every JSON file valid.
