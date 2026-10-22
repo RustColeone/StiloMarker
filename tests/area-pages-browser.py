@@ -69,7 +69,7 @@ async def main():
             await page.locator('.page-move-menu button', has_text=f'Move to {to}').click()
 
         start = await places()
-        assert (start['left'], start['side'], start['bottom']) == (['links', 'session'], ['agent', 'chats'], ['log']), start
+        assert (start['left'], start['side'], start['bottom']) == (['search', 'links', 'session'], ['agent', 'chats'], ['log']), start
 
         # The menu on a section's header: where it is, ticked and disabled.
         await page.locator('.sidebar-panel-toggle[data-panel="session"]').click(button='right')
@@ -80,7 +80,7 @@ async def main():
         # Session to the bottom: a tab there, its connection label in the bottom's header; the bottom shows.
         await move(page.locator('.sidebar-panel-toggle[data-panel="session"]'), 'Bottom')
         now = await places()
-        assert now['left'] == ['links'] and now['bottom'] == ['log', 'session'] and now['bottomOpen'] == 'session', now
+        assert now['left'] == ['search', 'links'] and now['bottom'] == ['log', 'session'] and now['bottomOpen'] == 'session', now
         assert now['debug'] == 'on', 'the bottom area shows what moved there'
         assert await page.evaluate(WHERE, 'session-panel-body') == 'bottom'
         assert await page.evaluate(WHERE, 'session-id-label') == 'bottom'
@@ -98,7 +98,7 @@ async def main():
         # The Agent to the left: a section of its own height, its history button at the section's top.
         await move(page.locator('[data-tab-host="side"] [data-page="agent"]'), 'Left')
         now = await places()
-        assert now['left'] == ['links', 'agent'] and now['side'] == ['chats', 'log'], now
+        assert now['left'] == ['search', 'links', 'agent'] and now['side'] == ['chats', 'log'], now
         assert await page.evaluate(WHERE, 'agent-page') == 'section:agent'
         assert await page.evaluate('document.querySelector("#chat-history-toggle-button").closest(".sidebar-panel-toggle")') is None, 'no button in a button'
         height = await page.evaluate('document.querySelector("#agent-page").getBoundingClientRect().height')
@@ -114,7 +114,7 @@ async def main():
         await page.reload(wait_until='domcontentloaded')
         await page.wait_for_function('document.querySelector("#preview-output")?.innerText.includes("STILO MARKER")', timeout=20000)
         now = await places()
-        assert (now['left'], now['side'], now['bottom']) == (['links', 'agent'], ['chats', 'log', 'session'], []), now
+        assert (now['left'], now['side'], now['bottom']) == (['search', 'links', 'agent'], ['chats', 'log', 'session'], []), now
         assert await page.evaluate(WHERE, 'agent-page') == 'section:agent' and await page.evaluate(WHERE, 'log-page') == 'side'
 
         # Moved back: the default places.
@@ -122,7 +122,7 @@ async def main():
         await move(page.locator('[data-tab-host="side"] [data-page="session"]'), 'Left')
         await move(page.locator('[data-tab-host="side"] [data-page="log"]'), 'Bottom')
         now = await places()
-        assert (now['left'], now['side'], now['bottom']) == (['links', 'session'], ['agent', 'chats'], ['log']), now
+        assert (now['left'], now['side'], now['bottom']) == (['search', 'links', 'session'], ['agent', 'chats'], ['log']), now
         assert await page.evaluate(WHERE, 'session-id-label') == 'section:session'
         assert await page.evaluate(WHERE, 'chat-history-toggle-button') == 'side'
         assert await page.evaluate(WHERE, 'log-toolbar') == 'bottom'
@@ -131,16 +131,16 @@ async def main():
         # own drops are files: a page passes through them); kept as Move to… keeps them.
         await page.locator('.sidebar-panel-toggle[data-panel="session"]').drag_to(page.locator('#chat-panel'), force=True)
         now = await places()
-        assert now['left'] == ['links'] and now['side'] == ['agent', 'chats', 'session'] and now['sideOpen'] == 'session', now
+        assert now['left'] == ['search', 'links'] and now['side'] == ['agent', 'chats', 'session'] and now['sideOpen'] == 'session', now
         await page.locator('[data-tab-host="side"] [data-page="chats"]').drag_to(page.locator('#explorer-tree'))
         now = await places()
-        assert now['left'] == ['links', 'chats'] and now['side'] == ['agent', 'session'], now
+        assert now['left'] == ['search', 'links', 'chats'] and now['side'] == ['agent', 'session'], now
         assert await page.evaluate(WHERE, 'chats-page') == 'section:chats'
         assert await page.evaluate('document.querySelectorAll(".is-page-drop").length') == 0, 'no drop mark left behind'
         await page.locator('.sidebar-panel-toggle[data-panel="chats"]').drag_to(page.locator('#chat-panel'), force=True)
         await page.locator('[data-tab-host="side"] [data-page="session"]').drag_to(page.locator('#explorer-tree'))
         now = await places()
-        assert (now['left'], now['side']) == (['links', 'session'], ['agent', 'chats']), now
+        assert (now['left'], now['side']) == (['search', 'links', 'session'], ['agent', 'chats']), now
         assert await page.evaluate('JSON.parse(localStorage.getItem("mdnotes.settings.v1")).pageHosts') == {}, 'home again: nothing kept'
 
         assert not errors, errors

@@ -3,20 +3,13 @@
 // main.js creates this on first use and passes its shared values in `app`.
 import { isTextFileName } from "../../workspace/index.js";
 import { ignore } from "../../../kernel/index.js";
+import { findMatches, replaceMatches, searchPattern } from "../model/search.js";
 
 export function createFindReplace(app) {
-  // Build the RegExp for the current query + toggles, or null on empty/invalid.
+  // The RegExp for the current query + toggles (model/search.js), or null on empty/invalid.
   function buildSearchRegex() {
-    const raw = app.elements.findInput?.value ?? "";
-    if (!raw) return null;
-    let source = app.searchState.regex ? raw : raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (app.searchState.wholeWord) source = `\\b(?:${source})\\b`;
-    const flags = "g" + (app.searchState.caseSensitive ? "" : "i");
-    try {
-      return new RegExp(source, flags);
-    } catch {
-      return null; // invalid regex — caller shows the error state
-    }
+    const { regex, wholeWord, caseSensitive } = app.searchState;
+    return searchPattern(app.elements.findInput?.value ?? "", { regex, wholeWord, caseSensitive }).pattern ?? null;
   }
 
   // Scan the active file's text for all matches. Preserves the current match near
@@ -28,18 +21,7 @@ export function createFindReplace(app) {
     const invalid = canSearch && app.searchState.regex && Boolean(app.elements.findInput?.value) && !regex;
     app.elements.findInput?.classList.toggle("is-error", invalid);
     app.searchState.matches = [];
-    if (regex) {
-      const text = app.getEditorText();
-      let m;
-      let guard = 0;
-      while ((m = regex.exec(text)) !== null) {
-        const start = m.index;
-        const end = start + m[0].length;
-        app.searchState.matches.push({ start, end });
-        if (m[0].length === 0) regex.lastIndex += 1; // avoid an infinite loop on zero-width
-        if (++guard > 20000) break;                  // sanity cap on pathological patterns
-      }
-    }
+    if (regex) app.searchState.matches = findMatches(app.getEditorText(), regex);
     if (app.searchState.matches.length === 0) {
       app.searchState.currentIndex = -1;
     } else if (keepCaret) {
@@ -169,11 +151,8 @@ export function createFindReplace(app) {
     const regex = buildSearchRegex();
     if (!regex || !app.searchState.matches.length) return;
     const text = app.getEditorText();
-    const replaceRaw = app.elements.replaceInput?.value ?? "";
-    const count = app.searchState.matches.length;
-    // String.replace with a global regex applies $1/$& templates in regex mode;
-    // in plain mode the pattern is escaped so it's a literal replace.
-    const newText = text.replace(regex, replaceRaw);
+    // A regular expression's $1 and $& apply; a plain replacement is taken as it is.
+    const { text: newText, count } = replaceMatches(text, regex, app.elements.replaceInput?.value ?? "", { regex: app.searchState.regex });
     app.applyEditorEdit(newText, 0, 0);
     computeSearchMatches();
     app.showToast(`Replaced ${count} occurrence${count === 1 ? "" : "s"}`);

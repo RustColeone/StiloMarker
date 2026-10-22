@@ -170,8 +170,8 @@ export function installKeys(ed, app) {
     if (event.key === "Tab") {
       app.traceEditorEvent("Keydown", { key: "Tab" });
     }
-    // Find / Replace (Ctrl/Cmd+F, Ctrl/Cmd+H).
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "f") {
+    // Find / Replace (Ctrl/Cmd+F, Ctrl/Cmd+H). With Shift: Find in Files (a command, search-files.js).
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "f") {
       event.preventDefault();
       app.openFindBar(false);
       return;

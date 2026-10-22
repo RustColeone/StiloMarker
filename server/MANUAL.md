@@ -510,6 +510,12 @@ click it (▾) to switch that file between Source and Preview in the same
 pane. Right-click a tab for more: open it as Source or Preview, move it to
 the other pane or open it there too.
 
+**Find in Files** (Edit → Find in Files, `Ctrl+Shift+F`, or the magnifier
+on the left): search every file of the workspace, with Match case, whole
+word and regular expressions. Results are grouped by file with their line
+numbers; click one to open the file there. Replace All (or a file's own
+Replace) asks first; Undo Replace puts it back.
+
 **Very long files** (thousands of lines, hundreds of KB) type as quickly as
 short ones: only the lines in view are drawn. Everything still works on the
 whole file: Select All, copy, cut, paste and typing over a selection, undo,

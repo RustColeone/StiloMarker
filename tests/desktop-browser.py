@@ -121,12 +121,13 @@ try:
     SERVED = Path(TMP.name) / "served"
     port = free_port()
     serving = electron("serve", profile=SERVED, extra={"STILO_SMOKE_PORT": str(port), "STILO_SMOKE_HOLD": "20000"})
-    info = None
+    info, seen = None, []
     for _ in range(4000):
         line = serving.stdout.readline()
         if not line: break
+        seen.append(line)
         if line.startswith("SERVING "): info = json.loads(line[8:]); break
-    assert info, "the server never ran"
+    assert info, f"the server never ran:\n{''.join(seen)[-2000:]}\n{serving.stderr.read()[-3000:]}"
     joined = call(info["port"], "/api/session/connect", {"pin": info["pin"], "displayName": "someone else"})
     # What was typed reaches the server within moments (sent as it is typed).
     shared, contents = {}, []

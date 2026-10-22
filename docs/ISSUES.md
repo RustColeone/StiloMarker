@@ -48,6 +48,34 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 
 ## Fixed
 
+### v0.2.30: Find in Files
+
+Before freezing the core (2026-10-22), the first of four. Browser only.
+
+- **Search every file** (new): a Search section in the left area (Edit →
+  Find in Files, Ctrl+Shift+F, or the activity bar's magnifier; like any
+  page it can be moved to another area). It searches every text file as you
+  type, with Match case, whole word and regular expressions; results are
+  grouped by file in path order, each match with its line number and the
+  words around it, and a click opens the file at the match (in a very long
+  file too: the line is rendered and shown). It searches again as files
+  change. A word selected in the editor becomes the query.
+- **Replace in every file**: Replace All, or one file's Replace, asks first,
+  then writes through Workspace's one write path (merged with others' edits,
+  and synced); Undo Replace puts back what it changed, except in a file
+  changed since (left as it is, and said).
+- **The find bar shares the search** (`editor/model/search.js`), and its
+  Replace All took `$&` and `$1` in a plain (not regular expression)
+  replacement as patterns (fixed: taken as they are). Ctrl+Shift+F no longer
+  also opens the open file's find bar.
+- Tests: `editor-search.test.mjs` (new: patterns and options, matches,
+  lines, snippets, replacing) and `search-files-browser.py` (new: the
+  shortcut, results across files and in Chinese, the options, opening a
+  match in a 20,000-line file, searching again after an edit, Replace All
+  and Undo, an Undo that leaves a file changed since, a selected word as the
+  query); `area-pages-browser.py` and `shell-browser.py` expect the Search
+  section first in the left area and Find in Files in the Edit menu.
+
 ### v0.2.29: the desktop app runs a server, and gets back on it by itself
 
 Asked for (2026-10-22): a way to start the sync server from the desktop

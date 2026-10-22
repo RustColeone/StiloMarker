@@ -83,7 +83,7 @@ async def main():
         labels = await page.locator('.menu-bar .menu-trigger').all_inner_texts()
         assert labels == ['File', 'Edit', 'Create', 'View', 'Settings'], labels
         counts = await page.evaluate('[...document.querySelectorAll(".menu-bar .menu-popover")].map((p) => [p.querySelectorAll("button").length, p.querySelectorAll(".menu-separator").length])')
-        assert counts == [[9, 3], [5, 2], [8, 1], [6, 1], [6, 2]], counts  # Create: md, mtree, urldb, bmap, persona, mermaid, html, folder; a line between groups
+        assert counts == [[9, 3], [6, 2], [8, 1], [6, 1], [6, 2]], counts  # Edit: Find in Files too. Create: md, mtree, urldb, bmap, persona, mermaid, html, folder; a line between groups
         save = await page.evaluate('[...document.querySelectorAll("[data-command=\'workspace.save\'] span")].map((s) => s.textContent)')
         assert save == ['Save', 'Ctrl+S'], save
         assert await page.locator('#file-menu').is_hidden()

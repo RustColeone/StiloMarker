@@ -15,6 +15,7 @@ import { createAutocomplete } from "./autocomplete.js";
 import { createEditorCore } from "./editor-core.js";
 import { installEditorEvents } from "./editor-events.js";
 import { createFindReplace } from "./find-replace.js";
+import { addFindInFiles } from "./search-files.js";
 import { createHighlighter } from "./highlight.js";
 import { createLinks } from "./links.js";
 import { createPreview } from "./preview.js";
@@ -201,6 +202,8 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
   // The left area's Linked Notes section (Shell's pages), shown while a note is open.
   shell.pages.add({ host: "left", id: "links", order: 10, label: "Linked Notes", title: "Linked notes",
     body: document.getElementById("links-panel-body"), className: "links-sidebar-panel", headerClass: "links-panel-header", available: false });
+  // Find in Files: a section of the left area too (it can be moved), above Linked Notes.
+  addFindInFiles({ app, shell, workspace });
   installFrameParts(app, shell);
   installTogether(app, workspace, composing);
   // Where the reader was, kept when the page hides or goes (resume.js, tabs.js).

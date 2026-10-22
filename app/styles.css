@@ -6965,3 +6965,126 @@ pre.proposal-diff-block {
   min-height: 2.6em;
   user-select: text;
 }
+
+/* Find in Files (editor/adapters/search-files.js): a section of the left area
+   (or a tab, moved); its results scroll inside it, so the file tree keeps its room. */
+.search-files {
+  gap: 6px;
+}
+
+.search-files-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.search-files-row .find-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.search-files-query.is-error {
+  outline: 1px solid var(--danger, #d33);
+}
+
+.search-files-summary {
+  min-height: 1.4em;
+  font-size: 11px;
+}
+
+.search-files-results {
+  display: grid;
+  align-content: start;
+  max-height: 45vh;
+  overflow: auto;
+  font-size: 12px;
+}
+
+[data-tab-host-pages] .search-files-results {
+  max-height: none;
+}
+
+.search-files-file {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 4px 2px 2px;
+  font-weight: 600;
+}
+
+.search-files-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-files-folder {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-weight: 400;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-files-count {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-2, var(--surface-1));
+  color: var(--text-dim);
+  font-weight: 400;
+  font-size: 10px;
+}
+
+.search-files-replace-file {
+  visibility: hidden;
+}
+
+.search-files-file:hover .search-files-replace-file,
+.search-files-replace-file:focus-visible {
+  visibility: visible;
+}
+
+.search-files-match {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  padding: 2px 4px 2px 22px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.search-files-match:hover,
+.search-files-match:focus-visible {
+  background: var(--surface-1);
+}
+
+.search-files-match mark {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: inherit;
+}
+
+.search-files-line {
+  display: inline-block;
+  min-width: 3ch;
+  margin-right: 6px;
+  color: var(--text-dim);
+  font-size: 10px;
+  text-align: right;
+}
+
+.search-files-more {
+  justify-self: start;
+  margin: 4px 0 0 22px;
+}
