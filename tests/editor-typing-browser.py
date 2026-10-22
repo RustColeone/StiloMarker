@@ -204,13 +204,14 @@ async def main():
         await page.keyboard.type('quick', delay=120)
         await page.wait_for_timeout(600)
         work = sorted(await page.evaluate('window.__inputs'))
-        assert len(work) >= 3 and work[len(work) // 2] < 40, f'a keystroke on a long chapter took {work} ms of work'
+        # The browser reports only events of 16 ms or more: fast keys go unreported, and none reported is fast.
+        assert not work or work[len(work) // 2] < 40, f'a keystroke on a long chapter took {work} ms of work'
         s = await page.evaluate('''() => ({ text: __typing.getEditorText(), model: __typing.controller.getActiveFile().content,
           inPage: document.querySelectorAll("#editor-content > .editor-line").length,
           stray: document.querySelector("#editor-content").childNodes.length - document.querySelector("#editor-content").children.length })''')
         assert s['text'] == s['model'] and s['model'].split('\n')[2002] == 'Somequick **bold** text with a [link](notes.md) and `code` in paragraph 500.' \
             and s['inPage'] < 400 and s['stray'] == 0, ({k: v for k, v in s.items() if k not in ('text', 'model')}, s['text'] == s['model'], s['model'].split('\n')[2000:2004])
-        checks.append(f'a long chapter: a keystroke\'s own work {round(work[len(work) // 2], 1)} ms, drawn right on a pause')
+        checks.append(f'a long chapter: a keystroke\'s own work {round(work[len(work) // 2], 1) if work else "under 16"} ms, drawn right on a pause')
 
         print(json.dumps({'checks': checks, 'runtimeErrors': len(errors)}, ensure_ascii=False))
         assert not errors, errors

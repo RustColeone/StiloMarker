@@ -6942,3 +6942,26 @@ pre.proposal-diff-block {
 .trash-actions { display: flex; gap: 6px; flex: none; }
 .browser-tool-btn.is-danger { color: var(--danger, #c0392b); }
 @media (max-width: 560px) { .trash-row { flex-direction: column; align-items: stretch; } }
+
+/* Settings → Server (the desktop app only: cloud/adapters/desktop-server.js) */
+.desktop-server-choices {
+  display: grid;
+  gap: 6px;
+}
+
+.desktop-server-local,
+.desktop-server-remote {
+  display: grid;
+  gap: 8px;
+  margin: 2px 0 6px 24px;
+}
+
+.desktop-server-local[hidden],
+.desktop-server-remote[hidden] {
+  display: none;
+}
+
+.desktop-server-status {
+  min-height: 2.6em;
+  user-select: text;
+}

@@ -1,7 +1,7 @@
 {
   "name": "stilo-marker",
   "productName": "Stilo Marker",
-  "version": "0.2.28",
+  "version": "0.2.29",
   "description": "A Markdown workspace: notes, diagrams, characters, writing together.",
   "author": "RustColeone",
   "license": "GPL-3.0-only",
@@ -23,41 +23,28 @@
       "app.mjs",
       "policy.mjs",
       "preload.cjs",
+      "server.mjs",
+      "server-policy.mjs",
       "package.json"
     ],
     "extraResources": [
       {
-        "from": "../index.html",
-        "to": "web/index.html"
-      },
-      {
-        "from": "../manifest.webmanifest",
-        "to": "web/manifest.webmanifest"
-      },
-      {
-        "from": "../app",
-        "to": "web/app"
-      },
-      {
-        "from": "../assets",
-        "to": "web/assets"
-      },
-      {
-        "from": "../extensions",
-        "to": "web/extensions",
+        "from": "..",
+        "to": "stilo",
         "filter": [
-          "**/*",
-          "!**/server/**",
-          "!**/*.py"
+          "index.html",
+          "manifest.webmanifest",
+          "app/**/*",
+          "assets/**/*",
+          "extensions/**/*",
+          "vendor/**/*",
+          "Template/**/*",
+          "protocol/**/*",
+          "server/MANUAL.md",
+          "server/**/*.py",
+          "server/**/module.json",
+          "!**/__pycache__/**"
         ]
-      },
-      {
-        "from": "../vendor",
-        "to": "web/vendor"
-      },
-      {
-        "from": "../Template",
-        "to": "web/Template"
       }
     ],
     "linux": {

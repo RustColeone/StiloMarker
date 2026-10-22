@@ -48,6 +48,42 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 
 ## Fixed
 
+### v0.2.29: the desktop app runs a server, and gets back on it by itself
+
+Asked for (2026-10-22): a way to start the sync server from the desktop
+app, which then connects to it (or to a server of one's own) by itself.
+
+- **Settings → Server** (the desktop app only): no server; run a server on
+  this computer (its port; whether other devices on the network reach it);
+  or connect to another server (its address, http or https). Running, it
+  says where others open it (in a browser: the server serves the app too)
+  and the PIN they join with; **Share This Workspace** makes this workspace
+  the server's (joined once with its master PIN, which stays here); after
+  that this app rejoins with the session's PIN, as anyone does, so the
+  server's copy, with everyone's edits, stays the session's (a master pushes
+  its own copy on joining: after a crash, an older one).
+- **The app reaches the chosen server through the desktop app**: its
+  requests to its own `/api/` are sent on to the server (the sync events'
+  stream too), so a server on the network at a plain `http://` address works
+  (the app's own origin is secure, and a page there could not call it
+  directly) and the Server URL stays blank.
+- **By itself**: the choice is kept; at the next start the server is
+  started again and the app joins its session again (Remember & reconnect).
+  Choosing another server drops the session joined on the last one.
+- **The server is this app's part**: its state, accounts file and data are
+  in the app's own folder, its PINs are made at random once, and it stops
+  when the app quits, and also when the app crashes or is killed (the
+  server's new `--parent-pid`). It needs Python 3.10 or later on this
+  computer (it says so when there is none); a taken port moves to the next.
+- Tests: `desktop-server.test.mjs` (new: the kept choice, where requests
+  go, the server's command line and Python; the server started with this
+  computer's Python, answering, stopped; a taken port; no Python),
+  `parent-watch.test.py` (new: the server stops when the process that
+  started it ends) and `desktop-browser.py` (the app in Electron: a server
+  run here, reached through the app, shared on, joined by someone else who
+  finds the typing; reopened, back on it with nothing clicked; quit, it
+  stops; another server reached and joined; none: offline).
+
 ### v0.2.28: a very long file types like a short one
 
 From the stability review (2026-10-21), O2b. Browser only.

@@ -134,11 +134,13 @@ async def main():
         ev = await page.evaluate('window.__ev')
         work = sorted(w for n, w, d in ev if n == 'input')
         screen = sorted(d for n, w, d in ev if n == 'keydown')
-        # (Before v0.2.28 a key took ~1.5 s to reach the screen in a file this size.)
-        assert len(work) >= 10 and work[len(work) // 2] < 40 and screen[len(screen) // 2] < 150, (work, screen)
+        # (Before v0.2.28 a key took ~1.5 s to reach the screen in a file this size.) The browser
+        # reports only events of 16 ms or more: fast keys go unreported, and none reported is fast.
+        assert (not work or work[len(work) // 2] < 40) and (not screen or screen[len(screen) // 2] < 150), (work, screen)
         model_lines[3] = model_lines[3][:6] + 'quick brown fox' + model_lines[3][6:]
         await state('typed near the top', '\n'.join(model_lines))
-        checks.append(f'typing: {round(work[len(work) // 2], 1)} ms of work, {screen[len(screen) // 2]} ms to the screen a key')
+        checks.append(f'typing: {round(work[len(work) // 2], 1) if work else "under 16"} ms of work, '
+                      f'{screen[len(screen) // 2] if screen else "under 16"} ms to the screen a key')
 
         # Scrolled to the middle and to the end: the model's lines at that place.
         await scroll_to(0.5)

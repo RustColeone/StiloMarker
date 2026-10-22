@@ -11,11 +11,19 @@ its page; typing is saved; closing with unsaved work asks (Stay keeps the
 window, Leave closes it). Reopened, the work is still there (one origin at
 every start), and a second start hands over to the first and quits.
 
+Its server (Settings → Server): chosen to run on this computer, it starts
+(this computer's Python), the app reaches it through its own address, and
+Share This Workspace makes this workspace the server's; someone else joining
+with the session's PIN finds what was typed. Reopened, nothing clicked: the
+server starts again and the app is back on its session. Quit: the server
+stops. Another server chosen: the app's requests reach it and its session is
+joined; none: the server's addresses answer as offline.
+
 Needs Electron: STILO_ELECTRON (its binary), or desktop/node_modules (npm
 install in desktop/), and xvfb-run without a display. Skipped, and said,
 without them.
 """
-import json, os, shutil, subprocess, sys, tempfile, time
+import json, os, shutil, socket, subprocess, sys, tempfile, time, urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -37,7 +45,7 @@ for entry in WEB:
     (shutil.copytree(source, SITE / entry, ignore=shutil.ignore_patterns("server", "__pycache__", "*.py")) if source.is_dir()
      else (SITE.mkdir(exist_ok=True), shutil.copy(source, SITE / entry)))
 with open(SITE / "app/main.js", "ab") as main:
-    main.write(app_hook("window.__ui = { shell, controller };"))
+    main.write(app_hook("window.__ui = { shell, controller, sync: modules.sync };"))
 # A fresh profile starts with one note (a formula, a link, a diagram), shown in the preview.
 NOTE = {"id": "smoke", "name": "Smoke", "sourceMode": "memory", "rootId": "root", "activeFileId": "n", "nodes": {
     "root": {"id": "root", "kind": "folder", "name": "Smoke", "children": ["n"], "expanded": True},
@@ -49,13 +57,13 @@ index = (SITE / "index.html").read_text()
 (SITE / "index.html").write_text(index.replace('<script src="./app/boot-theme.js"></script>', SEED + '\n    <script src="./app/boot-theme.js"></script>', 1))
 
 
-def electron(phase, **popen):
+def electron(phase, profile=None, extra=None, **popen):
     display = [] if os.environ.get("DISPLAY") else ["xvfb-run", "-a", "-s", "-screen 0 1400x1000x24"]
     # --no-sandbox: a downloaded Electron's sandbox helper is not set up (it needs root); the app's own settings are tested as written.
     command = display + [ELECTRON, "--no-sandbox", str(ROOT / "tests/desktop-smoke.mjs")]
     # Without ELECTRON_RUN_AS_NODE (an editor's terminal may set it): Electron would run as plain Node.
     env = {**{k: v for k, v in os.environ.items() if k != "ELECTRON_RUN_AS_NODE"},
-           "STILO_SMOKE_ROOT": str(SITE), "STILO_SMOKE_PROFILE": str(PROFILE), "STILO_SMOKE_PHASE": phase}
+           "STILO_SMOKE_ROOT": str(SITE), "STILO_SMOKE_PROFILE": str(profile or PROFILE), "STILO_SMOKE_PHASE": phase, **(extra or {})}
     return subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **popen)
 
 
@@ -93,6 +101,82 @@ try:
     assert reopened["where"] == "app://stilo/" and reopened["kept"], reopened
     assert second_code == 0 and reopened["focusedBySecond"] == 1, (second_code, reopened)
     assert not reopened["errors"], reopened["errors"]
+
+    # Its server: run on this computer, shared on, joined by someone else.
+    def free_port():
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0)); return probe.getsockname()[1]
+
+    def answers(port):
+        try:
+            return json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=2).read())["message"] == "pong"
+        except Exception:
+            return False
+
+    def call(port, path, body=None):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, headers={"Content-Type": "application/json"}, method="POST" if data else "GET")
+        return json.loads(urllib.request.urlopen(req, timeout=10).read())
+
+    SERVED = Path(TMP.name) / "served"
+    port = free_port()
+    serving = electron("serve", profile=SERVED, extra={"STILO_SMOKE_PORT": str(port), "STILO_SMOKE_HOLD": "20000"})
+    info = None
+    for _ in range(4000):
+        line = serving.stdout.readline()
+        if not line: break
+        if line.startswith("SERVING "): info = json.loads(line[8:]); break
+    assert info, "the server never ran"
+    joined = call(info["port"], "/api/session/connect", {"pin": info["pin"], "displayName": "someone else"})
+    # What was typed reaches the server within moments (sent as it is typed).
+    shared, contents = {}, []
+    for _ in range(40):
+        try:
+            shared = call(info["port"], f"/api/session/state?token={joined['token']}")
+        except OSError:
+            break  # the app (and its server) gone
+        contents = [n.get("content", "") for n in (shared.get("project") or {}).get("nodes", {}).values()]
+        if any("The end. Shared from the desktop." in c for c in contents): break
+        time.sleep(0.5)
+    if not any("The end. Shared from the desktop." in c for c in contents):
+        rest, err = serving.communicate(timeout=60)
+        raise AssertionError(("someone else finds what was typed",
+            [(n.get("name"), (n.get("content") or "")[-80:]) for n in (shared.get("project") or {}).get("nodes", {}).values()],
+            next((l for l in rest.splitlines() if l.startswith("SMOKE ")), rest[-1500:])))
+    rest, err = serving.communicate(timeout=60)
+    line = next((l for l in rest.splitlines() if l.startswith("SMOKE ")), None)
+    assert line, f"no result:\n{rest[-2000:]}\n{err[-3000:]}"
+    served = json.loads(line[6:])
+    assert not served.get("failed"), served
+    assert served["ping"] == [200, "pong"] and served["role"] == "master" and info["pin"] in served["status"], served
+    assert info["addresses"] == [], "this computer only"
+    time.sleep(1)
+    assert not answers(info["port"]), "the app quit: its server stopped"
+
+    back = result(electron("serve-again", profile=SERVED))
+    # Back as anyone is (the session's PIN): the server's copy, with what was typed, stays the session's.
+    assert not back.get("failed") and back["role"] == "client" and back["kept"], back
+    time.sleep(1)
+    assert not answers(info["port"]), "the app quit again: its server stopped"
+
+    # Another server (one of this test's), then none.
+    other_port = free_port()
+    other_dir = Path(TMP.name) / "other"
+    other_dir.mkdir()
+    other = subprocess.Popen([sys.executable, str(ROOT / "server/mdnotes_server.py"), "--host", "127.0.0.1", "--port", str(other_port),
+                              "--pin", "111222", "--master-pin", "333444", "--static-dir", str(ROOT), "--state-file", str(other_dir / "state.json"),
+                              "--whitelist", str(other_dir / "none.json"), "--data-dir", str(other_dir / "data")],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(100):
+            if answers(other_port): break
+            time.sleep(0.2)
+        far = result(electron("remote", profile=Path(TMP.name) / "remote",
+                              extra={"STILO_SMOKE_REMOTE": f"http://127.0.0.1:{other_port}", "STILO_SMOKE_REMOTE_PIN": "111222"}))
+        assert not far.get("failed"), far
+        assert far["ping"] == [200, "pong"] and far["none"] == [503, "offline"], far
+    finally:
+        other.terminate()
 finally:
     TMP.cleanup()
 
@@ -101,4 +185,7 @@ print(json.dumps({"checks": ["loads from app://stilo/; no server, answered at on
                              "a link and a navigation away open in the system's browser; the window stays",
                              "a newer release: Update available, its item opens the release's page",
                              "closing with unsaved work asks: Stay keeps the window, Leave closes it",
-                             "reopened: the work is there; a second start hands over and quits"], "runtimeErrors": 0}))
+                             "reopened: the work is there; a second start hands over and quits",
+                             "its server: run here, reached through the app, shared on; someone else joins and finds the typing",
+                             "reopened: the server starts again and the app is back on its session by itself; quit: it stops",
+                             "another server: reached and joined; none: offline"], "runtimeErrors": 0}))

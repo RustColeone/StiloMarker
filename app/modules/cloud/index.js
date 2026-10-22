@@ -10,6 +10,7 @@
 // it asks for the agent's status and resumes the last session.
 // Static, for code from before the restructure: saveUserState,
 // pingServer (the server's routes, adapters/api.js).
+import { addDesktopServer } from "./adapters/desktop-server.js";
 import { defineModule } from "../../kernel/index.js";
 import { createSurface } from "./adapters/surface.js";
 import { addCollaborationSettings } from "./adapters/settings-section.js";
@@ -28,6 +29,9 @@ export default defineModule({
   start(ctx) {
     const shell = ctx.use("shell");
     addCollaborationSettings({ dialog: shell.settingsDialog, settings: shell.settings, desktop: shell.desktop });
+    // The desktop app: the server it connects to, or runs (Settings → Server).
+    if (shell.desktop) addDesktopServer({ dialog: shell.settingsDialog, settings: shell.settings, sync: ctx.use("sync"),
+      ping: () => parts?.pingCurrentServer(), log: (message, detail) => shell.log("response", message, detail ?? "") });
     let parts = null;
     addServerItem({ shell, sync: ctx.use("sync"), identity: ctx.use("identity"), ping: () => parts?.pingCurrentServer() });
     if (globalThis.document) {

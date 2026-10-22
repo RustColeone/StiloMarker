@@ -77,10 +77,16 @@ it, keeping your work; other windows of the app follow. Closing every window
 of the app starts it too (the browser's own reload keeps the version).
 
 **The desktop app** (`desktop/`, see its README) is the same app in a window
-of its own, with no server needed (a Server URL in Settings → Collaboration
-connects it to one). Closing it with unsaved work asks first; links open in
-your browser; a newer release shows "Update available" in the status bar,
-which opens its download page.
+of its own, with no server needed. Closing it with unsaved work asks first;
+links open in your browser; a newer release shows "Update available" in the
+status bar, which opens its download page.
+
+**Settings → Server** (the desktop app): run a server on this computer, or
+connect to another one (yours, at its address), or none. Running, it says
+where other devices open it (in their browser) and the PIN they join with;
+**Share This Workspace** makes your workspace the one they join. The app
+remembers: next time it starts the server again and gets back on it by
+itself. Running a server here needs Python 3.10 or later.
 
 ---
 

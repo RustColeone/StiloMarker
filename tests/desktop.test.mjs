@@ -66,24 +66,34 @@ test("desktop: a newer release, from the release feed", () => {
   assert.match(FEED, /^https:\/\/api\.github\.com\/repos\/RustColeone\/StiloMarker\/releases\/latest$/);
 });
 
-test("desktop: the build carries exactly the files the window may load, at the app's version", () => {
+test("desktop: the build carries the app's files and the server's code, never its data, at the app's version", () => {
   const desktop = json("desktop/package.json");
   assert.equal(desktop.version, json("package.json").version);
-  const carried = desktop.build.extraResources.map(({ from, to }) => {
-    assert.equal(to, `web/${from.replace(/^\.\.\//, "")}`);
-    return from.replace(/^\.\.\//, "");
-  });
-  assert.deepEqual(carried.sort(), [...WEB_ENTRIES].sort());
-  for (const entry of WEB_ENTRIES) assert.ok(existsSync(join(ROOT, entry)), `${entry} exists`);
-  const extensions = desktop.build.extraResources.find(({ from }) => from === "../extensions");
-  assert.ok(extensions.filter.includes("!**/server/**"), "never the extensions' server code");
+  // One tree shaped like the repository (the server reads protocol/ and extensions/ beside it).
+  const [tree, ...others] = desktop.build.extraResources;
+  assert.equal(others.length, 0);
+  assert.deepEqual([tree.from, tree.to], ["..", "stilo"]);
+  const included = tree.filter.filter((pattern) => !pattern.startsWith("!"));
+  for (const entry of WEB_ENTRIES) {
+    assert.ok(included.some((pattern) => pattern === entry || pattern.startsWith(`${entry}/`)), `${entry} carried`);
+    assert.ok(existsSync(join(ROOT, entry)), `${entry} exists`);
+  }
+  // Besides the window's files: only the shared protocol and the server's code.
+  const others2 = included.filter((pattern) => !WEB_ENTRIES.some((entry) => pattern === entry || pattern.startsWith(`${entry}/`)));
+  assert.deepEqual(others2.sort(), ["protocol/**/*", "server/**/*.py", "server/**/module.json", "server/MANUAL.md"]);
+  for (const secret of ["server/whitelist.json", "server/session-state.json", "server/stilomarker.env", "server/data/team_x/a.md"]) {
+    const glob = (pattern) => new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*\*\//g, "\u0000").replace(/\*/g, "[^/]*").replace(/\u0000/g, "(?:.*/)?")}$`);
+    assert.ok(!included.some((pattern) => glob(pattern).test(secret)), `never ${secret}`);
+  }
   for (const file of desktop.build.files) assert.ok(existsSync(join(ROOT, "desktop", file)), `desktop/${file} exists`);
   assert.match(desktop.devDependencies.electron, /^\d+\.\d+\.\d+$/, "Electron pinned");
 });
 
-test("desktop: the page gets only the bridge's three calls, in an isolated, sandboxed window", () => {
+test("desktop: the page gets only the bridge's calls, in an isolated, sandboxed window", () => {
   const preload = readFileSync(join(ROOT, "desktop/preload.cjs"), "utf8");
-  assert.deepEqual([...preload.matchAll(/ipcRenderer\.invoke\("([^"]+)"\)/g)].map((m) => m[1]), ["stilo:version", "stilo:check-update", "stilo:open-update"]);
+  assert.deepEqual([...preload.matchAll(/ipcRenderer\.invoke\("([^"]+)"/g)].map((m) => m[1]),
+    ["stilo:version", "stilo:check-update", "stilo:open-update", "stilo:server-state", "stilo:server-choose"]);
+  assert.deepEqual([...preload.matchAll(/ipcRenderer\.on\("([^"]+)"/g)].map((m) => m[1]), ["stilo:server-changed"]);
   const main = readFileSync(join(ROOT, "desktop/app.mjs"), "utf8");
   for (const setting of ["contextIsolation: true", "sandbox: true", "nodeIntegration: false"]) assert.ok(main.includes(setting), setting);
   assert.ok(main.includes('"will-prevent-unload"'), "the leave question is answered");

@@ -30,8 +30,9 @@ export function addCollaborationSettings({ dialog, settings, desktop = false, do
   const username = body.querySelector("#account-username-input");
   if (username) username.value = settings.accountUsername ?? "";
 
-  // In the desktop build, blank is no server at all (there is no "same origin" to reach).
-  if (desktop) body.querySelector("#server-url-input").placeholder = "https://… (blank: no server, this app on its own)";
+  // In the desktop app the server is chosen on Settings → Server (the desktop
+  // app sends the requests on): the address here stays blank, and hidden.
+  if (desktop) body.querySelector("#server-url-input").closest("label").hidden = true;
   dialog.addPage({ id: "collaboration", label: "Collaboration", order: 30, body });
   dialog.onOpen(show);
   settings.on((view, changed) => { if (changed.some((key) => ["serverUrl", "serverPin", "displayName", "autoReconnect"].includes(key))) show(); });

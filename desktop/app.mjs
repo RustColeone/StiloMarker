@@ -1,31 +1,55 @@
 // The desktop app (Electron's main process): the web app in a window of its
 // own, from its own files at one fixed origin (policy.mjs), with what a
 // browser would otherwise do: asking before closing with unsaved work, links
-// opened in the system's browser, no server unless Settings names one, and
-// telling of a newer release. main.mjs starts it; tests/desktop-smoke.mjs
-// starts it with stand-ins for the native dialog and the system's browser.
+// opened in the system's browser, and telling of a newer release. The app's
+// requests to the server (/api/) are sent on from here to the server the
+// desktop settings name (server-policy.mjs): none, the one this app runs on
+// this computer (server.mjs), or another; the choice is kept, so at the next
+// start that server is started again and the app reconnects on its own.
+// main.mjs starts it; tests/desktop-smoke.mjs starts it with stand-ins for
+// the native dialog and the system's browser.
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, session, shell } from "electron";
 import { readFileSync } from "node:fs";
-import { stat } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { FEED, ORIGIN, SCHEME, linkAction, noServer, route, updateFrom } from "./policy.mjs";
+import { createLocalServer } from "./server.mjs";
+import { forwardHeaders, forwardTarget, forwardUrl, serverChoice } from "./server-policy.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const VERSION = JSON.parse(readFileSync(join(HERE, "package.json"), "utf8")).version;
 // What a page may ask for: copying (Copy buttons) and full screen. Nothing else (camera, location, …).
 const PERMISSIONS = new Set(["clipboard-sanitized-write", "fullscreen"]);
 
-// Packaged, the web app's files are beside the app (extraResources: web/);
-// run from the repository, they are the repository's.
-export const webRoot = () => (app.isPackaged ? join(process.resourcesPath, "web") : resolve(HERE, ".."));
+// Packaged, the web app's files and the server's code are beside the app, in
+// a tree shaped like the repository (extraResources: stilo/); run from the
+// repository, they are the repository's.
+export const webRoot = () => (app.isPackaged ? join(process.resourcesPath, "stilo") : resolve(HERE, ".."));
+export const serverRoot = () => join(webRoot(), "server");
 
-async function serve(address, root) {
-  const answer = route(address, root);
-  if (answer.api) {
-    const reply = noServer();
-    return new Response(reply.body, { status: reply.status, headers: reply.headers });
+const offline = () => {
+  const reply = noServer();
+  return new Response(reply.body, { status: reply.status, headers: reply.headers });
+};
+
+// A request to /api/ sent on to the server (a stream, like the sync events,
+// passes as it comes); none, or it can't be reached: answered as offline.
+async function forward(request, target) {
+  if (!target) return offline();
+  const method = request.method;
+  try {
+    return await net.fetch(forwardUrl(target, request.url), { method, headers: forwardHeaders(request.headers),
+      body: method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer(), redirect: "follow" });
+  } catch {
+    return offline();
   }
+}
+
+async function serve(request, root, target) {
+  const address = request.url;
+  const answer = route(address, root);
+  if (answer.api) return forward(request, target());
   // A file only (never a folder's listing), read by Electron, which gives its type.
   if (answer.file) {
     try {
@@ -79,7 +103,17 @@ function openWindow({ root, ask, openExternal }) {
 
 // Starts the app: one instance (a second start shows the first's window).
 // Options are for tests: the files, the profile, the dialog and the browser.
-export function start({ root = webRoot(), userData = null, ask = askToLeave, openExternal = (url) => shell.openExternal(url),
+// The desktop settings (the server choice), kept in this app's folder.
+async function readSettings(file) {
+  try {
+    return JSON.parse(await readFile(file, "utf8"));
+  } catch (error) {
+    if (error.code !== "ENOENT") console.warn("The desktop settings could not be read; starting from the defaults.", error.message);
+    return {};
+  }
+}
+
+export function start({ root = webRoot(), server = serverRoot(), userData = null, ask = askToLeave, openExternal = (url) => shell.openExternal(url),
   feed = FEED, version = VERSION, onWindow = () => {} } = {}) {
   if (userData) app.setPath("userData", userData);
   protocol.registerSchemesAsPrivileged([{ scheme: SCHEME,
@@ -91,14 +125,32 @@ export function start({ root = webRoot(), userData = null, ask = askToLeave, ope
   let win = null;
   let update = null;
   const fromApp = (event) => linkAction(event.senderFrame?.url ?? "") === "app";
+  // The server choice, and the server this app runs when it is "local".
+  const settingsFile = () => join(app.getPath("userData"), "desktop-settings.json");
+  let choice = serverChoice();
+  const tell = () => { if (win && !win.isDestroyed()) win.webContents.send("stilo:server-changed", serverState()); };
+  const local = createLocalServer({ serverDir: server, staticDir: root, dataDir: join(app.getPath("userData"), "server"), onState: tell });
+  const target = () => (choice.connect === "local" ? (local.state().status === "running" ? local.state().local : null) : forwardTarget(choice));
+  const serverState = () => ({ connect: choice.connect, remoteUrl: choice.remoteUrl, port: choice.local.port, lan: choice.local.lan,
+    pin: choice.local.pin, masterPin: choice.local.masterPin, local: local.state() });
+  async function apply(next) {
+    choice = serverChoice(next);
+    await mkdir(app.getPath("userData"), { recursive: true });
+    await writeFile(settingsFile(), `${JSON.stringify(choice, null, 2)}\n`, { mode: 0o600 });
+    if (choice.connect === "local") await local.start(choice.local);
+    else await local.stop();
+    tell();
+    return serverState();
+  }
   app.on("second-instance", () => {
     if (!win || win.isDestroyed()) return;
     if (win.isMinimized()) win.restore();
     win.focus();
   });
   app.on("window-all-closed", () => app.quit());
+  app.on("will-quit", () => local.kill());
   void app.whenReady().then(() => {
-    protocol.handle(SCHEME, (request) => serve(request.url, root));
+    protocol.handle(SCHEME, (request) => serve(request, root, target));
     session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => callback(PERMISSIONS.has(permission)));
     ipcMain.handle("stilo:version", () => version);
     ipcMain.handle("stilo:check-update", async (event) => {
@@ -110,10 +162,18 @@ export function start({ root = webRoot(), userData = null, ask = askToLeave, ope
     ipcMain.handle("stilo:open-update", (event) => {
       if (fromApp(event) && update?.url) void openExternal(update.url);
     });
+    // The server: what it is now, and a new choice (kept, then applied).
+    ipcMain.handle("stilo:server-state", (event) => (fromApp(event) ? serverState() : null));
+    ipcMain.handle("stilo:server-choose", (event, next) => {
+      if (!fromApp(event) || !next || typeof next !== "object") return null;
+      return apply({ ...choice, ...next, local: { ...choice.local, ...(next.local ?? {}), pin: choice.local.pin, masterPin: choice.local.masterPin } });
+    });
     // The app draws its own menus; macOS needs its application and Edit menus (copy and paste).
     Menu.setApplicationMenu(process.platform === "darwin"
       ? Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, { role: "windowMenu" }]) : null);
     win = openWindow({ root, ask, openExternal });
     onWindow(win);
+    // The kept choice: the server this app runs is started again.
+    void readSettings(settingsFile()).then((kept) => apply(kept));
   });
 }

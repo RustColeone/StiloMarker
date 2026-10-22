@@ -5,7 +5,11 @@
 //   STILO_SMOKE_ROOT     the web app's files (a copy: its main.js exposes window.__ui, and
 //                        a fresh profile starts with one note, flow.md)
 //   STILO_SMOKE_PROFILE  the profile (one per run: the second phase reopens it)
-//   STILO_SMOKE_PHASE    "first" (a fresh profile) or "again" (the same, reopened)
+//   STILO_SMOKE_PHASE    "first" (a fresh profile) or "again" (the same, reopened);
+//                        "serve" (a fresh profile: runs a server, shares on it),
+//                        "serve-again" (the same, reopened: back on it by itself),
+//                        "remote" (another server: STILO_SMOKE_REMOTE, its PIN STILO_SMOKE_REMOTE_PIN)
+//   STILO_SMOKE_PORT     the port for the server it runs
 import { createServer } from "node:http";
 import { app } from "electron";
 import { start } from "../desktop/app.mjs";
@@ -110,6 +114,72 @@ async function again(win) {
   finish();
 }
 
+// Settings → Server: a choice made as a person would (the page's fields, Apply).
+async function chooseServer(contents, connect, { port = 0, url = "" } = {}) {
+  await page(contents, `window.__ui.shell.settingsDialog.open("desktop-server");
+    const body = document.querySelector(".desktop-server");
+    body.querySelector('input[name="desktop-server"][value="${connect}"]').click();
+    if (${port}) body.querySelector("#desktop-server-port").value = "${port}";
+    body.querySelector("#desktop-server-lan").checked = false;
+    body.querySelector("#desktop-server-url").value = ${JSON.stringify(url)};
+    body.querySelector("#desktop-server-apply").click();`);
+}
+
+const status = (contents) => page(contents, "return document.querySelector('#desktop-server-status')?.textContent ?? '';");
+const connected = 'window.__ui.sync.status.status === "connected"';
+
+async function serve(win) {
+  const contents = win.webContents;
+  await chooseServer(contents, "local", { port: Number(process.env.STILO_SMOKE_PORT) });
+  await until(contents, "document.querySelector('#desktop-server-status').textContent.startsWith('Running')", "the server running", 60);
+  found.status = await status(contents);
+  const state = await page(contents, "return window.stiloDesktop.server.state();");
+  found.server = { port: state.local.port, pin: state.pin, addresses: state.local.addresses };
+  // Through the app: the app's own address, sent on to the server.
+  found.ping = await page(contents, `const r = await fetch("api/ping"); return [r.status, (await r.json()).message];`);
+  // Share This Workspace: this workspace is the server's (joined as its master).
+  await page(contents, 'document.querySelector("#desktop-server-join").click();');
+  await until(contents, connected, "connected to the server", 30);
+  found.role = await page(contents, "return window.__ui.sync.status.role;");
+  await page(contents, 'window.__ui.shell.settingsDialog.close?.(); document.querySelector("#settings-dialog")?.close?.();');
+  await click(contents, "#editor-content .editor-line:last-child");
+  contents.sendInputEvent({ type: "keyDown", keyCode: "End", modifiers: ["control"] });
+  contents.sendInputEvent({ type: "keyUp", keyCode: "End", modifiers: ["control"] });
+  await pause(300);
+  await contents.insertText(" Shared from the desktop.");
+  await until(contents, 'window.__ui.controller.getActiveFile().content.endsWith("The end. Shared from the desktop.")', "typed", 30);
+  process.stdout.write(`SERVING ${JSON.stringify(found.server)}\n`); // desktop-browser.py joins it as someone else now
+  await pause(Number(process.env.STILO_SMOKE_HOLD ?? 8000));
+  finish();
+}
+
+async function serveAgain(win) {
+  const contents = win.webContents;
+  // Nothing clicked: the server started again, and the app back on its session.
+  await until(contents, connected, "reconnected by itself", 60);
+  found.status = await status(contents);
+  found.role = await page(contents, "return window.__ui.sync.status.role;");
+  found.kept = await page(contents, `return Object.values(window.__ui.controller.getProject().nodes).some((n) => n.kind === "file" && (n.content ?? "").includes("Shared from the desktop."));`);
+  finish();
+}
+
+async function remote(win) {
+  const contents = win.webContents;
+  await chooseServer(contents, "remote", { url: process.env.STILO_SMOKE_REMOTE });
+  await until(contents, "document.querySelector('#desktop-server-status').textContent.startsWith('Connected through')", "the other server chosen", 20);
+  found.status = await status(contents);
+  found.ping = await page(contents, `const r = await fetch("api/ping"); return [r.status, (await r.json()).message];`);
+  await page(contents, `window.__ui.shell.settings.change({ serverPin: ${JSON.stringify(process.env.STILO_SMOKE_REMOTE_PIN)} }, "test");
+    await window.__ui.sync.connectSaved({ auto: false });`);
+  await until(contents, connected, "joined the other server's session", 30);
+  // None: the app on its own again; the server's addresses answer as offline.
+  await page(contents, "await window.__ui.sync.session().disconnect?.();");
+  await chooseServer(contents, "none");
+  await until(contents, "document.querySelector('#desktop-server-status').textContent.startsWith('No server')", "no server chosen", 20);
+  found.none = await page(contents, `const r = await fetch("api/ping"); return [r.status, (await r.json()).error];`);
+  finish();
+}
+
 let secondStarts = 0;
 app.on("second-instance", () => { secondStarts += 1; });
 app.on("will-quit", () => finish());
@@ -126,7 +196,7 @@ start({ root, userData, feed,
     win.webContents.once("did-finish-load", async () => {
       try {
         await until(win.webContents, 'window.__ui && document.querySelector("#explorer-tree .tree-row")', "the app started");
-        await (phase === "again" ? again(win) : first(win));
+        await ({ again, serve, "serve-again": serveAgain, remote }[phase] ?? first)(win);
       } catch (error) {
         finish({ failed: String(error?.message ?? error) });
       }

@@ -78,6 +78,8 @@ def main():
                         help="Account whitelist JSON (accounts mode). Kept out of the web-served set. Absent ⇒ accounts disabled.")
     parser.add_argument("--data-dir", default=os.environ.get("MDNOTES_DATA_DIR", str(Path(__file__).resolve().parent / "data")),
                         help="Directory for persistent per-team cloud workspaces. Kept out of the web-served set.")
+    parser.add_argument("--parent-pid", type=int, default=None,
+                        help="Stop when this process is gone (a program that runs the server as its own part: the desktop app).")
     parser.add_argument("--trash-days", type=int, default=int(os.environ.get("MDNOTES_TRASH_DAYS", "30")),
                         help="Days a deleted project stays in its team's trash before it is removed for good (1 to 30).")
     args = parser.parse_args()
@@ -112,6 +114,10 @@ def main():
     def _stop(_signum, _frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, _stop)
+    if args.parent_pid:
+        import _thread
+        from stilo.kernel.parent import watch
+        watch(args.parent_pid, _thread.interrupt_main)  # stops as on Ctrl+C
     try:
         server.serve_forever()
     except KeyboardInterrupt:
