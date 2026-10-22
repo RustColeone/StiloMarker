@@ -1,7 +1,7 @@
 {
   "name": "stilo-marker",
   "productName": "Stilo Marker",
-  "version": "0.2.31",
+  "version": "0.2.32",
   "description": "A Markdown workspace: notes, diagrams, characters, writing together.",
   "author": "RustColeone",
   "license": "GPL-3.0-only",

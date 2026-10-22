@@ -141,6 +141,11 @@ async function serve(win) {
   await page(contents, 'document.querySelector("#desktop-server-join").click();');
   await until(contents, connected, "connected to the server", 30);
   found.role = await page(contents, "return window.__ui.sync.status.role;");
+  // What sync said (a dropped stream, a rejoin), for a failure's report.
+  const syncLog = () => page(contents, `return window.__ui.shell.logLines()
+    .filter((l) => /connect|sync|lost|stream|snapshot|rejoin|preserv|revision/i.test(l.message + " " + (l.detail ?? "")))
+    .slice(-20).map((l) => l.kind + " " + l.message + " " + (l.detail ?? ""));`);
+  found.syncLogAtJoin = await syncLog();
   await page(contents, 'window.__ui.shell.settingsDialog.close?.(); document.querySelector("#settings-dialog")?.close?.();');
   await click(contents, "#editor-content .editor-line:last-child");
   contents.sendInputEvent({ type: "keyDown", keyCode: "End", modifiers: ["control"] });
@@ -150,6 +155,7 @@ async function serve(win) {
   await until(contents, 'window.__ui.controller.getActiveFile().content.endsWith("The end. Shared from the desktop.")', "typed", 30);
   process.stdout.write(`SERVING ${JSON.stringify(found.server)}\n`); // desktop-browser.py joins it as someone else now
   await pause(Number(process.env.STILO_SMOKE_HOLD ?? 8000));
+  found.syncLog = await syncLog();
   finish();
 }
 
@@ -159,6 +165,11 @@ async function serveAgain(win) {
   await until(contents, connected, "reconnected by itself", 60);
   found.status = await status(contents);
   found.role = await page(contents, "return window.__ui.sync.status.role;");
+  // What sync said (a dropped stream, a rejoin), for a failure's report.
+  const syncLog = () => page(contents, `return window.__ui.shell.logLines()
+    .filter((l) => /connect|sync|lost|stream|snapshot|rejoin|preserv|revision/i.test(l.message + " " + (l.detail ?? "")))
+    .slice(-20).map((l) => l.kind + " " + l.message + " " + (l.detail ?? ""));`);
+  found.syncLogAtJoin = await syncLog();
   found.kept = await page(contents, `return Object.values(window.__ui.controller.getProject().nodes).some((n) => n.kind === "file" && (n.content ?? "").includes("Shared from the desktop."));`);
   finish();
 }

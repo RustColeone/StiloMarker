@@ -11,7 +11,7 @@ Last updated: 2026-10-22 · release `v0.2.29` (deployed with v0.2.28; public che
 
 ## Open
 
-None. Everything the stability review of 2026-10-21 found (the app as a PWA,
+One, O8 below (found 2026-10-22). Everything the stability review of 2026-10-21 found (the app as a PWA,
 in Electron, with the user's own key and no server; each found by an
 experiment) is fixed: the storage limit (O0) in v0.2.19, a copy per
 workspace (O7) in v0.2.20, two windows (O1) in v0.2.21, the Agent and Chats
@@ -19,6 +19,19 @@ with the user's own key and no server (O3) in v0.2.22, offline edits merged
 per file (O4) in v0.2.23, typing in a long chapter (O2) in v0.2.24, the app
 as an installed web app (O5) in v0.2.25, the desktop app (O6) in v0.2.26,
 very long files (O2b) in v0.2.28.
+
+### O8. Typing unconfirmed when a PIN session drops does not reach it
+**Confidence:** confirmed by reading and an experiment · **Severity:** low
+
+A PIN session (a guest's PIN, the desktop app's Share This Workspace) that
+drops goes back to the tab's own workspace by design, and joining again
+shows the session's copy; nothing of the own workspace leaks into it (tried
+2026-10-22). But typing made in the last moment before the drop, not yet
+confirmed by the server (usually well under a second), is not sent when the
+tab joins again: the session's copy replaces it. Cloud workspaces merge such
+typing since v0.2.23. A fix would keep the shared copy's unconfirmed files
+aside at the drop and merge them when the same session is joined again
+(never the own workspace's files). Needs a decision: fix, or accept.
 
 ## Accepted
 
@@ -47,6 +60,23 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.32: the desktop app keeps its live session when its server's state changes
+
+Found by the desktop test failing now and then (2026-10-22). Browser only.
+
+- **Share This Workspace could lose what was typed next** (fixed): when the
+  desktop app's server reported a change of state (as it does while it
+  starts), the app joined its session again with the PIN it had saved, which
+  dropped the live session first; right after Share This Workspace that PIN
+  is already the guest's, so the app came back as a client and took the
+  server's copy over typing not yet sent. A session the app is in (or
+  rejoining) is now left as it is; one it was in before and is not in now is
+  still joined again.
+- Tests: `desktop-follow-browser.py` (new: a stand-in for the desktop
+  bridge; in a session, a change of the server's state makes no second
+  join); `desktop-smoke.mjs` reports what Sync said in the serve phases, for
+  a failure's report.
 
 ### v0.2.31: plain text, JSON and tables
 

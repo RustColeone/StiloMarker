@@ -69,11 +69,14 @@ export function addDesktopServer({ dialog, settings, sync, ping = () => {}, log 
   }
 
   // The server came up (or changed): the app finds it, and a session it was
-  // in before is joined again.
+  // in before is joined again. One it is in now is left as it is: joining
+  // again would drop it, and right after Share This Workspace (the PIN saved
+  // is already the guest's) take the server's copy over typing not yet sent.
   async function followed(next) {
     const reachable = next.connect === "remote" || (next.connect === "local" && next.local?.status === "running");
     ping();
-    if (reachable && settings.autoReconnect && settings.wasConnected && settings.serverPin) {
+    const inSession = ["connected", "reconnecting"].includes(sync.status?.status);
+    if (reachable && !inSession && settings.autoReconnect && settings.wasConnected && settings.serverPin) {
       await sync.connectSaved({ auto: true }).catch((error) => log("Reconnecting to the desktop app's server failed", error.message));
     }
   }
