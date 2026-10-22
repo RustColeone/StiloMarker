@@ -66,6 +66,21 @@ def _parent_id(project, parent_path):
     return parent_id
 
 
+def _check_top(project, parent_id, name, types):
+    """At the top, none of the names the server keeps its own files under there
+    (as the browser's ensureUniqueName refuses them)."""
+    if parent_id == project["rootId"] and types.is_reserved(name):
+        raise ValueError(f"{name!r} is kept for the app's own file at a workspace's top")
+
+
+def reserved_at_top(project: dict, types) -> list[str]:
+    """The names at a project's top that only the app's own files may have (for
+    a whole project brought in at once, which no operation checked)."""
+    root = project.get("nodes", {}).get(project.get("rootId"), {})
+    names = [project["nodes"].get(child, {}).get("name", "") for child in root.get("children", [])]
+    return [name for name in names if types.is_reserved(name)]
+
+
 def _node(project, path, what="Node"):
     node_id = node_id_by_path(project, path)
     if not node_id:
@@ -75,7 +90,7 @@ def _node(project, path, what="Node"):
 
 def apply_operation(project: dict, operation: dict, types, gap: float = EDIT_SESSION_GAP_SECONDS) -> dict:
     """Change `project` by one operation; raises ValueError when it cannot apply.
-    `types` is File types (is_known). Returns what the caller needs to know:
+    `types` is File types (is_known, is_reserved). Returns what the caller needs to know:
     {"moved": [paths]} for a move (every path under the node, old and new),
     {"counters": {...}} for a file whose text changed, {} otherwise. A text
     patch must already be rebased to the current text."""
@@ -85,6 +100,7 @@ def apply_operation(project: dict, operation: dict, types, gap: float = EDIT_SES
         name = operation["name"]
         if find_child_by_name(project, parent_id, name):
             raise ValueError("create conflict: a file or folder with that name already exists")
+        _check_top(project, parent_id, name, types)
         if kind == "create-folder":
             append_node(project, parent_id, {"id": create_id("folder"), "kind": "folder", "name": name,
                                              "parentId": parent_id, "children": [], "expanded": True})
@@ -103,11 +119,12 @@ def apply_operation(project: dict, operation: dict, types, gap: float = EDIT_SES
             raise ValueError("rename conflict: a file or folder with that name already exists")
         if node["kind"] == "file" and not types.is_known(operation["name"]):
             raise ValueError(f"Unsupported file type: {operation['name']}")
+        _check_top(project, node["parentId"], operation["name"], types)
         node["name"] = operation["name"]
         return {}
 
     if kind == "move-node":
-        return {"moved": _move(project, operation)}
+        return {"moved": _move(project, operation, types)}
 
     if kind == "delete-node":
         node_id = node_id_by_path(project, operation["path"])
@@ -137,7 +154,7 @@ def apply_operation(project: dict, operation: dict, types, gap: float = EDIT_SES
     raise ValueError(f"Unsupported operation type: {kind}")
 
 
-def _move(project: dict, operation: dict) -> list[str]:
+def _move(project: dict, operation: dict, types) -> list[str]:
     """Re-parent or reorder a node. Validation and index arithmetic mirror
     moveNode() in the browser exactly: peers apply the same broadcast with it,
     and any difference would order the tree differently for different people."""
@@ -159,6 +176,7 @@ def _move(project: dict, operation: dict) -> list[str]:
         child = nodes.get(child_id)
         if child and child_id != node_id and str(child.get("name", "")).lower() == lowered:
             raise ValueError("move conflict: a file or folder with that name already exists there")
+    _check_top(project, target_id, node["name"], types)
     old_paths = subtree_paths(project, node_id)
     source = nodes[node["parentId"]]
     source_children = list(source.get("children", []))

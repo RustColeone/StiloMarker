@@ -59,7 +59,8 @@
 //       attach({ busy, scope, shared, confirmed }) from the app above, which
 //       starts the page listeners and the periodic save (adapters/saving.js)
 // Static: the project's storage (loadProject, saveProject; folders on disk:
-// importDirectory, saveProjectToHandles...; on-device folders: openProjectOpfs,
+// importDirectory, saveProjectToHandles..., leftOutOf(project): what opening a folder or
+// ZIP left out (text files over 5 MB); on-device folders: openProjectOpfs,
 // listOpfsDir...; snapshotProject, savedFileIds), a file's content as bytes and back (bytesToDataUrl, dataUrlToBlob,
 // decodeTextBytes, getExportBytes, getMimeTypeForFileName,
 // readFileAsProjectContent) and ZIP archives (createZip, downloadBlob,
@@ -88,7 +89,7 @@ export { buildTextPatch, isTextPatch } from "./model/text-patch.js";
 export { bytesToDataUrl, dataUrlToBlob, dataUrlToBytes, decodeTextBytes, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent } from "./adapters/file-content.js";
 export { createZip, downloadBlob, extractZipEntries } from "./adapters/zip.js";
 export { isLocalKey, loadProject, localKey, saveProject } from "./adapters/browser-copy.js";
-export { buildProjectFromDirectoryHandle, buildSourceIndex, importDirectory, importSingleFile, importZipArchive, saveProjectToHandles, supportsDirectoryAccess } from "./adapters/disk-folders.js";
+export { buildProjectFromDirectoryHandle, buildSourceIndex, importDirectory, importSingleFile, importZipArchive, leftOutOf, saveProjectToHandles, supportsDirectoryAccess } from "./adapters/disk-folders.js";
 export { createProjectOpfs, deleteOpfsEntry, exportProjectModelOpfs, getOpfsDirectoryHandle, importOsFolderIntoOpfs, importProjectModelOpfs, listOpfsDir, mkdirOpfs, openProjectOpfs, saveProjectOpfs, supportsOpfs } from "./adapters/device-folders.js";
 export { createProjectSaveQueue, savedFileIds, snapshotProject } from "./adapters/save-queue.js";
 import { createSaving } from "./adapters/saving.js";

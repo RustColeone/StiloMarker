@@ -1,6 +1,7 @@
 // The preview pane: a file shown as it reads, not as it is written. Markdown
-// (links resolved inside the project, math typeset when present), images and
-// plain mind-map trees are built in; other kinds of file add a preview to the
+// (links resolved inside the project, math typeset when present), images,
+// plain mind-map trees, plain text (as it is) and JSON (valid, with its value
+// formatted, or where it is not) are built in; other kinds of file add a preview to the
 // `previews` extension point:
 //   previews.add({ id, matches(file) -> bool, render(target, project, file, tools) -> { shouldTypeset, content },
 //                  cacheable?: bool, printHtml?(project, file, tools) -> html,
@@ -16,6 +17,8 @@
 // while none of those changed.
 import { getNodeIdByPath, getPath, isImageFileName, isMarkdownFileName, isMtreeFileName } from "../../workspace/index.js";
 import { renderMarkdown } from "../model/markdown.js";
+import { checkJson, describeJson, highlightJsonLine } from "../model/json.js";
+import { builtinTypes } from "../../file-types/index.js";
 import { ignore } from "../../../kernel/index.js";
 
 // MathJax, served with the app (an absolute address: the print window writes its own page).
@@ -87,6 +90,22 @@ export function createPreview(app, previews, codeBlocks = { all: () => [] }) {
     }
   }
 
+  // JSON: valid (what it holds, the value formatted and coloured) or where it is not.
+  const COLOURED_UP_TO = 2 * 1024 * 1024; // a larger value is shown formatted, uncoloured
+  function jsonHtml(text) {
+    const escape = app.escapeEditorHtml;
+    const checked = checkJson(text);
+    if (!checked.ok) {
+      const where = checked.line ? ` at line ${checked.line}, column ${checked.column}` : "";
+      return `<p class="preview-json-status is-bad">Not valid JSON${where}: ${escape(checked.message)}.</p><pre class="preview-plain">${escape(text)}</pre>`;
+    }
+    const tools = { escape, blank: (line) => `<div class="editor-line">${escape(line)}</div>` };
+    const body = checked.formatted.length > COLOURED_UP_TO ? escape(checked.formatted)
+      : checked.formatted.split("\n").map((line) => highlightJsonLine(line, tools)).join("");
+    return `<p class="preview-json-status">Valid JSON: ${escape(describeJson(checked.value))}.</p><div class="preview-json">${body}</div>`;
+  }
+  const isFormat = (format) => (file) => builtinTypes.formatOf(file.name) === format;
+
   // The built-in previews, after any added ones (an added preview wins).
   const builtIn = [
     { id: "image", matches: (file) => isImageFileName(file.name), cacheable: false,
@@ -107,6 +126,18 @@ export function createPreview(app, previews, codeBlocks = { all: () => [] }) {
         return { shouldTypeset: false, content: "" };
       },
       printHtml: (project, file) => `<pre><code>${app.escapeEditorHtml(file.content)}</code></pre>` },
+    { id: "plain", matches: isFormat("plain"), cacheable: true,
+      render(target, project, file) {
+        target.innerHTML = `<pre class="preview-plain">${app.escapeEditorHtml(file.content)}</pre>`;
+        return { shouldTypeset: false, content: "" };
+      },
+      printHtml: (project, file) => `<pre>${app.escapeEditorHtml(file.content)}</pre>` },
+    { id: "json", matches: isFormat("json"), cacheable: true,
+      render(target, project, file) {
+        target.innerHTML = jsonHtml(file.content ?? "");
+        return { shouldTypeset: false, content: "" };
+      },
+      printHtml: (project, file) => jsonHtml(file.content ?? "") },
     { id: "markdown", matches: () => true, cacheable: true,
       render(target, project, file) {
         target.innerHTML = markdownHtml(project, file, file.content);

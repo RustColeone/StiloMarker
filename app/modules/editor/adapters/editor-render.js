@@ -21,7 +21,18 @@ export function installRender(ed, app) {
       // doesn't jump the view. caretIntoView() below then only nudges the scroll
       // when the edit actually pushed the caret out of the viewport.
       const savedScroll = app.elements.editorContent.scrollTop;
+      // A write from elsewhere while something else has the keyboard (a
+      // table's cell, the chat, a Replace button): drawn, and the keyboard stays
+      // where it is (placing the caret here would take it).
+      const active = document.activeElement;
+      const elsewhere = Boolean(active) && active !== document.body && !app.elements.editorContent.contains(active);
       renderEditorContent(text, { keep: [lineAt(text, Math.min(selStart, selEnd)), lineAt(text, Math.max(selStart, selEnd))] });
+      if (elsewhere) {
+        ed.dropHeld?.();
+        app.elements.editorContent.scrollTop = savedScroll;
+        syncEditorScroll();
+        return;
+      }
       // Setting innerHTML can cause the contenteditable to lose focus in some
       // browsers.  Restore focus explicitly so that the subsequent
       // notifyEditorChanged → updateStatus call still sees the editor as the

@@ -62,6 +62,12 @@ export class MockFileHandle {
       close: async () => {}
     };
   }
+
+  // As a real handle's file; `size` may be set to stand for a large one.
+  async getFile() {
+    const blob = new Blob([this.content]);
+    return { name: this.name, size: this.size ?? blob.size, lastModified: 0, text: async () => this.content, arrayBuffer: () => blob.arrayBuffer() };
+  }
 }
 
 export class MockDirectoryHandle {
@@ -74,6 +80,11 @@ export class MockDirectoryHandle {
 
   async queryPermission() {
     return "granted";
+  }
+
+  async *values() {
+    yield* this.directories.values();
+    yield* this.files.values();
   }
 
   async requestPermission() {

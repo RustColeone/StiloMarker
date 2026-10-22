@@ -160,8 +160,13 @@ function getNodeByPath(project, path) {
   return nodeId ? getNode(project, nodeId) : null;
 }
 
+// A name may stand in this folder: no sibling has it (any case), and at the
+// top it is none of the names the server keeps its own files under there.
 function ensureUniqueName(project, parentId, name, excludeNodeId = null) {
   const parent = getNode(project, parentId);
+  if (parentId === (project.rootId ?? ROOT_ID) && builtinTypes.isReserved(name)) {
+    throw new Error(`"${name}" is kept for the app's own file at a workspace's top. Put it in a folder, or give it another name.`);
+  }
   const duplicate = parent.children
     .map((childId) => project.nodes[childId])
     .find((child) => child && child.id !== excludeNodeId && child.name.toLowerCase() === name.toLowerCase());

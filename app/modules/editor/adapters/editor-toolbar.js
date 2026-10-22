@@ -4,7 +4,7 @@
 // Installed on the editor object `ed` that the other parts share (see
 // editor-core.js); calls into another part go through `ed`.
 import { isTextFileName } from "../../workspace/index.js";
-import { buildTableSnippet, getEditorToolbarFormat, renderEditorFormatToolbar } from "./format-toolbar.js";
+import { TOOLBAR_SPECS, buildTableSnippet, getEditorToolbarFormat, renderEditorFormatToolbar } from "./format-toolbar.js";
 import { createTableGridPicker } from "./table-picker.js";
 
 export function installToolbar(ed, app) {
@@ -190,7 +190,9 @@ export function installToolbar(ed, app) {
     const toolbar = app.elements.editorFormatToolbar;
     if (!toolbar) return;
     const activeFile = app.controller.getActiveFile();
-    const format = app.settings.showFormatToolbar ? getEditorToolbarFormat(activeFile?.name ?? "") : null;
+    const named = app.settings.showFormatToolbar ? getEditorToolbarFormat(activeFile?.name ?? "") : null;
+    // A format with no buttons (plain text, JSON, a table) shows no toolbar.
+    const format = named !== null && (TOOLBAR_SPECS[named] || app.toolbars?.get(named)) ? named : null;
 
     toolbar.hidden = format === null;
     if (format === currentToolbarFormat) return;

@@ -69,6 +69,36 @@ export default Object.freeze([
     ]
   },
   {
+    "id": "text",
+    "label": "Plain Text",
+    "kind": "text",
+    "format": "plain",
+    "extensions": {
+      ".txt": "text/plain;charset=utf-8",
+      ".log": "text/plain;charset=utf-8"
+    },
+    "icon": "is-text",
+    "filters": [
+      "notes"
+    ],
+    "create": {
+      "label": "New Text File",
+      "name": "new text",
+      "order": 8
+    }
+  },
+  {
+    "id": "json",
+    "label": "JSON",
+    "kind": "text",
+    "format": "json",
+    "extensions": {
+      ".json": "application/json;charset=utf-8"
+    },
+    "icon": "is-json",
+    "filters": []
+  },
+  {
     "id": "image",
     "label": "Image",
     "kind": "image",
@@ -109,6 +139,24 @@ export default Object.freeze([
       "order": 4
     },
     "extension": "bmap-diagram"
+  },
+  {
+    "id": "datatable",
+    "label": "Data Table",
+    "kind": "text",
+    "format": "datatable",
+    "extensions": {
+      ".csv": "text/csv;charset=utf-8",
+      ".tsv": "text/tab-separated-values;charset=utf-8"
+    },
+    "icon": "is-csv",
+    "filters": [],
+    "create": {
+      "label": "New Table",
+      "name": "new table",
+      "order": 9
+    },
+    "extension": "data-table"
   },
   {
     "id": "htmlpage",

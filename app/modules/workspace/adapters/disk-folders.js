@@ -3,7 +3,7 @@
 // from the legacy file-system service when Workspace took saving.
 import { createProjectSaveQueue } from "./save-queue.js";
 import { ROOT_ID, addFile, addFolder, createProject, getNode, getPath, isImageFileName, listVisibleNodes } from "../model/project.js";
-import { bytesToDataUrl, dataUrlToBlob, decodeTextBytes, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent } from "./file-content.js";
+import { bytesToDataUrl, dataUrlToBlob, decodeTextBytes, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent, sizeLabel, tooLarge } from "./file-content.js";
 import { extractZipEntries } from "./zip.js";
 import { builtinTypes } from "../../file-types/index.js";
 
@@ -30,6 +30,23 @@ function ensureFolderPath(project, folderNames) {
   });
 
   return { project: currentProject, parentId };
+}
+
+// What a folder or ZIP opened as a project left out, by the project it made:
+// text files too large to hold, and a folder's own files at its top (a local
+// folder's manifest). For the one who opened it to say so.
+const LEFT_OUT = new WeakMap();
+const leftOutOf = (project) => LEFT_OUT.get(project) ?? [];
+function noteLeftOut(project, names) {
+  if (names.length) LEFT_OUT.set(project, names);
+  return project;
+}
+// Kept out of the project: a name the app keeps at the top, or a text file too large.
+function keptOut(parentId, name, size, leftOut, path) {
+  if (parentId === ROOT_ID && builtinTypes.isReserved(name)) return true;
+  if (!tooLarge(name, size)) return false;
+  leftOut.push(`${path} (${sizeLabel(size)})`);
+  return true;
 }
 
 function supportsDirectoryAccess() {
@@ -96,20 +113,23 @@ async function buildProjectFromDirectoryHandle(directoryHandle, name, sourceMode
   let project = createProject(name || directoryHandle.name || "Directory");
   project.sourceMode = sourceMode;
   project.handles = { [ROOT_ID]: directoryHandle };
+  const leftOut = [];
 
-  async function walk(folderHandle, parentId) {
+  async function walk(folderHandle, parentId, where = "") {
     for await (const entry of folderHandle.values()) {
       if (entry.kind === "directory") {
+        if (parentId === ROOT_ID && builtinTypes.isReserved(entry.name)) continue;
         project = addFolder(project, parentId, entry.name);
         const folderNode = Object.values(project.nodes).find(
           (node) => node.parentId === parentId && node.kind === "folder" && node.name === entry.name
         );
         project.handles[folderNode.id] = entry;
-        await walk(entry, folderNode.id);
+        await walk(entry, folderNode.id, `${where}${entry.name}/`);
       }
 
       if (entry.kind === "file" && builtinTypes.isKnown(entry.name)) {
         const file = await entry.getFile();
+        if (keptOut(parentId, entry.name, file.size, leftOut, `${where}${entry.name}`)) continue;
         project = addFile(project, parentId, entry.name, await readFileAsProjectContent(file, entry.name));
         const fileNode = Object.values(project.nodes).find(
           (node) => node.parentId === parentId && node.kind === "file" && node.name === entry.name
@@ -126,7 +146,7 @@ async function buildProjectFromDirectoryHandle(directoryHandle, name, sourceMode
   }
   project.sourceIndex = buildSourceIndex(project);
 
-  return project;
+  return noteLeftOut(project, leftOut);
 }
 
 async function importDirectory() {
@@ -228,10 +248,13 @@ async function importZipArchive(file) {
   const projectName = file.name.replace(/\.zip$/i, "") || "Imported Zip";
   let project = createProject(projectName);
   project.sourceMode = "import-zip";
+  const leftOut = [];
 
   for (const entry of supportedEntries) {
     const segments = entry.path.split("/").filter(Boolean);
     const fileName = segments.pop();
+    if (keptOut(segments.length ? null : ROOT_ID, fileName, entry.bytes.length, leftOut, entry.path)) continue;
+    if (segments.length && builtinTypes.isReserved(segments[0])) continue;
     const folderState = ensureFolderPath(project, segments);
     project = folderState.project;
     const content = isImageFileName(fileName)
@@ -242,7 +265,7 @@ async function importZipArchive(file) {
 
   const firstFile = listVisibleNodes(project).find((row) => row.node.kind === "file")?.node;
   project.activeFileId = firstFile?.id ?? null;
-  return project;
+  return noteLeftOut(project, leftOut);
 }
 
 export {
@@ -251,6 +274,8 @@ export {
   importDirectory,
   importSingleFile,
   importZipArchive,
+  leftOutOf,
+  noteLeftOut,
   saveProjectToHandles,
   supportsDirectoryAccess
 };

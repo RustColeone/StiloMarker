@@ -853,6 +853,14 @@ p {
   --file-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='8' r='5'/%3E%3Cpath d='M20 21a8 8 0 0 0-16 0'/%3E%3C/svg%3E");
   --file-icon-color: #d08a3a;
 }
+.file-icon.is-text {
+  --file-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/%3E%3Cpath d='M14 2v6h6M8 13h8M8 17h8M8 9h2'/%3E%3C/svg%3E");
+  --file-icon-color: var(--text-muted);
+}
+.file-icon.is-json {
+  --file-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1M16 21h1a2 2 0 0 0 2-2v-5a2 2 0 0 1 2-2 2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1'/%3E%3C/svg%3E");
+  --file-icon-color: #c9a227;
+}
 .file-icon.is-image {
   --file-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Ccircle cx='9' cy='9' r='2'/%3E%3Cpath d='m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21'/%3E%3C/svg%3E");
   --file-icon-color: #2aa198;
@@ -2541,6 +2549,60 @@ p {
 
 .token-mtree-description {
   color: var(--syntax-quote);
+}
+
+/* JSON (the source and its preview) */
+.token-json-key {
+  color: var(--syntax-attribute);
+}
+
+.token-json-string {
+  color: var(--syntax-string);
+}
+
+.token-json-number {
+  color: var(--syntax-number);
+}
+
+.token-json-literal {
+  color: var(--syntax-constant);
+}
+
+.token-json-punctuation {
+  color: var(--syntax-punctuation);
+}
+
+/* Plain text and JSON in the preview: as written (JSON formatted). */
+.preview-output .preview-plain {
+  margin: 0;
+  padding: 10px;
+  border: 0;
+  background: transparent;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.preview-json-status {
+  margin: 4px 10px 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.preview-json-status.is-bad {
+  color: var(--danger);
+}
+
+.preview-json {
+  padding: 0 10px 10px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.preview-json .editor-line {
+  min-height: 0;
 }
 
 /* ── color swatch (shared across file types) ─────────────────────────────── */

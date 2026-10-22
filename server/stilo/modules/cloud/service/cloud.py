@@ -12,7 +12,7 @@ import mimetypes
 from stilo.kernel.log import log as _log
 from stilo.modules.file_types import BUILTIN as FILE_TYPES
 from stilo.modules.projects import safe_component, safe_relpath
-from stilo.modules.workspace import default_project, path_of
+from stilo.modules.workspace import default_project, path_of, reserved_at_top
 
 
 class Cloud:
@@ -110,6 +110,9 @@ class Cloud:
             node_name = str(node.get("name", ""))
             if "/" in node_name or "\\" in node_name or node_name in ("", ".", ".."):
                 raise ValueError("Invalid file or folder name in payload")
+        kept = reserved_at_top(project, FILE_TYPES) if root_id in project["nodes"] else []
+        if kept:
+            raise ValueError(f"{', '.join(kept)} at the workspace's top: those names are kept for the app's own files")
         parent = self._new_place(team, relpath)
         final, counter = name, 2
         while (parent / final).exists():

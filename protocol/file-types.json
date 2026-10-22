@@ -26,6 +26,17 @@
       "icon": "is-file", "filters": ["notes"]
     },
     {
+      "id": "text", "label": "Plain Text", "kind": "text", "format": "plain",
+      "extensions": { ".txt": "text/plain;charset=utf-8", ".log": "text/plain;charset=utf-8" },
+      "icon": "is-text", "filters": ["notes"],
+      "create": { "label": "New Text File", "name": "new text", "order": 8 }
+    },
+    {
+      "id": "json", "label": "JSON", "kind": "text", "format": "json",
+      "extensions": { ".json": "application/json;charset=utf-8" },
+      "icon": "is-json", "filters": []
+    },
+    {
       "id": "image", "label": "Image", "kind": "image", "format": "image",
       "extensions": {
         ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
@@ -34,5 +45,9 @@
       "generated": [".png", ".jpg", ".jpeg", ".webp"],
       "icon": "is-image", "filters": ["images"]
     }
-  ]
+  ],
+  "reserved": {
+    "about": "Names no file or folder may have at a workspace's top, compared without regard to case (a desktop's disk may not tell them apart): the server keeps its own files there under these names (the tree, who may open it, the comments, the Agent's threads, a write in progress), and a local folder its manifest. Both ends refuse them (Workspace); a server test checks this list holds every name a module keeps in a project's folder that is a known type.",
+    "names": ["manifest.json", "access.json", "comments.json", "chat.json", ".pending-state.json"]
+  }
 }

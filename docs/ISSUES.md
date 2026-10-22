@@ -48,6 +48,66 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 
 ## Fixed
 
+### v0.2.31: plain text, JSON and tables
+
+Before freezing the core (2026-10-22), the second of four. Asked for: "the
+csv might need a table editor for the preview mode" (chosen: a grid, with
+the numbers in a column summed up).
+
+- **Plain text** (`.txt`, `.log`; new, in the core): edited as it is (no
+  Markdown colours, no formatting toolbar; a type with no toolbar buttons no
+  longer shows an empty toolbar), previewed as it is. Create → New Text File.
+- **JSON** (`.json`; new, in the core): coloured in the source
+  (`editor/model/json.js`: keys, strings, numbers, literals, punctuation, a
+  line at a time); the preview says whether it is valid, with what it holds
+  and the value formatted, or where it is not (line and column, found by the
+  app's own check: browsers word the error differently and some never say
+  where).
+- **Tables** (`.csv`, `.tsv`; new, an extension: `extensions/data-table/`):
+  the table editor in the preview, shown when a table opens. Only the rows
+  and columns in view are drawn (20,000 rows scroll like twenty); the first
+  row kept in view as a header (found by itself, a checkbox to change it);
+  cells edited in place (typed over, or Enter / F2 / a double click; Enter
+  and Tab move on; Escape drops the edit; an input method's text goes in);
+  blocks copied and pasted as tab-separated text (one value pasted on a
+  block fills it); rows and columns inserted and deleted (a right click, or
+  Add Row / Add Column); columns resized; the numbers in the selection, or
+  one cell's whole column, summed up below (sum, mean, min, max); Ctrl+Z
+  and Ctrl+Shift+Z for its own edits. An edit rewrites only the records it
+  touches (the rest of the file byte for byte, quoting as the writer chose)
+  and is written with the text it was made on, so it merges with others'
+  typing, and an edit begun before a row came in above still lands on its
+  own row. The source colours each column. Create → New Table.
+- **Names kept for the app** (both ends): no file or folder at a workspace's
+  top may be named like a file the server keeps there (`manifest.json`,
+  `access.json`, `comments.json`, `chat.json`, `.pending-state.json`, any
+  case); with `.json` a known type, a file of that name would have
+  overwritten the workspace's tree, its access list, its comments or the
+  agent's threads. The list is `reserved` in `protocol/file-types.json`
+  (both ends read it; a server test checks it covers every bookkeeping name
+  a module reserves that is a known type); Workspace refuses such a create,
+  rename or move on both ends (the operations table has the cases); a local
+  folder's own `manifest.json` is no longer read as a file.
+- **The keyboard stays where it is**: the write path edits the file shown in
+  the source editor as if typed (it joins the undo history), and that render
+  put the keyboard back in the editor, so a table's next key went into the
+  source; when something else has the keyboard (a table's cell, the chat, a
+  Replace button) it now keeps it. And the preview, which is not drawn while
+  the keyboard is inside it (a diagram's fields, a table's cell), is drawn
+  when another file is to show there.
+- **Large text files left out**: a folder or ZIP opened as a workspace
+  leaves out text files over 5 MB (now that logs and data files are known,
+  a folder of results could hold one of hundreds of MB), and says which;
+  adding one is refused the same way.
+- Tests: `data-table.test.mjs` and `editor-json.test.mjs` (new: records read
+  as written, each edit's text, the numbers in a block, the clipboard's form;
+  JSON's colours, validity and where it stops), `data-table-browser.py` (new:
+  the 14 checks above, in a browser), the file-types and operations tables
+  (the new types; reserved names refused at the top on both ends, fine in a
+  folder), `file-types.test.py` (the list covers every bookkeeping file of a
+  known type), `zip-fs.test.mjs` (a folder's and a ZIP's left-out files) and
+  `shell-browser.py` (the Create menu's two new items).
+
 ### v0.2.30: Find in Files
 
 Before freezing the core (2026-10-22), the first of four. Browser only.

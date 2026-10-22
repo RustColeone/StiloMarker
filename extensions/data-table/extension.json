@@ -1,0 +1,13 @@
+{
+  "about": "Tables (.csv, .tsv): the table editor in the preview (cells edited in place, rows and columns added and removed, blocks copied and pasted, the numbers in the selection summed up), the source's column colours and a new table's first content. Everything about them lives in this folder; the core only offers extension points. Both ends read 'fileTypes' (the server through File types, the browser through the copy tools/protocol-sync.mjs writes). A .csv's delimiter is a comma (a semicolon when its first line has only those), a .tsv's a tab.",
+  "name": "data-table",
+  "browser": "browser/index.js",
+  "fileTypes": [
+    {
+      "id": "datatable", "label": "Data Table", "kind": "text", "format": "datatable",
+      "extensions": { ".csv": "text/csv;charset=utf-8", ".tsv": "text/tab-separated-values;charset=utf-8" },
+      "icon": "is-csv", "filters": [],
+      "create": { "label": "New Table", "name": "new table", "order": 9 }
+    }
+  ]
+}

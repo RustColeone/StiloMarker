@@ -6,6 +6,7 @@ import { getPath } from "../../workspace/index.js";
 
 export function createPreviewPane(app) {
   let updatingFromPreview = false;
+  let drawn = null; // the file (or view) the preview last drew
 
   // The pane view whose tab is shown in the preview, if one is.
   function shownView() {
@@ -26,14 +27,17 @@ export function createPreviewPane(app) {
       if (shown.element) shown.element.hidden = false;
       if (preview) preview.hidden = true;
       shown.show({ fresh }); // in full when just shown, else a light refresh
+      drawn = null;
       return;
     }
     if (preview) preview.hidden = false;
     // Not drawn again when the change came from the preview itself, nor while
-    // the user edits inside it (a diagram node's fields): drawing replaces its
-    // contents, which would reset its scroll and take focus out of the field.
+    // the user edits inside it (a diagram node's fields, a table's cell):
+    // drawing replaces its contents, which would reset its scroll and take
+    // focus out of the field. Another file to show is always drawn.
     const editingInPreview = preview.contains(document.activeElement) && document.activeElement !== preview;
-    if (updatingFromPreview || editingInPreview) return;
+    if ((updatingFromPreview || editingInPreview) && previewFile?.id === drawn) return;
+    drawn = previewFile?.id ?? null;
     const state = app.renderPreviewContent(preview, project, previewFile);
     if (state.shouldTypeset) void app.typesetPreview(state.content);
   }

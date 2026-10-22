@@ -1,12 +1,18 @@
 """Reads the shared list of file types: protocol/file-types.json, then the
 types each extension adds (extensions/<name>/extension.json, 'fileTypes'),
-each marked with the extension it came from."""
+each marked with the extension it came from; and the names kept at a
+workspace's top (the same file's 'reserved')."""
 import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[5]
 DATA = ROOT / "protocol" / "file-types.json"
 EXTENSIONS = ROOT / "extensions"
+
+
+def load_reserved():
+    """The names kept for the app's own files at a workspace's top."""
+    return json.loads(DATA.read_text(encoding="utf-8"))["reserved"]["names"]
 
 
 def load_types():

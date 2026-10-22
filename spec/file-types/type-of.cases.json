@@ -1,5 +1,5 @@
 {
-  "about": "What type a name has (both ends must agree): the longest matching extension wins, case does not matter, and a name that is only an extension has no type.",
+  "about": "What type a name has (both ends must agree): the longest matching extension wins, case does not matter, and a name that is only an extension has no type. Where a case says `reserved`, whether the name is one no file or folder may have at a workspace's top (any case).",
   "cases": [
     { "name": "notes.md", "type": "md", "extension": ".md", "base": "notes", "image": false, "text": true, "format": "markdown" },
     { "name": "Notes.MD", "type": "md", "extension": ".md", "base": "Notes", "image": false, "text": true, "format": "markdown" },
@@ -15,6 +15,14 @@
     { "name": "README", "type": null, "extension": "", "base": "README", "image": false, "text": false, "format": null },
     { "name": ".md", "type": null, "extension": "", "base": ".md", "image": false, "text": false, "format": null },
     { "name": "persona.skill", "type": "skill", "extension": ".skill", "base": "persona", "image": false, "text": true, "format": "markdown" },
-    { "name": "x.mdx", "type": null, "extension": ".mdx", "base": "x", "image": false, "text": false, "format": null }
+    { "name": "x.mdx", "type": null, "extension": ".mdx", "base": "x", "image": false, "text": false, "format": null },
+    { "name": "notes.txt", "type": "text", "extension": ".txt", "base": "notes", "image": false, "text": true, "format": "plain", "reserved": false },
+    { "name": "run.LOG", "type": "text", "extension": ".log", "base": "run", "image": false, "text": true, "format": "plain" },
+    { "name": "config.json", "type": "json", "extension": ".json", "base": "config", "image": false, "text": true, "format": "json", "reserved": false },
+    { "name": "results.csv", "type": "datatable", "extension": ".csv", "base": "results", "image": false, "text": true, "format": "datatable" },
+    { "name": "steps.TSV", "type": "datatable", "extension": ".tsv", "base": "steps", "image": false, "text": true, "format": "datatable" },
+    { "name": "manifest.json", "type": "json", "extension": ".json", "base": "manifest", "image": false, "text": true, "format": "json", "reserved": true },
+    { "name": "Comments.JSON", "type": "json", "extension": ".json", "base": "Comments", "image": false, "text": true, "format": "json", "reserved": true },
+    { "name": ".pending-state.json", "type": "json", "extension": ".json", "base": ".pending-state", "image": false, "text": true, "format": "json", "reserved": true }
   ]
 }

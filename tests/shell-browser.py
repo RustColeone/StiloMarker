@@ -77,13 +77,14 @@ async def main():
         options = await page.evaluate('[...document.querySelectorAll("#new-file-type option")].map((o) => [o.value, o.textContent])')
         assert options == [['md', 'Markdown (.md)'], ['mtree', 'MTREE (.mtree)'], ['urldb', 'URL Album (.urldb)'],
                            ['bmap', 'Brainstorm Diagram (.bmap)'], ['persona', 'Character (.persona.skill)'],
-                       ['mermaid', 'Mermaid (.mmd)'], ['htmlpage', 'HTML Page (.html)']], options
+                       ['mermaid', 'Mermaid (.mmd)'], ['htmlpage', 'HTML Page (.html)'], ['text', 'Plain Text (.txt)'],
+                       ['datatable', 'Data Table (.csv)']], options
 
         # Five menus, in order, each with its items.
         labels = await page.locator('.menu-bar .menu-trigger').all_inner_texts()
         assert labels == ['File', 'Edit', 'Create', 'View', 'Settings'], labels
         counts = await page.evaluate('[...document.querySelectorAll(".menu-bar .menu-popover")].map((p) => [p.querySelectorAll("button").length, p.querySelectorAll(".menu-separator").length])')
-        assert counts == [[9, 3], [6, 2], [8, 1], [6, 1], [6, 2]], counts  # Edit: Find in Files too. Create: md, mtree, urldb, bmap, persona, mermaid, html, folder; a line between groups
+        assert counts == [[9, 3], [6, 2], [10, 1], [6, 1], [6, 2]], counts  # Edit: Find in Files too. Create: md, mtree, urldb, bmap, persona, mermaid, html, text, table, folder; a line between groups
         save = await page.evaluate('[...document.querySelectorAll("[data-command=\'workspace.save\'] span")].map((s) => s.textContent)')
         assert save == ['Save', 'Ctrl+S'], save
         assert await page.locator('#file-menu').is_hidden()

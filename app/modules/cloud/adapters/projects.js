@@ -3,16 +3,19 @@
 // no device storage and no account), opening one, the file manager, and
 // importing a folder, a file or a zip.
 // Part of Cloud: `app` is its shared context (surface.js).
-import { importDirectory, importOsFolderIntoOpfs, importSingleFile, importZipArchive, seedDefaultProject, supportsDirectoryAccess,
+import { importDirectory, importOsFolderIntoOpfs, importSingleFile, importZipArchive, leftOutOf, seedDefaultProject, supportsDirectoryAccess,
   supportsOpfs } from "../../workspace/index.js";
 
 export function addProjectCommands(app, { shell, editor, sync }) {
   const { settings, identity } = app;
   // A project read in from elsewhere replaces the open one, shown afresh and shared if this tab is.
+  // What it left out (text files too large to hold) is said.
   function adopt(project) {
+    const leftOut = leftOutOf(project);
     app.controller.replaceProject(project);
     editor.view.reset(project);
     sync.publishSnapshot();
+    if (leftOut.length) shell.notice(`Left out, too large to open here (over 5 MB): ${leftOut.join(", ")}.`, "Some files were left out");
   }
 
   shell.commands.add({ id: "cloud.new-project", title: "New Project", menu: { id: "file", group: 0, order: 1 }, async run() {

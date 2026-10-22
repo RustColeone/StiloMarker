@@ -1,0 +1,260 @@
+/* Tables' look: their icon in the explorer, the table editor in the preview
+   and the source's column colours. Loaded by the module when it starts. */
+.file-icon.is-csv {
+  --file-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Cpath d='M3 9h18M3 15h18M9 3v18M15 3v18'/%3E%3C/svg%3E");
+  --file-icon-color: #3fa66b;
+}
+
+/* The grid scrolls itself: the preview gives it all its room. */
+.preview-output:has(> .datatable) {
+  padding: 0;
+  overflow: hidden;
+}
+
+.datatable {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.datatable-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+}
+
+.datatable-header-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+}
+
+.datatable-size {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.datatable-view {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.datatable-corner,
+.datatable-cols,
+.datatable-rows {
+  position: absolute;
+  overflow: hidden;
+  background: var(--surface-2);
+  user-select: none;
+}
+
+.datatable-corner {
+  top: 0;
+  left: 0;
+  width: var(--datatable-rowhead, 44px);
+  height: 24px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
+}
+
+.datatable-cols {
+  top: 0;
+  left: var(--datatable-rowhead, 44px);
+  right: 0;
+  height: 24px;
+  border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
+}
+
+.datatable-rows {
+  top: 24px;
+  left: 0;
+  bottom: 0;
+  width: var(--datatable-rowhead, 44px);
+  border-right: 1px solid var(--border);
+  box-sizing: border-box;
+}
+
+.datatable-cols-inner,
+.datatable-rows-inner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  will-change: transform;
+}
+
+.datatable-col,
+.datatable-rownum {
+  position: absolute;
+  height: 24px;
+  line-height: 23px;
+  box-sizing: border-box;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+
+.datatable-col {
+  top: 0;
+  text-align: center;
+  border-right: 1px solid var(--border);
+}
+
+.datatable-rownum {
+  left: 0;
+  right: 0;
+  padding-right: 6px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+}
+
+.datatable-rownum.is-pinned {
+  z-index: 1;
+  background: var(--surface-2);
+}
+
+.datatable-col.is-sel,
+.datatable-rownum.is-sel {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.datatable-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 1;
+}
+
+.datatable-scroll {
+  position: absolute;
+  top: 24px;
+  left: var(--datatable-rowhead, 44px);
+  right: 0;
+  bottom: 0;
+  overflow: auto;
+  background: var(--editor);
+}
+
+.datatable-sizer {
+  position: relative;
+}
+
+.datatable-cells {
+  position: absolute;
+  inset: 0;
+}
+
+.datatable-cell {
+  position: absolute;
+  height: 24px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--editor);
+  color: var(--text);
+  line-height: 23px;
+  white-space: pre;
+  text-overflow: ellipsis;
+}
+
+.datatable-cell.is-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.datatable-cell.is-head {
+  background: var(--surface-1);
+  font-weight: 600;
+}
+
+.datatable-cell.is-pinned {
+  z-index: 1;
+  box-shadow: 0 1px 0 var(--border-strong);
+}
+
+.datatable-cell.is-extra {
+  background: var(--surface-1);
+}
+
+.datatable-cell.is-sel {
+  background: var(--accent-soft);
+}
+
+.datatable-cell.is-active {
+  z-index: 2;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* The keyboard's home: on the active cell, unseen until an edit begins. */
+.datatable-input {
+  position: absolute;
+  z-index: 3;
+  height: 24px;
+  min-height: 24px;
+  margin: 0;
+  padding: 4px 6px;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  font: inherit;
+  line-height: 16px;
+  white-space: pre-wrap;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.datatable-input.is-editing {
+  opacity: 1;
+  pointer-events: auto;
+  background: var(--editor);
+  color: var(--text);
+  caret-color: auto;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.datatable-stats {
+  flex: none;
+  min-height: 22px;
+  padding: 4px 8px;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-top: 1px solid var(--border);
+  background: var(--surface-1);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The source: each column its own colour. */
+.token-table-col0 { color: var(--syntax-keyword); }
+.token-table-col1 { color: var(--syntax-string); }
+.token-table-col2 { color: var(--syntax-number); }
+.token-table-col3 { color: var(--syntax-type); }
+.token-table-col4 { color: var(--syntax-attribute); }
+.token-table-col5 { color: var(--syntax-constant); }
+.token-table-delimiter { color: var(--syntax-punctuation); }

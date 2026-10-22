@@ -8,7 +8,7 @@ import threading
 import time
 
 from stilo.kernel.log import log as _log
-from stilo.modules.workspace import PATCH_FILE, REPLACE_PROJECT, UPDATE_FILE
+from stilo.modules.workspace import PATCH_FILE, REPLACE_PROJECT, UPDATE_FILE, reserved_at_top
 from ..model.rebase import RebaseLog
 from .sessions import Sessions
 
@@ -117,6 +117,9 @@ class SharedWorkspace:
             if base is None or int(base) != int(self.revision):
                 raise ValueError(f"replace-project conflict: based on revision {base} but the server is at "
                                  f"{self.revision} — reload before publishing over it")
+            kept = reserved_at_top(operation["project"], self._types)
+            if kept:
+                raise ValueError(f"{', '.join(kept)} at the workspace's top: those names are kept for the app's own files")
             self.project = operation["project"]
             return {}
         if kind == UPDATE_FILE:

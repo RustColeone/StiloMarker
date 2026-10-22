@@ -88,11 +88,20 @@ try:
     assert not first["errors"], first["errors"]
 
     again = electron("again")
+    up, said = False, []
     for _ in range(600):  # until it is up, then a second start
         line = again.stdout.readline()
-        if line.startswith("READY") or not line: break
+        said.append(line)
+        if line.startswith("READY"): up = True; break
+        if not line: break
+    assert up, f"the reopened app never came up:\n{''.join(said)[-2000:]}\n{again.stderr.read()[-3000:]}"
     second = electron("second")
-    second_code = second.wait(timeout=30)
+    try:
+        second_code = second.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        second.kill()
+        out, err = second.communicate()
+        raise AssertionError(f"a second start did not hand over and quit:\n{out[-2000:]}\n{err[-3000:]}")
     rest, err = again.communicate(timeout=60)
     line = next((l for l in rest.splitlines() if l.startswith("SMOKE ")), None)
     assert line, f"no result:\n{rest[-2000:]}\n{err[-3000:]}"

@@ -18,6 +18,20 @@ class FileTypeParity(unittest.TestCase):
                    "image": t.is_image(c["name"]), "text": t.is_text(c["name"]), "format": t.format_of(c["name"])}
             want = {k: c[k] for k in ("type", "extension", "base", "image", "text", "format")}
             self.assertEqual(got, want, c["name"])
+            if "reserved" in c:
+                self.assertEqual(t.is_reserved(c["name"]), c["reserved"], c["name"])
+
+    def test_reserved_covers_every_kept_file_of_a_known_type(self):
+        """Every file a module keeps in a project's folder, if its name is a
+        known type, is a reserved name: a user's file could overwrite it."""
+        from stilo.modules.assistant.service.threads import THREADS_FILE
+        from stilo.modules.chats import DB_FILES
+        from stilo.modules.comments.adapters.comments_file import COMMENTS_FILE
+        from stilo.modules.identity import ACCESS_FILE
+        from stilo.modules.workspace.adapters.folder_store import JOURNAL, MANIFEST
+        kept = [MANIFEST, JOURNAL, ACCESS_FILE, COMMENTS_FILE, THREADS_FILE, *DB_FILES]
+        missing = [name for name in kept if BUILTIN.is_known(name) and not BUILTIN.is_reserved(name)]
+        self.assertEqual(missing, [])
 
     def test_mime_types(self):
         self.assertEqual(BUILTIN.mime_of("a.JPG"), "image/jpeg")

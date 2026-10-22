@@ -7,17 +7,20 @@
 //   typeOf(name) -> entry | null      is(name, id)      isKnown / isText / isImage(name)
 //   formatOf(name)  extensionOf(name)  baseName(name)  mimeOf(name)  extensionsOf(id)
 //   accept()  describe()  creatable()  all()
+//   isReserved(name)  reserved()       a name no file or folder may have at a
+//                                       workspace's top (the server's own files there)
 // Module API only:
 //   add(entry) -> remove()             an extension point: a new file type
 //   onChange(listener)
 import { defineModule } from "../../kernel/index.js";
 import BUILTIN from "./model/builtin-types.js";
+import RESERVED from "./model/reserved-names.js";
 import { createTypeTable } from "./model/types.js";
 import { fillPage } from "./adapters/page.js";
 
 // For code from before the restructure, which looks types up without the
 // kernel. It never sees types added at run time; modules use the API.
-export const builtinTypes = createTypeTable(BUILTIN);
+export const builtinTypes = createTypeTable(BUILTIN, RESERVED);
 
 const KINDS = new Set(["text", "image"]);
 
@@ -43,7 +46,7 @@ export default defineModule({
   },
   start(ctx) {
     const registry = ctx.registry({ validate: checkEntry });
-    const table = createTypeTable(() => registry.all());
+    const table = createTypeTable(() => registry.all(), RESERVED);
 
     function add(entry) {
       for (const extension of Object.keys(entry.extensions ?? {})) {

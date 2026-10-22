@@ -278,7 +278,7 @@
         {
           "type": "create-file",
           "parentPath": "",
-          "name": "notes.txt",
+          "name": "notes.xyz",
           "content": ""
         }
       ],
@@ -296,7 +296,96 @@
         {
           "type": "rename-node",
           "path": "a.md",
-          "name": "a.txt"
+          "name": "a.xyz"
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "a name kept for the app's own file is refused at the top",
+      "ops": [
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "manifest.json",
+          "content": "{}"
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "a kept name is refused at the top in any case, for a folder too",
+      "ops": [
+        {
+          "type": "create-folder",
+          "parentPath": "",
+          "name": "Chat.JSON"
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "inside a folder a kept name is an ordinary file",
+      "ops": [
+        {
+          "type": "create-folder",
+          "parentPath": "",
+          "name": "data"
+        },
+        {
+          "type": "create-file",
+          "parentPath": "data",
+          "name": "manifest.json",
+          "content": "{}"
+        },
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "config.json",
+          "content": "[]"
+        }
+      ],
+      "tree": [
+        "data/",
+        "data/manifest.json={}",
+        "config.json=[]"
+      ]
+    },
+    {
+      "name": "renaming a file at the top to a kept name is refused",
+      "ops": [
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "a.json",
+          "content": "{}"
+        },
+        {
+          "type": "rename-node",
+          "path": "a.json",
+          "name": "comments.json"
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "moving a file with a kept name to the top is refused",
+      "ops": [
+        {
+          "type": "create-folder",
+          "parentPath": "",
+          "name": "data"
+        },
+        {
+          "type": "create-file",
+          "parentPath": "data",
+          "name": "access.json",
+          "content": "{}"
+        },
+        {
+          "type": "move-node",
+          "path": "data/access.json",
+          "parentPath": ""
         }
       ],
       "error": true

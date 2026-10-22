@@ -14,15 +14,16 @@ Stilo Marker is a browser-based Markdown workspace. It lets you write notes, bui
 6. [Brainstorm Diagram Files (.bmap)](#6-brainstorm-diagram-files-bmap)
 7. [Mermaid Diagrams (.mmd)](#7-mermaid-diagrams-mmd)
 8. [HTML Pages (.html)](#8-html-pages-html)
-9. [Image Files](#9-image-files)
-10. [Explorer](#10-explorer)
-11. [Source Pane](#11-source-pane)
-12. [Preview Pane](#12-preview-pane)
-13. [Saving and Exporting](#13-saving-and-exporting)
-14. [Collaboration Backend](#14-collaboration-backend)
-15. [Chat Panel](#15-chat-panel)
-16. [Settings](#16-settings)
-17. [Templates](#17-templates)
+9. [Text and Data Files (.txt, .log, .json, .csv, .tsv)](#9-text-and-data-files-txt-log-json-csv-tsv)
+10. [Image Files](#10-image-files)
+11. [Explorer](#11-explorer)
+12. [Source Pane](#12-source-pane)
+13. [Preview Pane](#13-preview-pane)
+14. [Saving and Exporting](#14-saving-and-exporting)
+15. [Collaboration Backend](#15-collaboration-backend)
+16. [Chat Panel](#16-chat-panel)
+17. [Settings](#17-settings)
+18. [Templates](#18-templates)
 
 ---
 
@@ -421,7 +422,67 @@ workspace do not open from inside the page.
 
 ---
 
-## 9. Image Files
+## 9. Text and Data Files (.txt, .log, .json, .csv, .tsv)
+
+**Plain text** (`.txt`, `.log`) is edited as it is: no Markdown colours, no
+formatting toolbar, and the preview shows the text unchanged. Create → New
+Text File starts one.
+
+**JSON** (`.json`) is coloured in the source (keys, strings, numbers,
+`true` / `false` / `null`). The preview says whether the text is valid JSON:
+valid, it shows what it holds ("an object with 12 keys") and the value
+formatted; not valid, it shows where (line and column) and why.
+
+**Tables** (`.csv`, `.tsv`) open in the table editor, in the preview. A
+`.csv` is split by commas (by semicolons when its first line has only
+those), a `.tsv` by tabs; values in quotes may hold the delimiter, quotes
+(written twice) and line breaks. In the source, each column has its own
+colour. Create → New Table starts one with three columns.
+
+- **Only what is in view is drawn**, so a table of 20,000 rows scrolls and
+  edits like a small one. The row numbers and column letters stay in view.
+- **Header row**: when the first row names the columns, it stays at the top
+  while you scroll and is shown in bold. The table editor turns this on by
+  itself when the first row is words and the rows below hold numbers; the
+  checkbox in its bar changes it.
+- **Editing a cell**: click it and type to replace its value, or press Enter
+  or F2 (or double-click) to change it. Enter saves and moves down, Tab
+  moves right (Shift goes back), Escape leaves the value as it was. Alt+Enter
+  puts a line break in the value. Typing into the blank row or column at the
+  end adds it.
+- **Selecting**: arrows move (Ctrl+arrow to the edge, Shift+arrow to select
+  a block); click a column letter or a row number to select it whole, and
+  Shift-click to select up to another; Ctrl+A selects everything.
+- **Copy and paste** work as in a spreadsheet (tab-separated), so blocks go
+  to and from other spreadsheets. One value pasted onto a block fills it.
+  Delete clears the selected cells.
+- **Rows and columns**: right-click a cell, row number or column letter to
+  insert rows above or below, columns left or right, or delete them; Add Row
+  and Add Column in the bar add one at the end. Drag a column letter's edge
+  to change its width.
+- **Statistics**: below the table, the numbers in the selection are summed
+  up: sum, mean, minimum and maximum, and how many numbers there are. With
+  one cell selected, its whole column is summed up (without its header).
+- **Undo**: Ctrl+Z undoes the table editor's edits, Ctrl+Shift+Z (or
+  Ctrl+Y) does them again.
+- An edit changes only the rows it touches in the file; the rest of the file
+  stays exactly as it was. Edits merge with what others type at the same
+  time; if someone changed the same row in a way your edit no longer fits,
+  nothing is changed and you are told.
+
+**Large files**: when a folder is opened or imported, a text file larger than
+5 MB is left out (the app keeps each file whole in memory, saves and syncs
+it); the files left out are listed. Adding such a file to a workspace is
+refused the same way.
+
+**Names kept for the app**: at the top of a workspace, no file or folder may
+be called `manifest.json`, `access.json`, `comments.json`, `chat.json` or
+`.pending-state.json` (any case): the server keeps its own files there under
+those names. Inside a folder, any name is fine.
+
+---
+
+## 10. Image Files
 
 Stilo Marker recognizes: `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.bmp`.
 
@@ -432,7 +493,7 @@ Stilo Marker recognizes: `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.bmp
 
 ---
 
-## 10. Explorer
+## 11. Explorer
 
 The explorer shows the project tree as a collapsible file/folder list.
 
@@ -490,7 +551,7 @@ where you put it; move it back the same way.
 
 ---
 
-## 11. Source Pane
+## 12. Source Pane
 
 A plain-text editor for `.md`, `.mtree`, `.urldb`, and `.bmap` files. Image files show a read-only preview.
 
@@ -524,7 +585,7 @@ next key you press.
 
 ---
 
-## 12. Preview Pane
+## 13. Preview Pane
 
 Renders the active file's content in read-only mode.
 
@@ -540,7 +601,7 @@ The preview can be shown or hidden with `View > Toggle Preview` or the `×` butt
 
 ---
 
-## 13. Saving and Exporting
+## 14. Saving and Exporting
 
 ### Save
 
@@ -574,7 +635,7 @@ The preview can be shown or hidden with `View > Toggle Preview` or the `×` butt
 
 ---
 
-## 14. Collaboration Backend
+## 15. Collaboration Backend
 
 The Python backend (`server/mdnotes_server.py`) enables real-time multi-user sessions.
 
@@ -647,7 +708,7 @@ When a collaboration session is active, the chat thread list is shared across al
 
 ---
 
-## 15. Chat Panel
+## 16. Chat Panel
 
 The chat panel provides an AI assistant scoped to the current workspace.
 
@@ -778,7 +839,7 @@ When a user asks you to update a character file after new writing:
 
 ---
 
-## 16. Settings
+## 17. Settings
 
 `Settings` menu or the settings panel:
 
@@ -797,7 +858,7 @@ When a user asks you to update a character file after new writing:
 
 ---
 
-## 17. Templates
+## 18. Templates
 
 On first load, Stilo Marker offers to open the built-in template project, which demonstrates all file types:
 
@@ -821,4 +882,9 @@ The template is defined in `Template/template-manifest.json`.
 | `.urldb` | URL album | Yes | Image grid |
 | `.bmap` | Brainstorm diagram | Yes | Interactive canvas |
 | `.persona.skill` | Chats character (Markdown) | Yes | Character card + Markdown |
+| `.mmd` `.mermaid` | Mermaid diagram | Yes | Diagram |
+| `.html` `.htm` | HTML page | Yes | The page, sandboxed |
+| `.txt` `.log` | Plain text | Yes | The text as it is |
+| `.json` | JSON | Yes | Valid (formatted) or where it is not |
+| `.csv` `.tsv` | Table | Yes | Table editor |
 | `.png` `.jpg` `.jpeg` `.gif` `.svg` `.webp` `.bmp` | Image | No | Image viewer |

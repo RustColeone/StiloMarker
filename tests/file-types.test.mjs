@@ -14,6 +14,7 @@ test("type lookups match the shared table", () => {
     assert.deepEqual(
       { type: t.typeOf(c.name)?.id ?? null, extension: t.extensionOf(c.name), base: t.baseName(c.name), image: t.isImage(c.name), text: t.isText(c.name), format: t.formatOf(c.name) },
       { type: c.type, extension: c.extension, base: c.base, image: c.image, text: c.text, format: c.format }, c.name);
+    if ("reserved" in c) assert.equal(t.isReserved(c.name), c.reserved, `${c.name} reserved`);
   }
 });
 
@@ -21,7 +22,7 @@ test("MIME types, accept lists and the Create order come from the one list", () 
   assert.equal(builtinTypes.mimeOf("a.JPG"), "image/jpeg");
   assert.equal(builtinTypes.mimeOf("a.unknown"), "application/octet-stream");
   assert.ok(builtinTypes.accept().split(",").includes(".persona.skill"));
-  assert.deepEqual(builtinTypes.creatable().map((t) => t.id), ["md", "mtree", "urldb", "bmap", "persona", "mermaid", "htmlpage"]);
+  assert.deepEqual(builtinTypes.creatable().map((t) => t.id), ["md", "mtree", "urldb", "bmap", "persona", "mermaid", "htmlpage", "text", "datatable"]);
 });
 
 test("the module lets a new type in, refuses a taken extension, and sees the new type at once", async () => {

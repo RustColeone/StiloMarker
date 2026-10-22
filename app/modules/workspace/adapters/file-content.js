@@ -61,12 +61,20 @@ function dataUrlToBlob(dataUrl) {
   return new Blob([bytes], { type: mimeType });
 }
 
+// A text file larger than this is not opened: the editor, saving and syncing
+// all hold a file whole (a folder of results may hold a log of hundreds of MB).
+const TEXT_LIMIT = 5 * 1024 * 1024;
+const tooLarge = (fileName, size) => !isImageFileName(fileName) && size > TEXT_LIMIT;
+const sizeLabel = (size) => `${(size / 1024 / 1024).toFixed(1)} MB`;
+
 async function readFileAsProjectContent(file, fileName = file.name) {
   if (isImageFileName(fileName)) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     return bytesToDataUrl(bytes, getMimeTypeForFileName(fileName));
   }
-
+  if (tooLarge(fileName, file.size)) {
+    throw new Error(`${fileName} is ${sizeLabel(file.size)}: a text file over ${sizeLabel(TEXT_LIMIT)} can't be opened here.`);
+  }
   return file.text();
 }
 
@@ -88,5 +96,7 @@ export {
   decodeTextBytes,
   getExportBytes,
   getMimeTypeForFileName,
-  readFileAsProjectContent
+  readFileAsProjectContent,
+  sizeLabel,
+  tooLarge
 };

@@ -5,8 +5,9 @@ the two in step (docs/ARCHITECTURE.md, rule 6)."""
 
 
 class TypeTable:
-    def __init__(self, entries):
+    def __init__(self, entries, reserved=()):
         self._entries = list(entries)
+        self._reserved = {name.lower() for name in reserved}
 
     def _find(self, name):
         lower = str(name or "").lower()
@@ -65,3 +66,7 @@ class TypeTable:
     def extensions_of(self, ident):
         entry = next((e for e in self._entries if e["id"] == ident), None)
         return list(entry["extensions"]) if entry else []
+
+    def is_reserved(self, name):
+        """A name no file or folder may have at a workspace's top (any case): the server's own files there."""
+        return str(name or "").lower() in self._reserved

@@ -2,6 +2,7 @@
 // Writes the browser's copies of the shared protocol data, which plain
 // browsers cannot import as JSON:
 //   protocol/file-types.json (+ each extension's fileTypes) -> app/modules/file-types/model/builtin-types.js
+//                            and app/modules/file-types/model/reserved-names.js (names kept at a workspace's top)
 //   extensions/*/extension.json -> app/extensions.js (the browser modules to start),
 //                                  extensions/offline.js (their files, and the libraries in their vendor/
 //                                  folders, for the service worker)
@@ -41,6 +42,7 @@ const contributedThemes = () => extensions().flatMap((extension) =>
 
 export const COPIES = [
   { from: "protocol/file-types.json", to: "app/modules/file-types/model/builtin-types.js", pick: (data) => [...data.types, ...extensionTypes()] },
+  { from: "protocol/file-types.json", to: "app/modules/file-types/model/reserved-names.js", pick: (data) => data.reserved.names },
   { from: "protocol/sync.contract.json", to: "app/modules/sync/model/contract.js", pick: (data) => ({ version: data.version }) },
   { from: "protocol/agent.json", to: "app/modules/assistant/model/agent-contract.js", pick: ({ about, ...data }) => data },
   { from: "protocol/agent.json", to: "app/modules/characters/model/read-tools.js", pick: (data) => data.tools.filter((tool) => data.readTools.includes(tool.function.name)) },

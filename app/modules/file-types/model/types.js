@@ -5,9 +5,11 @@
 //
 // An entry: { id, label, kind: "text" | "image", format, extensions: { ".ext": mime },
 //             icon, filters: [], expandable?, create?: { label, name, order } }
+// `reserved`: names no file or folder may have at a workspace's top (any case).
 
-export function createTypeTable(entries) {
+export function createTypeTable(entries, reserved = []) {
   const list = () => (typeof entries === "function" ? entries() : entries);
+  const kept = new Set(reserved.map((name) => name.toLowerCase()));
 
   // The entry and extension that match a name: the longest extension wins.
   function find(name) {
@@ -56,6 +58,8 @@ export function createTypeTable(entries) {
     describe: () => list().flatMap((entry) => Object.keys(entry.extensions)).join(", "),
     creatable: () => list().filter((entry) => entry.create)
       .sort((a, b) => a.create.order - b.create.order),
+    isReserved: (name) => kept.has(String(name ?? "").toLowerCase()),
+    reserved: () => [...reserved],
     all: () => [...list()]
   });
 }

@@ -10,7 +10,7 @@
 // single File-Browser can later drive both sides.
 
 import { ROOT_ID } from "../model/project.js";
-import { buildProjectFromDirectoryHandle, saveProjectToHandles } from "./disk-folders.js";
+import { buildProjectFromDirectoryHandle, leftOutOf, noteLeftOut, saveProjectToHandles } from "./disk-folders.js";
 import { ignore } from "../../../kernel/index.js";
 
 const MANIFEST_NAME = "manifest.json";
@@ -206,7 +206,8 @@ async function importOsFolderIntoOpfs(basePath = "") {
   await saveProjectToHandles(project);
 
   const path = basePath ? `${basePath}/${finalName}` : finalName;
-  return openProjectOpfs(path);
+  // What the walk of the real folder left out, said by whoever imported it.
+  return noteLeftOut(await openProjectOpfs(path), leftOutOf(project));
 }
 
 // Delete a local (OPFS) folder or project by path. Resolves the parent handle
