@@ -156,15 +156,26 @@ export function createLinks(app) {
   // markdown of the whole project on every render — more work than the preview.
   // File contents are shared between project versions now, so an unchanged file
   // is usually the very same string and the check is free.
-  const markdownLinksCache = new Map(); // node id -> { content, links }
+  // A long text (over LONG_TEXT) is read again at most every STALE_FOR while it
+  // changes (each key re-read a 450 KB file's links); the panel catches up
+  // once typing stops.
+  const markdownLinksCache = new Map(); // node id -> { content, links, at }
+  const LONG_TEXT = 100 * 1024;
+  const STALE_FOR = 1500;
+  let catchUp = null;
 
   function cachedMarkdownLinks(nodeId, content) {
     const text = content ?? "";
     const hit = markdownLinksCache.get(nodeId);
     if (hit && hit.content === text) return hit.links;
+    if (hit && text.length > LONG_TEXT && Date.now() - hit.at < STALE_FOR) {
+      clearTimeout(catchUp);
+      catchUp = setTimeout(() => renderLinksPanel(app.controller.getProject(), app.controller.getActiveFile()), STALE_FOR);
+      return hit.links;
+    }
     const links = extractMarkdownLinks(text);
     if (markdownLinksCache.size > 2000) markdownLinksCache.clear();
-    markdownLinksCache.set(nodeId, { content: text, links });
+    markdownLinksCache.set(nodeId, { content: text, links, at: Date.now() });
     return links;
   }
 

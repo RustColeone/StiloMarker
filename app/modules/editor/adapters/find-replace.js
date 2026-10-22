@@ -75,7 +75,10 @@ export function createFindReplace(app) {
     if (!app.searchState.open || !app.searchState.matches.length) return;
     const scrollRect = app.elements.editorScroll.getBoundingClientRect();
     const MAX = 500;
-    app.searchState.matches.slice(0, MAX).forEach((match, index) => {
+    // Only matches in the page (of a long file, the lines in view: editor-window.js).
+    const shown = app.renderedRange();
+    app.searchState.matches.map((match, index) => ({ match, index }))
+      .filter(({ match }) => match.end >= shown.start && match.start <= shown.end).slice(0, MAX).forEach(({ match, index }) => {
       try {
         const s = app.textOffsetToDomPosition(match.start);
         const e = app.textOffsetToDomPosition(match.end);

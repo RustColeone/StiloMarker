@@ -33,8 +33,15 @@ export function createAutocomplete(app) {
 
   /** General word completion: suggest words already present in the document that
    *  share the typed prefix, ranked by frequency. Makes the popup useful beyond
-   *  link/path contexts, like an editor's basic word-based IntelliSense. */
-  function buildWordSuggestions(text, token) {
+   *  link/path contexts, like an editor's basic word-based IntelliSense. In a
+   *  long text, from WORD_REACH characters around the caret (each key scanned
+   *  the whole of a 450 KB file). */
+  const WORD_REACH = 16 * 1024;
+  function buildWordSuggestions(text, token, cursor = 0) {
+    if (text.length > 2 * WORD_REACH) {
+      const from = Math.max(0, Math.min(cursor - WORD_REACH, text.length - 2 * WORD_REACH));
+      text = text.slice(from, from + 2 * WORD_REACH);
+    }
     const prefix = token.toLowerCase();
     const counts = new Map();
     const wordPattern = /[A-Za-z][A-Za-z0-9_-]{2,}/g;
@@ -229,7 +236,7 @@ export function createAutocomplete(app) {
       items = context.provider.items(context, { project, file: activeFile,
         projectFiles: (kind) => buildProjectFileSuggestions(project, activeFile?.id ?? null, kind) });
     } else if (context.kind === "word") {
-      items = buildWordSuggestions(app.getEditorText(), context.token);
+      items = buildWordSuggestions(app.getEditorText(), context.token, app.getEditorSelection().start);
     } else {
       items = buildProjectFileSuggestions(project, activeFile?.id ?? null, context.kind)
         .filter((item) => !tokenLower || item.insertText.toLowerCase().includes(tokenLower) || item.detail.toLowerCase().includes(tokenLower));

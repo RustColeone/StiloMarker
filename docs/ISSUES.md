@@ -11,21 +11,14 @@ Last updated: 2026-10-21 · release `v0.2.27` (deployed with v0.2.20–v0.2.26; 
 
 ## Open
 
-From the stability review of 2026-10-21 (the app as a PWA, in Electron, with
-the user's own key and no server; each found by an experiment). Being fixed in
-this order; the storage limit (O0) was fixed in v0.2.19, a copy per workspace
-(O7) in v0.2.20, two windows (O1) in v0.2.21, the Agent and Chats with the
-user's own key and no server (O3) in v0.2.22, offline edits merged per file
-(O4) in v0.2.23, typing in a long chapter (O2) in v0.2.24, the app as an
-installed web app (O5) in v0.2.25, the desktop app (O6) in v0.2.26.
-
-### O2b. Very large single files still lag
-
-After v0.2.24 a long chapter (about 90 KB) types in well under a tenth of a
-second a key; a 450 KB file still takes about 1.5 s a key on the server's
-two slow cores (it could not be measured before): the browser lays out all
-of its 20,000 lines whenever the editor draws. Splitting such a file, or an
-editor that keeps only the visible lines in the page, would fix it.
+None. Everything the stability review of 2026-10-21 found (the app as a PWA,
+in Electron, with the user's own key and no server; each found by an
+experiment) is fixed: the storage limit (O0) in v0.2.19, a copy per
+workspace (O7) in v0.2.20, two windows (O1) in v0.2.21, the Agent and Chats
+with the user's own key and no server (O3) in v0.2.22, offline edits merged
+per file (O4) in v0.2.23, typing in a long chapter (O2) in v0.2.24, the app
+as an installed web app (O5) in v0.2.25, the desktop app (O6) in v0.2.26,
+very long files (O2b) in v0.2.28.
 
 ## Accepted
 
@@ -54,6 +47,45 @@ Accepted (2026-10-20): it can only touch history from before snapshots lived on 
 ---
 
 ## Fixed
+
+### v0.2.28: a very long file types like a short one
+
+From the stability review (2026-10-21), O2b. Browser only.
+
+- **A 450 KB file took about 1.5 s a key** (fixed): the browser laid out
+  every one of its 20,000 lines whenever the editor drew. Now only the lines
+  in view, and 60 more each side, are in the page (lazy rendering); empty
+  space above and below stands for the rest, as tall as those lines were
+  measured or, never shown yet, are estimated (wrapping included), and the
+  view is kept steady as the estimates become measurements. A file of up to
+  2,000 lines is in the page whole, as before. On a 450 KB file a key's own
+  work is now 2-3 ms and it reaches the screen in about 25 ms (the same as a
+  short file on the server's two slow cores).
+- **Everything still works on the whole text**: a selection longer than the
+  page can hold (Select All; a Shift-click thousands of lines away) is kept
+  as text offsets while the page shows the part in view, and copying,
+  cutting, typing over it and pasting use the whole of it; a caret scrolled
+  far out of view comes back with the next key, and the key lands there;
+  find, undo and going to a line render the lines they need and move the
+  view there; someone else's edit while you are scrolled away leaves the
+  view where it is.
+- **Work every key did on the whole text** (fixed, any file): the undo
+  history compared the texts a character at a time (now a 4 KB chunk at a
+  time), every line went through the highlighter (now only changed lines,
+  and those after a changed ``` fence until it closes as before), word
+  suggestions read the whole text (now 16 KB either side of the caret), the
+  Linked Notes panel re-read a long note's links on every key (now at most
+  every 1.5 s while it changes), the editor's style was read on every draw
+  (now when the width, font or wrapping change), the line numbers' layer was
+  as tall as the file, and the view state was written on every caret move
+  (now at most every 2 s, and when the page is hidden).
+- Tests: `editor-lazy-browser.py` (new: a 20,000-line file with a fence in
+  the middle: a few hundred lines in the page; a key's work and time to the
+  screen; the lines and numbers shown at the middle and the end; the fence
+  highlighted across the page's edge; a caret out of view; Select All with
+  copy, typing over and undo; an 8,900-line Shift-click selection deleted;
+  find near the end; someone else's edit; word wrap off) and
+  `editor-typing-browser.py` (the long chapter, now rendered lazily).
 
 ### v0.2.27: tabs from before v0.2.25 still get the new version
 

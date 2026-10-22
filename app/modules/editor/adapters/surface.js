@@ -67,10 +67,15 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
     editorRenderCache: {
       fileId: null,     // file the cache describes
       kind: null,       // highlighter used
-      els: [],          // line elements, in DOM order, as rendered
-      texts: [],        // each line's text as rendered
-      html: [],         // each line's final HTML as rendered
-      heights: [],      // gutter heights measured for each line
+      els: [],          // the rendered lines' elements, in DOM order: lines ws.. (editor-window.js)
+      ws: 0,            // the first rendered line (a long file renders only the lines in view)
+      winStart: 0,      // the text offset where line ws starts
+      before: "",       // the text of the lines before ws, and after the rendered ones
+      after: "",
+      above: 0,         // the height the lines before ws stand for (px)
+      texts: [],        // every line's text as rendered
+      html: [],         // every line's final HTML as rendered
+      heights: [],      // each line's measured height (null: not measured; estimated)
       gutter: [],       // gutter row HTML as rendered
       metricsKey: "",   // geometry the heights were measured under (see below)
       gutterEpoch: "",  // line count / mark range / line notes the gutter rows reflect
@@ -161,7 +166,7 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
   // scroll are worked out again; wrapping redraws the lines.
   shell.settings.on((settings, changed) => {
     const fontChanged = changed.includes("sourceFontSize") || changed.includes("sourceFontFamily");
-    if (fontChanged) app.editorRenderCache.metricsKey = "";
+    if (fontChanged || changed.includes("wordWrap")) app.editorRenderCache.metricsKey = "";
     if (changed.includes("wordWrap")) app.elements.app.dataset.wordWrap = settings.wordWrap ? "on" : "off";
     if (fontChanged || changed.includes("wordWrap")) {
       app.render(app.controller.getProject());
@@ -267,8 +272,7 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
       app.openSourceTab(nodeId);
       app.controller.setActiveFile(nodeId);
       // After the re-render settles (one paint).
-      requestAnimationFrame(() => app.elements.editorContent.querySelector(`.editor-line.is-${mark.kind}`)
-        ?.scrollIntoView({ block: "center", behavior: "smooth" }));
+      requestAnimationFrame(() => app.revealEditorLine(mark.lineStart));
       return true;
     }
   });

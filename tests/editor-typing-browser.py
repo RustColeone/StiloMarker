@@ -71,7 +71,7 @@ async def main():
             if file.is_file():
                 body = file.read_bytes()
                 if path == '/app/main.js':
-                    body += app_hook('window.__typing={controller,renderEditorContent,getEditorText};')
+                    body += app_hook('window.__typing={controller,renderEditorContent,getEditorText,setEditorSelection};')
                 await route.fulfill(status=200, content_type=mimetypes.guess_type(str(file))[0] or 'application/octet-stream', body=body)
             else:
                 await route.continue_()
@@ -189,21 +189,27 @@ async def main():
 
         # A long chapter: each keystroke's own work stays short (the browser has
         # drawn the letter; the line, the gutter and suggestions follow on a pause).
+        # At 4,000 lines only the lines in view are in the page (lazy rendering;
+        # editor-lazy-browser.py checks it whole).
         long_text = "\n".join(f"## Section {i}\n\nSome **bold** text with a [link](notes.md) and `code` in paragraph {i}.\n" for i in range(1000))
         await page.evaluate('(text) => { const c = __typing.controller; c.createFile(c.getProject().rootId, "chapter.md", text); }', long_text)
         await page.locator('#explorer-tree .tree-row', has_text='chapter.md').first.click()
-        await page.wait_for_function('document.querySelectorAll("#editor-content > .editor-line").length > 3990', timeout=60000)
+        await page.wait_for_function('__typing.controller.getActiveFile()?.name === "chapter.md" && document.querySelectorAll("#editor-content > .editor-line").length > 10', timeout=60000)
         await page.wait_for_timeout(500)
-        await caret_at(2002, 4)
+        await page.evaluate('''() => { const text = __typing.getEditorText(); let at = 0; for (let i = 0; i < 2002; i += 1) at = text.indexOf("\\n", at) + 1;
+          document.querySelector('#editor-content').focus(); __typing.setEditorSelection(at + 4, at + 4); }''')
+        await page.wait_for_timeout(300)
         await page.evaluate('''() => { window.__inputs = []; new PerformanceObserver((list) => { for (const e of list.getEntries())
           if (e.name === "input") window.__inputs.push(e.processingEnd - e.processingStart); }).observe({ type: "event", durationThreshold: 0 }); }''')
         await page.keyboard.type('quick', delay=120)
         await page.wait_for_timeout(600)
         work = sorted(await page.evaluate('window.__inputs'))
         assert len(work) >= 3 and work[len(work) // 2] < 40, f'a keystroke on a long chapter took {work} ms of work'
-        s = await page.evaluate(STATE)
-        assert s['text'] == s['model'] and 'quick' in s['text'].split('\n')[2002] and not s['badRows'] and not s['badHighlight'] and s['stray'] == 0, \
-            {k: v for k, v in s.items() if k not in ('text', 'model')}
+        s = await page.evaluate('''() => ({ text: __typing.getEditorText(), model: __typing.controller.getActiveFile().content,
+          inPage: document.querySelectorAll("#editor-content > .editor-line").length,
+          stray: document.querySelector("#editor-content").childNodes.length - document.querySelector("#editor-content").children.length })''')
+        assert s['text'] == s['model'] and s['model'].split('\n')[2002] == 'Somequick **bold** text with a [link](notes.md) and `code` in paragraph 500.' \
+            and s['inPage'] < 400 and s['stray'] == 0, ({k: v for k, v in s.items() if k not in ('text', 'model')}, s['text'] == s['model'], s['model'].split('\n')[2000:2004])
         checks.append(f'a long chapter: a keystroke\'s own work {round(work[len(work) // 2], 1)} ms, drawn right on a pause')
 
         print(json.dumps({'checks': checks, 'runtimeErrors': len(errors)}, ensure_ascii=False))

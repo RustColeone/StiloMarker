@@ -78,7 +78,8 @@ async def main():
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
         await page.goto(BASE, wait_until="domcontentloaded")
-        await page.wait_for_function("navigator.serviceWorker.ready.then(() => true)", timeout=30000)
+        # The first install fetches the app and its libraries (~5 MB) from a plain test server: slow on a busy machine.
+        await page.wait_for_function("navigator.serviceWorker.ready.then(() => true)", timeout=90000)
 
         # The manifest: the app, its icons at the sizes it says.
         manifest = await page.evaluate('''async () => { const link = document.querySelector('link[rel="manifest"]');

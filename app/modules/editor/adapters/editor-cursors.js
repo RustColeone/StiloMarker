@@ -30,11 +30,15 @@ export function installCursors(ed, app) {
     const scrollEl = app.elements.editorScroll;
     const scrollRect = app.elements.editorScroll.getBoundingClientRect();
 
+    // Of a long file only part is in the page (editor-window.js): what lies
+    // outside it is out of view, and not drawn.
+    const shownText = ed.renderedRange();
     for (const cursor of cursors) {
       if (cursor.fileId !== activePath) continue;
       const color = clientColor(cursor.clientId);
-      const selStart = Number(cursor.selStart);
-      const selEnd = Number(cursor.selEnd);
+      const selStart = Math.max(Number(cursor.selStart), shownText.start);
+      const selEnd = Math.min(Number(cursor.selEnd), shownText.end);
+      if (Number(cursor.selEnd) < shownText.start || Number(cursor.selStart) > shownText.end) continue;
       const hasSelection = selEnd > selStart;
 
       try {
@@ -147,13 +151,9 @@ export function installCursors(ed, app) {
     return line;
   }
 
-  /** Vertical position of a line inside the scrollable content, in px. */
-  function editorLineTop(lineIndex) {
-    const lines = app.elements.editorContent.children; // not a fresh array per marker
-    if (!lines.length) return 0;
-    const el = lines[Math.max(0, Math.min(lineIndex, lines.length - 1))];
-    return el ? el.offsetTop : 0;
-  }
+  /** Vertical position of a line inside the scrollable content, in px (a line
+   *  not in the page: from the measured and estimated heights above it). */
+  const editorLineTop = (lineIndex) => ed.lineTop(lineIndex);
 
   let overviewRulerFrame = 0;
   function scheduleOverviewRuler() {

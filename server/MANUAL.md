@@ -504,6 +504,12 @@ click it (▾) to switch that file between Source and Preview in the same
 pane. Right-click a tab for more: open it as Source or Preview, move it to
 the other pane or open it there too.
 
+**Very long files** (thousands of lines, hundreds of KB) type as quickly as
+short ones: only the lines in view are drawn. Everything still works on the
+whole file: Select All, copy, cut, paste and typing over a selection, undo,
+and find. A caret you scrolled far away from comes back into view with the
+next key you press.
+
 ---
 
 ## 12. Preview Pane

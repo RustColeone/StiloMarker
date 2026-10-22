@@ -11,11 +11,20 @@ export function installHistory(ed, app) {
   /** Push a history snapshot.  Call at logical "checkpoints" (space, enter,
    *  punctuation, paste, indent, drag-drop). */
   // The single changed span between two texts: common prefix and suffix trimmed.
+  // Compared a chunk at a time (the engine's own string comparison), then one
+  // character at a time inside the chunk that differs: a keystroke in a
+  // 450 KB file took ~25 ms character by character.
+  const CHUNK = 4096;
   function diffEditorTexts(before, after) {
     const max = Math.min(before.length, after.length);
     let at = 0;
+    while (at + CHUNK <= max && before.slice(at, at + CHUNK) === after.slice(at, at + CHUNK)) at += CHUNK;
     while (at < max && before.charCodeAt(at) === after.charCodeAt(at)) at += 1;
     let tail = 0;
+    while (tail + CHUNK <= max - at
+      && before.slice(before.length - tail - CHUNK, before.length - tail) === after.slice(after.length - tail - CHUNK, after.length - tail)) {
+      tail += CHUNK;
+    }
     while (tail < max - at
       && before.charCodeAt(before.length - 1 - tail) === after.charCodeAt(after.length - 1 - tail)) {
       tail += 1;

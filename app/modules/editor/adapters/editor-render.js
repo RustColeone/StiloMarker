@@ -12,7 +12,8 @@ export function installRender(ed, app) {
   // ed.rendering is true while applyEditorRender runs, so the synchronous
   // updateStatus callback triggered by notifyEditorChanged does not mistake a
   // transient focus state during innerHTML replacement for "editor lost focus".
-  function applyEditorRender(text, selStart, selEnd) {
+  // reveal: false keeps a selection out of view where it is (someone else's edit).
+  function applyEditorRender(text, selStart, selEnd, { reveal = true } = {}) {
     ed.rendering = true;
     try {
       // renderEditorContent replaces innerHTML, which resets scrollTop to 0. Save
@@ -20,7 +21,7 @@ export function installRender(ed, app) {
       // doesn't jump the view. caretIntoView() below then only nudges the scroll
       // when the edit actually pushed the caret out of the viewport.
       const savedScroll = app.elements.editorContent.scrollTop;
-      renderEditorContent(text);
+      renderEditorContent(text, { keep: [lineAt(text, Math.min(selStart, selEnd)), lineAt(text, Math.max(selStart, selEnd))] });
       // Setting innerHTML can cause the contenteditable to lose focus in some
       // browsers.  Restore focus explicitly so that the subsequent
       // notifyEditorChanged → updateStatus call still sees the editor as the
@@ -28,7 +29,7 @@ export function installRender(ed, app) {
       if (document.activeElement !== app.elements.editorContent) {
         app.elements.editorContent.focus({ preventScroll: true });
       }
-      ed.setEditorSelection(selStart, selEnd);
+      ed.setEditorSelection(selStart, selEnd, { reveal });
       app.rememberEditorSelection();
       // Diagnostic: verify the caret actually landed where we asked. When it
       // doesn't (the "jump to line 1 / offset 0" bug), capture WHY — the resolved
@@ -61,6 +62,13 @@ export function installRender(ed, app) {
     }
   }
 
+
+  // The line an offset falls on in `text` (0-based).
+  function lineAt(text, offset) {
+    let line = 0;
+    for (let at = text.indexOf("\n"); at !== -1 && at < offset; at = text.indexOf("\n", at + 1)) line += 1;
+    return line;
+  }
 
   function getEditorLineHeight() {
     const lineHeight = Number.parseFloat(globalThis.getComputedStyle(app.elements.editorContent).lineHeight);
@@ -128,29 +136,12 @@ export function installRender(ed, app) {
     return { fragment: tpl.content, els };
   }
 
-  // Replace DOM lines [from, to) with freshly rendered lines for new indices
-  // [from, from + count) and splice the cache to match. Returns the new elements.
-  function spliceEditorLines(from, to, htmlSlice, textSlice) {
-    const container = app.elements.editorContent;
-    const before = container.children[to] ?? null;
-    for (let i = to - 1; i >= from; i -= 1) container.children[i]?.remove();
-    const { fragment, els } = parseEditorLines(htmlSlice);
-    container.insertBefore(fragment, before);
-    const cache = app.editorRenderCache;
-    const removed = to - from;
-    cache.els.splice(from, removed, ...els);
-    // The DOM's own text for each new line (normally identical to the source).
-    cache.texts.splice(from, removed, ...els.map((el, i) => {
-      const actual = el.textContent;
-      if (actual !== textSlice[i]) cache.textExact = false;
-      return actual;
-    }));
-    cache.html.splice(from, removed, ...htmlSlice);
-    cache.heights.splice(from, removed, ...els.map(() => null)); // measured below
-    return els;
-  }
-
-  function renderEditorContent(text, { full = false } = {}) {
+  // Render the text: the whole file, or of a long one (editor-window.js) the
+  // run of lines in view, [ws, we). Lines unchanged since the last render keep
+  // their elements (and so the native caret and composition); the rest are
+  // made from their HTML. `keep`: lines [a, b] to render with the view (the
+  // selection's, when close enough).
+  function renderEditorContent(text, { full = false, keep = null } = {}) {
     ed.refreshFormatToolbar();
     const normalized = text.replace(/\r\n/g, "\n");
     const lines = normalized.split("\n");
@@ -162,104 +153,157 @@ export function installRender(ed, app) {
     const activeDecoration = activeFilePath ? app.marks.get(activeFilePath) : null;
     const isDecorated = (index) => Boolean(activeDecoration)
       && index >= activeDecoration.lineStart && index <= activeDecoration.lineEnd;
-    const lineHtml = app.highlightEditorLinesMemo(kind, lines).map((hit, index) => {
-      if (isDecorated(index)) return decorateEditorLineHtml(hit.html, lines[index], activeDecoration.kind);
-      if (hit.plain === null) hit.plain = decorateEditorLineHtml(hit.html, lines[index], null);
-      return hit.plain;
-    });
-
     const container = app.elements.editorContent;
     const cache = app.editorRenderCache;
     const tracker = ed.trackEditorDom();
+    const n = lines.length;
+    const oldWs = cache.ws ?? 0;
+    const oldEls = cache.els;
+    // The page still holds exactly the elements last rendered (native edits
+    // only changed text inside them): they can be kept.
     const incremental = !full
       && cache.fileId === (activeFile?.id ?? null)
       && cache.kind === kind
-      && cache.els.length > 0
-      // Stray text nodes directly under the editor (some mobile edits) aren't
-      // lines we can diff against; rebuild.
-      && container.childNodes.length === container.children.length;
+      && oldEls.length > 0
+      && !tracker.structural
+      && container.childNodes.length === oldEls.length
+      && oldEls.every((el, k) => container.children[k] === el);
 
-    if (incremental) {
-      const dom = container.children;
-      const domLen = dom.length;
-      const cacheLen = cache.els.length;
-      const newLen = lineHtml.length;
-      // Unchanged leading lines: same element, untouched, same HTML.
-      let prefix = 0;
-      const maxPrefix = Math.min(domLen, cacheLen, newLen);
-      while (prefix < maxPrefix
-        && dom[prefix] === cache.els[prefix]
-        && cache.html[prefix] === lineHtml[prefix]
-        && !tracker.dirty.has(dom[prefix])) {
-        prefix += 1;
+    // Lines unchanged at both ends (a line typed in and not yet drawn counts as changed).
+    const oldN = cache.html.length;
+    // (Collected once: usually none or one; asking for each line cost a long file ~15 ms a render.)
+    const dirtyLines = new Set();
+    for (const el of tracker.dirty) {
+      const k = oldEls.indexOf(el);
+      if (k >= 0) dirtyLines.add(oldWs + k);
+    }
+    const dirtyLine = dirtyLines.size ? (i) => dirtyLines.has(i) : () => false;
+    let prefix = 0;
+    let suffix = 0;
+    let lineHtml;
+    let fenceIn; // each line's starting state: inside a ``` fence (markdown) or not
+    let fenceEnd = false;
+    // Only some lines changed (and no mark tints this file's lines): the
+    // others keep their HTML, and only the changed lines are highlighted, with
+    // the lines after them until the fence state is again what it was. (Every
+    // line went through the highlighter's memo on every render: ~30 ms a key
+    // in a 450 KB file.)
+    if (incremental && !activeDecoration && !cache.decorated && cache.textExact && cache.fenceIn?.length === oldN) {
+      const most = Math.min(oldN, n);
+      while (prefix < most && lines[prefix] === cache.texts[prefix] && !dirtyLine(prefix)) prefix += 1;
+      while (suffix < most - prefix && lines[n - 1 - suffix] === cache.texts[oldN - 1 - suffix] && !dirtyLine(oldN - 1 - suffix)) suffix += 1;
+      lineHtml = new Array(n);
+      fenceIn = new Array(n);
+      for (let i = 0; i < prefix; i += 1) { lineHtml[i] = cache.html[i]; fenceIn[i] = cache.fenceIn[i]; }
+      let state = prefix < oldN ? cache.fenceIn[prefix] : cache.fenceEnd;
+      let j = prefix;
+      const unchangedFrom = n - suffix;
+      while (j < n && !(j >= unchangedFrom && state === cache.fenceIn[j - n + oldN])) {
+        const hit = app.highlightEditorLineMemo(kind, lines[j], state);
+        if (hit.plain === null) hit.plain = decorateEditorLineHtml(hit.html, lines[j], null);
+        lineHtml[j] = hit.plain;
+        fenceIn[j] = state;
+        state = hit.inFence;
+        j += 1;
       }
-      // Unchanged trailing lines, matched from each end independently: a native
-      // Enter can add an element the cache has never seen.
-      let suffix = 0;
-      const maxSuffix = Math.min(domLen, cacheLen, newLen) - prefix;
-      while (suffix < maxSuffix) {
-        const d = domLen - 1 - suffix;
-        const c = cacheLen - 1 - suffix;
-        const n = newLen - 1 - suffix;
-        if (dom[d] === cache.els[c] && cache.html[c] === lineHtml[n] && !tracker.dirty.has(dom[d])) {
-          suffix += 1;
-        } else {
-          break;
-        }
+      for (let i = j; i < n; i += 1) { lineHtml[i] = cache.html[i - n + oldN]; fenceIn[i] = cache.fenceIn[i - n + oldN]; }
+      fenceEnd = j < n ? cache.fenceEnd : state;
+      suffix = n - j; // lines highlighted again past the edit count as changed
+    } else {
+      const hits = app.highlightEditorLinesMemo(kind, lines);
+      fenceIn = new Array(n);
+      lineHtml = hits.map((hit, index) => {
+        fenceIn[index] = index > 0 ? hits[index - 1].inFence : false;
+        if (isDecorated(index)) return decorateEditorLineHtml(hit.html, lines[index], activeDecoration.kind);
+        if (hit.plain === null) hit.plain = decorateEditorLineHtml(hit.html, lines[index], null);
+        return hit.plain;
+      });
+      fenceEnd = hits.length ? hits[hits.length - 1].inFence : false;
+      if (incremental) {
+        const most = Math.min(oldN, n);
+        while (prefix < most && cache.html[prefix] === lineHtml[prefix] && !dirtyLine(prefix)) prefix += 1;
+        while (suffix < most - prefix && cache.html[oldN - 1 - suffix] === lineHtml[n - 1 - suffix] && !dirtyLine(oldN - 1 - suffix)) suffix += 1;
       }
-      // The cache must describe the same leading elements as the DOM for the
-      // splice indices to line up; drop cache entries for DOM-only elements.
-      const domEnd = domLen - suffix;
-      const cacheEnd = cacheLen - suffix;
-      if (domEnd - prefix !== cacheEnd - prefix) {
-        // Native edits added/removed elements in the middle. Re-sync the cache's
-        // middle section to the DOM's actual elements before splicing.
-        const middle = Array.from(dom).slice(prefix, domEnd);
-        cache.els.splice(prefix, cacheEnd - prefix, ...middle);
-        cache.texts.splice(prefix, cacheEnd - prefix, ...middle.map(() => null));
-        cache.html.splice(prefix, cacheEnd - prefix, ...middle.map(() => null));
-        cache.heights.splice(prefix, cacheEnd - prefix, ...middle.map(() => null));
-      }
-      spliceEditorLines(prefix, domEnd, lineHtml.slice(prefix, newLen - suffix), lines.slice(prefix, newLen - suffix));
-      // Safety net: if the DOM and the text disagree on the line count, the diff
-      // assumptions failed somewhere — rebuild rather than show wrong text.
-      if (container.children.length !== newLen) {
-        return renderEditorContent(text, { full: true });
+    }
+    // Where each new line was (-1: changed or new).
+    const oldIndexOf = (j) => (j < prefix ? j : j >= n - suffix ? j - n + oldN : -1);
+
+    // Measurements: kept through the diff; none when the geometry changed.
+    const metrics = ed.windowMetrics();
+    let heights;
+    if (incremental && metrics.key === cache.metricsKey) {
+      heights = new Array(n);
+      for (let j = 0; j < n; j += 1) {
+        const old = oldIndexOf(j);
+        heights[j] = old >= 0 ? cache.heights[old] ?? null : null;
       }
     } else {
-      container.innerHTML = lineHtml.join("");
-      const els = Array.from(container.children);
-      els.forEach(normalizeEditorLineElement);
-      cache.fileId = activeFile?.id ?? null;
-      cache.kind = kind;
-      cache.els = els;
-      cache.texts = els.map((el) => el.textContent);
-      cache.textExact = cache.texts.length === lines.length && cache.texts.every((t, i) => t === lines[i]);
-      cache.html = lineHtml.slice(0, els.length);
-      cache.heights = els.map(() => null);
-      cache.gutter = [];
-      cache.metricsKey = "";
+      heights = new Array(n).fill(null);
+    }
+    cache.metricsKey = metrics.key;
+
+    // The run to render, then the page made to hold exactly it.
+    const [ws, we] = ed.windowFor(n, heights, lines, keep, metrics);
+    const wanted = new Array(we - ws).fill(null);
+    if (incremental) {
+      for (let j = ws; j < we; j += 1) {
+        const k = oldIndexOf(j) - oldWs;
+        if (oldIndexOf(j) >= 0 && k >= 0 && k < oldEls.length) wanted[j - ws] = oldEls[k];
+      }
+      const kept = new Set(wanted.filter(Boolean));
+      for (const el of oldEls) if (!kept.has(el)) el.remove();
+      for (let k = 0; k < wanted.length;) {
+        if (wanted[k]) { k += 1; continue; }
+        let e = k;
+        while (e < wanted.length && !wanted[e]) e += 1;
+        const { fragment, els } = parseEditorLines(lineHtml.slice(ws + k, ws + e));
+        container.insertBefore(fragment, e < wanted.length ? wanted[e] : null);
+        for (let t = k; t < e; t += 1) wanted[t] = els[t - k];
+        k = e;
+      }
+    } else {
+      container.innerHTML = lineHtml.slice(ws, we).join("");
+      Array.from(container.children).forEach((el, k) => { normalizeEditorLineElement(el); wanted[k] = el; });
+    }
+    // Safety net: the page and the run disagree on the line count; rebuild.
+    if (container.children.length !== we - ws) {
+      cache.els = [];
+      return renderEditorContent(text, { full: true, keep });
     }
 
-    // Gutter heights. Reading geometry forces layout, but after an incremental
-    // splice only the replaced lines are dirty, so it is cheap; and only lines
-    // without a cached height are measured. A width change invalidates them all.
-    const metrics = globalThis.getComputedStyle(container);
-    const parsedLineHeight = Number.parseFloat(metrics.lineHeight);
-    const minimumLineHeight = Number.isFinite(parsedLineHeight) ? parsedLineHeight : 20.8;
-    const metricsKey = `${container.clientWidth}|${metrics.lineHeight}|${metrics.fontSize}|${metrics.fontFamily}|${app.elements.app.dataset.wordWrap ?? ""}`;
-    if (metricsKey !== cache.metricsKey) {
-      cache.heights = cache.els.map(() => null);
-      cache.metricsKey = metricsKey;
+    // The cache describes every line; the page, the run.
+    cache.fileId = activeFile?.id ?? null;
+    cache.kind = kind;
+    cache.els = wanted;
+    cache.ws = ws;
+    cache.texts = lines;
+    cache.html = lineHtml;
+    cache.fenceIn = fenceIn;
+    cache.fenceEnd = fenceEnd;
+    cache.decorated = Boolean(activeDecoration);
+    cache.textExact = true;
+    for (let k = 0; k < wanted.length; k += 1) {
+      const actual = wanted[k].textContent;
+      if (actual !== lines[ws + k]) { lines[ws + k] = actual; cache.textExact = false; }
     }
-    const heights = cache.heights;
+    let winStart = 0;
+    for (let i = 0; i < ws; i += 1) winStart += lines[i].length + 1;
+    cache.winStart = winStart;
+    cache.before = ws > 0 ? lines.slice(0, ws).join("\n") : "";
+    cache.after = we < n ? lines.slice(we).join("\n") : "";
+
+    // Gutter heights. Reading geometry forces layout, but only the run's
+    // lines without a measurement are read (after a splice, just those).
+    const minimumLineHeight = metrics.lineHeight;
     const remeasured = [];
-    for (let i = 0; i < cache.els.length; i += 1) {
-      if (heights[i] == null) {
-        heights[i] = Math.max(minimumLineHeight, cache.els[i].getBoundingClientRect().height);
-        remeasured.push(i);
+    for (let k = 0; k < wanted.length; k += 1) {
+      if (heights[ws + k] == null) {
+        heights[ws + k] = Math.max(minimumLineHeight, wanted[k].getBoundingClientRect().height);
+        remeasured.push(ws + k);
       }
     }
+    cache.heights = heights;
+    const above = ed.applySpacers(metrics);
 
     // Gutter rows, diffed the same way. The gutter is entirely ours (no native
     // edits), so plain index comparison is enough. A line-count change shifts the
@@ -270,7 +314,7 @@ export function installRender(ed, app) {
     // Row strings depend on the row index, its height, the notes and the
     // mark's range. A changed line count renumbers every following row, so
     // rebuild all; otherwise only rows that were just (re)measured can differ.
-    const gutterEpoch = `${cache.els.length}|${activeDecoration ? `${activeDecoration.kind}:${activeDecoration.lineStart}-${activeDecoration.lineEnd}` : ""}|${notes.map((n) => `${n.kind}:${n.line}:${n.title}`).join("\u0001")}`;
+    const gutterEpoch = `${n}|${ws}|${we}|${activeDecoration ? `${activeDecoration.kind}:${activeDecoration.lineStart}-${activeDecoration.lineEnd}` : ""}|${notes.map((n) => `${n.kind}:${n.line}:${n.title}`).join("\u0001")}`;
     const gutterRow = (index) => {
       const decorated = isDecorated(index);
       const marker = decorated ? `<span class="editor-gutter-mark" aria-hidden="true">◦</span>` : "";
@@ -281,17 +325,18 @@ export function installRender(ed, app) {
       return `<div class="editor-gutter-line${decorated ? ` is-${activeDecoration.kind}` : ""}${note ? ` has-${note.kind}` : ""}" data-line="${index}" style="height:${heights[index].toFixed(3)}px">${marker}${noteMark}${index + 1}</div>`;
     };
     let gutterHtml;
-    if (gutterEpoch !== cache.gutterEpoch || cache.gutter.length !== cache.els.length) {
-      gutterHtml = cache.els.map((_, index) => gutterRow(index));
+    if (gutterEpoch !== cache.gutterEpoch || cache.gutter.length !== wanted.length) {
+      gutterHtml = wanted.map((_, k) => gutterRow(ws + k));
     } else {
       gutterHtml = cache.gutter.slice();
-      for (const index of remeasured) gutterHtml[index] = gutterRow(index);
+      for (const index of remeasured) gutterHtml[index - ws] = gutterRow(index);
     }
     cache.gutterEpoch = gutterEpoch;
     let gutterContent = app.elements.editorGutter.firstElementChild;
     if (!gutterContent || !gutterContent.classList.contains("editor-gutter-content")
         || gutterContent.children.length !== cache.gutter.length) {
       app.elements.editorGutter.innerHTML = `<div class="editor-gutter-content">${gutterHtml.join("")}</div>`;
+      gutterContent = app.elements.editorGutter.firstElementChild;
     } else {
       const rows = gutterContent.children;
       const oldLen = cache.gutter.length;
@@ -334,11 +379,15 @@ export function installRender(ed, app) {
     bar.hidden = !html;
   }
 
+  // The gutter follows the text: its rows (the rendered lines') sit where
+  // those lines are, below the space the lines before them stand for. (Not
+  // padding: the gutter is a layer of its own, and a long file's would be
+  // hundreds of thousands of pixels tall.)
   function syncEditorScroll() {
     const scrollTop = app.elements.editorContent.scrollTop;
     const gutterContent = app.elements.editorGutter.firstElementChild;
     if (gutterContent) {
-      gutterContent.style.transform = `translateY(${-scrollTop}px)`;
+      gutterContent.style.transform = `translateY(${(app.editorRenderCache.above ?? 0) - scrollTop}px)`;
     }
   }
 
@@ -350,6 +399,9 @@ export function installRender(ed, app) {
   // which is overflow:hidden).
   function caretIntoView(margin = getEditorLineHeight()) {
     if (document.activeElement !== app.elements.editorContent) return;
+    // A held selection (editor-window.js): the page's caret is not the real one (a held
+    // caret's waits out of view at the edge of the rendered lines); the view stays.
+    if (ed.hasHeldSelection?.()) return;
     const sel = globalThis.getSelection?.();
     if (!sel || sel.rangeCount === 0) return;
     const range = sel.getRangeAt(0).cloneRange();
@@ -400,5 +452,5 @@ export function installRender(ed, app) {
     return file ? app.marks.get(getPath(app.controller.getProject(), file.id)) : null;
   }
 
-  Object.assign(ed, { drawMarkBar, applyEditorRender, getEditorLineHeight, getEditorSpaceWidth, getLeadingIndentColumns, decorateEditorLineHtml, normalizeEditorLineElement, parseEditorLines, spliceEditorLines, renderEditorContent, syncEditorScroll, caretIntoView, forwardEditorWheel, clamp });
+  Object.assign(ed, { lineAt, drawMarkBar, applyEditorRender, getEditorLineHeight, getEditorSpaceWidth, getLeadingIndentColumns, decorateEditorLineHtml, normalizeEditorLineElement, parseEditorLines, renderEditorContent, syncEditorScroll, caretIntoView, forwardEditorWheel, clamp });
 }

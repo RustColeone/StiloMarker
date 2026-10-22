@@ -227,6 +227,8 @@ export function installEditorEvents(app, composing) {
   });
 
   app.elements.editorContent.addEventListener("scroll", () => {
+    // Of a long file, the lines coming into view are rendered (editor-window.js).
+    if (!composing.now) app.updateEditorWindow();
     app.syncEditorScroll();
     app.scheduleRemoteCursorRender(); // keep peer carets/highlights pinned to the text while scrolling
     if (app.searchState.open) app.renderSearchHighlights();
@@ -378,6 +380,7 @@ export function installEditorEvents(app, composing) {
         return;
       }
       _lastEditorObservedWidth = width;
+      app.editorRenderCache.metricsKey = ""; // lines wrap differently: measured again
       const sel = app.getEditorSelection();
       const hadFocus = document.activeElement === app.elements.editorContent;
       const savedScroll = app.elements.editorContent.scrollTop;

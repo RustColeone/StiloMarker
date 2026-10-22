@@ -40,10 +40,22 @@ export function createResume(app) {
     return fileId ? viewStates[fileId] : null;
   }
 
+  // Kept at once in memory; written at most every SAVE_EVERY (the caret moves
+  // on every key), and when the page is hidden or left.
+  const SAVE_EVERY = 2000;
+  let saveTimer = null;
+  const saveNow = () => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = null;
+    saveViewStates(viewStates);
+  };
+  globalThis.addEventListener?.("pagehide", () => { if (saveTimer) saveNow(); });
+  globalThis.document?.addEventListener("visibilitychange", () => { if (saveTimer && document.visibilityState === "hidden") saveNow(); });
+
   function setViewState(fileId, patch) {
     if (!fileId) return;
     viewStates[fileId] = { ...viewStates[fileId], ...patch };
-    saveViewStates(viewStates);
+    saveTimer ??= setTimeout(saveNow, SAVE_EVERY);
   }
 
   /** Snapshot the preview's own view and the editor position before a file

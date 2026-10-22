@@ -115,7 +115,7 @@ export function createShowFile(app, composing) {
           const nextSelection = app.consumeExternalEditorSelection(activeFile.id, nextText, start, end);
           app.logDebug("response", "caret", `render resync (same file, focused): read sel=${start}-${end} → applyEditorRender at ${nextSelection.start}`);
           app.hideEditorAutocomplete();
-          app.applyEditorRender(nextText, nextSelection.start, nextSelection.end);
+          app.applyEditorRender(nextText, nextSelection.start, nextSelection.end, { reveal: false }); // someone else's edit: the view stays
           app.resetEditorHistory(nextText, nextSelection.start, nextSelection.end);
         } else {
           app.logDebug("response", "caret", "render→loadEditorContent (same file, NOT focused) → caret to 0");

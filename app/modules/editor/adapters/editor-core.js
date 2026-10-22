@@ -2,6 +2,7 @@
 // job into parts that share one editor object (`ed`):
 //   editor-dom.js      the text and the DOM, caret and selection
 //   editor-render.js   rendering lines incrementally, scroll, measurements
+//   editor-window.js   of a long file, only the lines in view (lazy rendering)
 //   editor-history.js  edits, undo / redo, telling the app the text changed
 //   editor-cursors.js  other people's cursors and the overview ruler
 //   editor-toolbar.js  the formatting toolbar's edits, the drop caret
@@ -15,6 +16,7 @@ import { installHistory } from "./editor-history.js";
 import { installKeys } from "./editor-keys.js";
 import { installRender } from "./editor-render.js";
 import { installToolbar } from "./editor-toolbar.js";
+import { installWindow } from "./editor-window.js";
 
 // What the app calls (the same functions as before the split).
 const API = [
@@ -26,12 +28,12 @@ const API = [
     "queueExternalEditorSelection", "refreshFormatToolbar", "renderEditorContent", "drawMarkBar", "renderRemoteCursors",
     "replaceEditorRange", "resetEditorHistory", "scheduleOverviewRuler", "scheduleRemoteCursorRender",
     "setEditorSelection", "showEditorDropCaret", "syncEditorScroll", "textOffsetToDomPosition",
-    "transformEditorSelection"
+    "transformEditorSelection", "updateEditorWindow", "isOffsetRendered", "renderedRange", "editorLineTop", "revealEditorLine", "selectAllInEditor"
 ];
 
 export function createEditorCore(app) {
   const ed = { rendering: false, typing: false };
-  for (const install of [installDom, installRender, installHistory, installCursors, installToolbar, installKeys]) install(ed, app);
+  for (const install of [installDom, installRender, installWindow, installHistory, installCursors, installToolbar, installKeys]) install(ed, app);
   return {
     ...Object.fromEntries(API.map((name) => [name, ed[name]])),
     isRendering: () => ed.rendering, // redrawing the text (the page may report focus oddly meanwhile)

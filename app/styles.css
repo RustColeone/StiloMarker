@@ -1846,6 +1846,22 @@ p {
   white-space: pre;
 }
 
+/* Of a long file only the lines in view are in the page: these blocks stand
+   for the lines above and below them (editor-window.js sets the heights).
+   Inside the scrolled content (the editor's own padding would grow the box
+   instead), and not elements: every child of the editor is a line. */
+#editor-content::before,
+#editor-content::after {
+  content: "";
+  display: block;
+  height: var(--lazy-above, 0px);
+  pointer-events: none;
+}
+
+#editor-content::after {
+  height: var(--lazy-below, 0px);
+}
+
 .app-shell[data-word-wrap="on"] #editor-content {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1865,6 +1881,7 @@ p {
    onto the second visual line). */
 #editor-content[data-empty="true"]::before {
   content: attr(data-placeholder);
+  height: auto;
   position: absolute;
   top: 16px;
   left: 16px;

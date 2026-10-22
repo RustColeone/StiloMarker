@@ -75,8 +75,9 @@ export function installDom(ed, app) {
     tracker.text = text;
   }
 
-  // Index of a line element if every line before it is unchanged since the last
-  // render (so the cache's text lengths are exact for them), else -1.
+  // Index of a line element in the rendered run (cache.els) if every line
+  // before it is unchanged since the last render (so the cache's text lengths
+  // are exact for them), else -1.
   function cleanLineIndex(lineEl) {
     const tracker = trackEditorDom();
     const cache = app.editorRenderCache;
@@ -93,21 +94,26 @@ export function installDom(ed, app) {
     return index;
   }
 
+  // The text: the rendered run's lines (from the page) between the lines
+  // before and after it (from the cache: they change only in a render).
   function getEditorText() {
     const tracker = trackEditorDom();
     if (tracker.text !== null) return tracker.text;
+    const cache = app.editorRenderCache;
     const lines = app.elements.editorContent.children;
-    if (lines.length === 0) {
+    const ws = cache.ws ?? 0;
+    const we = ws + cache.els.length;
+    const total = cache.texts?.length ?? 0;
+    if (lines.length === 0 && ws === 0 && we >= total) {
       tracker.text = "";
       return "";
     }
     // Nothing added or removed since the render: the lines as rendered, with
     // only those changed since read again (every line's textContent was read
     // on each keystroke before).
-    const cache = app.editorRenderCache;
     let parts = null;
-    if (!tracker.structural && cache.els.length === lines.length && cache.texts?.length === lines.length) {
-      parts = cache.texts.slice();
+    if (!tracker.structural && cache.els.length === lines.length && total >= we) {
+      parts = cache.texts.slice(ws, we);
       for (const dirty of tracker.dirty) {
         const at = cache.els.indexOf(dirty);
         if (at < 0) { parts = null; break; }
@@ -119,7 +125,11 @@ export function installDom(ed, app) {
       parts = new Array(lines.length);
       for (let i = 0; i < lines.length; i += 1) parts[i] = lines[i].textContent;
     }
-    tracker.text = parts.join("\n");
+    const pieces = [];
+    if (ws > 0) pieces.push(cache.before);
+    if (parts.length) pieces.push(parts.join("\n"));
+    if (we < total) pieces.push(cache.after);
+    tracker.text = pieces.join("\n");
     return tracker.text;
   }
 
@@ -150,17 +160,21 @@ export function installDom(ed, app) {
 
   /** Convert an integer plain-text offset to a { node, offset } DOM position
    *  inside the contenteditable. */
+  // Offsets before the rendered run land at its start, past it at its end
+  // (setEditorSelection renders the lines it needs first; see editor-window.js).
   function textOffsetToDomPosition(textOffset) {
     // Fast path: nothing changed since the last render, so the cache's line
     // lengths are exact and no line's textContent needs reading.
     const tracker = trackEditorDom();
     const cache = app.editorRenderCache;
     const kids = app.elements.editorContent.children;
+    const ws = cache.ws ?? 0;
+    textOffset = Math.max(0, textOffset - (cache.winStart ?? 0));
     if (!tracker.structural && tracker.dirty.size === 0 && kids.length > 0 && kids.length === cache.els.length) {
       let remaining = textOffset;
       for (let i = 0; i < kids.length; i += 1) {
         const line = kids[i];
-        const lineLen = cache.texts[i].length;
+        const lineLen = cache.texts[ws + i].length;
         if (remaining <= lineLen) return findTextNodeAt(line, remaining);
         remaining -= lineLen + 1;
         if (remaining < 0) return { node: line, offset: line.childNodes.length };
@@ -197,11 +211,12 @@ export function installDom(ed, app) {
     // 0, so getEditorSelection() reported an empty selection and Ctrl+A + paste
     // inserted at the top WITHOUT removing the selection (the "everything mixed up"
     // corruption).
+    const winStart = app.editorRenderCache.winStart ?? 0;
     if (container === app.elements.editorContent) {
       const kids = Array.from(app.elements.editorContent.childNodes);
       const count = kids.length;
       const limit = Math.min(Math.max(0, domOffset), count);
-      let offset = 0;
+      let offset = winStart;
       for (let i = 0; i < limit; i += 1) {
         offset += kids[i].textContent?.length ?? 0;
         if (i < count - 1) offset += 1; // newline between lines (none after the last)
@@ -219,8 +234,9 @@ export function installDom(ed, app) {
     const cleanIndex = cleanLineIndex(lineEl);
     if (cleanIndex >= 0) {
       const texts = app.editorRenderCache.texts;
-      let offset = 0;
-      for (let i = 0; i < cleanIndex; i += 1) offset += texts[i].length + 1;
+      const ws = app.editorRenderCache.ws ?? 0;
+      let offset = winStart;
+      for (let i = 0; i < cleanIndex; i += 1) offset += texts[ws + i].length + 1;
       return offset + getOffsetWithinTextRoot(lineEl, container, domOffset);
     }
 
@@ -235,14 +251,14 @@ export function installDom(ed, app) {
       let node = container;
       while (node && node.parentNode !== app.elements.editorContent) node = node.parentNode;
       const idx = node ? kids.indexOf(node) : -1;
-      if (idx < 0) return 0;
-      let offset = 0;
+      if (idx < 0) return winStart;
+      let offset = winStart;
       for (let i = 0; i < idx; i += 1) offset += (kids[i].textContent?.length ?? 0) + 1;
       return offset + getOffsetWithinTextRoot(node, container, domOffset);
     }
 
     // Characters contributed by all preceding lines + their newlines.
-    let offset = 0;
+    let offset = winStart;
     for (let i = 0; i < lineIndex; i += 1) {
       offset += lineEls[i].textContent.length + 1;
     }
@@ -253,19 +269,34 @@ export function installDom(ed, app) {
 
   /** Return the current editor selection as integer plain-text {start, end}. */
   function getEditorSelection() {
+    const { start, end } = getEditorSelectionEnds();
+    return { start, end };
+  }
+
+  /** The selection with its direction: {start, end, anchor, focus} (anchor:
+   *  where it began, focus: where it ends now, which Shift moves). */
+  function getEditorSelectionEnds() {
+    const kept = ed.heldSelection?.();
+    if (kept) return kept;
     const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return { start: 0, end: 0 };
+    if (!sel || sel.rangeCount === 0) return { start: 0, end: 0, anchor: 0, focus: 0 };
     const range = sel.getRangeAt(0);
-    if (!app.elements.editorContent.contains(range.startContainer)) return { start: 0, end: 0 };
+    if (!app.elements.editorContent.contains(range.startContainer)) return { start: 0, end: 0, anchor: 0, focus: 0 };
     const start = domPositionToTextOffset(range.startContainer, range.startOffset);
     const end = range.collapsed
       ? start
       : domPositionToTextOffset(range.endContainer, range.endOffset);
-    return { start, end };
+    const backward = !range.collapsed && sel.anchorNode === range.endContainer && sel.anchorOffset === range.endOffset;
+    return { start, end, anchor: backward ? end : start, focus: backward ? start : end };
   }
 
-  /** Move the browser selection to cover [start, end] in the editor plain text. */
-  function setEditorSelection(start, end) {
+  /** Move the browser selection to cover [start, end] in the editor plain text
+   *  (from `anchor` to `focus` when given: the direction Shift extends). Its
+   *  lines are rendered first, the view moving to them when they are far from
+   *  it (`reveal`; restoring a held selection as it was never moves it); when
+   *  they are too far apart, or not to be revealed, the selection is held as
+   *  offsets and the page shows the part in view (editor-window.js). */
+  function setEditorSelection(start, end, { anchor = start, focus = end, reveal = true } = {}) {
     if (!app.elements.editorContent.isConnected) return;
     // Only ever move the caret when the editor is the focused element. Adding a
     // Range inside a contenteditable otherwise *steals* focus into it (and lands
@@ -279,16 +310,20 @@ export function installDom(ed, app) {
       return;
     }
     try {
-      const startPos = textOffsetToDomPosition(start);
-      const endPos = start === end ? startPos : textOffsetToDomPosition(end);
-      const range = document.createRange();
-      range.setStart(startPos.node, startPos.offset);
-      range.setEnd(endPos.node, endPos.offset);
-      const sel = window.getSelection();
-      if (sel) {
-        sel.removeAllRanges();
-        sel.addRange(range);
+      const wasHeld = ed.heldSelection?.();
+      ed.dropHeld?.();
+      if (ed.isLazy?.()) {
+        const same = wasHeld && wasHeld.start === Math.min(start, end) && wasHeld.end === Math.max(start, end);
+        const [a, b] = [ed.lineOfOffset(Math.min(start, end)), ed.lineOfOffset(Math.max(start, end))];
+        if (!ed.ensureLinesRendered(a, b, { reveal: reveal && !same })) {
+          ed.holdSelection(anchor, focus);
+          return;
+        }
       }
+      const anchorPos = textOffsetToDomPosition(anchor);
+      const focusPos = anchor === focus ? anchorPos : textOffsetToDomPosition(focus);
+      const sel = window.getSelection();
+      if (sel) sel.setBaseAndExtent(anchorPos.node, anchorPos.offset, focusPos.node, focusPos.offset);
     } catch (error) {
       ignore(error, "restoring the editor selection failed (out of range during a file switch?)");
     }
@@ -334,5 +369,5 @@ export function installDom(ed, app) {
   // Since the last render, at most one line's text changed and no line was added or removed.
   const editedOneLine = () => { const tracker = trackEditorDom(); return !tracker.structural && tracker.dirty.size <= 1; };
 
-  Object.assign(ed, { editedOneLine, editorLineEls, trackEditorDom, noteEditorMutations, markEditorDomSynced, cleanLineIndex, getEditorText, findTextNodeAt, textOffsetToDomPosition, domPositionToTextOffset, getEditorSelection, setEditorSelection, getOffsetWithinTextRoot, getEditorTextOffsetFromPoint });
+  Object.assign(ed, { getEditorSelectionEnds, editedOneLine, editorLineEls, trackEditorDom, noteEditorMutations, markEditorDomSynced, cleanLineIndex, getEditorText, findTextNodeAt, textOffsetToDomPosition, domPositionToTextOffset, getEditorSelection, setEditorSelection, getOffsetWithinTextRoot, getEditorTextOffsetFromPoint });
 }

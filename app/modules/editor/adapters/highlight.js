@@ -235,5 +235,28 @@ export function createHighlighter(app) {
     return out;
   }
 
-  return { editorHighlightKind, escapeEditorHtml, highlightEditorLinesMemo, highlightMarkdownSource };
+  // One line, from the state it starts in (inside a ``` fence or not): its
+  // memoised hit ({ html, inFence: the state after it, plain }). Lets a render
+  // highlight only the lines that changed (editor-render.js).
+  function highlightEditorLineMemo(kind, line, inFence = false) {
+    if (editorLineMemo.kind !== kind) {
+      editorLineMemo.kind = kind;
+      editorLineMemo.maps = [new Map(), new Map()];
+    }
+    const markdown = kind === "markdown";
+    const map = editorLineMemo.maps[markdown && inFence ? 1 : 0];
+    let hit = map.get(line);
+    if (hit === undefined) {
+      if (markdown) {
+        const result = highlightMarkdownLine(line, inFence);
+        hit = { html: result.html, inFence: result.inFence, plain: null };
+      } else {
+        hit = { html: highlightEditorLines(kind, line)[0], inFence: false, plain: null };
+      }
+      map.set(line, hit);
+    }
+    return hit;
+  }
+
+  return { editorHighlightKind, escapeEditorHtml, highlightEditorLinesMemo, highlightEditorLineMemo, highlightMarkdownSource };
 }
