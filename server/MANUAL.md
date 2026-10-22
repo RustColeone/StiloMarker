@@ -658,6 +658,13 @@ Browser B ──GET /api/events/stream──▶   │ (SSE)
 4. File edits are sent as `POST /api/operations` with a typed operation object.
 5. The server applies the operation, increments the revision, and broadcasts the event to all other subscribers.
 
+When a PIN session's connection drops, the tab goes back to your own
+workspace and joins the session again by itself when it can. Words typed in
+the last moment before a drop (not yet confirmed by the server) do not reach
+the session. If drops come close together, the app says the connection keeps
+dropping: when it is back, check that your last words arrived. (A cloud
+workspace, opened with an account, keeps such typing and merges it.)
+
 ### Operation types
 
 | Type | Description |

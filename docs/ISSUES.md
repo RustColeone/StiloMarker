@@ -11,7 +11,7 @@ Last updated: 2026-10-22 · release `v0.2.29` (deployed with v0.2.28; public che
 
 ## Open
 
-One, O8 below (found 2026-10-22). Everything the stability review of 2026-10-21 found (the app as a PWA,
+None. Everything the stability review of 2026-10-21 found (the app as a PWA,
 in Electron, with the user's own key and no server; each found by an
 experiment) is fixed: the storage limit (O0) in v0.2.19, a copy per
 workspace (O7) in v0.2.20, two windows (O1) in v0.2.21, the Agent and Chats
@@ -19,19 +19,6 @@ with the user's own key and no server (O3) in v0.2.22, offline edits merged
 per file (O4) in v0.2.23, typing in a long chapter (O2) in v0.2.24, the app
 as an installed web app (O5) in v0.2.25, the desktop app (O6) in v0.2.26,
 very long files (O2b) in v0.2.28.
-
-### O8. Typing unconfirmed when a PIN session drops does not reach it
-**Confidence:** confirmed by reading and an experiment · **Severity:** low
-
-A PIN session (a guest's PIN, the desktop app's Share This Workspace) that
-drops goes back to the tab's own workspace by design, and joining again
-shows the session's copy; nothing of the own workspace leaks into it (tried
-2026-10-22). But typing made in the last moment before the drop, not yet
-confirmed by the server (usually well under a second), is not sent when the
-tab joins again: the session's copy replaces it. Cloud workspaces merge such
-typing since v0.2.23. A fix would keep the shared copy's unconfirmed files
-aside at the drop and merge them when the same session is joined again
-(never the own workspace's files). Needs a decision: fix, or accept.
 
 ## Accepted
 
@@ -57,9 +44,38 @@ one. Affects only pre-existing local history.
 
 Accepted (2026-10-20): it can only touch history from before snapshots lived on the server, and only when two workspaces share a file's name.
 
+### A3. Typing unconfirmed when a PIN session drops does not reach it
+**Confidence:** confirmed by reading and an experiment · **Severity:** low
+
+A PIN session (a guest's PIN, the desktop app's Share This Workspace) that
+drops goes back to the tab's own workspace by design, and joining again
+shows the session's copy; nothing of the own workspace leaks into it (tried
+2026-10-22). Typing made in the last moment before the drop, not yet
+confirmed by the server (usually well under a second), is not sent when the
+tab joins again. Cloud workspaces merge such typing since v0.2.23.
+
+Accepted (2026-10-22, found as O8): it is a moment's typing, and a cloud
+workspace keeps it. Since a shaky connection makes it more likely, drops
+that come close together are said (v0.2.36).
+
 ---
 
 ## Fixed
+
+### v0.2.36: a shaky connection is said
+
+Asked for (2026-10-22): O8 is accepted (A3), "but we should warn user about a
+shaky connection". Browser only.
+
+- **Drops close together are said** (new): when a PIN session's connection
+  drops a second time within ten minutes, the tab says the connection keeps
+  dropping and that words typed just before a drop may not reach the others,
+  to check that the last words arrived once it is back (at most once every
+  ten minutes; `sync/model/shaky.js`, pure). A single drop rejoins quietly,
+  as before.
+- Tests: `sync-shaky.test.mjs` (new: two drops in four minutes said, once in
+  a while; drops far apart not) and `shaky-connection-browser.py` (new: one
+  drop quiet, a second soon after said, rejoined each time).
 
 ### v0.2.35: accounts with hashed passwords, and admins who manage them
 

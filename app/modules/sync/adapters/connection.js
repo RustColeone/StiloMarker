@@ -3,6 +3,7 @@
 // the session's status does, switching between the shared workspace and this
 // tab's own, and sending a change.
 import { UPDATE_FILE, isImageFileName } from "../../workspace/index.js";
+import { SHAKY_WITHIN, noteDrop } from "../model/shaky.js";
 import { ignore, ignored } from "../../../kernel/index.js";
 import { patchStoredSettings } from "../../shell/index.js";
 
@@ -44,6 +45,7 @@ export function createConnection({ session, status, mode, events, workspace, she
   // as it connects, and this is what is kept aside (to come back on leaving).
   // A join shows the host's workspace when it arrives, unless the user
   // switched to their own meanwhile (joinShows false): that choice stands.
+  let shaky = null; // the PIN session's recent drops (model/shaky.js)
   let joiningFrom = null;
   let joinShows = false;
   async function connectSaved({ auto = false } = {}) {
@@ -195,6 +197,13 @@ export function createConnection({ session, status, mode, events, workspace, she
         status.change({ detail: "Offline — edits are saved locally and will sync when the connection returns." }, "offline, edits kept");
         redraw();
         return;
+      }
+      // A PIN or guest session sends nothing typed in its last moment
+      // (docs/ISSUES.md, O8): drops close together are said.
+      shaky = noteDrop(shaky, Date.now());
+      if (shaky.warn) {
+        shell.toast("The connection to the shared session keeps dropping. Words typed just before a drop may not reach the others: when it is back, check that your last words arrived.", { duration: 10000 });
+        log("Shaky connection", `${shaky.drops.length} drops in ${SHAKY_WITHIN / 60000} minutes`);
       }
       switchMode("private");
       return;
