@@ -48,7 +48,7 @@ def deploy(old, new):
     sw.write_text(sw.read_text().replace(f'"mdnotes-shell-v{old}"', f'"mdnotes-shell-v{new}"'))
 
 
-async def version_becomes(page, want, seconds=30):
+async def version_becomes(page, want, seconds=90):
     # Asked only once the page has reloaded into it: questions to the version in
     # use while a new one waits keep it busy, and the browser does not swap a busy
     # one. Each within a few seconds: one asked as the page navigates may never be answered.
@@ -62,6 +62,15 @@ async def version_becomes(page, want, seconds=30):
 
 
 DRAWN = "#preview-output .mermaid-diagram svg"
+# How long each kind of step may take, sized for a small machine (the test
+# machine: 2 CPUs, 2 GB, often swapping). Measured idle there (2026-10-23): a
+# version installing (the whole app fetched from the plain test server)
+# 7-19 s; the swap to it 1-2 s; a page loading again through the version just
+# started 4 s, two windows at once 8 s. Busy, each took several times that,
+# past waits of 30 or 60 s: the app was right, only slow.
+INSTALLED = 120000     # a new version installed (said in the status bar)
+LOADED = 120000        # a page loaded again through the version just started
+DRAWN_WITHIN = 60000   # the diagram and the formula drawn on a page just loaded
 VERSION = '() => new Promise((resolve) => { const c = new MessageChannel(); c.port1.onmessage = (e) => resolve(e.data.version);' \
           ' navigator.serviceWorker.controller.postMessage({ type: "version" }, [c.port2]); setTimeout(() => resolve(null), 3000); })'
 
@@ -93,41 +102,41 @@ async def main():
 
         # Controlled from the next load (by 0.2.24 here).
         await page.reload(wait_until="domcontentloaded")
-        await page.wait_for_function("Boolean(navigator.serviceWorker.controller)", timeout=15000)
+        await page.wait_for_function("Boolean(navigator.serviceWorker.controller)", timeout=LOADED)
         await version_becomes(page, OLD)
 
         # This version replaces one from before 0.2.25 at once (nobody clicks anything).
         deploy(OLD, RELEASE)
-        async with page.expect_navigation(timeout=60000):
+        async with page.expect_navigation(timeout=INSTALLED + LOADED):
             await page.evaluate("navigator.serviceWorker.getRegistration().then((r) => r.update())")
         await version_becomes(page, RELEASE)
 
         # The diagram and the formula draw from the served libraries.
-        await page.wait_for_selector(DRAWN, timeout=30000)
-        await page.wait_for_selector("#preview-output mjx-container svg", timeout=30000)
+        await page.wait_for_selector(DRAWN, timeout=DRAWN_WITHIN)
+        await page.wait_for_selector("#preview-output mjx-container svg", timeout=DRAWN_WITHIN)
         first = await asyncio.wait_for(page.evaluate(VERSION), 8)
 
         # Offline: the app opens, and the formula and the diagram draw again.
         await context.set_offline(True)
         await page.reload(wait_until="domcontentloaded")
-        await page.wait_for_selector(DRAWN, timeout=30000)
-        await page.wait_for_selector("#preview-output mjx-container svg", timeout=30000)
+        await page.wait_for_selector(DRAWN, timeout=DRAWN_WITHIN)
+        await page.wait_for_selector("#preview-output mjx-container svg", timeout=DRAWN_WITHIN)
         await context.set_offline(False)
 
         # A new version is deployed: it waits; this tab keeps its own and says one is ready.
         deploy(first, "next")
         await page.evaluate("navigator.serviceWorker.getRegistration().then((r) => r.update())")
-        await page.wait_for_function('document.querySelector("#status-update-item")?.hidden === false', timeout=30000)
+        await page.wait_for_function('document.querySelector("#status-update-item")?.hidden === false', timeout=INSTALLED)
         assert await asyncio.wait_for(page.evaluate(VERSION), 8) == first, "the open tab keeps its version"
         title = await page.get_attribute("#status-update-item", "title")
         assert "vnext" in title or "next" in title, title
 
         # Reload Window (the item) starts it.
-        async with page.expect_navigation(timeout=30000):
+        async with page.expect_navigation(timeout=LOADED):
             await page.click("#status-update-item")
-        await page.wait_for_function("Boolean(navigator.serviceWorker.controller)", timeout=15000)
+        await page.wait_for_function("Boolean(navigator.serviceWorker.controller)", timeout=LOADED)
         await version_becomes(page, "next")
-        await page.wait_for_selector(DRAWN, timeout=30000)
+        await page.wait_for_selector(DRAWN, timeout=DRAWN_WITHIN)
         assert await page.evaluate('document.querySelector("#status-update-item").hidden')
 
         # Two windows: started in one, the other follows into it.
@@ -135,31 +144,31 @@ async def main():
         other.on("pageerror", lambda e: errors.append(str(e)))
         await other.goto(BASE, wait_until="domcontentloaded")
         await version_becomes(other, "next")
-        await other.wait_for_selector(DRAWN, timeout=30000)
+        await other.wait_for_selector(DRAWN, timeout=DRAWN_WITHIN)
         deploy("next", "next2")
         await page.evaluate("navigator.serviceWorker.getRegistration().then((r) => r.update())")
         for each in (page, other):
-            await each.wait_for_function('document.querySelector("#status-update-item")?.hidden === false', timeout=30000)
+            await each.wait_for_function('document.querySelector("#status-update-item")?.hidden === false', timeout=INSTALLED)
         assert await asyncio.wait_for(other.evaluate(VERSION), 8) == "next"
-        async with page.expect_navigation(timeout=60000), other.expect_navigation(timeout=60000):
+        async with page.expect_navigation(timeout=LOADED), other.expect_navigation(timeout=LOADED):
             await page.click("#status-update-item")
         await version_becomes(page, "next2")
         await version_becomes(other, "next2")
-        await other.wait_for_selector(DRAWN, timeout=30000)
+        await other.wait_for_selector(DRAWN, timeout=DRAWN_WITHIN)
         await other.close()
 
         # A reload keeps the version (as browsers do) and says one waits; Reload
         # Window, even right as the page has started, starts it.
         deploy("next2", "next3")
         await page.evaluate("navigator.serviceWorker.getRegistration().then((r) => r.update())")
-        await page.wait_for_function('document.querySelector("#status-update-item")?.hidden === false', timeout=30000)
+        await page.wait_for_function('document.querySelector("#status-update-item")?.hidden === false', timeout=INSTALLED)
         await page.reload(wait_until="domcontentloaded")
-        await page.wait_for_function('document.querySelector("#status-update-item")?.hidden === false', timeout=30000)
+        await page.wait_for_function('document.querySelector("#status-update-item")?.hidden === false', timeout=INSTALLED)
         assert await asyncio.wait_for(page.evaluate(VERSION), 8) == "next2"
-        async with page.expect_navigation(timeout=60000):
+        async with page.expect_navigation(timeout=LOADED):
             await page.click("#status-update-item")
         await version_becomes(page, "next3")
-        await page.wait_for_selector(DRAWN, timeout=30000)
+        await page.wait_for_selector(DRAWN, timeout=DRAWN_WITHIN)
 
         assert not [url for url in elsewhere if "jsdelivr" in url or "unpkg" in url], elsewhere
         assert not errors, errors
