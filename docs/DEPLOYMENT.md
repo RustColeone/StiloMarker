@@ -1150,3 +1150,45 @@ desktop app's in Electron 44, with its server).
 
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261022T090204Z-v0.2.29`.
 173/173 data files (taken with the service stopped), every JSON file valid.
+
+## Verified release: v0.3.0 (stable)
+
+Deployed on 2026-10-23 at 11:11 UTC: the stable version, v0.2.30-v0.2.42
+(Find in Files, plain text and tables, spellcheck, hashed accounts and the
+admin page, the shaky-connection warning, the extension API, accounts in
+the desktop app; then what the review before calling it stable found:
+paths, accounts, PIN sessions, Find in Files and tables). App version
+`0.3.0`, tag `v0.3.0`; sync compatibility unchanged at `117`. The
+service's command line and environment file are unchanged; it was down
+4 seconds.
+
+Before: every live project (4) loaded whole with the new server and passed
+its path checks, and the account file read under the new rules, on a
+private copy (removed after).
+
+Accounts: the account file was converted once
+(`python3 server/accounts.py convert --admin leoyan01`): 4 passwords
+hashed, `leoyan01` the first admin, the file readable by its owner only
+(it was readable by all users of the machine). Converting counts as a new
+password for each account, so their sign-ins ended once (a browser signs in
+again by itself).
+
+Public checks: ping (`0.3.0`, accounts on, hosting on), a JSON reply's
+`Cache-Control: no-store`, the service worker's cache label
+`mdnotes-shell-v0.3.0`, new files served (`editor/model/search.js`,
+`extensions/data-table/browser/model/table.js`), the server's own files
+refused under any spelling (`server/whitelist.json`,
+`server/stilomarker.env`, `server/mdnotes_server.py`,
+`SERVER/whitelist.json`, `Server/accounts.py`, `data/...` answer as the
+app's page), an unknown session token answered 403, and a clean journal
+(only the expected note about passwords kept as typed, before the
+conversion). A fresh browser on the public site (its own welcome
+workspace, no real data) was controlled by `0.3.0`, opened offline,
+fetched nothing from a CDN, and had no page errors.
+
+Validation: 405 Node tests, all 25 Python suites, 45 browser suites (the
+desktop app's in Electron 44, with its server).
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261023T111131Z-v0.3.0`.
+173/173 data files (taken with the service stopped), every JSON file valid;
+the account file and the environment file as they were.
