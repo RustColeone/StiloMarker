@@ -23,6 +23,10 @@
     { "name": "steps.TSV", "type": "datatable", "extension": ".tsv", "base": "steps", "image": false, "text": true, "format": "datatable" },
     { "name": "manifest.json", "type": "json", "extension": ".json", "base": "manifest", "image": false, "text": true, "format": "json", "reserved": true },
     { "name": "Comments.JSON", "type": "json", "extension": ".json", "base": "Comments", "image": false, "text": true, "format": "json", "reserved": true },
-    { "name": ".pending-state.json", "type": "json", "extension": ".json", "base": ".pending-state", "image": false, "text": true, "format": "json", "reserved": true }
+    { "name": ".pending-state.json", "type": "json", "extension": ".json", "base": ".pending-state", "image": false, "text": true, "format": "json", "reserved": true },
+    { "name": "user-state.json", "type": "json", "extension": ".json", "base": "user-state", "image": false, "text": true, "format": "json", "reserved": true },
+    { "name": "acceß.json", "type": "json", "extension": ".json", "base": "acceß", "image": false, "text": true, "format": "json", "reserved": true },
+    { "name": "ＣＨＡＴ.json", "type": "json", "extension": ".json", "base": "ＣＨＡＴ", "image": false, "text": true, "format": "json", "reserved": true },
+    { "name": "manıfest.json", "type": "json", "extension": ".json", "base": "manıfest", "image": false, "text": true, "format": "json", "reserved": false }
   ]
 }

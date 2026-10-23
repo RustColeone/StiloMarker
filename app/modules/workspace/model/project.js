@@ -160,10 +160,27 @@ function getNodeByPath(project, path) {
   return nodeId ? getNode(project, nodeId) : null;
 }
 
-// A name may stand in this folder: no sibling has it (any case), and at the
-// top it is none of the names the server keeps its own files under there.
+// Why a file or folder name cannot be used, or null. A name becomes a path on
+// a disk (the server's, a local folder's), so none walks out of its folder
+// (., .., a slash) or reads as another name on some disk (control characters;
+// a trailing dot or space, which Windows drops). The server's
+// operations.py (name_problem) refuses the same.
+const MAX_NAME = 255;
+function nameProblem(name) {
+  if (typeof name !== "string" || !name) return "A file or folder needs a name.";
+  if (name === "." || name === ".." || name.includes("/") || name.includes("\\")) return `"${name}" cannot be a file or folder name.`;
+  if (/[\u0000-\u001f\u007f]/.test(name)) return "A file or folder name cannot hold control characters.";
+  if (/[. ]$/.test(name)) return `"${name}": a file or folder name cannot end with a dot or a space.`;
+  if (name.length > MAX_NAME) return `A file or folder name has at most ${MAX_NAME} characters.`;
+  return null;
+}
+
+// A name may stand in this folder: a usable name, no sibling has it (any
+// case), and at the top none of the names the server keeps its own files under there.
 function ensureUniqueName(project, parentId, name, excludeNodeId = null) {
   const parent = getNode(project, parentId);
+  const problem = nameProblem(name);
+  if (problem) throw new Error(problem);
   if (parentId === (project.rootId ?? ROOT_ID) && builtinTypes.isReserved(name)) {
     throw new Error(`"${name}" is kept for the app's own file at a workspace's top. Put it in a folder, or give it another name.`);
   }
@@ -505,6 +522,7 @@ export {
   getPath,
   isImageFileName,
   isAllowedFileName,
+  nameProblem,
   isMarkdownFileName,
   isMtreeFileName,
   isPersonaFileName,

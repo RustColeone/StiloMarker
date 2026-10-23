@@ -2,10 +2,11 @@
 // or a file as a project, and writing a project back to its folder. Moved
 // from the legacy file-system service when Workspace took saving.
 import { createProjectSaveQueue } from "./save-queue.js";
-import { ROOT_ID, addFile, addFolder, createProject, getNode, getPath, isImageFileName, listVisibleNodes } from "../model/project.js";
+import { ROOT_ID, addFile, addFolder, createProject, getNode, getPath, isImageFileName, listVisibleNodes, nameProblem } from "../model/project.js";
 import { bytesToDataUrl, dataUrlToBlob, decodeTextBytes, getExportBytes, getMimeTypeForFileName, readFileAsProjectContent, sizeLabel, tooLarge } from "./file-content.js";
 import { extractZipEntries } from "./zip.js";
 import { builtinTypes } from "../../file-types/index.js";
+import { ignore } from "../../../kernel/index.js";
 
 function findChildByName(project, parentId, name, kind) {
   const parent = getNode(project, parentId);
@@ -38,14 +39,25 @@ function ensureFolderPath(project, folderNames) {
 const LEFT_OUT = new WeakMap();
 const leftOutOf = (project) => LEFT_OUT.get(project) ?? [];
 function noteLeftOut(project, names) {
-  if (names.length) LEFT_OUT.set(project, names);
+  if (names.length) LEFT_OUT.set(project, [...names].sort((a, b) => a.localeCompare(b)));
   return project;
 }
-// Kept out of the project: a name the app keeps at the top, or a text file too large.
-function keptOut(parentId, name, size, leftOut, path) {
-  if (parentId === ROOT_ID && builtinTypes.isReserved(name)) return true;
-  if (!tooLarge(name, size)) return false;
-  leftOut.push(`${path} (${sizeLabel(size)})`);
+// Kept out of the project, and why (said by whoever opened it): a name the
+// app cannot keep (one that would walk out of its folder, or read as another
+// on some disk), a name kept for the app's own file at the top (its own
+// local folder's manifest is simply not one of the files), a text file too
+// large to hold. size null: a folder.
+function keptOut(parentId, name, size, path, leftOut, { ownFolder = false } = {}) {
+  if (nameProblem(name)) {
+    leftOut.push(`${path} (a name the app cannot keep)`);
+    return true;
+  }
+  if (parentId === ROOT_ID && builtinTypes.isReserved(name)) {
+    if (!ownFolder) leftOut.push(`${path} (a name kept for the app's own file)`);
+    return true;
+  }
+  if (size === null || !tooLarge(name, size)) return false;
+  leftOut.push(`${path} (${sizeLabel(size)}, too large to open here)`);
   return true;
 }
 
@@ -95,7 +107,25 @@ async function removeEntryAtPath(rootHandle, entry) {
   const segments = entry.path.split("/").filter(Boolean);
   const name = segments.pop();
   const parentHandle = await getDirectoryHandleAtPath(rootHandle, segments.join("/"), false);
-  await parentHandle.removeEntry(name, { recursive: entry.kind === "folder" });
+  await parentHandle.removeEntry(name);
+}
+
+// A removed (or renamed, or moved) folder goes with what this project knew
+// of it, file by file, then its folders while empty, deepest first; anything
+// else in it (a file left out for its size, one the app does not open) stays,
+// and so does the folder that holds it.
+async function removeKnownFolder(rootHandle, folder, previousSourceIndex) {
+  const under = Object.values(previousSourceIndex).filter((entry) => entry.path.startsWith(`${folder.path}/`));
+  for (const file of under.filter((entry) => entry.kind === "file")) {
+    try { await removeEntryAtPath(rootHandle, file); }
+    catch (error) { if (error.name !== "NotFoundError") throw error; }
+  }
+  const folders = [...under.filter((entry) => entry.kind === "folder"), folder]
+    .sort((left, right) => getPathDepth(right.path) - getPathDepth(left.path));
+  for (const entry of folders) {
+    try { await removeEntryAtPath(rootHandle, entry); }
+    catch (error) { ignore(error, "a folder still holding files this project does not show is kept"); }
+  }
 }
 
 async function ensureReadWritePermission(handle) {
@@ -109,7 +139,8 @@ async function ensureReadWritePermission(handle) {
 // Walk any FileSystemDirectoryHandle (an OS-picked folder *or* an OPFS folder —
 // they share the same handle API) into a live project whose handles map back to
 // the directory, so edits can be flushed via saveProjectToHandles.
-async function buildProjectFromDirectoryHandle(directoryHandle, name, sourceMode = "filesystem") {
+// ownFolder: the app's own local folder (its manifest at the top is its own).
+async function buildProjectFromDirectoryHandle(directoryHandle, name, sourceMode = "filesystem", { ownFolder = false } = {}) {
   let project = createProject(name || directoryHandle.name || "Directory");
   project.sourceMode = sourceMode;
   project.handles = { [ROOT_ID]: directoryHandle };
@@ -118,7 +149,7 @@ async function buildProjectFromDirectoryHandle(directoryHandle, name, sourceMode
   async function walk(folderHandle, parentId, where = "") {
     for await (const entry of folderHandle.values()) {
       if (entry.kind === "directory") {
-        if (parentId === ROOT_ID && builtinTypes.isReserved(entry.name)) continue;
+        if (keptOut(parentId, entry.name, null, `${where}${entry.name}/`, leftOut, { ownFolder })) continue;
         project = addFolder(project, parentId, entry.name);
         const folderNode = Object.values(project.nodes).find(
           (node) => node.parentId === parentId && node.kind === "folder" && node.name === entry.name
@@ -129,7 +160,7 @@ async function buildProjectFromDirectoryHandle(directoryHandle, name, sourceMode
 
       if (entry.kind === "file" && builtinTypes.isKnown(entry.name)) {
         const file = await entry.getFile();
-        if (keptOut(parentId, entry.name, file.size, leftOut, `${where}${entry.name}`)) continue;
+        if (keptOut(parentId, entry.name, file.size, `${where}${entry.name}`, leftOut, { ownFolder })) continue;
         project = addFile(project, parentId, entry.name, await readFileAsProjectContent(file, entry.name));
         const fileNode = Object.values(project.nodes).find(
           (node) => node.parentId === parentId && node.kind === "file" && node.name === entry.name
@@ -220,6 +251,10 @@ async function writeProjectToHandles(project) {
   // Write the new paths before removing renamed/deleted paths. Failed saves
   // keep the previous copy; retries tolerate cleanup already completed.
   for (const entry of filteredDeletedEntries) {
+    if (entry.kind === "folder") {
+      await removeKnownFolder(rootHandle, entry, previousSourceIndex);
+      continue;
+    }
     try { await removeEntryAtPath(rootHandle, entry); }
     catch (error) { if (error.name !== "NotFoundError") throw error; }
   }
@@ -253,8 +288,16 @@ async function importZipArchive(file) {
   for (const entry of supportedEntries) {
     const segments = entry.path.split("/").filter(Boolean);
     const fileName = segments.pop();
-    if (keptOut(segments.length ? null : ROOT_ID, fileName, entry.bytes.length, leftOut, entry.path)) continue;
-    if (segments.length && builtinTypes.isReserved(segments[0])) continue;
+    // A path that would walk out of the workspace, or hold a name it cannot keep, is left out whole.
+    if (segments.some((segment) => nameProblem(segment))) {
+      leftOut.push(`${entry.path} (a path the app cannot keep)`);
+      continue;
+    }
+    if (segments.length && builtinTypes.isReserved(segments[0])) {
+      leftOut.push(`${entry.path} (in a folder named like the app's own file)`);
+      continue;
+    }
+    if (keptOut(segments.length ? null : ROOT_ID, fileName, entry.bytes.length, entry.path, leftOut)) continue;
     const folderState = ensureFolderPath(project, segments);
     project = folderState.project;
     const content = isImageFileName(fileName)

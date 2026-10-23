@@ -5,5 +5,9 @@ export default Object.freeze([
   "access.json",
   "comments.json",
   "chat.json",
-  ".pending-state.json"
+  "user-state.json",
+  ".pending-state.json",
+  "conversations.sqlite",
+  "conversations.sqlite-wal",
+  "conversations.sqlite-shm"
 ]);

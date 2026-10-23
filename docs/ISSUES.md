@@ -62,6 +62,57 @@ that come close together are said (v0.2.36).
 
 ## Fixed
 
+### v0.2.39: nothing reaches outside a workspace's folder (security)
+
+Found by the review before calling a version stable (2026-10-23). Server and
+browser. The first two were in deployed versions before this round (a team
+project's folder storage), reachable by signed-in accounts with access to a
+project; PIN guests and temporary shares keep no folder.
+
+- **A name could walk out of the workspace's folder** (fixed): no name was
+  checked as a path. An account that may edit a project could make a folder
+  named `..` and write (or, deleting it, remove) files outside the project's
+  folder: another project's, or the server's own. Names are now checked on
+  both ends (`name_problem` / `nameProblem`: not `.` or `..`, no slash,
+  backslash or control character, no trailing dot or space, at most 255
+  characters), and the folder store never writes, moves, replays or deletes
+  outside its folder (`FolderStore.inside`, checked for the whole tree before
+  the write-ahead record; a project saved before with such a node opens
+  without it, said).
+- **The image upload wrote any file, for anyone in the session** (fixed): it
+  checked only that the path stayed in the folder (and by a string prefix, so
+  a neighbour folder named alike passed), not the role or the type, so even a
+  reader could overwrite the project's access list and become its owner. Now
+  only someone who may edit uploads, only images, at paths a file may have,
+  never over a name the server keeps; and only the workspace's own files are
+  served (never its bookkeeping beside them).
+- **Names kept for the app** are complete (`user-state.json`, the chats'
+  database and its two side files), apply to folders too, and are compared as
+  a disk that ignores case and look-alikes would (NFKC, case folded, `ß` as
+  `ss`, trailing dots and spaces dropped; both ends fold the same way); on the
+  server's disk, a top-level name that is one of its own files under another
+  spelling is refused as well.
+- **A whole project brought in at once** (Share This Workspace, a state
+  pushed, an import) is checked whole (`tree_problem`): every name, every
+  node in the folder it names, known types, no loop, no two alike in a
+  folder, nothing reserved at the top.
+- **A folder inside a project is never a project of its own** (one holding a
+  user's `manifest.json` could be opened, with its own access list).
+- **Opening a folder or ZIP**: a path that walks out (`../x.md`) is left out
+  whole, a name the app cannot keep is left out, a name kept for the app's
+  own files at the top is reported (no longer dropped without a word), and
+  the notice gives each one's reason. **Renaming or moving a folder** of a
+  local project no longer deletes files in it the project left out (too
+  large, or of a type the app does not open): the old folder keeps them.
+- Tests: `path-safety.test.py` (new: names that walk out, a whole project
+  that does, the store never writing, replaying or deleting outside, the
+  server's own file under another spelling (a hard link), uploads and what is
+  served, a folder inside a project); the operations and file-types tables
+  (names, folds); `file-types.test.py` (the list covers every file a module
+  keeps in a project's folder); `zip-fs.test.mjs` (the reasons, a ZIP path
+  that walks out, a renamed folder keeping a left-out file); `sync.test.py`
+  (an uploaded image is served once it is a file of the workspace).
+
 ### v0.2.38: accounts in the desktop app, turned on from its Server page
 
 Asked (2026-10-22): what happens for a user setting up accounts in the

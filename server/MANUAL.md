@@ -482,9 +482,16 @@ it); the files left out are listed. Adding such a file to a workspace is
 refused the same way.
 
 **Names kept for the app**: at the top of a workspace, no file or folder may
-be called `manifest.json`, `access.json`, `comments.json`, `chat.json` or
-`.pending-state.json` (any case): the server keeps its own files there under
-those names. Inside a folder, any name is fine.
+be called `manifest.json`, `access.json`, `comments.json`, `chat.json`,
+`user-state.json`, `.pending-state.json` or `conversations.sqlite` (with
+`-wal` and `-shm`), in any case or look-alike spelling: the server keeps its
+own files there under those names. Inside a folder, any of them is fine.
+
+**Names a file or folder cannot have**, anywhere: `.` or `..`, a name with a
+slash or backslash, a control character, or one ending with a dot or a space
+(Windows drops those, so it would read as another name). Opening a folder or
+a ZIP leaves out what has such a name, or a path that would walk out of it,
+and says so.
 
 ---
 

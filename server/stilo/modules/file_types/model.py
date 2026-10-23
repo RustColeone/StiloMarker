@@ -2,12 +2,21 @@
 entries goes in, answers come out. The browser has the same rules in
 app/modules/file-types/model/types.js; spec/file-types/type-of.cases.json keeps
 the two in step (docs/ARCHITECTURE.md, rule 6)."""
+import unicodedata
+
+
+def fold(name) -> str:
+    """A name as a disk that ignores case and Unicode look-alikes may read it
+    (NFKC, case folded, trailing dots and spaces dropped as Windows does). The
+    browser's types.js folds the same way."""
+    return unicodedata.normalize("NFKC", str(name or "")).casefold().rstrip(". ")
 
 
 class TypeTable:
     def __init__(self, entries, reserved=()):
         self._entries = list(entries)
-        self._reserved = {name.lower() for name in reserved}
+        self._listed = list(reserved)
+        self._reserved = {fold(name) for name in reserved}
 
     def _find(self, name):
         lower = str(name or "").lower()
@@ -68,5 +77,10 @@ class TypeTable:
         return list(entry["extensions"]) if entry else []
 
     def is_reserved(self, name):
-        """A name no file or folder may have at a workspace's top (any case): the server's own files there."""
-        return str(name or "").lower() in self._reserved
+        """A name no file or folder may have at a workspace's top (in any case or
+        look-alike spelling): the server's own files there."""
+        return fold(name) in self._reserved
+
+    def reserved_names(self):
+        """The reserved names as listed (protocol/file-types.json)."""
+        return list(self._listed)

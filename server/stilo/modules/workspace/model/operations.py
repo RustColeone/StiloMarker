@@ -66,19 +66,75 @@ def _parent_id(project, parent_path):
     return parent_id
 
 
-def _check_top(project, parent_id, name, types):
-    """At the top, none of the names the server keeps its own files under there
-    (as the browser's ensureUniqueName refuses them)."""
+MAX_NAME = 255
+
+
+def name_problem(name) -> str | None:
+    """Why a file or folder name cannot be used, or None. A name becomes a path
+    on disk, so none walks out of its folder (., .., a slash) or reads as
+    another name on some disk (control characters; a trailing dot or space,
+    which Windows drops). The browser's project.js (nameProblem) refuses the same."""
+    if not isinstance(name, str) or not name:
+        return "A file or folder needs a name."
+    if name in (".", "..") or "/" in name or "\\" in name:
+        return f"{name!r} cannot be a file or folder name."
+    if any(ord(char) < 32 or ord(char) == 127 for char in name):
+        return "A file or folder name cannot hold control characters."
+    if name[-1] in ". ":
+        return f"{name!r}: a file or folder name cannot end with a dot or a space."
+    if len(name) > MAX_NAME:
+        return f"A file or folder name has at most {MAX_NAME} characters."
+    return None
+
+
+def _check_name(project, parent_id, name, types):
+    """A name that can stand in this folder: a usable name, and at the top none
+    of the names the server keeps its own files under there (as the browser's
+    ensureUniqueName refuses them)."""
+    problem = name_problem(name)
+    if problem:
+        raise ValueError(problem)
     if parent_id == project["rootId"] and types.is_reserved(name):
         raise ValueError(f"{name!r} is kept for the app's own file at a workspace's top")
 
 
-def reserved_at_top(project: dict, types) -> list[str]:
-    """The names at a project's top that only the app's own files may have (for
-    a whole project brought in at once, which no operation checked)."""
-    root = project.get("nodes", {}).get(project.get("rootId"), {})
-    names = [project["nodes"].get(child, {}).get("name", "") for child in root.get("children", [])]
-    return [name for name in names if types.is_reserved(name)]
+def tree_problem(project: dict, types) -> str | None:
+    """Why a whole project brought in at once (Share This Workspace, an import,
+    a state pushed) cannot be kept, or None: every node a usable name in a
+    folder that lists it, a file of a known type, nothing at the top that only
+    the app's own files may be called, no loop, no two names alike in a folder."""
+    nodes, root_id = (project or {}).get("nodes"), (project or {}).get("rootId")
+    if not isinstance(nodes, dict) or root_id not in nodes:
+        return "The workspace has no root."
+    names_in = {}
+    for node_id, node in nodes.items():
+        if node_id == root_id:
+            continue
+        if not isinstance(node, dict):
+            return "The workspace holds something that is not a file or folder."
+        name = node.get("name")
+        problem = name_problem(name)
+        if problem:
+            return problem
+        parent = nodes.get(node.get("parentId"))
+        if not isinstance(parent, dict) or parent.get("kind") != "folder" or node_id not in parent.get("children", []):
+            return f"{name!r} is not in the folder it names."
+        if node.get("kind") == "file" and not types.is_known(name):
+            return f"Unsupported file type: {name}"
+        if node.get("kind") not in ("file", "folder"):
+            return f"{name!r} is neither a file nor a folder."
+        if node.get("parentId") == root_id and types.is_reserved(name):
+            return f"{name!r} is kept for the app's own file at a workspace's top."
+        key = (node.get("parentId"), name.lower())
+        if key in names_in:
+            return f"Two items are named {name!r} in one folder."
+        names_in[key] = node_id
+        steps, current = 0, node
+        while current.get("parentId") and steps <= len(nodes):
+            current, steps = nodes.get(current["parentId"], {}), steps + 1
+        if steps > len(nodes):
+            return f"{name!r} is inside itself."
+    return None
 
 
 def _node(project, path, what="Node"):
@@ -100,7 +156,7 @@ def apply_operation(project: dict, operation: dict, types, gap: float = EDIT_SES
         name = operation["name"]
         if find_child_by_name(project, parent_id, name):
             raise ValueError("create conflict: a file or folder with that name already exists")
-        _check_top(project, parent_id, name, types)
+        _check_name(project, parent_id, name, types)
         if kind == "create-folder":
             append_node(project, parent_id, {"id": create_id("folder"), "kind": "folder", "name": name,
                                              "parentId": parent_id, "children": [], "expanded": True})
@@ -119,7 +175,7 @@ def apply_operation(project: dict, operation: dict, types, gap: float = EDIT_SES
             raise ValueError("rename conflict: a file or folder with that name already exists")
         if node["kind"] == "file" and not types.is_known(operation["name"]):
             raise ValueError(f"Unsupported file type: {operation['name']}")
-        _check_top(project, node["parentId"], operation["name"], types)
+        _check_name(project, node["parentId"], operation["name"], types)
         node["name"] = operation["name"]
         return {}
 
@@ -176,7 +232,7 @@ def _move(project: dict, operation: dict, types) -> list[str]:
         child = nodes.get(child_id)
         if child and child_id != node_id and str(child.get("name", "")).lower() == lowered:
             raise ValueError("move conflict: a file or folder with that name already exists there")
-    _check_top(project, target_id, node["name"], types)
+    _check_name(project, target_id, node["name"], types)
     old_paths = subtree_paths(project, node_id)
     source = nodes[node["parentId"]]
     source_children = list(source.get("children", []))

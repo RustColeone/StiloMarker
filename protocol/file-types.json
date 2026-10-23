@@ -47,7 +47,8 @@
     }
   ],
   "reserved": {
-    "about": "Names no file or folder may have at a workspace's top, compared without regard to case (a desktop's disk may not tell them apart): the server keeps its own files there under these names (the tree, who may open it, the comments, the Agent's threads, a write in progress), and a local folder its manifest. Both ends refuse them (Workspace); a server test checks this list holds every name a module keeps in a project's folder that is a known type.",
-    "names": ["manifest.json", "access.json", "comments.json", "chat.json", ".pending-state.json"]
+    "about": "Names no file or folder may have at a workspace's top, compared as a disk that ignores case and Unicode look-alikes would (both ends fold them the same way): the server keeps its own files there under these names (the tree, who may open it, the comments, the Agent's threads, each account's open files, a write in progress, the chats' database), and a local folder its manifest. Both ends refuse them (Workspace); a server test checks this list holds every name a module keeps in a project's folder that is a known type.",
+    "names": ["manifest.json", "access.json", "comments.json", "chat.json", "user-state.json", ".pending-state.json",
+              "conversations.sqlite", "conversations.sqlite-wal", "conversations.sqlite-shm"]
   }
 }

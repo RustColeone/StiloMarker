@@ -21,16 +21,18 @@ class FileTypeParity(unittest.TestCase):
             if "reserved" in c:
                 self.assertEqual(t.is_reserved(c["name"]), c["reserved"], c["name"])
 
-    def test_reserved_covers_every_kept_file_of_a_known_type(self):
-        """Every file a module keeps in a project's folder, if its name is a
-        known type, is a reserved name: a user's file could overwrite it."""
+    def test_reserved_covers_every_kept_file(self):
+        """Every file a module keeps in a project's folder is a reserved name: a
+        user's file of that name could overwrite it, and a folder of that name
+        would stop the module writing it."""
         from stilo.modules.assistant.service.threads import THREADS_FILE
         from stilo.modules.chats import DB_FILES
         from stilo.modules.comments.adapters.comments_file import COMMENTS_FILE
         from stilo.modules.identity import ACCESS_FILE
+        from stilo.modules.projects.adapters.team_folders import USER_STATE_FILE
         from stilo.modules.workspace.adapters.folder_store import JOURNAL, MANIFEST
-        kept = [MANIFEST, JOURNAL, ACCESS_FILE, COMMENTS_FILE, THREADS_FILE, *DB_FILES]
-        missing = [name for name in kept if BUILTIN.is_known(name) and not BUILTIN.is_reserved(name)]
+        kept = [MANIFEST, JOURNAL, ACCESS_FILE, COMMENTS_FILE, THREADS_FILE, USER_STATE_FILE, *DB_FILES]
+        missing = [name for name in kept if not BUILTIN.is_reserved(name)]
         self.assertEqual(missing, [])
 
     def test_an_extension_for_another_api_version_is_left_out(self):

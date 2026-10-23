@@ -167,7 +167,7 @@ def add_routes(transport, directory, version: int):
         if not path:
             raise ValueError("Asset path is required")
         offset = int(request.query("offset", "0"))
-        return {"ok": True, "size": workspace.write_asset_chunk(path, offset, request.body())}
+        return {"ok": True, "size": workspace.write_asset_chunk(token, path, offset, request.body())}
 
     def stream(request):
         token = token_of(request)

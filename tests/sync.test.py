@@ -216,6 +216,12 @@ class ImagesOverHttp(unittest.TestCase):
         except urllib.error.HTTPError as error:
             return error.code, error.headers.get("content-type"), error.read()
 
+    def add_image(self, session, folder, name):
+        """An uploaded image's node, as the browser makes it (its folder first, then the content-less file)."""
+        for operation in ({"type": "create-folder", "parentPath": "", "name": folder},
+                          {"type": "create-file", "parentPath": folder, "name": name, "content": ""}):
+            self.call("POST", f"/api/operations?token={session}", {"version": 117, "operation": operation})
+
     def test_an_image_uploads_in_pieces_and_is_served_by_path(self):
         account = json.loads(self.call("POST", "/api/auth/login", {"username": "amy", "password": "pw"})[2])["token"]
         created = json.loads(self.call("POST", f"/api/workspaces/create?token={account}", {"team": "red", "path": "", "name": "Novel", "version": 117})[2])
@@ -224,6 +230,9 @@ class ImagesOverHttp(unittest.TestCase):
         self.assertEqual(json.loads(self.call("POST", f"/api/workspaces/asset?token={session}&path=pics/a.png&offset=0", raw=b"\x89PNG")[2]),
                          {"ok": True, "size": 4})
         self.assertEqual(json.loads(self.call("POST", f"/api/workspaces/asset?token={session}&path=pics/a.png&offset=4", raw=b"rest")[2])["size"], 8)
+        # Not served until it is a file of the workspace (the content-less create-file the browser sends next).
+        self.assertEqual(self.call("GET", f"/api/workspaces/asset?token={session}&path=pics/a.png")[0], 404)
+        self.add_image(session, "pics", "a.png")
         status, kind, data = self.call("GET", f"/api/workspaces/asset?token={session}&path=pics/a.png")
         self.assertEqual((status, kind, data), (200, "image/png", b"\x89PNGrest"))
         self.assertEqual(self.call("GET", f"/api/workspaces/asset?token={session}&path=pics/none.png")[0], 404)
@@ -240,6 +249,7 @@ class ImagesOverHttp(unittest.TestCase):
             "type": "create-file", "parentPath": "", "name": "page.html", "content": page}})[0]
         self.assertEqual(status, 200, "an HTML page is a known type now (the html-page extension)")
         self.call("POST", f"/api/workspaces/asset?token={session}&path=pics/a.svg&offset=0", raw=b"<svg xmlns='http://www.w3.org/2000/svg'><script>1</script></svg>")
+        self.add_image(session, "pics", "a.svg")
         for path, kind in (("page.html", "text/html"), ("pics/a.svg", "image/svg+xml")):
             with self.subTest(path=path):
                 request = urllib.request.Request(f"http://127.0.0.1:{self.port}/api/workspaces/asset?token={session}&path={path}")

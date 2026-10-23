@@ -9,6 +9,7 @@ project it is given and holds no state but its folder.
 import base64
 import copy
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -25,9 +26,35 @@ class FolderStore:
     def __init__(self, folder: Path):
         self.folder = Path(folder)
 
+    def inside(self, rel_path: str) -> Path | None:
+        """Where a project-relative path lives on disk, or None when it would
+        leave the folder (or be the folder itself): no write, move or delete
+        ever reaches outside it, whatever a tree holds."""
+        base = self.folder.resolve()
+        candidate = (self.folder / rel_path).resolve()
+        return candidate if candidate != base and candidate.is_relative_to(base) else None
+
     def file_path(self, project: dict, node_id: str) -> Path:
         """Where a node lives on disk, mirroring its place in the tree."""
-        return self.folder / path_of(project, node_id, strict=True)
+        path = self.inside(path_of(project, node_id, strict=True))
+        if path is None:
+            raise PermissionError("That path leaves the workspace's folder")
+        return path
+
+    def check_tree(self, project: dict) -> None:
+        """Before anything is written: every node stays inside the folder, and
+        none at the top is, on this disk, one of the server's own files under
+        another spelling (a disk that ignores case or look-alikes)."""
+        root_id = project.get("rootId")
+        kept = [self.folder / name for name in FILE_TYPES.reserved_names() if (self.folder / name).exists()]
+        for node_id, node in project.get("nodes", {}).items():
+            if node_id == root_id:
+                continue
+            path = self.inside(path_of(project, node_id))
+            if path is None:
+                raise ValueError(f"{node.get('name')!r} leaves the workspace's folder")
+            if node.get("parentId") == root_id and path.exists() and any(os.path.samefile(path, own) for own in kept):
+                raise ValueError(f"{node.get('name')!r} is one of the app's own files on this disk")
 
     def write_node_file(self, project: dict, node_id: str) -> None:
         """Write one file node. An image's data URL becomes bytes on disk and
@@ -62,8 +89,8 @@ class FolderStore:
         for node_id, node in project.get("nodes", {}).items():
             if node.get("kind") == "file" and FILE_TYPES.is_image(node.get("name", "")):
                 data = decode_data_url(node.get("content", ""))
-                if data is not None:
-                    dest = self.folder / path_of(project, node_id)
+                dest = self.inside(path_of(project, node_id))
+                if data is not None and dest is not None:
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     atomic_write(dest, data)
                     node["content"] = ""
@@ -72,18 +99,12 @@ class FolderStore:
 
     def resolve_asset(self, rel_path: str) -> Path | None:
         """The file at a project-relative path, refusing any path that escapes the folder."""
-        if not rel_path:
-            return None
-        base = self.folder.resolve()
-        candidate = (self.folder / rel_path).resolve()
-        if not str(candidate).startswith(str(base)) or not candidate.is_file():
-            return None
-        return candidate
+        candidate = self.inside(rel_path) if rel_path else None
+        return candidate if candidate is not None and candidate.is_file() else None
 
     def asset_dest(self, rel_path: str) -> Path:
-        base = self.folder.resolve()
-        dest = (self.folder / rel_path).resolve()
-        if not str(dest).startswith(str(base)):
+        dest = self.inside(rel_path) if rel_path else None
+        if dest is None:
             raise PermissionError("Invalid asset path")
         return dest
 
@@ -110,6 +131,7 @@ class FolderStore:
             return None
         data = json.loads(manifest.read_text(encoding="utf-8"))
         project = data.get("project") or default_project()
+        self.drop_outside(project)
         for node_id, node in project.get("nodes", {}).items():
             if node.get("kind") != "file" or FILE_TYPES.is_image(node.get("name", "")):
                 continue
@@ -117,10 +139,33 @@ class FolderStore:
             node["content"] = path.read_text(encoding="utf-8") if path.exists() else ""
         return project, int(data.get("revision", 0))
 
+    def drop_outside(self, project: dict) -> None:
+        """Nodes kept from before names were checked whose path leaves the
+        folder (a folder named ..) are left out of the tree, with what is under
+        them, and said: the workspace opens without them."""
+        nodes, root_id = project.get("nodes", {}), project.get("rootId")
+        gone = {node_id for node_id in nodes if node_id != root_id and self.inside(path_of(project, node_id)) is None}
+        if not gone:
+            return
+        for node_id in list(nodes):
+            current = nodes[node_id]
+            while current and current.get("parentId") and current["id"] not in gone:
+                current = nodes.get(current["parentId"])
+            if current and current.get("id") in gone:
+                gone.add(node_id)
+        for node_id in gone:
+            ignore(PermissionError(path_of(project, node_id)), "a node whose path leaves the workspace's folder is left out")
+        for node_id in gone:
+            nodes.pop(node_id, None)
+        for node in nodes.values():
+            if node.get("kind") == "folder":
+                node["children"] = [child for child in node.get("children", []) if child not in gone]
+
     def save(self, project: dict, revision: int, previous: dict | None) -> dict:
         """Commit the project to the folder; returns the project as kept in
         memory afterwards (image bytes moved to disk)."""
         self.folder.mkdir(parents=True, exist_ok=True)
+        self.check_tree(project)
         project = copy.deepcopy(project)
         previous = previous or default_project()
         # Capture moved images before any destination is replaced: the redo
@@ -133,8 +178,8 @@ class FolderStore:
                 continue
             old = previous.get("nodes", {}).get(node_id)
             if old and path_of(previous, node_id) != path_of(project, node_id):
-                source = self.folder / path_of(previous, node_id)
-                if source.is_file():
+                source = self.inside(path_of(previous, node_id))
+                if source is not None and source.is_file():
                     node["content"] = "data:application/octet-stream;base64," + base64.b64encode(source.read_bytes()).decode("ascii")
         payload = {"project": project, "revision": revision, "previousProject": previous}
         # Write-ahead redo record: durable BEFORE changing any project files.
@@ -153,7 +198,10 @@ class FolderStore:
                 continue
             rel = path_of(project, node_id)
             paths.add(rel)
-            dest = self.folder / rel
+            dest = self.inside(rel)
+            if dest is None:
+                ignore(PermissionError(rel), "a node outside the workspace's folder is never written")
+                continue
             if node.get("kind") == "folder":
                 dest.mkdir(parents=True, exist_ok=True)
                 fsync_directory(dest.parent)
@@ -172,7 +220,10 @@ class FolderStore:
                     atomic_write(dest, content.encode("utf-8"))
         old_paths = {path_of(previous, node_id) for node_id in previous.get("nodes", {}) if node_id != previous.get("rootId")}
         for rel in sorted(old_paths - paths, key=lambda value: value.count("/"), reverse=True):
-            dest = self.folder / rel
+            dest = self.inside(rel)
+            if dest is None:
+                ignore(PermissionError(rel), "nothing outside the workspace's folder is ever deleted")
+                continue
             if dest.is_dir():
                 shutil.rmtree(dest)  # explicit deletion of a removed project folder
             elif dest.exists():

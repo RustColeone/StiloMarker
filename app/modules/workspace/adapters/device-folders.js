@@ -160,7 +160,7 @@ async function openProjectOpfs(path) {
   const dir = await getDirectoryHandleAtPath(root, path, false);
   const segments = splitPath(path);
   const name = segments[segments.length - 1] || dir.name || "Workspace";
-  const project = await buildProjectFromDirectoryHandle(dir, name, "opfs");
+  const project = await buildProjectFromDirectoryHandle(dir, name, "opfs", { ownFolder: true });
   project.localPath = path;
   return project;
 }

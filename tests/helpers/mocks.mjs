@@ -122,8 +122,9 @@ export class MockDirectoryHandle {
       return;
     }
     if (this.directories.has(name)) {
-      if (!options.recursive) {
-        throw new Error(`Recursive delete required for directory: ${name}`);
+      const folder = this.directories.get(name);
+      if (!options.recursive && (folder.files.size || folder.directories.size)) {
+        throw Object.assign(new Error(`Directory not empty: ${name}`), { name: "InvalidModificationError" });
       }
       this.directories.delete(name);
       return;

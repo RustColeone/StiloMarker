@@ -389,6 +389,134 @@
         }
       ],
       "error": true
+    },
+    {
+      "name": "a folder named .. is refused (it would walk out of the workspace's folder)",
+      "ops": [
+        {
+          "type": "create-folder",
+          "parentPath": "",
+          "name": ".."
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "a folder named . is refused",
+      "ops": [
+        {
+          "type": "create-folder",
+          "parentPath": "",
+          "name": "."
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "a name with a slash is refused",
+      "ops": [
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "./access.json",
+          "content": "{}"
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "a name with a backslash is refused",
+      "ops": [
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "a\\b.md",
+          "content": ""
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "a name with a control character is refused",
+      "ops": [
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "a\u0000b.md",
+          "content": ""
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "a name ending with a dot or a space is refused",
+      "ops": [
+        {
+          "type": "create-folder",
+          "parentPath": "",
+          "name": "Notes "
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "renaming to .. is refused",
+      "ops": [
+        {
+          "type": "create-folder",
+          "parentPath": "",
+          "name": "Notes"
+        },
+        {
+          "type": "rename-node",
+          "path": "Notes",
+          "name": ".."
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "a kept name in another spelling is refused at the top (ß as ss, a trailing dot)",
+      "ops": [
+        {
+          "type": "create-file",
+          "parentPath": "",
+          "name": "acceß.json",
+          "content": "{}"
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "the chats' database name is kept for a folder too",
+      "ops": [
+        {
+          "type": "create-folder",
+          "parentPath": "",
+          "name": "conversations.sqlite"
+        }
+      ],
+      "error": true
+    },
+    {
+      "name": "dots inside a name are fine",
+      "ops": [
+        {
+          "type": "create-folder",
+          "parentPath": "",
+          "name": "v1.2 notes"
+        },
+        {
+          "type": "create-file",
+          "parentPath": "v1.2 notes",
+          "name": "a..b.md",
+          "content": "x"
+        }
+      ],
+      "tree": [
+        "v1.2 notes/",
+        "v1.2 notes/a..b.md=x"
+      ]
     }
   ]
 }

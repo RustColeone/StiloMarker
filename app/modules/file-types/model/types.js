@@ -7,9 +7,14 @@
 //             icon, filters: [], expandable?, create?: { label, name, order } }
 // `reserved`: names no file or folder may have at a workspace's top (any case).
 
+// A name as a disk that ignores case and Unicode look-alikes may read it
+// (NFKC, lower case with ß as ss, trailing dots and spaces dropped as Windows
+// does); the server's file_types/model.py folds the same way.
+export const foldName = (name) => String(name ?? "").normalize("NFKC").toLowerCase().replaceAll("ß", "ss").normalize("NFKC").replace(/[. ]+$/, "");
+
 export function createTypeTable(entries, reserved = []) {
   const list = () => (typeof entries === "function" ? entries() : entries);
-  const kept = new Set(reserved.map((name) => name.toLowerCase()));
+  const kept = new Set(reserved.map(foldName));
 
   // The entry and extension that match a name: the longest extension wins.
   function find(name) {
@@ -58,7 +63,7 @@ export function createTypeTable(entries, reserved = []) {
     describe: () => list().flatMap((entry) => Object.keys(entry.extensions)).join(", "),
     creatable: () => list().filter((entry) => entry.create)
       .sort((a, b) => a.create.order - b.create.order),
-    isReserved: (name) => kept.has(String(name ?? "").toLowerCase()),
+    isReserved: (name) => kept.has(foldName(name)),
     reserved: () => [...reserved],
     all: () => [...list()]
   });

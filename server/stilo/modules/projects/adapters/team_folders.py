@@ -59,9 +59,20 @@ class TeamFolders:
             raise PermissionError("Path escapes team directory")
         return candidate
 
-    @staticmethod
-    def is_project(directory: Path) -> bool:
-        return (directory / MANIFEST).is_file()
+    def is_project(self, directory: Path) -> bool:
+        """A folder with a manifest, not itself inside a project: a project's
+        folders are its files' folders (one holding a manifest.json of a
+        user's is never opened as a project of its own)."""
+        directory = Path(directory)
+        if not (directory / MANIFEST).is_file():
+            return False
+        root = self.data_dir.resolve() if self.data_dir is not None else None
+        for parent in directory.resolve().parents:
+            if root is None or parent == root or root not in parent.parents:
+                break
+            if (parent / MANIFEST).is_file():
+                return False
+        return True
 
     @staticmethod
     def modified(path: Path):
