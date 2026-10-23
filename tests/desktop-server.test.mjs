@@ -5,7 +5,7 @@
 // admin made by the server's own tool. The app in Electron: desktop-browser.py.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -139,7 +139,9 @@ test("desktop server: its accounts: the file, how many, the tool's command line"
     .join(" ").includes(`--whitelist ${join("/data", ACCOUNTS_FILE)}`), "the server reads the same file");
   assert.equal(accountCount('{"users": [{"username": "a"}, {"username": "b"}]}'), 2);
   assert.equal(accountCount('{"users": []}'), 0);
-  assert.equal(accountCount("not json"), 0);
+  assert.equal(accountCount(""), 0, "an empty file holds no one");
+  for (const broken of ["not json", '{"users": [', "[]", '{"users": "leo"}'])
+    assert.equal(accountCount(broken), null, `${broken}: does not read, so no first admin is made over it`);
 });
 
 test("desktop server: its first admin, made by the server's own tool, and only the first", { timeout: 60000 }, async (t) => {
@@ -148,12 +150,17 @@ test("desktop server: its first admin, made by the server's own tool, and only t
   const server = createLocalServer({ serverDir: join(ROOT, "server"), staticDir: ROOT, dataDir });
   try {
     assert.equal(await server.accounts(), 0, "none at first: PINs only");
+    const file = join(dataDir, ACCOUNTS_FILE);
+    await writeFile(file, '{"users": [{"username": "leo", ');
+    assert.equal(await server.accounts(), null);
+    assert.match((await server.firstAdmin("leo", "a long password")).error, /does not read/);
+    assert.equal(await readFile(file, "utf8"), '{"users": [{"username": "leo", ', "left as it was");
+    await rm(file);
     const short = await server.firstAdmin("leo", "short");
     assert.match(short.error, /at least 8 characters/, "the server's rules, its words");
     assert.equal(await server.accounts(), 0);
     assert.deepEqual(await server.firstAdmin("leo", "a long password"), { ok: true });
     assert.equal(await server.accounts(), 1);
-    const file = join(dataDir, ACCOUNTS_FILE);
     const [account] = JSON.parse(await readFile(file, "utf8")).users;
     assert.deepEqual([account.username, account.admin], ["leo", true]);
     assert.match(account.password, /^scrypt\$/, "hashed");

@@ -16,7 +16,9 @@ Static, for code from before the restructure:
 API (started by the kernel; config: pin, master_pin, state_file, edit_gap;
 every 15 seconds the sessions whose lease ran out are closed):
     directory    service/directory.py: open workspaces by id, by session token,
-                 by place; adopt(...) a project made whole, drop(team, relpath)
+                 by place; adopt(...) a project made whole, drop(team, relpath);
+                 an account's sessions end when Identity says it was removed,
+                 got a new password or left a team (drop_account)
     places       service/places.py: where a team's project is and who may see
                  it (Projects'), and whether it is open now: what History,
                  Comments and Chats ask about a project
@@ -64,6 +66,7 @@ def start(ctx):
     directory = Directory(pin=ctx.config.get("pin"), state_file=ctx.config.get("state_file"), master_pin=ctx.config.get("master_pin"),
                           projects=ctx.use("projects"), identity=ctx.use("identity"), make=make, emit=events.emit)
     add_routes(transport, directory, VERSION)
+    ctx.use("identity").on_change(directory.drop_account)  # an account removed, or out of a team: its sessions end
     ctx.every(LEASE_SWEEP_SECONDS, directory.expire_leases)
     if ctx.config.get("state_file") is not None:
         transport.keep_private(Path(ctx.config["state_file"]).name)  # the PIN session's project

@@ -10,6 +10,7 @@
 //                        "serve-again" (the same, reopened: back on it by itself),
 //                        "remote" (another server: STILO_SMOKE_REMOTE, its PIN STILO_SMOKE_REMOTE_PIN),
 //                        "accounts" (a fresh profile: accounts turned on, the first admin signed in)
+//                        "accounts-broken" (an account file that does not read: said, no first admin offered)
 //   STILO_SMOKE_PORT     the port for the server it runs
 import { createServer } from "node:http";
 import { app } from "electron";
@@ -207,6 +208,17 @@ async function accounts(win) {
   finish();
 }
 
+// An account file that does not read: said, and no first admin offered (one
+// made then would write over whatever the file was meant to hold).
+async function accountsBroken(win) {
+  const contents = win.webContents;
+  await chooseServer(contents, "local", { port: Number(process.env.STILO_SMOKE_PORT) });
+  await until(contents, "document.querySelector('#desktop-server-status').textContent.startsWith('Running')", "the server running", 60);
+  found.said = await page(contents, "return document.querySelector('#desktop-server-accounts-status').textContent;");
+  found.button = await page(contents, 'return document.querySelector("#desktop-server-accounts-on").hidden;');
+  finish();
+}
+
 async function remote(win) {
   const contents = win.webContents;
   await chooseServer(contents, "remote", { url: process.env.STILO_SMOKE_REMOTE });
@@ -240,7 +252,7 @@ start({ root, userData, feed,
     win.webContents.once("did-finish-load", async () => {
       try {
         await until(win.webContents, 'window.__ui && document.querySelector("#explorer-tree .tree-row")', "the app started");
-        await ({ again, serve, "serve-again": serveAgain, remote, accounts }[phase] ?? first)(win);
+        await ({ again, serve, "serve-again": serveAgain, remote, accounts, "accounts-broken": accountsBroken }[phase] ?? first)(win);
       } catch (error) {
         finish({ failed: String(error?.message ?? error) });
       }

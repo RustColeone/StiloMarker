@@ -3,23 +3,46 @@ share. Pure: the accounts (username -> {"password", "teams", "admin"}) in,
 new accounts out; a change that may not happen raises ValueError, with
 the reason. There is always an admin once there is one: the last admin can be
 neither removed nor made an ordinary account."""
+import re
+import unicodedata
+
 from .passwords import hash_password, is_hashed, password_problem
 
 MAX_NAME = 64
+# A team's projects are kept in a folder named after it, so a team name is one
+# Projects can name a folder (projects/model/paths.py safe_component; a test
+# checks they agree).
+TEAM_NAME = re.compile(r"[A-Za-z0-9 _.-]{1,64}")
 
 
-def _name(value: str, what: str) -> str:
+def fold(name: str) -> str:
+    """A name as another that differs only in case or Unicode form reads it."""
+    return unicodedata.normalize("NFKC", name).casefold()
+
+
+def _name(value: str) -> str:
+    """An account name: what is typed to sign in and shown to others, so
+    nothing invisible or that reads as another name (no control or format
+    characters, which take in zero-width and right-to-left marks, and only
+    in the form NFKC gives it)."""
     name = str(value or "").strip()
-    if not name or len(name) > MAX_NAME or name in (".", "..") or any(c in name for c in '/\\') or any(ord(c) < 32 for c in name):
-        raise ValueError(f"That is not a usable {what} name.")
+    if (not name or len(name) > MAX_NAME or name in (".", "..") or any(c in name for c in "/\\")
+            or any(unicodedata.category(c).startswith("C") for c in name) or unicodedata.normalize("NFKC", name) != name):
+        raise ValueError("That is not a usable user name: letters, numbers and plain punctuation, up to 64.")
     return name
 
 
-def _teams(values) -> list[str]:
+def _teams(values, users: dict) -> list[str]:
+    """Team names as given, each spelled as the accounts already spell it
+    ("Red" joins "red"), so one team never becomes two folders."""
+    known = {team.casefold(): team for user in users.values() for team in user["teams"]}
     teams = []
     for value in values or []:
-        team = _name(value, "team")
-        if team not in teams:
+        team = str(value or "").strip()
+        if not TEAM_NAME.fullmatch(team) or team in (".", ".."):
+            raise ValueError("That is not a usable team name: letters, numbers, spaces and _.- only, up to 64.")
+        team = known.get(team.casefold(), team)
+        if team.casefold() not in (t.casefold() for t in teams):
             teams.append(team)
     return teams
 
@@ -60,14 +83,14 @@ def convert(users: dict, admin: str) -> tuple[dict, int]:
 
 
 def add_account(users: dict, username: str, password: str, teams=(), admin: bool = False) -> dict:
-    name = _name(username, "user")
-    if any(existing.lower() == name.lower() for existing in users):
+    name = _name(username)
+    if any(fold(existing) == fold(name) for existing in users):
         raise ValueError(f"There is already an account {name!r}.")
     problem = password_problem(password)
     if problem:
         raise ValueError(problem)
     out = _copy(users)
-    out[name] = {"password": hash_password(password), "teams": _teams(teams), "admin": bool(admin)}
+    out[name] = {"password": hash_password(password), "teams": _teams(teams, users), "admin": bool(admin)}
     return out
 
 
@@ -84,7 +107,7 @@ def set_password(users: dict, username: str, password: str) -> dict:
 def set_teams(users: dict, username: str, teams) -> dict:
     _existing(users, username)
     out = _copy(users)
-    out[username]["teams"] = _teams(teams)
+    out[username]["teams"] = _teams(teams, {name: user for name, user in users.items() if name != username})
     return out
 
 

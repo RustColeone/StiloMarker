@@ -96,6 +96,19 @@ class Directory:
                 self.workspaces.pop(key, None)
         self._emit("dropped", {"workspace_id": workspace_id})
 
+    def drop_account(self, username: str, change) -> None:
+        """An account changed (Identity's on_change): removed (None) or given a
+        new password ("password"), its sessions in every team project end;
+        given other teams (the list), those in the teams it left. A guest's
+        session (hosted, or the PIN session) is no account's."""
+        with self.lock:
+            open_now = [(workspace_id.split("/", 1)[0], workspace) for workspace_id, workspace in self.workspaces.items()
+                        if not workspace_id.startswith(f"{DEFAULT_TEAM}/")]
+        for team, workspace in open_now:
+            if isinstance(change, list) and team in change:
+                continue
+            workspace.evict_user(username)
+
     # ---- joining ---------------------------------------------------------------
     def _bind(self, workspace_id: str, session: dict) -> dict:
         with self.lock:

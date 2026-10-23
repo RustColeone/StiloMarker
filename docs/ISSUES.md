@@ -62,6 +62,47 @@ that come close together are said (v0.2.36).
 
 ## Fixed
 
+### v0.2.40: an account loses what it may no longer have (security)
+
+Found by the review before calling a version stable (2026-10-23). Server,
+and the desktop app's first admin. Accounts as an admin manages them
+(v0.2.35, v0.2.38) are not deployed yet; the first item was true before
+them too, for an account removed from the file by hand.
+
+- **A removed account kept its open projects** (fixed): its session in
+  each team project went on (editing, saving) until it disconnected.
+  Identity now says when an account changes (removed, a new password,
+  other teams), wherever it was changed: the admin page,
+  `server/accounts.py`, or the file by hand (read again every 15 seconds
+  even when no one signs in). Sync ends its sessions: all of them when it
+  is removed or given a new password, those in the teams it left.
+- **Sign-ins**: a new password signs the account out everywhere but the
+  page that set it; a sign-in lasts 14 days at most.
+- **Signing in**: five wrong passwords for a name make that name wait a
+  minute (any name, so it tells nothing about which have accounts); a
+  name with no account takes as long to refuse as one with; two password
+  checks at most at once.
+- **The account file is never served, whatever it is called**: only the
+  name `whitelist.json` was kept private, so a file given another name
+  inside the folder the app is served from would have been served. And
+  the server's own files are refused under any spelling a disk that
+  ignores case, look-alikes and trailing dots would take (`/SERVER/`,
+  `/Data./` on Windows or macOS; not the live server, on Linux).
+- **The file read as it should be**: teams a list of names (a string was
+  read as one team per letter), a password a string (anything else signs
+  no one in). A file that does not read keeps the accounts from before,
+  as it did, but the page no longer writes them over it, and the desktop
+  app makes no first admin over it (it says the file does not read).
+- **Names**: an account name holds nothing invisible (control and format
+  characters, which take in zero-width and right-to-left marks) and only
+  its NFKC form, and two names differing in case or form are one. A team
+  name is a folder name (letters, numbers, spaces, `_.-`, up to 64) and
+  takes the spelling the accounts already use ("Red" joins "red").
+- `server/accounts.py` reads a password from standard input as UTF-8 on
+  any system.
+- Tests: `account-security.test.py` (new); `desktop-server.test.mjs` and
+  `desktop-browser.py` (an account file that does not read).
+
 ### v0.2.39: nothing reaches outside a workspace's folder (security)
 
 Found by the review before calling a version stable (2026-10-23). Server and

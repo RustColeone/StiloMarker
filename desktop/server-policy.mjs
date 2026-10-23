@@ -86,13 +86,16 @@ export function firstAdminArgs({ script, dataDir, username, join }) {
   return [script, "--file", join(dataDir, ACCOUNTS_FILE), "--password-stdin", "add", "--admin", "--", username];
 }
 
-// How many accounts an account file's text holds (0 for none, or for one that does not read).
+// How many accounts an account file's text holds: 0 for an empty one, null
+// for one that does not read (making a first admin then would write over
+// whatever it was meant to hold).
 export function accountCount(text) {
+  if (!String(text).trim()) return 0;
   try {
     const data = JSON.parse(text);
-    return Array.isArray(data?.users) ? data.users.length : 0;
+    return data && typeof data === "object" && !Array.isArray(data) && Array.isArray(data.users ?? []) ? (data.users ?? []).length : null;
   } catch (error) {
-    if (error instanceof SyntaxError) return 0; // not an account file: no accounts to speak of
+    if (error instanceof SyntaxError) return null;
     throw error;
   }
 }

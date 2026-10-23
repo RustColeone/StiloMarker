@@ -70,11 +70,14 @@ export function addDesktopServer({ dialog, settings, sync, shell, identity, ping
     $(".desktop-server-remote").hidden = next.connect !== "remote";
     $("#desktop-server-status").textContent = describe(next);
     $("#desktop-server-join").hidden = !(next.connect === "local" && next.local?.status === "running");
-    const accounts = Number(next.accounts ?? 0);
-    $("#desktop-server-accounts-status").textContent = accounts
-      ? `Accounts: on (${accounts}). An admin manages them in Settings → Accounts.`
-      : "Accounts: off. Others join with the session's PIN.";
-    $("#desktop-server-accounts-on").hidden = accounts > 0 || next.connect !== "local";
+    // null: the account file is there but does not read (no first admin is made over it).
+    const accounts = next.accounts === null ? null : Number(next.accounts ?? 0);
+    $("#desktop-server-accounts-status").textContent = accounts === null
+      ? "Accounts: the account file (accounts.json in the server's folder) does not read. Fix or remove it, then Apply here again."
+      : accounts
+        ? `Accounts: on (${accounts}). An admin manages them in Settings → Accounts.`
+        : "Accounts: off. Others join with the session's PIN.";
+    $("#desktop-server-accounts-on").hidden = accounts !== 0 || next.connect !== "local";
   }
 
   // Accounts on this computer's server: the first admin, asked here (whoever

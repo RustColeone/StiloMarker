@@ -100,7 +100,7 @@ export function createLocalServer({ serverDir, staticDir, dataDir, onState = () 
     const args = [...found.pre, ...serverArgs({ script: join(serverDir, "mdnotes_server.py"), port: listening, lan, pin, masterPin,
       staticDir, dataDir, join, parentPid: process.pid })];
     const mine = spawn(found.cmd, args, { cwd: serverDir, stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
-      env: { ...process.env, PYTHONUNBUFFERED: "1" } });
+      env: { ...process.env, PYTHONUNBUFFERED: "1", PYTHONIOENCODING: "utf-8" } });
     child = mine;
     let output = "";
     const note = (chunk) => { output = (output + chunk).slice(-4000); };
@@ -122,7 +122,8 @@ export function createLocalServer({ serverDir, staticDir, dataDir, onState = () 
     return set({ status: "running", port: listening, lan, addresses, local: `http://127.0.0.1:${listening}`, python: found.version });
   }
 
-  // How many accounts the server has (only that leaves the file).
+  // How many accounts the server has (only that leaves the file); null when
+  // the file is there but does not read.
   async function accounts() {
     try {
       return accountCount(await readFile(join(dataDir, ACCOUNTS_FILE), "utf8"));
@@ -136,13 +137,16 @@ export function createLocalServer({ serverDir, staticDir, dataDir, onState = () 
   // the password on standard input: { ok: true } or { error }. Refused once
   // the server has accounts: the admins manage them in Settings → Accounts.
   async function firstAdmin(username, password) {
-    if (await accounts()) return { error: "This server has accounts already: an admin manages them in Settings → Accounts." };
+    const count = await accounts();
+    if (count === null) return { error: `The account file (${ACCOUNTS_FILE} in the server's folder) does not read: fix or remove it first.` };
+    if (count) return { error: "This server has accounts already: an admin manages them in Settings → Accounts." };
     const found = await python();
     if (!found) return { error: "Python 3.10 or later is needed to run a server on this computer (python.org)." };
     await mkdir(dataDir, { recursive: true });
     const args = [...found.pre, ...firstAdminArgs({ script: join(serverDir, "accounts.py"), dataDir, username, join })];
     return new Promise((resolve) => {
-      const tool = spawn(found.cmd, args, { cwd: serverDir, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+      const tool = spawn(found.cmd, args, { cwd: serverDir, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+        env: { ...process.env, PYTHONIOENCODING: "utf-8" } }); // a name in any script, on any system
       let said = "";
       tool.stdout.resume(); // "Added …": nothing to keep
       tool.stderr.on("data", (chunk) => { said = (said + chunk).slice(-2000); });

@@ -28,7 +28,8 @@ from stilo.modules.identity import ACCOUNT_FILE, accounts as rules, read_account
 
 def new_password(args) -> str:
     if args.password_stdin:
-        return sys.stdin.readline().rstrip("\n")
+        # As UTF-8 whatever the system's own encoding, as the browser sends it.
+        return sys.stdin.buffer.readline().decode("utf-8").rstrip("\r\n")
     first = getpass.getpass("New password: ")
     if first != getpass.getpass("Again: "):
         raise ValueError("The two passwords differ.")

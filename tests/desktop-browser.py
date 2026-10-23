@@ -17,13 +17,16 @@ Share This Workspace makes this workspace the server's; someone else joining
 with the session's PIN finds what was typed. Reopened, nothing clicked: the
 server starts again and the app is back on its session. Quit: the server
 stops. Another server chosen: the app's requests reach it and its session is
-joined; none: the server's addresses answer as offline.
+joined; none: the server's addresses answer as offline. Accounts: off at
+first, turned on from Settings → Server (the first admin, hashed, signed
+in); an account file that does not read is said, and no first admin is
+offered over it.
 
 Needs Electron: STILO_ELECTRON (its binary), or desktop/node_modules (npm
 install in desktop/), and xvfb-run without a display. Skipped, and said,
 without them.
 """
-import json, os, shutil, socket, subprocess, sys, tempfile, time, urllib.request
+import json, os, shutil, signal, socket, subprocess, sys, tempfile, time, urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -57,6 +60,9 @@ index = (SITE / "index.html").read_text()
 (SITE / "index.html").write_text(index.replace('<script src="./app/boot-theme.js"></script>', SEED + '\n    <script src="./app/boot-theme.js"></script>', 1))
 
 
+STARTED = []  # every Electron started: each in a group of its own, ended with all it started however the test ends
+
+
 def electron(phase, profile=None, extra=None, **popen):
     display = [] if os.environ.get("DISPLAY") else ["xvfb-run", "-a", "-s", "-screen 0 1400x1000x24"]
     # --no-sandbox: a downloaded Electron's sandbox helper is not set up (it needs root); the app's own settings are tested as written.
@@ -64,7 +70,19 @@ def electron(phase, profile=None, extra=None, **popen):
     # Without ELECTRON_RUN_AS_NODE (an editor's terminal may set it): Electron would run as plain Node.
     env = {**{k: v for k, v in os.environ.items() if k != "ELECTRON_RUN_AS_NODE"},
            "STILO_SMOKE_ROOT": str(SITE), "STILO_SMOKE_PROFILE": str(profile or PROFILE), "STILO_SMOKE_PHASE": phase, **(extra or {})}
-    return subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **popen)
+    process = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True, **popen)
+    STARTED.append(process)
+    return process
+
+
+def end_started():
+    """Each Electron started, ended with its virtual display and the server it ran
+    (a phase that timed out once left all three running, for days)."""
+    for process in STARTED:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # that group has ended already
 
 
 def result(process, timeout=150):
@@ -196,7 +214,17 @@ try:
     assert turned["button"] is True and turned["accountsPage"] is True, turned
     kept = json.loads((ACCOUNTED / "server" / "accounts.json").read_text())["users"]
     assert [(u["username"], u.get("admin")) for u in kept] == [("leo", True)] and kept[0]["password"].startswith("scrypt$"), "hashed, an admin"
+
+    # An account file that does not read: said, no first admin offered, the file left as it was.
+    BROKEN = Path(TMP.name) / "broken"
+    (BROKEN / "server").mkdir(parents=True)
+    (BROKEN / "server" / "accounts.json").write_text('{"users": [{"username": "leo", ')
+    broken = result(electron("accounts-broken", profile=BROKEN, extra={"STILO_SMOKE_PORT": str(free_port())}))
+    assert not broken.get("failed"), broken
+    assert "does not read" in broken["said"] and broken["button"] is True, broken
+    assert (BROKEN / "server" / "accounts.json").read_text() == '{"users": [{"username": "leo", ', "left as it was"
 finally:
+    end_started()
     TMP.cleanup()
 
 print(json.dumps({"checks": ["loads from app://stilo/; no server, answered at once as offline; nothing else served; no service worker",
@@ -208,4 +236,5 @@ print(json.dumps({"checks": ["loads from app://stilo/; no server, answered at on
                              "its server: run here, reached through the app, shared on; someone else joins and finds the typing",
                              "reopened: the server starts again and the app is back on its session by itself; quit: it stops",
                              "another server: reached and joined; none: offline",
-                             "accounts: off, turned on from Settings → Server, the first admin (hashed) signed in"], "runtimeErrors": 0}))
+                             "accounts: off, turned on from Settings → Server, the first admin (hashed) signed in",
+                             "an account file that does not read: said, no first admin offered"], "runtimeErrors": 0}))

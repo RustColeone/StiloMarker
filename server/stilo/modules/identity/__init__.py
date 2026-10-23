@@ -13,7 +13,11 @@ Static, for code from before the restructure:
 API (started by the kernel; config: accounts (an AccountStore), data_dir):
     the Identity (service/identity.py): require(token), require_team(...),
     access(...), may_open(...), role(...), can(...), claim(...), team_members(team)...,
-    accounts_list(token), accounts_change(token, change) (admins only).
+    accounts_list(token), accounts_change(token, change) (admins only),
+    on_change(listener(username, change)): an account removed (change None),
+    given a new password ("password") or other teams (the list): Sync ends
+    the sessions it may no longer have. Its account tokens go on removal and
+    on a new password, and last TOKEN_DAYS at most.
     It serves the sign-in and accounts routes (and the ping says whether there are accounts);
     who may open a project is read and set through Projects' routes.
 """
@@ -29,6 +33,7 @@ from .adapters.routes import add_routes
 from .model.access import ROLES, can, refusal  # noqa: F401
 from .service.identity import Identity
 
+ACCOUNTS_CHECK_SECONDS = 15
 _ACCESS_STORE = SimpleNamespace(read=access_file.read_access, write=access_file.write_access, projects_in=access_file.projects_in)
 
 
@@ -42,7 +47,11 @@ def start(ctx):
     identity = open_identity(ctx.config.get("accounts"), ctx.config.get("data_dir"))
     transport = ctx.use("transport")
     add_routes(transport, identity)
-    transport.keep_private(ACCOUNT_FILE)  # passwords: never served, wherever it lies
+    # Passwords: never served, wherever it lies, under whatever name it was given.
+    transport.keep_private(ACCOUNT_FILE, *([identity.accounts.path.name] if identity.accounts.path else []))
+    # The file read again now and then even when no one signs in, so an account
+    # removed by hand loses what it has open within seconds.
+    ctx.every(ACCOUNTS_CHECK_SECONDS, identity.accounts.refresh)
     # The ping says whether this server has accounts (the browser shows sign-in).
     transport.ping.add({"id": "identity", "fields": lambda: {"accounts": identity.enabled}})
     return identity

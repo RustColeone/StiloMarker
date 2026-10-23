@@ -8,8 +8,10 @@ before hashing keeps them as they are typed; they still sign in, the server
 says at every load that the file needs converting, and
 `python3 server/accounts.py convert --admin <name>` hashes them all once.
 The file is never served (the server's static denylist names ACCOUNT_FILE).
-When the file is absent, the accounts feature is simply disabled and the app
-keeps working in PIN-only / local modes.
+When the file is absent at start, the accounts feature is simply disabled and
+the app keeps working in PIN-only / local modes. A file deleted while the
+server runs keeps the accounts it had (as a file that does not read does)
+until the server restarts; to remove an account, remove it from the file.
 """
 import json
 import os
@@ -17,9 +19,17 @@ import time
 from pathlib import Path
 
 from stilo.kernel.log import log as _log
-from ..model.passwords import is_hashed, verify_password
+from ..model.passwords import hash_password, is_hashed, verify_password
 
 ACCOUNT_FILE = "whitelist.json"
+_DECOY = []
+
+
+def _decoy() -> str:
+    """A hash checked for a name with no account, made once."""
+    if not _DECOY:
+        _DECOY.append(hash_password("no account has this password"))
+    return _DECOY[0]
 
 
 def read_accounts(path: Path) -> dict:
@@ -30,13 +40,17 @@ def read_accounts(path: Path) -> dict:
         raise ValueError('expected {"users": [...]}')
     users = {}
     for entry in data.get("users", []):
-        if not isinstance(entry, dict):
+        if not isinstance(entry, dict) or not isinstance(entry.get("username"), str):
             continue
-        username = str(entry.get("username", "")).strip()
+        username = entry["username"].strip()
         if not username:
             continue
-        teams = [str(t).strip() for t in entry.get("teams", []) if str(t).strip()]
-        users[username] = {"password": str(entry.get("password", "")), "teams": teams, "admin": entry.get("admin") is True}
+        # Only what reads as it should: teams a list of names (a string is not
+        # split into letters), a password a string (anything else signs no one in).
+        raw_teams = entry.get("teams", [])
+        teams = [t.strip() for t in raw_teams if isinstance(t, str) and t.strip()] if isinstance(raw_teams, list) else []
+        password = entry.get("password") if isinstance(entry.get("password"), str) else ""
+        users[username] = {"password": password, "teams": teams, "admin": entry.get("admin") is True}
     return users
 
 
@@ -61,9 +75,23 @@ class AccountStore:
     def __init__(self, path: Path | None):
         self.path = path
         self.users: dict[str, dict] = {}  # username -> {"password", "teams": [...], "admin"}
+        self.broken = False     # the file did not read at its last change (the accounts before it are kept)
+        self.listeners = []     # listener(username, change): change is None (gone), "password", or the teams now
         self._signature = None  # (mtime_ns, size) of the file last read
         self._checked = 0.0
         self._load()
+
+    def _changed(self, before: dict, after: dict) -> None:
+        """Tell the listeners what changed for each account (a hand edit, the
+        command line, the admin page): gone, a new password, other teams."""
+        for username, user in before.items():
+            now = after.get(username)
+            change = None if now is None else "password" if now["password"] != user["password"] \
+                else list(now["teams"]) if now["teams"] != user["teams"] else ...
+            if change is ...:
+                continue
+            for listener in list(self.listeners):
+                listener(username, change)
 
     @property
     def enabled(self) -> bool:
@@ -93,11 +121,14 @@ class AccountStore:
             stat = self.path.stat()
             self._signature = (stat.st_mtime_ns, stat.st_size)
             users = read_accounts(self.path)
-        except (json.JSONDecodeError, OSError, ValueError) as error:
+        except (json.JSONDecodeError, OSError, ValueError, TypeError) as error:
+            self.broken = True
             kept = f"; keeping the {len(self.users)} account(s) already loaded" if self.users else "; no accounts are loaded"
             _log("AUTH", f"WARNING: cannot read the account file {self.path}: {error}{kept}. Fix the file; it is re-read when it changes.")
             return
-        self.users = users
+        self.broken = False
+        before, self.users = self.users, users
+        self._changed(before, users)
         plain = [name for name, user in users.items() if not is_hashed(user["password"])]
         _log("AUTH", f"Loaded {len(self.users)} account(s) from {self.path}")
         if plain:
@@ -110,15 +141,23 @@ class AccountStore:
         """Write the accounts (the admin page's changes) and keep them."""
         if not self.path:
             raise ValueError("This server has no account file")
+        if self.broken:
+            raise ValueError("The account file does not read: fix it by hand, or with server/accounts.py, first "
+                             "(a change here would write the accounts from before over it)")
         write_accounts(self.path, users)
+        before = self.users
         self.users = {name: {**user, "teams": list(user["teams"])} for name, user in users.items()}
         stat = self.path.stat()
         self._signature = (stat.st_mtime_ns, stat.st_size)
+        self._changed(before, self.users)
 
     def authenticate(self, username: str, password: str) -> dict | None:
         self.refresh()
         user = self.users.get(username)
-        if user is None or not verify_password(user["password"], password):
+        if user is None:
+            verify_password(_decoy(), password)  # as long as a real check: no telling which names exist
+            return None
+        if not verify_password(user["password"], password):
             return None
         return {"username": username, "teams": list(user["teams"]), "admin": bool(user.get("admin"))}
 

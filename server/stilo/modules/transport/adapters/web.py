@@ -7,6 +7,7 @@ import gzip
 import mimetypes
 import posixpath
 import threading
+import unicodedata
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -62,13 +63,19 @@ def accepts_gzip(header: str) -> bool:
     return False
 
 
+def _fold(segment: str) -> str:
+    """A name as a disk that ignores case, Unicode look-alikes and trailing
+    dots or spaces finds it (Windows, macOS): /SERVER/ and /data./ are /server/ and /data/."""
+    return unicodedata.normalize("NFKC", segment).casefold().rstrip(". ")
+
+
 def is_denied(safe_path: str, private_names) -> bool:
     if not safe_path:
         return False
-    segments = safe_path.split("/")
-    if segments[0] in DENIED_SEGMENTS or any(segment.startswith(".") for segment in segments):
+    segments = [_fold(segment) for segment in safe_path.split("/")]
+    if segments[0] in DENIED_SEGMENTS or any(segment.startswith(".") for segment in safe_path.split("/")):
         return True
-    return segments[-1] in private_names or segments[-1].endswith(DENIED_SUFFIXES)
+    return segments[-1] in {_fold(name) for name in private_names} or segments[-1].endswith(DENIED_SUFFIXES)
 
 
 def make_listener(host, port, *, handle, send_cors, write_json, static_root, private_names, on_close):
@@ -107,7 +114,7 @@ def make_listener(host, port, *, handle, send_cors, write_json, static_root, pri
             if is_denied(safe_path, private_names):
                 safe_path = "index.html"
             candidate = (static_root / safe_path).resolve()
-            if not str(candidate).startswith(str(static_root.resolve())) or not candidate.exists() or candidate.is_dir():
+            if not candidate.is_relative_to(static_root.resolve()) or not candidate.exists() or candidate.is_dir():
                 candidate = static_root / "index.html"
             content = candidate.read_bytes()
             content_type = mimetypes.guess_type(str(candidate))[0] or "application/octet-stream"

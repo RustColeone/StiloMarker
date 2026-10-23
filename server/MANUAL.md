@@ -725,8 +725,19 @@ An admin, signed in, also has **Settings → Accounts**: the accounts, their
 teams and who is an admin; **Add Account…**, **Password…**, **Teams…**, the
 **Admin** box and **Remove** on each. A new password needs at least 8
 characters. The last admin can be neither removed nor made an ordinary account
-(make someone else an admin first). A removed account is signed out at once;
-its projects stay.
+(make someone else an admin first). A removed account is signed out at once,
+and the projects it has open close for it; its projects stay. A new password
+signs the account out everywhere but the page that set it; an account taken
+out of a team leaves that team's open projects. This holds however the
+change is made: here, with `server/accounts.py`, or in the file by hand.
+
+Account names may not hold invisible characters or look-alike forms, and two
+names that differ only in case are the same name. Team names are folder names
+(letters, numbers, spaces and `_.-`, up to 64), spelled the way the accounts
+already spell them. A sign-in lasts two weeks at most. After five wrong
+passwords for a name, that name waits a minute before the next try. If the
+account file stops reading (a typo made by hand), the accounts it had still
+sign in, but nothing is changed here until the file is fixed.
 
 ### Chat workspace sync
 

@@ -3,10 +3,17 @@
 preferences are reached through the stores it is given."""
 import secrets
 import threading
+import time
 
 from stilo.kernel.log import log as _log
 from ..model import accounts as account_rules
 from ..model.access import can, changed_access, may_open, owned_by_other, owner_record, require_owner, role_of
+
+
+TOKEN_DAYS = 14          # an account token signs in this long at most
+TRIES, TRIES_WINDOW = 5, 300  # wrong passwords for one name within that many seconds, then...
+TRIES_WAIT = 60          # ...that name waits this long (no more than this, so no one is locked out for good)
+CHECKS_AT_ONCE = 2       # password checks running together (each takes memory and time on purpose)
 
 
 class Identity:
@@ -14,8 +21,34 @@ class Identity:
         self.accounts = accounts          # the account file (adapters/account_file.py)
         self.prefs = prefs                # adapters/prefs_file.py
         self._access = access_store       # read(project_dir, legacy), write(project_dir, data), projects_in(folder)
-        self._tokens: dict[str, str] = {}  # account token -> username
-        self._lock = threading.Lock()
+        self._tokens: dict[str, tuple] = {}  # account token -> (username, when made, time.monotonic())
+        self._tries: dict[str, list] = {}    # username as typed -> when its recent wrong passwords were
+        self._checks = threading.BoundedSemaphore(CHECKS_AT_ONCE)
+        self._lock = threading.RLock()     # the tokens and the tries
+        self._changing = threading.Lock()  # one change of the accounts at a time (read, change, write)
+        self._keeping = None               # (username, token): kept through that account's own change of password
+        self._listeners = []
+        accounts.listeners.append(self._account_changed)
+
+    def on_change(self, listener) -> None:
+        """listener(username, change) when an account must lose what it has open:
+        change is None (the account is gone), "password" (a new one: its other
+        sessions end) or its teams now (it leaves the others' projects). From
+        the admin page, server/accounts.py, or the file edited by hand."""
+        self._listeners.append(listener)
+
+    def _account_changed(self, username: str, change) -> None:
+        keeping = self._keeping if self._keeping and self._keeping[0] == username else None
+        if change is None or change == "password":
+            with self._lock:
+                self._tokens = {token: entry for token, entry in self._tokens.items()
+                                if entry[0] != username or (keeping and token == keeping[1])}
+            if change == "password" and keeping:
+                return  # its own change, on the admin page: what it has open stays
+        _log("AUTH", f"{username}: {'removed' if change is None else 'new password' if change == 'password' else 'teams changed'}; "
+                     "sessions it may no longer have end")
+        for listener in list(self._listeners):
+            listener(username, change)
 
     @property
     def enabled(self) -> bool:
@@ -27,23 +60,52 @@ class Identity:
     def login(self, username: str, password: str) -> dict:
         """Check a password and mint an account token (not a workspace session
         token). The reply also names the workspace the account last opened."""
-        identity = self.accounts.authenticate(str(username).strip(), password)
+        username = str(username).strip()
+        self._wait_if_guessed(username)
+        if not self._checks.acquire(timeout=10):
+            raise PermissionError("The server is busy signing others in: try again in a moment")
+        try:
+            identity = self.accounts.authenticate(username, password)
+        finally:
+            self._checks.release()
         if identity is None:
+            with self._lock:
+                self._tries.setdefault(username, []).append(time.monotonic())
             _log("AUTH", f"Rejected login for {username!r}")
             raise PermissionError("Invalid username or password")
         token = secrets.token_urlsafe(24)
         with self._lock:
-            self._tokens[token] = identity["username"]
+            self._tries.pop(username, None)
+            self._tokens[token] = (identity["username"], time.monotonic())
         _log("AUTH", f"{identity['username']} logged in", teams=identity["teams"])
         return {"token": token, "username": identity["username"], "teams": identity["teams"], "admin": identity["admin"],
                 "lastWorkspace": self.prefs.get(identity["username"]).get("lastWorkspace")}
 
+    def _wait_if_guessed(self, username: str) -> None:
+        """A name with too many wrong passwords lately waits a minute (whether
+        or not it has an account, so this says nothing about which names do)."""
+        now = time.monotonic()
+        with self._lock:
+            if len(self._tries) > 10_000:  # a sweep of names: keep only the recent ones
+                self._tries = {name: when for name, when in self._tries.items() if now - when[-1] < TRIES_WINDOW}
+            recent = [when for when in self._tries.get(username, []) if now - when < TRIES_WINDOW]
+            if recent:
+                self._tries[username] = recent[-TRIES:]
+            else:
+                self._tries.pop(username, None)
+        if len(recent) >= TRIES and now - recent[-1] < TRIES_WAIT:
+            raise PermissionError("Too many wrong passwords for this name: wait a minute and try again")
+
     def who(self, token: str) -> dict | None:
         """{username, teams, admin} for an account token, or None. They are read
         from the account file each time, so a change there applies at once, and
-        an account removed from it is signed out."""
+        an account removed from it is signed out. A token signs in for
+        TOKEN_DAYS at most."""
         with self._lock:
-            username = self._tokens.get(token)
+            username, made = self._tokens.get(token, (None, 0))
+            if username is not None and time.monotonic() - made > TOKEN_DAYS * 86400:
+                self._tokens.pop(token, None)
+                username = None
         if username is None:
             return None
         if not self.accounts.exists(username):
@@ -85,7 +147,9 @@ class Identity:
         file; the accounts as they then are. A removed account is signed out."""
         admin = self._require_admin(token)
         action, username = str(change.get("action", "")), str(change.get("username", "")).strip()
-        with self._lock:
+        # Not under the tokens' lock: a change ends sessions (Sync's locks), which must
+        # never wait on something that holds it.
+        with self._changing:
             self.accounts.refresh(0)  # the file as it is now (server/accounts.py may have changed it)
             users = self.accounts.users
             if action == "add":
@@ -100,9 +164,12 @@ class Identity:
                 users = account_rules.remove_account(users, username)
             else:
                 raise ValueError(f"Unknown change: {action!r}")
-            self.accounts.save(users)
-            if action == "remove":
-                self._tokens = {token: name for token, name in self._tokens.items() if name != username}
+            # A new password of one's own: the page that set it stays signed in.
+            self._keeping = (username, token) if action == "password" and username == admin["username"] else None
+            try:
+                self.accounts.save(users)  # the account's tokens and sessions follow (_account_changed)
+            finally:
+                self._keeping = None
         _log("AUTH", f"{admin['username']} changed accounts: {action} {username}")
         return account_rules.listing(self.accounts.users)
 
