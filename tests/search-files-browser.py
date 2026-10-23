@@ -8,11 +8,14 @@ Match case, whole word and regular expressions narrow it; a pattern that
 isn't one is said. A click opens the file at the match, in a 20,000-line file
 too (the match selected and in view). Editing a file searches again. Replace
 All asks, then replaces in every file (Workspace's write path); Undo puts it
-back; where a file changed since, Undo leaves it and says so. No page errors.
+back; where a file changed since, Undo leaves it and says so. A file of parts
+(an album) is left out of Replace, and said. More than 20,000 results: the
+first shown, said, and Replace asks with the true count. Typing just before
+Replace is kept: it replaces in the file as it is then. No page errors.
 
 Isolated: APIs are mocked and static files come from this checkout.
 """
-import asyncio, json, mimetypes, os
+import asyncio, json, mimetypes, os, re
 from pathlib import Path
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
@@ -25,12 +28,13 @@ FILES = {
     'c1': ('chapters/chapter1.md', '# Chapter 1\n\nThe lantern swayed in the wind.\nShe lit the Lantern again.\n灯笼在风中摇晃。\n'),
     'c2': ('chapters/chapter2.md', 'No lanterns here.\nlantern-bearer arrives.\n'),
     'notes': ('notes.md', 'Lantern: brass, old.\n'),
+    'alb': ('refs.urldb', '[Gallery torchlight]\nurl = https://img.example/t.jpg\n'),
     'sim': ('sim.md', '\n'.join('step 15000 lantern=on' if i == 15000 else f'step {i} t={i * 0.01:.2f}' for i in range(20000))),
 }
 
 
 def project():
-    nodes = {'root': {'id': 'root', 'kind': 'folder', 'name': 'Search test', 'children': ['chapters', 'notes', 'sim', 'img'], 'expanded': True},
+    nodes = {'root': {'id': 'root', 'kind': 'folder', 'name': 'Search test', 'children': ['chapters', 'notes', 'alb', 'sim', 'img'], 'expanded': True},
              'chapters': {'id': 'chapters', 'kind': 'folder', 'name': 'chapters', 'parentId': 'root', 'children': ['c1', 'c2'], 'expanded': True},
              'img': {'id': 'img', 'kind': 'file', 'parentId': 'root', 'name': 'lantern.png', 'content': 'data:image/png;base64,iVBORw0KGgo=', 'dirty': False}}
     for node_id, (path, content) in FILES.items():
@@ -167,6 +171,39 @@ async def main():
         toast = await page.evaluate('[...document.querySelectorAll(".toast, .app-toast, [role=status]")].map((t) => t.textContent).join(" | ")')
         assert 'changed since' in toast, toast
         checks.append('Undo leaves a file changed since, and says so')
+
+        # A file of parts (an album) is left out of Replace, and said.
+        r = await search_for('torchlight')
+        assert r['files'] == ['refs.urldb'], r
+        await page.fill('.search-files-replacement', 'candle')
+        await page.click('.search-files-replace-all')
+        await page.wait_for_timeout(600)
+        toast = await page.evaluate('[...document.querySelectorAll(".toast, .app-toast, [role=status]")].map((t) => t.textContent).join(" | ")')
+        assert 'refs.urldb is left out' in toast, toast
+        assert 'torchlight' in await content('alb'), 'the album as it was'
+        checks.append('an album is left out of Replace, and said')
+
+        # More than 20,000 results: the first shown, said; Replace asks with the true count.
+        r = await search_for('t')
+        assert r['summary'].startswith('20,000+ results (the first 20,000 shown).'), r['summary']
+        await page.click('.search-files-replace-all')
+        await page.wait_for_selector('#confirm-dialog[open]')
+        asked = int(re.search(r'Replace ([\d,]+) matches', await page.text_content('#confirm-dialog-message')).group(1).replace(',', ''))
+        assert asked > 40000, asked
+        await page.keyboard.press('Escape')
+        await page.wait_for_timeout(300)
+        checks.append(f'more than 20,000 results: the first shown, said; Replace asks for all {asked:,}')
+
+        # Typing just before Replace is kept: it replaces in the file as it is then.
+        await search_for('polished')
+        await page.fill('.search-files-replacement', 'shiny')
+        await page.evaluate('__s.controller.updateContent("notes", "New first line.\\nLantern: iron, old, polished.\\nA second lantern.\\n")')
+        await page.click('.search-files-replace-all')
+        await page.wait_for_selector('#confirm-dialog[open]')
+        await page.click('#confirm-dialog-accept-button')
+        await page.wait_for_timeout(600)
+        assert await content('notes') == 'New first line.\nLantern: iron, old, shiny.\nA second lantern.\n', await content('notes')
+        checks.append('typing just before Replace is kept')
 
         # A word selected in the editor becomes the query.
         await page.evaluate('''() => { const c = __s.controller; c.setActiveFile("c2"); }''')

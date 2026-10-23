@@ -1,17 +1,20 @@
 # Extensions: the API, version 1
 
-With the core frozen, new features come as extensions. An extension is a
+New features come as extensions wherever they can. An extension is a
 folder under `extensions/<name>/` that adds a feature through what this page
 lists, and nothing else. Delete the folder, run `node tools/protocol-sync.mjs`,
 and the app runs without it.
 
-What is listed here is `protocol/extension-api.json` (version 1). The
-structure test (`tests/structure/structure.test.mjs`) holds both sides to it:
+What is listed here is `protocol/extension-api.json` (version 1).
+`tests/extension-api.test.mjs` holds both sides to it:
 
 - every extension declares `"api": 1`;
 - it uses only what is listed: its static imports, the modules it uses, their
   members, and the members of what `editor.parts()` and `workspace.project()`
-  return;
+  return (under whatever name the code keeps them: another variable, a
+  getter, destructured, over several lines); a use the test cannot read (a
+  module's API or the module context reached by brackets, all of a module
+  imported, or a module imported when it runs) is refused;
 - everything listed still exists in the modules;
 - this page names all of it.
 
@@ -28,6 +31,8 @@ The extensions in the repository are working examples:
 | `url-album` | a file type whose file holds named parts; a preview; a toolbar button; a form |
 | `bmap-diagram` | an editor in the preview, edits written back; settings; file menus; completions |
 | `mermaid` | a file type, and code blocks of a language drawn in Markdown previews |
+| `data-table` | a file type edited in its own editor (in the preview), every edit through the one write path; new files' first content; source highlighting |
+| `theme-pack` | data only: themes contributed from its manifest, no code |
 | `html-page` | a sandboxed preview; images resolved inside the workspace |
 | `module-map` | a dialog and commands on another type's files |
 | `data-table` | an editor in the preview with its own undo, writing through Workspace |
@@ -132,7 +137,7 @@ export default defineModule({
 | `settings` | the settings, read (`settings.<key>`: the extension's own contributed keys, and `serverUrl`); `settings.change({ key: value }, why)` for its own keys; `settings.on(listener(view, changedKeys))` |
 | `pages` | pages in the areas' tab hosts and the left's sections: `pages.add({ host, id, label, title?, order?, body, toolbar?, shown?(visible) })`, `pages.show(host, id)`, `pages.available(host, id, yes)` |
 | `settingsDialog` | `settingsDialog.addPage({ id, label, order, body })` (body: a `.settings-tab-panel` placed in `.settings-tab-panels`), `settingsDialog.fields.add(...)`, `settingsDialog.open(page?)` |
-| `statusBar` | `statusBar.add({ id, order, title?, action? }) -> { set({ text, tone, title, hidden }) }` |
+| `statusBar` | `statusBar.add({ id, order, title?, action?, dot?, grow?, hidden? }) -> { set({ text, tone, title, hidden }) }` (`dot`: a coloured dot before the text, in the item's tone; `grow`: it takes the spare width; `hidden`: not shown until `set({ hidden: false })`) |
 
 ## File types (`types`)
 

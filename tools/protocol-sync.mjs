@@ -32,12 +32,17 @@ export function checkManifest(folder, manifest) {
   return manifest;
 }
 
-// Every extension's manifest, by folder name.
-export function extensions() {
+// Every extension's manifest, by folder name. Strict (writing the copies): one
+// written for another API version stops it; not strict (a test that reports
+// each problem itself): read as it is.
+export function extensions({ strict = true } = {}) {
   const base = join(ROOT, "extensions");
   if (!existsSync(base)) return [];
   return readdirSync(base).sort().filter((name) => existsSync(join(base, name, "extension.json")))
-    .map((name) => ({ folder: name, ...checkManifest(name, JSON.parse(readFileSync(join(base, name, "extension.json"), "utf8"))) }));
+    .map((name) => {
+      const manifest = JSON.parse(readFileSync(join(base, name, "extension.json"), "utf8"));
+      return { folder: name, ...(strict ? checkManifest(name, manifest) : manifest) };
+    });
 }
 
 const extensionTypes = () => extensions().flatMap((extension) =>

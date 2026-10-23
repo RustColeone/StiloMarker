@@ -5,6 +5,8 @@ keeps its own tab behind a placeholder), opens there too ("Open to the
 Side"), or is dragged onto the other group's strip. A group whose last tab
 closes closes: the other takes the width and the bodies, so a file opened
 from the explorer shows there; View → Toggle Source brings the group back.
+Two previews at once: a second one with an editor of its own; while focus
+is inside it, another file's tab still draws that file there.
 Isolated: every API is mocked; the welcome template is this checkout's
 Template folder.
 """
@@ -133,11 +135,37 @@ async def main():
         assert 'STILO MARKER' in await page.locator('#preview-output').inner_text()
         assert await page.locator('.bmap-editor').count() == 1, 'the note in the preview, the diagram in the second one'
 
+        # A second preview whose file changes while focus is inside it (a diagram's field) draws
+        # the new file. Both previews to the side twice, then the diagram chosen on the right (the
+        # main preview goes with it): the left shows the diagram in a second preview. Its tab
+        # closed (without taking focus), the left's next preview tab, the note, is drawn there.
+        await menu('left', 'welcome.md', 'preview', 'Open to the Side')
+        await menu('right', 'welcome.bmap', 'preview', 'Open to the Side')
+        await page.evaluate('''() => { const tab = [...document.querySelectorAll(".editor-group[data-group='right'] .editor-tab[data-view='preview']")]
+          .find((t) => t.querySelector(".tab-title").textContent === "welcome.bmap");
+          for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) tab.dispatchEvent(new MouseEvent(type, { bubbles: true, button: 0 })); }''')
+        await page.wait_for_selector(".editor-group[data-group='left'] .second-preview .bmap-editor", timeout=15000)
+        inside = await page.evaluate('''() => { const editor = document.querySelector(".editor-group[data-group='left'] .second-preview .bmap-editor");
+          const field = document.createElement("input");
+          editor.append(field);
+          field.focus();
+          return editor.contains(document.activeElement); }''')
+        assert inside, 'focus inside the diagram'
+        await page.evaluate('''() => { const tab = [...document.querySelectorAll(".editor-group[data-group='left'] .editor-tab[data-view='preview']")]
+          .find((t) => t.querySelector(".tab-title").textContent === "welcome.bmap");
+          const close = tab.querySelector(".tab-close");
+          for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) close.dispatchEvent(new MouseEvent(type, { bubbles: true, button: 0 })); }''')
+        await page.wait_for_timeout(800)
+        now = await groups()
+        assert now['left']['active'] == ['welcome.md', 'preview'], now['left']
+        second = await page.evaluate('''document.querySelector(".editor-group[data-group='left'] .second-preview .preview-output").innerText''')
+        assert 'STILO MARKER' in second and await page.locator(".editor-group[data-group='left'] .second-preview .bmap-editor").count() == 0, second[:80]
+
         assert not errors, errors
         await browser.close()
         print(json.dumps({'checks': ['move to other group', 'placeholder left behind', 'open to the side', 'drag to the other strip',
                                      'emptied group closes', 'explorer opens in the group left', 'group comes back', 'move back',
-                                     'a diagram in a second preview']}))
+                                     'a diagram in a second preview', 'another file drawn in it while focus is inside']}))
 
 
 asyncio.run(main())

@@ -2,7 +2,10 @@
 // read as written (quotes, a quote doubled, a line break inside quotes, CRLF,
 // a .tsv's tabs, a semicolon .csv), every grid edit as a new text that
 // leaves the records it doesn't touch byte for byte, the numbers in a block,
-// whether the first row names the columns, and the clipboard's form. The page: data-table-browser.py.
+// whether the first row names the columns, and the clipboard's form. A
+// delimiter guessed past quoted values; new rows end as the file's lines do
+// (\r\n, \n or \r); a blank line among rows stays blank as columns come or
+// go; a last row of empty cells copies and pastes as a row. The page: data-table-browser.py.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { blockText, cell, columnName, delimiterFor, deleteColumns, deleteRows, insertColumns, insertRows, looksLikeHeader,
@@ -25,6 +28,24 @@ test("table: records read as written", () => {
   assert.equal(delimiterFor("x.tsv"), "\t");
   assert.equal(delimiterFor("x.CSV", "a;b;c\n1;2;3"), ";");
   assert.equal(delimiterFor("x.csv", "a,b;c\n"), ",");
+  assert.equal(delimiterFor("x.csv", '"Smith, J";2;3\n'), ";", "a comma inside quotes is a value's");
+  assert.equal(delimiterFor("x.csv", '"a;b",c\n'), ",");
+  assert.equal(delimiterFor("x.csv", "a;b\rc;d"), ";", "an old Mac's line break ends the first line too");
+});
+
+test("table: new rows end as the file's lines do", () => {
+  assert.equal(parseTable("a,b\rc,d\r", ",").newline, "\r");
+  assert.equal(insertRows("a,b\rc,d\r", parseTable("a,b\rc,d\r", ","), 2), "a,b\rc,d\r,\r");
+  assert.equal(parseTable("a\r\nb\nc\r\n", ",").newline, "\r\n", "most of them");
+  assert.equal(parseTable("a", ",").newline, "\n", "none at all: \\n");
+});
+
+test("table: a blank line among rows stays blank as columns come or go", () => {
+  const text = "a,b\n\nc,d\n";
+  const table = parseTable(text, ",");
+  assert.equal(insertColumns(text, table, 1), "a,,b\n\nc,,d\n");
+  assert.equal(deleteColumns(text, table, 0), "b\n\nd\n");
+  assert.equal(insertColumns("\n\n", parseTable("\n\n", ","), 1), ",\n,\n", "only blank lines: rows all the same");
 });
 
 test("table: a cell set rewrites its record only; quoting as needed or as it was", () => {
@@ -58,13 +79,15 @@ test("table: a pasted block, and the clipboard's form", () => {
   const text = "a,b,c\n1,2,3\n";
   const table = parseTable(text, ",");
   assert.equal(setCells(text, table, 1, 1, [["x", "y"], ["p", "q"]]), "a,b,c\n1,x,y\n,p,q\n");
-  assert.equal(blockText(table, { top: 0, bottom: 1, left: 1, right: 2 }), "b\tc\n2\t3");
+  assert.equal(blockText(table, { top: 0, bottom: 1, left: 1, right: 2 }), "b\tc\n2\t3\n");
   assert.deepEqual(parseBlock("b\tc\r\n2\t3\r\n"), [["b", "c"], ["2", "3"]]);
   assert.deepEqual(parseBlock("Hello, world"), [["Hello, world"]], "a line without tabs is one cell");
   assert.deepEqual(parseBlock('"two\nlines"\tx'), [["two\nlines", "x"]]);
   const quoted = parseTable('said "hi",two\nlines,"""q"\n'.replace("two\nlines", '"two\nlines"'), ",");
-  assert.equal(blockText(quoted, { top: 0, bottom: 0, left: 0, right: 2 }), 'said "hi"\t"two\nlines"\t"""q"', "quoted only where it must be");
+  assert.equal(blockText(quoted, { top: 0, bottom: 0, left: 0, right: 2 }), 'said "hi"\t"two\nlines"\t"""q"\n', "quoted only where it must be");
   assert.deepEqual(parseBlock(blockText(quoted, { top: 0, bottom: 0, left: 0, right: 2 })), [['said "hi"', "two\nlines", '"q']], "and back");
+  const emptyLast = parseTable("x\n\n", ",");
+  assert.deepEqual(parseBlock(blockText(emptyLast, { top: 0, bottom: 1, left: 0, right: 0 })), [["x"], [""]], "a last row of empty cells is a row");
 });
 
 test("table: the numbers in a block; a header row; column names", () => {

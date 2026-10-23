@@ -3,7 +3,7 @@
 // main.js creates this on first use and passes its shared values in `app`.
 import { isTextFileName } from "../../workspace/index.js";
 import { ignore } from "../../../kernel/index.js";
-import { findMatches, replaceMatches, searchPattern } from "../model/search.js";
+import { MATCH_LIMIT, findMatches, replaceAt, replaceMatches, searchPattern } from "../model/search.js";
 
 export function createFindReplace(app) {
   // The RegExp for the current query + toggles (model/search.js), or null on empty/invalid.
@@ -43,7 +43,7 @@ export function createFindReplace(app) {
     } else if (total === 0) {
       app.elements.findCount.textContent = app.elements.findInput?.classList.contains("is-error") ? "Bad pattern" : "No results";
     } else {
-      app.elements.findCount.textContent = `${app.searchState.currentIndex + 1} of ${total}`;
+      app.elements.findCount.textContent = `${app.searchState.currentIndex + 1} of ${total}${total >= MATCH_LIMIT ? "+" : ""}`;
     }
   }
 
@@ -120,26 +120,16 @@ export function createFindReplace(app) {
     if (app.searchState.matches.length) gotoMatch(app.searchState.currentIndex - 1);
   }
 
-  // The replacement text for one match (regex mode honors $1, $&, … via a scoped
-  // re-run of the pattern on just that match).
-  function replacementFor(matchText) {
-    const replaceRaw = app.elements.replaceInput?.value ?? "";
-    if (!app.searchState.regex) return replaceRaw;
-    const single = buildSearchRegex();
-    if (!single) return replaceRaw;
-    // matchText is exactly one match, so a single replace applies the templates.
-    return matchText.replace(new RegExp(single.source, single.flags.replace("g", "")), replaceRaw);
-  }
-
+  // The current match replaced, found again where it is in the whole text (a
+  // lookbehind, ^ and $1 read as Replace All reads them).
   function replaceCurrent() {
     if (app.searchState.currentIndex < 0 || !app.searchState.matches.length) { findNext(); return; }
     const match = app.searchState.matches[app.searchState.currentIndex];
-    const text = app.getEditorText();
-    const matchText = text.slice(match.start, match.end);
-    const replacement = replacementFor(matchText);
-    const newText = text.slice(0, match.start) + replacement + text.slice(match.end);
-    const caret = match.start + replacement.length;
-    app.applyEditorEdit(newText, caret, caret);
+    const replaced = replaceAt(app.getEditorText(), buildSearchRegex(), match.start, app.elements.replaceInput?.value ?? "",
+      { regex: app.searchState.regex });
+    if (!replaced) { computeSearchMatches({ keepCaret: true }); return; } // the text changed under it
+    const caret = replaced.end;
+    app.applyEditorEdit(replaced.text, caret, caret);
     computeSearchMatches();
     // Move to the next match at/after where we just replaced.
     const nextIdx = app.searchState.matches.findIndex((mm) => mm.start >= caret);

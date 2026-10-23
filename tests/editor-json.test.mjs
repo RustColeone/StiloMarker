@@ -1,7 +1,7 @@
 // JSON files (editor/model/json.js): a line's colours (a key, a string, a
 // number, true / false / null, punctuation; what isn't JSON left plain),
 // whether a text is valid (formatted when it is; its line and column when
-// not), and a value in a few words. The page: data-table-browser.py.
+// not, however deeply nested), and a value in a few words. The page: data-table-browser.py.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { checkJson, describeJson, errorAt, highlightJsonLine } from "../app/modules/editor/model/json.js";
@@ -41,6 +41,16 @@ test("json: where a text stops being JSON", () => {
   assert.equal(errorAt('"\\q"'), 2, "a bad escape");
   assert.equal(errorAt("[1] x"), 4, "something after the value");
   assert.equal(errorAt("{'a': 1}"), 1, "single quotes");
+  assert.equal(errorAt('{"a": {"b": [1, {"c": 2}]}, "d": []}'), -1, "nested");
+  assert.equal(errorAt('{"a": {"b": [1, {"c": 2]}}'), 23, "a list closing an object");
+  assert.equal(errorAt("{,}"), 1);
+});
+
+test("json: no nesting is too deep to find where it stops", () => {
+  const deep = `${"[".repeat(200000)}1${"]".repeat(199999)}`;
+  assert.equal(errorAt(deep), deep.length, "one ] short: it ends too soon");
+  assert.equal(checkJson(deep).message, "the text ends too soon");
+  assert.equal(errorAt(`${"[".repeat(200000)}${"]".repeat(200000)}`), -1);
 });
 
 test("json: a value in a few words", () => {

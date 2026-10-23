@@ -125,14 +125,17 @@ test("desktop: the app tells of a newer release once, and says when it could not
 
 test("desktop: the right-click menu: a misspelled word's suggestions, then cut, copy and paste", () => {
   const calls = [];
-  const tools = { replace: (word) => calls.push(["replace", word]), learn: (word) => calls.push(["learn", word]) };
+  const tools = { replace: (word) => calls.push(["replace", word]), learn: (word) => calls.push(["learn", word]), selectAll: () => calls.push(["select all"]) };
   const editFlags = { canCut: true, canCopy: true, canPaste: true, canSelectAll: true };
   const menu = contextMenuTemplate({ isEditable: true, misspelledWord: "teh", dictionarySuggestions: ["the", "tech", "ten", "tea", "eh", "toe"], editFlags }, tools);
   assert.deepEqual(menu.map((item) => item.label ?? item.type),
     ["the", "tech", "ten", "tea", "eh", "Add to Dictionary", "separator", "Cut", "Copy", "Paste", "separator", "Select All"], "five suggestions at most");
   menu[0].click();
   menu[5].click();
-  assert.deepEqual(calls, [["replace", "the"], ["learn", "teh"]]);
+  menu[11].click();
+  assert.deepEqual(calls, [["replace", "the"], ["learn", "teh"], ["select all"]]);
+  assert.equal(menu[11].role, undefined, "the page's own Select All (Ctrl+A), not the browser's: a long file shows only the lines in view");
+  assert.match(readFileSync(join(ROOT, "desktop/app.mjs"), "utf8"), /sendInputEvent\(\{ type, keyCode: "A", modifiers \}\)/, "pressed as keys");
   const none = contextMenuTemplate({ isEditable: true, misspelledWord: "zzqx", dictionarySuggestions: [], editFlags }, tools);
   assert.deepEqual([none[0].label, none[0].enabled], ["No Suggestions", false]);
   const plain = contextMenuTemplate({ isEditable: true, editFlags: { canPaste: true } }, tools);

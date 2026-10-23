@@ -3,11 +3,14 @@
 // with Match case, whole word and regular expressions (model/search.js);
 // results grouped by file, each with its line and the words around it, and a
 // click opens the file at the match. Replace All (or a file's own Replace)
-// writes through Workspace's one write path (merged with others' edits, synced)
-// after asking; Undo puts back what it replaced, in each file nobody changed since.
+// replaces in the files as they are then (every file, not only the results
+// shown), after asking with the true count, through Workspace's one write
+// path (merged with others' edits, synced); a file that holds parts (an
+// album) is left out, and said. Undo puts back what it replaced, in this
+// workspace, in each file nobody changed since.
 import { builtinTypes } from "../../file-types/index.js";
 import { getPath, isTextFileName } from "../../workspace/index.js";
-import { findMatches, locate, replaceMatches, searchPattern, snippet } from "../model/search.js";
+import { MATCH_LIMIT, findMatches, locate, replaceMatches, searchPattern, snippet } from "../model/search.js";
 
 const SEARCH_AFTER = 200;   // ms after the last key
 const AGAIN_AFTER = 600;    // ms after the workspace changed (while the page shows)
@@ -36,12 +39,14 @@ export function addFindInFiles({ app, shell, workspace, doc = globalThis.documen
   const replacement = $(".search-files-replacement");
   const options = { caseSensitive: false, wholeWord: false, regex: false };
   let results = [];   // [{ node, path, text, matches }]
+  let capped = false; // MATCH_LIMIT reached: there are more
   let shownRows = SHOWN_AT_ONCE;
-  let undo = null;    // [{ path, before, after }] of the last Replace
+  let undo = null;    // { key, files: [{ id, before, after }] } of the last Replace, in the workspace `key`
   let searchTimer = null;
   let againTimer = null;
 
   const project = () => app.controller.getProject();
+  const here = () => workspace.location.key(project());
   const pattern = () => searchPattern(query.value, options);
   const textFiles = () => Object.values(project()?.nodes ?? {})
     .filter((node) => node.kind === "file" && isTextFileName(node.name))
@@ -54,11 +59,15 @@ export function addFindInFiles({ app, shell, workspace, doc = globalThis.documen
     const { pattern: compiled, error } = pattern();
     query.classList.toggle("is-error", Boolean(error));
     results = [];
+    capped = false;
+    let left = MATCH_LIMIT; // in all the files together
     if (compiled) {
       for (const { node, path } of textFiles()) {
         const text = node.content ?? "";
-        const matches = findMatches(text, compiled);
+        const matches = findMatches(text, compiled, left);
         if (matches.length) results.push({ node, path, text, matches: locate(text, matches) });
+        left -= matches.length;
+        if (left <= 0) { capped = true; break; }
       }
     }
     shownRows = SHOWN_AT_ONCE;
@@ -73,7 +82,10 @@ export function addFindInFiles({ app, shell, workspace, doc = globalThis.documen
     if (error) summary.textContent = "Not a regular expression.";
     else if (!query.value) summary.textContent = "";
     else if (!results.length) summary.textContent = "No results.";
-    else summary.textContent = `${total()} result${total() === 1 ? "" : "s"} in ${results.length} file${results.length === 1 ? "" : "s"}.`;
+    else summary.textContent = capped
+      ? `${MATCH_LIMIT.toLocaleString("en")}+ results (the first ${MATCH_LIMIT.toLocaleString("en")} shown).`
+      : `${total()} result${total() === 1 ? "" : "s"} in ${results.length} file${results.length === 1 ? "" : "s"}.`;
+    if (undo && undo.key !== here()) undo = null; // made in another workspace
     if (undo) {
       const button = doc.createElement("button");
       button.type = "button";
@@ -123,7 +135,7 @@ export function addFindInFiles({ app, shell, workspace, doc = globalThis.documen
     replaceHere.className = "find-btn search-files-replace-file";
     replaceHere.textContent = "Replace";
     replaceHere.title = `Replace the matches in ${file.node.name}`;
-    replaceHere.addEventListener("click", () => void replace([file]));
+    replaceHere.addEventListener("click", () => void replace([file.node.id]));
     row.append(icon, name, folder, count, replaceHere);
     return row;
   }
@@ -162,46 +174,72 @@ export function addFindInFiles({ app, shell, workspace, doc = globalThis.documen
     });
   }
 
-  // Replace in these files (asked first); what it replaced kept for Undo.
-  async function replace(files) {
+  // Replace in these files (by id; all the text files when none are named),
+  // as they are now; asked first, with the true count. What it replaced is
+  // kept for Undo.
+  async function replace(ids = null) {
+    if (searchTimer) search(); // the query typed a moment ago, not the one before
     const { pattern: compiled } = pattern();
-    if (!compiled || !files.length) return;
-    const count = files.reduce((sum, file) => sum + file.matches.length, 0);
-    const where = files.length === 1 ? files[0].node.name : `${files.length} files`;
+    if (!compiled) return;
+    const plan = [];
+    const parts = [];
+    for (const id of ids ?? textFiles().map(({ node }) => node.id)) {
+      const node = project()?.nodes?.[id];
+      if (!node) continue;
+      const before = node.content ?? "";
+      const { text: after, count } = replaceMatches(before, compiled, replacement.value, { regex: options.regex });
+      if (!count) continue;
+      // A file of parts (an album) shows each part on its own: its text is not replaced as a whole.
+      if (workspace.parts.of(node.name)) { parts.push(node.name); continue; }
+      plan.push({ id, name: node.name, before, after, count });
+    }
+    const leftOut = parts.length ? ` ${parts.join(", ")} ${parts.length === 1 ? "is" : "are"} left out (${parts.length === 1 ? "it holds" : "they hold"} parts: replace in each part).` : "";
+    if (!plan.length) {
+      if (parts.length) shell.toast(`Nothing replaced.${leftOut}`, { duration: 5000 });
+      search();
+      return;
+    }
+    const count = plan.reduce((sum, file) => sum + file.count, 0);
+    const where = plan.length === 1 ? plan[0].name : `${plan.length} files`;
     const asked = await shell.confirm({ title: "Replace",
-      message: `Replace ${count} match${count === 1 ? "" : "es"} in ${where} with “${replacement.value}”?`,
+      message: `Replace ${count.toLocaleString("en")} match${count === 1 ? "" : "es"} in ${where} with “${replacement.value}”?${leftOut}`,
       acceptLabel: "Replace" });
     if (!asked) return;
+    const key = here();
     const done = [];
     const missed = [];
-    for (const file of files) {
-      const before = file.node.content ?? "";
-      const { text: after } = replaceMatches(before, compiled, replacement.value, { regex: options.regex });
+    for (const file of plan) {
+      const path = project()?.nodes?.[file.id] ? getPath(project(), file.id) : null;
       try {
-        await workspace.write(file.path, after, { base: file.text, source: "find-in-files" });
-        done.push({ path: file.path, before, after });
+        if (!path || here() !== key) throw new Error("gone");
+        // Typing since the question is kept: the change is placed into the file as it is.
+        const { text } = await workspace.write(path, file.after, { base: file.before, source: "find-in-files" });
+        done.push({ id: file.id, before: file.before, after: text });
       } catch (error) {
-        // Changed since it was searched (stale), or not written at all: left as it is, and said.
-        missed.push(workspace.isStale(error) ? file.node.name : `${file.node.name} (${error.message})`);
+        // Changed where it replaces (stale), gone, or not written at all: left as it is, and said.
+        missed.push(workspace.isStale(error) || !path ? file.name : `${file.name} (${error.message})`);
       }
     }
-    undo = done.length ? done : null;
+    undo = done.length ? { key, files: done } : null;
     search();
     shell.toast(missed.length
-      ? `Replaced in ${done.length} file${done.length === 1 ? "" : "s"}; ${missed.join(", ")} changed meanwhile and ${missed.length === 1 ? "was" : "were"} left as ${missed.length === 1 ? "it was" : "they were"}.`
-      : `Replaced ${count} match${count === 1 ? "" : "es"} in ${done.length} file${done.length === 1 ? "" : "s"}.`, { duration: 4000 });
+      ? `Replaced in ${done.length} file${done.length === 1 ? "" : "s"}; ${missed.join(", ")} changed meanwhile and ${missed.length === 1 ? "was" : "were"} left as ${missed.length === 1 ? "it was" : "they were"}.${leftOut}`
+      : `Replaced ${count.toLocaleString("en")} match${count === 1 ? "" : "es"} in ${done.length} file${done.length === 1 ? "" : "s"}.${leftOut}`, { duration: 4000 });
   }
 
-  // What the last Replace changed, put back where nobody changed it since.
+  // What the last Replace changed, put back in each file nobody changed since
+  // (in the workspace it was made in).
   async function undoReplace() {
-    const kept = undo ?? [];
+    const kept = undo?.key === here() ? undo.files : [];
     undo = null;
     const missed = [];
-    for (const { path, before, after } of kept) {
+    for (const { id, before, after } of kept) {
+      const node = project()?.nodes?.[id];
+      if (!node || (node.content ?? "") !== after) { missed.push(node?.name ?? "a file since removed"); continue; }
       try {
-        await workspace.write(path, before, { base: after, source: "find-in-files" });
+        await workspace.write(getPath(project(), id), before, { base: after, source: "find-in-files" });
       } catch (error) {
-        missed.push(workspace.isStale(error) ? path : `${path} (${error.message})`);
+        missed.push(workspace.isStale(error) ? node.name : `${node.name} (${error.message})`);
       }
     }
     search();
@@ -224,7 +262,7 @@ export function addFindInFiles({ app, shell, workspace, doc = globalThis.documen
       search();
     });
   }
-  $(".search-files-replace-all").addEventListener("click", () => void replace(results));
+  $(".search-files-replace-all").addEventListener("click", () => void replace());
 
   // The workspace changed (typing, someone else, a file added): searched again
   // while the page shows and there is a query.

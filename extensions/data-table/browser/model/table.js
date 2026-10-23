@@ -11,10 +11,11 @@
 export const NUMBER = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
 
 // The delimiter of a .tsv is a tab; a .csv's is a comma, unless its first
-// line has semicolons and no commas (as some spreadsheets write it).
+// line has semicolons and no commas (as some spreadsheets write it), quoted
+// values aside.
 export function delimiterFor(name, text = "") {
   if (/\.tsv$/i.test(name)) return "\t";
-  const first = text.slice(0, text.search(/\r?\n|$/));
+  const first = text.slice(0, text.search(/[\r\n]|$/)).replace(/"(?:[^"]|"")*"?/g, "");
   return first.includes(";") && !first.includes(",") ? ";" : ",";
 }
 
@@ -23,8 +24,7 @@ export function parseTable(text, delimiter = ",") {
   const length = text.length;
   let columns = 0;
   let i = 0;
-  let crlf = 0;
-  let lf = 0;
+  const breaks = { "\r\n": 0, "\n": 0, "\r": 0 };
   while (i < length) {
     const start = i;
     const fields = [];
@@ -54,12 +54,14 @@ export function parseTable(text, delimiter = ",") {
       lineDone = true;
     }
     const end = i;
-    if (text[i] === "\r" && text[i + 1] === "\n") { i += 2; crlf += 1; }
-    else if (text[i] === "\n" || text[i] === "\r") { i += 1; lf += 1; }
+    if (text[i] === "\r" && text[i + 1] === "\n") { i += 2; breaks["\r\n"] += 1; }
+    else if (text[i] === "\n" || text[i] === "\r") { breaks[text[i]] += 1; i += 1; }
     records.push({ start, end, next: i, fields });
     if (fields.length > columns) columns = fields.length;
   }
-  return { records, newline: crlf > lf ? "\r\n" : "\n", columns, delimiter };
+  // New rows end as most of the file's lines do (\r\n, \n, or an old Mac's \r).
+  const newline = Object.keys(breaks).reduce((best, kind) => (breaks[kind] > breaks[best] ? kind : best), "\n");
+  return { records, newline, columns, delimiter };
 }
 
 const valueAt = (record, column) => record?.fields[column]?.value ?? "";
@@ -153,11 +155,16 @@ export function deleteRows(text, table, from, count = 1) {
   return rebuild(text, table, { edits });
 }
 
+// A blank line among rows stays blank when columns come or go (a table of
+// nothing but blank lines is rows all the same).
+const blankKept = (table) => (record) => record.start === record.end && table.records.some((other) => other.start !== other.end);
+
 // Columns put in at `at` in every record long enough to have one there.
 export function insertColumns(text, table, at, count = 1) {
   const edits = new Map();
+  const blank = blankKept(table);
   table.records.forEach((record, row) => {
-    if (record.fields.length < at) return;
+    if (record.fields.length < at || blank(record)) return;
     const fields = fieldsOf(table, row);
     fields.splice(at, 0, ...blankRow(count));
     edits.set(row, fields);
@@ -167,8 +174,9 @@ export function insertColumns(text, table, at, count = 1) {
 
 export function deleteColumns(text, table, at, count = 1) {
   const edits = new Map();
+  const blank = blankKept(table);
   table.records.forEach((record, row) => {
-    if (record.fields.length <= at) return;
+    if (record.fields.length <= at || blank(record)) return;
     const fields = fieldsOf(table, row);
     fields.splice(at, count);
     edits.set(row, fields.length ? fields : blankRow(1));
@@ -208,7 +216,8 @@ export function looksLikeHeader(table) {
 
 // A block of cells as tab-separated text (for the clipboard), and back. As
 // spreadsheets copy: quoted only where a value holds a tab or a line break
-// (or starts with a quote).
+// (or starts with a quote), every row ending with a line break (so a last row
+// of empty cells is a row).
 const clipField = (value) => (/[\t\r\n]/.test(value) || value.startsWith('"') ? `"${value.replaceAll('"', '""')}"` : value);
 
 export function blockText(table, { top, bottom, left, right }) {
@@ -216,14 +225,15 @@ export function blockText(table, { top, bottom, left, right }) {
   for (let row = top; row <= bottom; row += 1) {
     const values = [];
     for (let column = left; column <= right; column += 1) values.push(clipField(cell(table, row, column)));
-    lines.push(values.join("\t"));
+    lines.push(`${values.join("\t")}\n`);
   }
-  return lines.join("\n");
+  return lines.join("");
 }
 
-// Tab-separated, as spreadsheets copy: a line without tabs is one cell.
+// Tab-separated, as spreadsheets copy: a line without tabs is one cell; the
+// line break after the last row ends it (one more after it is an empty row).
 export function parseBlock(text) {
-  return parseTable(text.replace(/\r?\n$/, ""), "\t").records.map((record) => record.fields.map((field) => field.value));
+  return parseTable(text, "\t").records.map((record) => record.fields.map((field) => field.value));
 }
 
 // Column names: A..Z, AA..

@@ -99,11 +99,16 @@ function openWindow({ root, ask, openExternal }) {
   });
   contents.on("will-prevent-unload", (event) => { if (ask(win)) event.preventDefault(); });
   // The right-click menu (Electron shows none of its own): a misspelled word's
-  // suggestions where the page checks spelling, then cut, copy and paste.
+  // suggestions where the page checks spelling, then cut, copy and paste, and
+  // Select All as the keys do it (the page's own handling of Ctrl+A).
   contents.on("context-menu", (event, params) => {
     const template = contextMenuTemplate(params, {
       replace: (word) => contents.replaceMisspelling(word),
-      learn: (word) => contents.session.addWordToSpellCheckerDictionary(word)
+      learn: (word) => contents.session.addWordToSpellCheckerDictionary(word),
+      selectAll: () => {
+        const modifiers = [process.platform === "darwin" ? "meta" : "control"];
+        for (const type of ["keyDown", "keyUp"]) contents.sendInputEvent({ type, keyCode: "A", modifiers });
+      }
     });
     if (template.length) Menu.buildFromTemplate(template).popup({ window: win });
   });

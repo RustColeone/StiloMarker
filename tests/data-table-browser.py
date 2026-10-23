@@ -10,7 +10,12 @@ goes in too. A block copies as tab-separated text and pastes back; a right
 click inserts and deletes rows and columns; Ctrl+Z undoes, Ctrl+Shift+Z
 redoes. Someone else's edit shows at once, and an edit begun before a row
 came in above still lands on its own row (the same row changed meanwhile:
-nothing written, and said). A .tsv reads by tabs. The source colours each
+nothing written, and said), and its undo puts back only what the grid did
+(the row that came in stays); an undo that no longer fits stays to undo. A
+cell over lines in a CRLF file, opened and left, changes nothing (edited,
+it keeps its \r\n). A semicolon table stays one when its first line gains a
+comma; renamed .tsv, it reads by tabs. With rows selected, the menu says
+how many it inserts, and does. A .tsv reads by tabs. The source colours each
 column.
 
 .txt and .log are plain text (no Markdown colours, no toolbar, a plain
@@ -34,6 +39,8 @@ FILES = {
     'sim': ('sim.csv', SIM),
     'small': ('small.csv', SMALL),
     'tsv': ('data.tsv', 'a\tb\n1,5\t2\n'),
+    'crlf': ('lines.csv', 'a,b\r\n"one\r\ntwo",x\r\n'),
+    'semi': ('semi.csv', 'a;b\n1;2\n'),
     'txt': ('notes.txt', '# not a heading\n**not bold**\n'),
     'log': ('run.log', 'INFO start\nWARN slow\n'),
     'json': ('config.json', '{"name": "sim", "steps": 20000, "ok": true, "tags": ["a", null]}'),
@@ -72,7 +79,7 @@ async def main():
             if file.is_file():
                 body = file.read_bytes()
                 if path == '/app/main.js':
-                    body += app_hook('window.__s = { controller, shell, parts: editorParts, types: modules["file-types"], editor: modules.editor };')
+                    body += app_hook('window.__s = { controller, shell, parts: editorParts, types: modules["file-types"], editor: modules.editor, table: modules["data-table"] };')
                 await route.fulfill(status=200, content_type=mimetypes.guess_type(str(file))[0] or 'application/octet-stream', body=body)
             else:
                 await route.continue_()
@@ -222,7 +229,7 @@ async def main():
         await page.keyboard.down('Shift'); await click_cell(2, 1); await page.keyboard.up('Shift')
         await page.keyboard.press('Control+c')
         await page.wait_for_timeout(200)
-        assert await page.evaluate('navigator.clipboard.readText()') == 'Smith, J\tsaid "hi"\nLee\t灯笼', await page.evaluate('navigator.clipboard.readText()')
+        assert await page.evaluate('navigator.clipboard.readText()') == 'Smith, J\tsaid "hi"\nLee\t灯笼\n', await page.evaluate('navigator.clipboard.readText()')
         await click_cell(4, 1)
         await page.keyboard.press('Control+v')
         await page.wait_for_timeout(300)
@@ -268,6 +275,64 @@ async def main():
         toast = await page.evaluate('[...document.querySelectorAll(".toast, .app-toast, [role=status]")].map((t) => t.textContent).join(" | ")')
         assert 'changed meanwhile' in toast, toast
         checks.append("someone else's edit shows at once; an edit begun before stays on its own row, or (the same row changed) is said")
+
+        # Undo puts back only what the grid did: the row that came in meanwhile stays.
+        steps = lambda: page.evaluate('__s.table.grids().find((g) => g.root.isConnected).steps()')
+        await click_cell(1, 0)
+        await page.keyboard.press('Escape')
+        await page.keyboard.press('Control+z')
+        await page.wait_for_timeout(400)
+        assert await content('small') == 'name,n\nZed,9\nAda,7\nBob,2\nCy,3\nDee,4\n', await content('small')
+        # The next step (the column deleted, before the file was replaced) no longer fits: it stays to undo.
+        kept = (await steps())['undo']
+        await page.keyboard.press('Control+z')
+        await page.wait_for_timeout(400)
+        assert await content('small') == 'name,n\nZed,9\nAda,7\nBob,2\nCy,3\nDee,4\n', await content('small')
+        assert (await steps())['undo'] == kept, (kept, await steps())
+        checks.append('undo puts back only what the grid did; a step that no longer fits stays')
+
+        # With rows selected, the menu says how many it inserts, and does.
+        await page.locator('.datatable-rownum', has_text='2').first.click()
+        await page.locator('.datatable-rownum', has_text='3').first.click(modifiers=['Shift'])
+        await page.locator('.datatable-rownum', has_text='2').first.click(button='right')
+        labels = await page.evaluate('[...document.querySelectorAll(".datatable-menu button")].map((b) => b.textContent)')
+        assert labels[:3] == ['Insert 2 Rows Above', 'Insert 2 Rows Below', 'Delete 2 Rows'], labels
+        await page.locator('.datatable-menu button', has_text='Insert 2 Rows Above').click()
+        await page.wait_for_timeout(300)
+        assert (await content('small')).split('\n')[:4] == ['name,n', ',', ',', 'Zed,9'], (await content('small')).split('\n')[:4]
+        checks.append('with rows selected, the menu says how many it inserts, and does')
+
+        # A cell over lines in a CRLF file: opened and left, nothing changes; edited, it keeps its \r\n.
+        await open_file('crlf')
+        await page.wait_for_selector('.datatable-cell')
+        await click_cell(1, 0)
+        await page.keyboard.press('F2')
+        await page.keyboard.press('Enter')
+        await page.wait_for_timeout(300)
+        assert await content('crlf') == 'a,b\r\n"one\r\ntwo",x\r\n', repr(await content('crlf'))
+        await click_cell(1, 0)
+        await page.keyboard.press('F2')
+        await page.keyboard.type('!')
+        await page.keyboard.press('Enter')
+        await page.wait_for_timeout(300)
+        assert await content('crlf') == 'a,b\r\n"one\r\ntwo!",x\r\n', repr(await content('crlf'))
+        checks.append('a cell over lines in a CRLF file: left as it was, or edited with its \\r\\n')
+
+        # A semicolon table stays one when its first line gains a comma; renamed .tsv, it reads by tabs.
+        await open_file('semi')
+        await page.wait_for_selector('.datatable-cell')
+        await click_cell(0, 0)
+        await page.keyboard.type('x,y')
+        await page.keyboard.press('Enter')
+        await page.wait_for_timeout(300)
+        assert await content('semi') == 'x,y;b\n1;2\n', await content('semi')
+        first = await page.evaluate('[...document.querySelectorAll(".datatable-cell")].map((c) => c.textContent).slice(0, 2)')
+        assert first == ['x,y', 'b'], first
+        await page.evaluate('__s.controller.rename("semi", "semi.tsv")')
+        await page.wait_for_timeout(500)
+        first = await page.evaluate('[...document.querySelectorAll(".datatable-cell")].map((c) => c.textContent).slice(0, 2)')
+        assert first[0] == 'x,y;b', first
+        checks.append('a semicolon table stays one as it gains a comma; renamed .tsv, it reads by tabs')
 
         # A .tsv by tabs; the source colours each column.
         await open_file('tsv')

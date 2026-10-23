@@ -1,10 +1,12 @@
 // Searching text (editor/model/search.js), which the find bar and Find in
 // Files share: the pattern for a query and its options, the matches with
 // their lines, a match's snippet, and replacing (a plain replacement taken as
-// it is; a regular expression's $1 in its own context). The page: search-files-browser.py.
+// it is; a regular expression's $1 in its own context), one match replaced
+// where it is (the find bar's Replace). Unicode-aware: a whole word in any
+// script, an emoji one character; ^ and $ a line's. The page: search-files-browser.py.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { findMatches, locate, replaceMatches, searchPattern, snippet } from "../app/modules/editor/model/search.js";
+import { findMatches, locate, replaceAt, replaceMatches, searchPattern, snippet } from "../app/modules/editor/model/search.js";
 
 const texts = (text, matches) => matches.map(({ start, end }) => text.slice(start, end));
 
@@ -59,4 +61,38 @@ test("search: replacing: a plain replacement as it is, a regular expression's $1
     { text: "$9 and 5", count: 1 });
   assert.deepEqual(replaceMatches("Cat concat cat", searchPattern("cat", { wholeWord: true }).pattern, "dog"), { text: "dog concat dog", count: 2 });
   assert.deepEqual(replaceMatches("same", null, "x"), { text: "same", count: 0 });
+});
+
+test("search: a whole word in any script, ^ and $ a line's, an emoji one character", () => {
+  const text = "café cafés übercafé über straße Straßen";
+  assert.deepEqual(texts(text, findMatches(text, searchPattern("café", { wholeWord: true }).pattern)), ["café"], "not inside cafés or übercafé");
+  assert.deepEqual(texts(text, findMatches(text, searchPattern("über", { wholeWord: true }).pattern)), ["über"]);
+  assert.deepEqual(texts(text, findMatches(text, searchPattern("straße", { wholeWord: true }).pattern)), ["straße"]);
+  assert.deepEqual(texts("-x- a-x-b", findMatches("-x- a-x-b", searchPattern("-x-", { wholeWord: true }).pattern)), ["-x-", "-x-"],
+    "punctuation at its ends: only letters around it count");
+  const lines = "one\ntwo\nthree";
+  assert.deepEqual(texts(lines, findMatches(lines, searchPattern("^t\\w+$", { regex: true }).pattern)), ["two", "three"]);
+  const emoji = "😀a😀";
+  assert.deepEqual(findMatches(emoji, searchPattern("(?=)", { regex: true }).pattern).map((m) => m.start), [0, 2, 3, 5],
+    "an empty match moves past a whole emoji");
+  assert.deepEqual(texts(emoji, findMatches(emoji, searchPattern(".", { regex: true }).pattern)), ["😀", "a", "😀"]);
+  // Written for the older rules (\- is no escape under Unicode's): read as they read it.
+  assert.deepEqual(texts("a-b", findMatches("a-b", searchPattern("a\\-b", { regex: true }).pattern)), ["a-b"]);
+  assert.match(searchPattern("a{", { regex: true, wholeWord: true }).pattern.source, /\\w/, "the older rules' whole word, ASCII's");
+});
+
+test("search: at most `limit` matches; as many means there may be more", () => {
+  assert.equal(findMatches("aaaa", searchPattern("a").pattern, 0).length, 0);
+  assert.equal(findMatches("aaaa", searchPattern("a").pattern, 4).length, 4);
+});
+
+test("search: one match replaced where it is, in its context", () => {
+  const behind = searchPattern("(?<=\\$)5", { regex: true }).pattern;
+  assert.deepEqual(replaceAt("$5 and 5", behind, 1, "9", { regex: true }), { text: "$9 and 5", end: 2 });
+  assert.equal(replaceAt("$5 and 5", behind, 7, "9", { regex: true }), null, "the 5 without a $ before it is no match");
+  assert.deepEqual(replaceAt("x=1, y=2", searchPattern("(\\w)=(\\d)", { regex: true }).pattern, 5, "$2=$1", { regex: true }),
+    { text: "x=1, 2=y", end: 8 });
+  assert.deepEqual(replaceAt("a cat", searchPattern("cat").pattern, 2, "$&!"), { text: "a $&!", end: 5 }, "plain: $ is a dollar");
+  assert.equal(replaceAt("a dog", searchPattern("cat").pattern, 2, "x"), null, "no longer there");
+  assert.deepEqual(replaceAt("one\ntwo", searchPattern("^two$", { regex: true }).pattern, 4, "2", { regex: true }), { text: "one\n2", end: 5 });
 });

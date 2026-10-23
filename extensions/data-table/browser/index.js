@@ -41,10 +41,12 @@ export default defineModule({
     const editor = ctx.use("editor"), explorer = ctx.use("explorer");
     const isTable = (name) => types.is(name, TYPE);
 
-    const read = (id) => {
+    const fileNode = (id) => {
       const node = workspace.project()?.getProject().nodes[id];
-      return node?.kind === "file" ? (node.content ?? "") : null;
+      return node?.kind === "file" ? node : null;
     };
+    const read = (id) => (fileNode(id) ? (fileNode(id).content ?? "") : null);
+    const nameOf = (id) => fileNode(id)?.name ?? null;
     // The grid's edit, from the text it was made on: the text after (merged), or null (said).
     async function write(id, next, base) {
       const project = workspace.project().getProject();
@@ -105,7 +107,7 @@ export default defineModule({
     const seconds = new WeakMap(); // a group's second preview -> its own grid
     let main = null;
     const make = () => {
-      const grid = createGrid({ write, read, menu });
+      const grid = createGrid({ write, read, nameOf, menu });
       grids.add(grid);
       return grid;
     };

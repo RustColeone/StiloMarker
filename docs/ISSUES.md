@@ -63,6 +63,44 @@ lost while the page is in view count, not one left on purpose).
 
 ## Fixed
 
+### v0.2.42: Find in Files, tables and the extension API, as the review asked
+
+Found by the review before calling a version stable (2026-10-23), in
+v0.2.30-v0.2.37 (not deployed).
+
+- **Find in Files' Replace could work from an old text** (fixed): a file
+  typed in after the search was replaced from the searched text. Replace
+  now works on every file as it is when it asks (not only the results
+  drawn), with the true count, and typing during the question is kept.
+  Undo puts back only files nobody changed since, and only in the
+  workspace it was made in (it could write the same paths in another).
+- Whole words in any script (`\b` knew only ASCII: "café" was found inside
+  "cafés"); `^` and `$` are a line's; an emoji is one character; at most
+  20,000 results, said as "20,000+"; an album is left out of Replace, and
+  said; the find bar's single Replace reads lookbehinds, `^` and `$1` in
+  the whole text.
+- **A table's Undo could take away another person's row** (fixed): it
+  restored the text the edit began on, so a row that came in during the
+  edit went too. It now restores only what the grid changed; a step that
+  no longer fits stays to undo. A cell over lines in a CRLF file no longer
+  rewrites its line breaks when opened and left. The delimiter is guessed
+  past quotes and once per file name; renamed .csv/.tsv, read again; new
+  rows end as the file's lines do (`\r` too); blank lines stay blank as
+  columns change; a last empty row copies as a row; the menu says how many
+  rows or columns it inserts. A deeply nested JSON file no longer
+  overflows the stack when its error is looked for.
+- **The extension API's test missed uses** (fixed): a module's API under
+  another name, destructured, over several lines, the project store in a
+  getter, and the module context destructured all went unread. It reads
+  them now, refuses what it cannot read, and is itself tested with a probe
+  of each kind; members must be in the module's API object.
+- The desktop app's right-click Select All selects the whole of a long
+  file (the page's own Ctrl+A); a second preview draws another file even
+  while focus is inside it.
+- Tests: `editor-search.test.mjs`, `search-files-browser.py`,
+  `data-table.test.mjs`, `data-table-browser.py`, `editor-json.test.mjs`,
+  `extension-api.test.mjs`, `desktop.test.mjs`, `editor-groups-browser.py`.
+
 ### v0.2.41: coming back to a tab leaves a PIN session as it is
 
 Found by the review before calling a version stable (2026-10-23). Came

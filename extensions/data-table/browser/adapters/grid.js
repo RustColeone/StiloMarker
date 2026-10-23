@@ -29,8 +29,8 @@ export function formatNumber(n) {
 }
 
 // write(id, next, base) -> Promise<text after | null> (null: not written, and said)
-// read(id) -> the file's text now (or null)
-export function createGrid({ doc = globalThis.document, write, read, menu }) {
+// read(id) -> the file's text now (or null); nameOf(id) -> its name now (or null)
+export function createGrid({ doc = globalThis.document, write, read, nameOf = () => null, menu }) {
   const root = doc.createElement("div");
   root.className = "datatable";
   root.innerHTML = `
@@ -62,7 +62,7 @@ export function createGrid({ doc = globalThis.document, write, read, menu }) {
   const headerToggle = $(".datatable-header-toggle");
   const statsLine = $(".datatable-stats");
 
-  const memory = new Map(); // file id -> { top, left, sel, header, widths, undo, redo }
+  const memory = new Map(); // file id -> { top, left, sel, header, widths, undo, redo, delimiter: { name, is } }
   let file = null;          // { id, name }
   let state = null;
   let text = null;          // the text the grid shows
@@ -83,8 +83,9 @@ export function createGrid({ doc = globalThis.document, write, read, menu }) {
       memory.set(next.id, state);
       text = null;
     }
+    const renamed = file.name !== next.name;
     file.name = next.name;
-    load(nextText);
+    load(nextText, { renamed });
     scroller.scrollTop = state.top;
     scroller.scrollLeft = state.left;
     draw();
@@ -96,10 +97,14 @@ export function createGrid({ doc = globalThis.document, write, read, menu }) {
     state.left = scroller.scrollLeft;
   }
 
-  function load(nextText) {
-    if (nextText === text) return;
+  // The delimiter is guessed once per file name (a .csv whose first line
+  // gains a comma while typing stays a semicolon table); renamed .csv <-> .tsv,
+  // guessed again.
+  function load(nextText, { renamed = false } = {}) {
+    if (nextText === text && !renamed) return;
     text = nextText ?? "";
-    table = parseTable(text, delimiterFor(file.name, text));
+    if (state.delimiter?.name !== file.name) state.delimiter = { name: file.name, is: delimiterFor(file.name, text) };
+    table = parseTable(text, state.delimiter.is);
     if (state.header === null) state.header = looksLikeHeader(table);
     headerToggle.checked = state.header;
     layout();
@@ -107,12 +112,16 @@ export function createGrid({ doc = globalThis.document, write, read, menu }) {
     stats();
   }
 
-  // Someone else's edit, the source editor's, or one of ours merged: shown as the file is now.
+  // Someone else's edit, the source editor's, or one of ours merged: shown as
+  // the file is now (renamed: read again, perhaps by another delimiter).
   function sync() {
     if (!file) return;
     const now = read(file.id);
-    if (now === null || now === text) return;
-    load(now);
+    const name = nameOf(file.id);
+    const renamed = Boolean(name) && name !== file.name;
+    if (renamed) file.name = name;
+    if (now === null || (now === text && !renamed)) return;
+    load(now, { renamed });
   }
 
   function measure(column) {
@@ -295,23 +304,28 @@ export function createGrid({ doc = globalThis.document, write, read, menu }) {
 
   // The cell's edit, made on the text it began on: written with that text as
   // its base, it lands on the same row even if rows came or went meanwhile.
+  // A text box knows only \n: a cell over lines is compared that way, and
+  // written with the file's own line breaks.
   function commit() {
     if (!editing) return;
     const { row, col, base, table: began } = editing;
     const value = input.value;
     end();
-    if (value !== cell(began, row, col)) apply(setCells(base, began, row, col, [[value]]), base);
+    if (value === cell(began, row, col).replace(/\r\n?/g, "\n")) return;
+    apply(setCells(base, began, row, col, [[began.newline === "\n" ? value : value.replaceAll("\n", began.newline)]]), base);
   }
 
   // A new text: shown at once (when made on what is shown), then written with
-  // the text it came from.
+  // the text it came from. Undo keeps the file as it was just before and as
+  // it is just after (others' typing merged in is not the grid's to undo).
   function apply(next, base = text) {
     if (next === base || !file) return;
     const { id } = file;
     const kept = state;
+    const before = read(id) ?? base;
     if (base === text) load(next);
     void write(id, next, base).then((after) => {
-      if (after !== null) keepStep(kept, base, after);
+      if (after !== null) keepStep(kept, before, after);
       if (file?.id === id) load(read(id) ?? after ?? base);
     });
   }
@@ -326,16 +340,20 @@ export function createGrid({ doc = globalThis.document, write, read, menu }) {
     }
   }
 
-  // Undo puts back what a step changed (in the file as it is now); redo does it again.
+  // Undo puts back what a step changed (in the file as it is now); redo does
+  // it again. A step that no longer fits (the file changed there) stays where
+  // it was, for when it fits again.
   function step(from, to, swap) {
     const entry = state[from].pop();
     if (!entry || !file) return;
     const { id } = file;
     const kept = state;
     const [base, next] = swap ? [entry.after, entry.before] : [entry.before, entry.after];
+    const now = read(id) ?? text;
     if (text === base) load(next);
     void write(id, next, base).then((after) => {
-      if (after !== null) kept[to].push(entry);
+      if (after === null) kept[from].push(entry);
+      else kept[to].push(swap ? { before: after, after: now } : { before: now, after });
       if (file?.id === id) load(read(id) ?? text);
     });
   }
@@ -390,9 +408,10 @@ export function createGrid({ doc = globalThis.document, write, read, menu }) {
     const { count: r } = rowsOfSelection();
     const { count: c } = colsOfSelection();
     const plural = (n, word) => (n === 1 ? word : `${n} ${word}s`);
+    // As many rows (columns) as are selected: the labels say how many.
     menu(event, [
-      ["Insert Row Above", "row-above"], ["Insert Row Below", "row-below"], [`Delete ${plural(r, "Row")}`, "delete-rows"], null,
-      ["Insert Column Left", "col-left"], ["Insert Column Right", "col-right"], [`Delete ${plural(c, "Column")}`, "delete-cols"], null,
+      [`Insert ${plural(r, "Row")} Above`, "row-above"], [`Insert ${plural(r, "Row")} Below`, "row-below"], [`Delete ${plural(r, "Row")}`, "delete-rows"], null,
+      [`Insert ${plural(c, "Column")} Left`, "col-left"], [`Insert ${plural(c, "Column")} Right`, "col-right"], [`Delete ${plural(c, "Column")}`, "delete-cols"], null,
       ["Copy", "copy"], ["Clear", "clear"]
     ], run);
   }
@@ -562,6 +581,7 @@ export function createGrid({ doc = globalThis.document, write, read, menu }) {
     focus: focusInput,
     // For tests and the extension: what is shown.
     selection: () => ({ ...state.sel, editing: Boolean(editing) }),
-    shownText: () => text
+    shownText: () => text,
+    steps: () => ({ undo: state?.undo.length ?? 0, redo: state?.redo.length ?? 0 })
   };
 }

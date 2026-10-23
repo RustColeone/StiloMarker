@@ -440,8 +440,10 @@ valid, it shows what it holds ("an object with 12 keys") and the value
 formatted; not valid, it shows where (line and column) and why.
 
 **Tables** (`.csv`, `.tsv`) open in the table editor, in the preview. A
-`.csv` is split by commas (by semicolons when its first line has only
-those), a `.tsv` by tabs; values in quotes may hold the delimiter, quotes
+`.csv` is split by commas (by semicolons when its first line, outside
+quotes, has only those; decided when the table opens, so typing a comma
+later does not change it), a `.tsv` by tabs (renamed from one to the other,
+the table is read again); values in quotes may hold the delimiter, quotes
 (written twice) and line breaks. In the source, each column has its own
 colour. Create → New Table starts one with three columns.
 
@@ -463,14 +465,17 @@ colour. Create → New Table starts one with three columns.
   to and from other spreadsheets. One value pasted onto a block fills it.
   Delete clears the selected cells.
 - **Rows and columns**: right-click a cell, row number or column letter to
-  insert rows above or below, columns left or right, or delete them; Add Row
-  and Add Column in the bar add one at the end. Drag a column letter's edge
+  insert rows above or below, columns left or right, or delete them (as many
+  as are selected: the menu says how many); Add Row and Add Column in the
+  bar add one at the end. A blank line between rows stays blank. Drag a column letter's edge
   to change its width.
 - **Statistics**: below the table, the numbers in the selection are summed
   up: sum, mean, minimum and maximum, and how many numbers there are. With
   one cell selected, its whole column is summed up (without its header).
 - **Undo**: Ctrl+Z undoes the table editor's edits, Ctrl+Shift+Z (or
-  Ctrl+Y) does them again.
+  Ctrl+Y) does them again. Only what the table editor did is undone, never
+  what someone else typed meanwhile; a step that no longer fits (the file
+  changed there) stays, and is said.
 - An edit changes only the rows it touches in the file; the rest of the file
   stays exactly as it was. Edits merge with what others type at the same
   time; if someone changed the same row in a way your edit no longer fits,
@@ -586,14 +591,18 @@ the other pane or open it there too.
 
 **Find in Files** (Edit → Find in Files, `Ctrl+Shift+F`, or the magnifier
 on the left): search every file of the workspace, with Match case, whole
-word and regular expressions. Results are grouped by file with their line
-numbers; click one to open the file there. Replace All (or a file's own
-Replace) asks first; Undo Replace puts it back.
+word (in any language) and regular expressions (`^` and `$` are a line's
+start and end). Results are grouped by file with their line numbers; click
+one to open the file there. At most 20,000 results are listed ("20,000+").
+Replace All (or a file's own Replace) replaces in every file as it is then,
+not only the results listed, and asks first with the true count; an album
+(a file of parts) is left out, and said. Undo Replace puts it back, in each
+file nobody changed since, in the workspace it was made in.
 
 **Very long files** (thousands of lines, hundreds of KB) type as quickly as
 short ones: only the lines in view are drawn. Everything still works on the
-whole file: Select All, copy, cut, paste and typing over a selection, undo,
-and find. A caret you scrolled far away from comes back into view with the
+whole file: Select All (the desktop app's right-click Select All too), copy,
+cut, paste and typing over a selection, undo, and find. A caret you scrolled far away from comes back into view with the
 next key you press.
 
 ---

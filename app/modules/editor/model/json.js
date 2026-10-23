@@ -40,7 +40,8 @@ export function checkJson(text) {
 }
 
 // Where a text stops being JSON: the offset of the first character that
-// can't be there (its length when it ends too soon).
+// can't be there (its length when it ends too soon). The containers open at a
+// point are a list, not calls, so no nesting is too deep to find it.
 class Stop {
   constructor(at) { this.at = at; }
 }
@@ -64,34 +65,42 @@ export function errorAt(text) {
     }
     i += 1;
   }
-  function value() {
-    space();
-    const char = text[i];
-    if (char === "{" || char === "[") {
-      const close = char === "{" ? "}" : "]";
-      i += 1;
+  const key = () => { space(); if (text[i] !== '"') stop(); string(); expect(":"); };
+  const open = []; // "{" or "[", outermost first
+  try {
+    for (;;) {
+      // A value.
       space();
-      if (text[i] === close) { i += 1; return; }
-      for (;;) {
-        if (char === "{") { space(); if (text[i] !== '"') stop(); string(); expect(":"); }
-        value();
+      const char = text[i];
+      if (char === "{" || char === "[") {
+        i += 1;
         space();
-        if (text[i] === ",") { i += 1; continue; }
-        if (text[i] === close) { i += 1; return; }
+        if (text[i] === (char === "{" ? "}" : "]")) i += 1; // empty: a whole value
+        else {
+          open.push(char);
+          if (char === "{") key();
+          continue;
+        }
+      } else if (char === '"') string();
+      else {
+        LITERAL.lastIndex = i;
+        const match = LITERAL.exec(text);
+        if (!match) stop();
+        i += match[0].length;
+      }
+      // After a value: the next one in its container, or the container closed (a value itself).
+      for (;;) {
+        space();
+        if (!open.length) {
+          if (i < text.length) stop();
+          return -1;
+        }
+        const container = open[open.length - 1];
+        if (text[i] === ",") { i += 1; if (container === "{") key(); break; }
+        if (text[i] === (container === "{" ? "}" : "]")) { i += 1; open.pop(); continue; }
         stop();
       }
     }
-    if (char === '"') { string(); return; }
-    LITERAL.lastIndex = i;
-    const match = LITERAL.exec(text);
-    if (!match) stop();
-    i += match[0].length;
-  }
-  try {
-    value();
-    space();
-    if (i < text.length) stop();
-    return -1;
   } catch (error) {
     if (error instanceof Stop) return error.at;
     throw error;

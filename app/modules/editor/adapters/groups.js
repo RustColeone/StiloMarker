@@ -82,8 +82,11 @@ export function createGroups(app) {
         const body = secondOf(group.id, element);
         body.dataset.shown = "true";
         const target = body.querySelector(".preview-output");
-        // Not drawn again while the user edits inside it (a diagram node's fields).
-        if (!target.contains(document.activeElement) || document.activeElement === target) {
+        // Not drawn again while the user edits inside it (a diagram node's
+        // fields, a table's cell), as the main preview; another file to show is always drawn.
+        const editingInside = target.contains(document.activeElement) && document.activeElement !== target;
+        if (!editingInside || body.dataset.drawn !== file.id) {
+          body.dataset.drawn = file.id;
           const state = app.renderPreviewContent(target, project, file, { secondary: true });
           if (state.shouldTypeset) void app.typesetPreview(state.content, target);
         }
