@@ -5,7 +5,8 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-22 · release `v0.2.29` (deployed with v0.2.28; public checks passed)
+Last updated: 2026-10-23 · release `v0.3.0`, the stable version (v0.2.30–v0.2.42 gone over
+again before calling it so; what that found is fixed in v0.2.39–v0.2.42)
 
 ---
 
@@ -18,7 +19,10 @@ workspace (O7) in v0.2.20, two windows (O1) in v0.2.21, the Agent and Chats
 with the user's own key and no server (O3) in v0.2.22, offline edits merged
 per file (O4) in v0.2.23, typing in a long chapter (O2) in v0.2.24, the app
 as an installed web app (O5) in v0.2.25, the desktop app (O6) in v0.2.26,
-very long files (O2b) in v0.2.28.
+very long files (O2b) in v0.2.28. The review before calling a version
+stable (2026-10-23, of v0.2.30–v0.2.38) found the problems fixed in
+v0.2.39 (paths), v0.2.40 (accounts), v0.2.41 (PIN sessions) and v0.2.42
+(Find in Files, tables, the extension API's test); v0.3.0 is that version.
 
 ## Accepted
 
