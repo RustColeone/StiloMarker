@@ -97,9 +97,14 @@ class Sessions:
         return events
 
     def renew_lease(self, token: str) -> None:
+        """A leased session's heartbeat. Refused when its stream is gone (the
+        browser may not know: a connection that died quietly): nothing reaches
+        it any more, so it drops and joins again, as after any drop."""
         with self.lock:
             self.authorize(token)
             if token in self.leases:
+                if token not in self.subscribers:
+                    raise PermissionError("This session's stream has ended")
                 self.leases[token] = time.monotonic()
 
     def lease_expired(self, token: str) -> bool:

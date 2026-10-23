@@ -199,9 +199,11 @@ export function createConnection({ session, status, mode, events, workspace, she
         return;
       }
       // A PIN or guest session sends nothing typed in its last moment
-      // (docs/ISSUES.md, O8): drops close together are said.
-      shaky = noteDrop(shaky, Date.now());
-      if (shaky.warn) {
+      // (docs/ISSUES.md, A3): drops close together are said. Only a session
+      // lost while the page is in view counts: not one left on purpose, nor
+      // one a hidden tab let go (it stops renewing its lease by design).
+      if (next.lost && doc?.visibilityState !== "hidden") shaky = noteDrop(shaky, Date.now());
+      if (shaky?.warn) {
         shell.toast("The connection to the shared session keeps dropping. Words typed just before a drop may not reach the others: when it is back, check that your last words arrived.", { duration: 10000 });
         log("Shaky connection", `${shaky.drops.length} drops in ${SHAKY_WITHIN / 60000} minutes`);
       }

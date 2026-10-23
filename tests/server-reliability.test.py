@@ -300,6 +300,17 @@ class ReliabilityTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self.broker.get_state(self.token)
 
+    def test_a_lease_without_its_stream_is_refused(self):
+        # The stream died quietly (a phone asleep, a proxy): the browser still
+        # renews, and is told, so it joins again instead of hearing nothing.
+        events = self.broker.subscribe(self.token, leased=True)
+        self.broker.renew_lease(self.token)
+        self.broker.unsubscribe(self.token, expected_queue=events)
+        with self.assertRaisesRegex(PermissionError, 'stream has ended'):
+            self.broker.renew_lease(self.token)
+        self.broker.subscribe(self.token, leased=True)  # a stream again: renewed as before
+        self.broker.renew_lease(self.token)
+
     def test_old_stream_has_no_new_lease_and_replaced_token_closes(self):
         self.broker.subscribe(self.token)
         self.assertFalse(self.broker.session_should_close(self.token))

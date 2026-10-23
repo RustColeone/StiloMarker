@@ -56,11 +56,33 @@ tab joins again. Cloud workspaces merge such typing since v0.2.23.
 
 Accepted (2026-10-22, found as O8): it is a moment's typing, and a cloud
 workspace keeps it. Since a shaky connection makes it more likely, drops
-that come close together are said (v0.2.36).
+that come close together are said (v0.2.36; since v0.2.41 only sessions
+lost while the page is in view count, not one left on purpose).
 
 ---
 
 ## Fixed
+
+### v0.2.41: coming back to a tab leaves a PIN session as it is
+
+Found by the review before calling a version stable (2026-10-23). Came
+with v0.2.34, which is not deployed (the live server runs v0.2.29).
+
+- **A host's tab coming back ended the session for its guests** (fixed):
+  since v0.2.34 a PIN or guest session's resume (the tab shown again, the
+  network back) opened a new stream on the same token. Closing the old one
+  ended the session's presence (others saw it leave and join), and for a
+  session hosted for guests (Collaboration → Host) the server took it as
+  the host leaving and closed the session. Now the resume leaves the stream
+  open and renews the lease at once; a stream that died quietly is found
+  by the server, which refuses a lease without its stream, and the tab
+  then drops and joins again as after any drop.
+- A tab told it is out of date is no longer brought back by a resume.
+- The shaky-connection warning counts only sessions lost while the page is
+  in view: leaving on purpose, or a hidden tab letting its lease go, are no
+  drops.
+- Tests: `collaboration-runtime.test.mjs`, `server-reliability.test.py`,
+  `shaky-connection-browser.py`.
 
 ### v0.2.40: an account loses what it may no longer have (security)
 

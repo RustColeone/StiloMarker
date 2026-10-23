@@ -63,6 +63,7 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
   let reconnectTask = null;
   let leaseTimer = null;
   let reauthInFlight = false;
+  let outOfDate = false;   // upgrade-required: nothing more until the page reloads
 
   const patches = createPatchQueue({
     clock,
@@ -91,9 +92,10 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
     reconnectAttempts = 0;
   }
 
-  function emitStatus(status, detail) {
+  // `lost`: an offline that is a session lost (its stream, its lease), not one left on purpose.
+  function emitStatus(status, detail, { lost = false } = {}) {
     onStatusChange({
-      status, detail, presence,
+      status, detail, presence, lost,
       revision: connection?.revision ?? 0,
       sessionId: connection?.sessionId ?? null,
       displayName: connection?.displayName ?? null,
@@ -132,14 +134,24 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
         scheduleLease();
         return;
       }
-      try {
-        await api.renewSessionLease(connection.serverUrl, token);
-      } catch {
-        if (epoch === generation && connection?.token === token) handleStreamError();
-        return;
-      }
-      if (epoch === generation && connection?.token === token) scheduleLease();
+      if (await renewLease() && epoch === generation && connection?.token === token) scheduleLease();
     }, 20000);
+  }
+
+  // The lease renewed now: true when it was. Refused (the session ended, or
+  // its stream is gone on the server's side though this page never heard),
+  // the session is lost, as when its stream drops.
+  async function renewLease() {
+    const token = connection?.token;
+    const epoch = generation;
+    if (!token || !connection.eventSource) return false;
+    try {
+      await api.renewSessionLease(connection.serverUrl, token);
+      return true;
+    } catch {
+      if (epoch === generation && connection?.token === token) handleStreamError();
+      return false;
+    }
   }
 
   function leaveOnPageHide() {
@@ -147,7 +159,8 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
   }
 
   // A deliberate teardown (left, or opening another session): no reconnect.
-  function disconnect(detail = "Server offline") {
+  // `lost`: the session was lost, not left (a PIN session's stream dropped).
+  function disconnect(detail = "Server offline", { lost = false } = {}) {
     markUnsyncedDirty();
     generation += 1;
     modelGeneration += 1;
@@ -165,12 +178,14 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
     connection?.eventSource?.close();
     connection = null;
     presence = [];
-    emitStatus("offline", detail);
+    outOfDate = false;
+    emitStatus("offline", detail, { lost });
   }
 
   // An out-of-date tab stops everything (no reconnect, no queued sends) until
   // it reloads; main.js turns this status into an update prompt.
   function handleUpgradeRequired(error) {
+    outOfDate = true;
     reconnectCtx = null;
     reconnectTask = null;
     clearReconnect();
@@ -192,7 +207,7 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
     }
     if (!reconnectCtx) {
       // PIN, guest and host sessions cannot reopen; main.js's PIN reconnect takes over.
-      disconnect("Connection to server lost.");
+      disconnect("Connection to server lost.", { lost: true });
       return;
     }
     // Queued patches would go to a dead token; the reconcile sends every changed file.
@@ -224,14 +239,14 @@ export function createRuntime({ getProject, replaceProject, applyOperation, onSt
 
   async function resumeConnection() {
     if (!connection) return false;
+    if (outOfDate) return true; // nothing more until the page reloads (and nothing to join again)
     if (!reconnectCtx) {
-      // A PIN or guest session cannot be opened again, but its stream can: a
-      // fresh one on the same token replaces one that may have died quietly
-      // (what was missed arrives with it). A token the server forgot fails
-      // there, and the session is joined again as after any drop.
-      connection.eventSource?.close();
-      connection.eventSource = null;
-      attachEventStream(connection.serverUrl);
+      // A PIN or guest session cannot be opened again, and its stream is left
+      // open: closing it ends the session's presence for the server, and a
+      // host's ends the session for its guests. Its lease is renewed now
+      // instead: refused (the session ended, or its stream died quietly), the
+      // session is lost and joined again as after any drop.
+      void renewLease();
       return true;
     }
     if (!reconnecting) handleStreamError();

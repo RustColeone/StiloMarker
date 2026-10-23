@@ -1,9 +1,14 @@
-"""Browser regression: a shaky connection is said (v0.2.36).
+"""Browser regression: a shaky connection is said (v0.2.36, v0.2.41).
 
 A tab in a PIN session whose stream drops once rejoins quietly; when it
 drops again soon after, the tab says the connection keeps dropping and that
 words typed just before a drop may not reach the others (docs/ISSUES.md,
-O8, accepted). No page errors.
+A3). Only a session lost while the page is in view counts: leaving on
+purpose does not, nor a drop while the tab is hidden. Coming back to the
+tab leaves the session's stream open (closing it would end the session for
+the server: its presence, and a host's session for its guests) and renews
+its lease; a lease the server refuses (the stream gone on its side) is a
+drop, rejoined. No page errors.
 
 Isolated: APIs are mocked (the event stream is a stand-in the test breaks),
 and static files come from this checkout.
@@ -20,6 +25,8 @@ PROJECT = {'id': 'shared', 'name': 'Shared', 'rootId': 'root', 'activeFileId': '
     'root': {'id': 'root', 'kind': 'folder', 'name': 'Shared', 'children': ['notes'], 'expanded': True},
     'notes': {'id': 'notes', 'kind': 'file', 'parentId': 'root', 'name': 'notes.md', 'content': 'Shared text.', 'dirty': False}}}
 STREAMS = 'window.__streams = []; window.EventSource = class { constructor(url) { this.url = url; window.__streams.push(this); } close() { this.closed = true; } };'
+# The page's visibility, set by the test (hidden, then shown again).
+VISIBILITY = 'window.__shown = true; Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (window.__shown ? "visible" : "hidden") });'
 
 
 async def main():
@@ -32,7 +39,8 @@ async def main():
         errors = []
         page.on('pageerror', lambda error: errors.append(str(error)))
         settings = {'serverUrl': BASE, 'serverPin': '4826', 'displayName': 'Ben', 'autoReconnect': True}
-        await page.add_init_script(STREAMS + 'localStorage.setItem("mdnotes.settings.v1", ' + json.dumps(json.dumps(settings)) + ');')
+        await page.add_init_script(STREAMS + VISIBILITY + 'localStorage.setItem("mdnotes.settings.v1", ' + json.dumps(json.dumps(settings)) + ');')
+        server = {'joins': 0, 'leases': 0, 'refuse_lease': False}
 
         async def route_request(route):
             parsed = urlparse(route.request.url)
@@ -40,15 +48,24 @@ async def main():
                 await route.continue_(); return
             path = parsed.path
             if path.startswith('/api/'):
+                status = 200
                 if path == '/api/ping':
                     body = {'message': 'pong', 'appVersion': '0.2.36', 'minSyncVersion': 117, 'accounts': False}
                 elif path == '/api/session/connect':
-                    body = {'token': 'pin', 'clientId': 'ben', 'sessionId': 'default', 'role': 'client', 'revision': 3}
+                    server['joins'] += 1
+                    body = {'token': f'pin-{server["joins"]}', 'clientId': 'ben', 'sessionId': 'default', 'role': 'client', 'revision': 3}
                 elif path == '/api/session/state' and route.request.method == 'GET':
                     body = {'project': PROJECT, 'revision': 3, 'presence': []}
+                elif path == '/api/session/lease':
+                    server['leases'] += 1
+                    if server['refuse_lease']:
+                        server['refuse_lease'] = False
+                        status, body = 403, {'message': "This session's stream has ended"}
+                    else:
+                        body = {'message': 'session active'}
                 else:
                     body = {'revision': 3, 'message': 'ok'}
-                await route.fulfill(status=200, content_type='application/json', body=json.dumps(body)); return
+                await route.fulfill(status=status, content_type='application/json', body=json.dumps(body)); return
             file = ROOT / (path.lstrip('/') or 'index.html')
             if file.is_file():
                 body = file.read_bytes()
@@ -66,12 +83,50 @@ async def main():
         toasts = lambda: page.evaluate('[...document.querySelectorAll(".toast, .app-toast, [role=status]")].map((t) => t.textContent).join(" | ")')
         checks = []
 
-        # One drop: it rejoins by itself, quietly.
-        await page.evaluate('window.__streams.at(-1).onerror(new Event("error"))')
-        await page.wait_for_function('window.__t.sync.status.status !== "connected"')
-        await page.wait_for_function(connected, timeout=15000)
+        async def joined_again(before):
+            for _ in range(150):
+                if server['joins'] > before: break
+                await page.wait_for_timeout(100)
+            assert server['joins'] > before, server
+            await page.wait_for_function(connected, timeout=15000)
+
+        # Left on purpose, twice (the app joins again by itself): not a shaky connection.
+        for _ in range(2):
+            before = server['joins']
+            await page.evaluate('window.__t.sync.session().disconnect()')
+            await joined_again(before)
         assert 'keeps dropping' not in await toasts(), await toasts()
-        checks.append('one drop: rejoined by itself, nothing said')
+        checks.append('left on purpose, twice: nothing said')
+
+        # Back to the tab: the stream stays open (no second join), and the lease is renewed at once.
+        streams, joins, leases = await page.evaluate('window.__streams.length'), server['joins'], server['leases']
+        await page.evaluate('window.__shown = false; document.dispatchEvent(new Event("visibilitychange"))')
+        await page.evaluate('window.__shown = true; document.dispatchEvent(new Event("visibilitychange"))')
+        for _ in range(50):
+            if server['leases'] > leases: break
+            await page.wait_for_timeout(100)
+        assert server['leases'] == leases + 1, (leases, server)
+        state = await page.evaluate('({ streams: window.__streams.length, closed: Boolean(window.__streams.at(-1).closed), status: window.__t.sync.status.status })')
+        assert state == {'streams': streams, 'closed': False, 'status': 'connected'} and server['joins'] == joins, (state, server)
+        checks.append('back to the tab: the stream left open, its lease renewed, no second join')
+
+        # A drop while the tab is hidden (it let its lease go): not counted.
+        await page.evaluate('window.__shown = false; document.dispatchEvent(new Event("visibilitychange"))')
+        before = server['joins']
+        await page.evaluate('window.__streams.at(-1).onerror(new Event("error"))')
+        await page.evaluate('window.__shown = true; document.dispatchEvent(new Event("visibilitychange"))')
+        await joined_again(before)
+        assert 'keeps dropping' not in await toasts(), await toasts()
+        checks.append('a drop while hidden: not counted')
+
+        # A lease refused (the stream gone on the server's side): a drop, rejoined quietly (the first).
+        server['refuse_lease'] = True
+        before = server['joins']
+        await page.evaluate('window.__shown = false; document.dispatchEvent(new Event("visibilitychange"))')
+        await page.evaluate('window.__shown = true; document.dispatchEvent(new Event("visibilitychange"))')
+        await joined_again(before)
+        assert 'keeps dropping' not in await toasts(), await toasts()
+        checks.append('a lease refused: a drop, rejoined; one drop says nothing')
 
         # Another soon after: said.
         await page.evaluate('window.__streams.at(-1).onerror(new Event("error"))')

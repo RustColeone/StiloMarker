@@ -37,11 +37,13 @@ function harness(t) {
   globalThis.fetch = async (url, options = {}) => {
     if (url.includes('/workspaces/open')) return hooks.open ? hooks.open() : json({ token: 'session', clientId: 'me', workspace: 'team/test', revision: server.revision });
     if (url.includes('/session/connect')) { posts.push({ type: 'connect' }); return json({ token: 'pin-token', clientId: 'me', sessionId: 'default', role: 'client', revision: server.revision }); }
+    if (url.includes('/session/host')) { posts.push({ type: 'host' }); return json({ token: 'host-token', clientId: 'me', sessionId: 'temp/host-1', workspace: 'temp/host-1', role: 'master', revision: 0, guestPin: '5150' }); }
+    if (url.includes('/session/state') && options.method !== 'GET' && hooks.hosting) { posts.push({ type: 'snapshot' }); return json({ revision: 1 }); }
     if (url.includes('/session/state') && options.method === 'GET') {
       if (hooks.get) return hooks.get();
       return json(structuredClone(server));
     }
-    if (url.includes('/session/lease')) { leases.push(url); return json({message:'session active'}); }
+    if (url.includes('/session/lease')) { leases.push(url); return hooks.lease ? hooks.lease() : json({message:'session active'}); }
     if (url.includes('/session/leave')) { leaves.push(url); return json({message:'session closed'}); }
     if (url.includes('/operations')) {
       const { operation } = JSON.parse(options.body);
@@ -396,7 +398,7 @@ test('a sleeping tab pauses heartbeats and waits for foreground to reconnect', a
   assert.equal(h.statuses.at(-1).status, 'connected');
 });
 
-test('resuming a PIN session opens a fresh stream on the same token, without joining again', async (t) => {
+test('resuming a PIN session leaves its stream open and renews its lease, without joining again', async (t) => {
   const h = harness(t);
   await h.runtime.connect('https://example.test', '1234', 'me'); await settle();
   assert.equal(h.posts.filter((p) => p.type === 'connect').length, 1);
@@ -404,9 +406,50 @@ test('resuming a PIN session opens a fresh stream on the same token, without joi
   assert.equal(await h.runtime.resumeConnection(), true);
   await settle();
   assert.equal(h.posts.filter((p) => p.type === 'connect').length, 1, 'no second join');
-  assert.equal(h.streams.length, 2);
-  assert.ok(h.streams[0].closed && !h.streams[1].closed, 'the old stream closed, a new one open');
-  assert.match(h.streams[1].url, /pin-token/);
+  assert.equal(h.streams.length, 1);
+  assert.ok(!h.streams[0].closed, 'the stream left open: closing it ends the presence, and a host\'s session for its guests');
+  assert.equal(h.leases.length, 1, 'its lease renewed at once');
+  assert.match(h.leases[0], /pin-token/);
   assert.equal(h.local().nodes.file.content, 'typed, not yet confirmed', 'the typing stays');
   assert.equal(h.statuses.at(-1).status, 'connected');
+});
+
+test('a session hosted for guests stays theirs when the host comes back to the tab', async (t) => {
+  // The server ends a hosted session when its host's stream closes: a resume must not close it.
+  const h = harness(t);
+  h.hooks.hosting = true;
+  assert.equal((await h.runtime.hostForGuests('https://example.test', 'me')).guestPin, '5150');
+  assert.equal(await h.runtime.resumeConnection(), true);
+  await settle();
+  assert.equal(h.streams.length, 1);
+  assert.ok(!h.streams[0].closed, "the host's stream stays open");
+  assert.match(h.leases.at(-1), /host-token/);
+  assert.equal(h.posts.filter((p) => p.type === 'host').length, 1, 'not hosted again');
+});
+
+test('a PIN session whose lease is refused is lost (said so), not left', async (t) => {
+  const h = harness(t);
+  await h.runtime.connect('https://example.test', '1234', 'me'); await settle();
+  h.hooks.lease = () => h.json({ message: "This session's stream has ended" }, 403);
+  await h.runtime.resumeConnection(); await settle();
+  assert.deepEqual([h.statuses.at(-1).status, h.statuses.at(-1).lost], ['offline', true]);
+  assert.equal(h.runtime.isConnected(), false);
+  await h.runtime.connect('https://example.test', '1234', 'me'); await settle();
+  h.runtime.disconnect();
+  assert.deepEqual([h.statuses.at(-1).status, h.statuses.at(-1).lost], ['offline', false], 'left on purpose');
+});
+
+test('an out-of-date tab is not brought back by a resume', async (t) => {
+  const h = harness(t);
+  await h.runtime.connect('https://example.test', '1234', 'me'); await settle();
+  h.hooks.post = () => h.json({ message: 'This app is out of date.', minSyncVersion: 999 }, 426);
+  h.edit('typed');
+  await h.tick(250);
+  assert.equal(h.statuses.at(-1).status, 'upgrade-required');
+  const leases = h.leases.length;
+  assert.equal(await h.runtime.resumeConnection(), true);
+  await settle();
+  assert.equal(h.leases.length, leases, 'nothing sent');
+  assert.equal(h.streams.length, 1);
+  assert.equal(h.statuses.at(-1).status, 'upgrade-required');
 });
