@@ -247,8 +247,7 @@ p {
 
 .brand-cluster,
 .status-item,
-.settings-actions-row,
-.sidebar-panel-header {
+.settings-actions-row {
   display: flex;
   align-items: center;
 }
@@ -1051,7 +1050,11 @@ p {
   .sidebar-panel-caret { transition: none; }
 }
 
+/* Every section's header (Shell draws it: Linked Notes, Session, any page
+   moved here) looks the same; a page adds no header style of its own. */
 .sidebar-panel-header {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
   font-size: 11px;
   text-transform: uppercase;
@@ -4904,18 +4907,10 @@ menu {
 
 /* ── Links sidebar panel ─────────────────────────────────────────────────── */
 
-.links-sidebar-panel {
-  border-top: 1px solid var(--border);
-  padding: 0;
-}
-
-.links-panel-header {
-  padding: 6px 10px 5px;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
-  font-weight: 600;
+/* The list reaches the section's edges (a row's hover fills the width); its
+   text lines up with the header's. */
+.links-sidebar-panel > .sidebar-panel-body {
+  margin: 0 -12px;
 }
 
 .links-section {
@@ -4923,7 +4918,7 @@ menu {
 }
 
 .links-section-label {
-  padding: 4px 10px 3px;
+  padding: 4px 12px 3px;
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -4940,7 +4935,7 @@ menu {
   display: flex;
   align-items: baseline;
   gap: 6px;
-  padding: 3px 10px;
+  padding: 3px 12px;
   font-size: 12px;
   overflow: hidden;
 }

@@ -202,7 +202,7 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
   });
   // The left area's Linked Notes section (Shell's pages), shown while a note is open.
   shell.pages.add({ host: "left", id: "links", order: 10, label: "Linked Notes", title: "Linked notes",
-    body: document.getElementById("links-panel-body"), className: "links-sidebar-panel", headerClass: "links-panel-header", available: false });
+    body: document.getElementById("links-panel-body"), className: "links-sidebar-panel", available: false });
   // Find in Files: a section of the left area too (it can be moved), above Linked Notes.
   addFindInFiles({ app, shell, workspace });
   installFrameParts(app, shell);

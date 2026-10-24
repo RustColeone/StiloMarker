@@ -132,6 +132,11 @@ class FolderStore:
         data = json.loads(manifest.read_text(encoding="utf-8"))
         project = data.get("project") or default_project()
         self.drop_outside(project)
+        # A team project is named by its folder (made or moved there, never
+        # "Workspace", the name of a project made before it had one).
+        project["name"] = self.folder.name
+        if isinstance(project.get("nodes", {}).get(project.get("rootId")), dict):
+            project["nodes"][project["rootId"]]["name"] = self.folder.name
         for node_id, node in project.get("nodes", {}).items():
             if node.get("kind") != "file" or FILE_TYPES.is_image(node.get("name", "")):
                 continue

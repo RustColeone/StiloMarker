@@ -41,7 +41,7 @@ class Cloud:
         if project_dir.exists():
             raise ValueError("A file or folder with that name already exists")
         new_rel = f"{relpath}/{name}" if relpath else name
-        self.directory.adopt(team, new_rel, project_dir, default_project())
+        self.directory.adopt(team, new_rel, project_dir, default_project(name))
         self.identity.claim(identity, project_dir)
         _log("WORKSPACE", f"{identity['username']} created project {team}/{new_rel}")
         return {"team": team, "path": new_rel, "name": name, "kind": "project", "id": f"{team}/{new_rel}",

@@ -5,7 +5,8 @@ drag it onto another area. A
 section moved to a tab host becomes a tab (its toolbar in the host's header);
 a tab moved to the left becomes a section; the area it went to shows it; an
 area left without pages says how to fill it; the moves are kept over a
-reload, and moving back restores the default places. Isolated: every API is
+reload, and moving back restores the default places. Every section's header
+in the left area looks the same (v0.3.5: Linked Notes drew its own). Isolated: every API is
 mocked; the welcome template is this checkout's Template folder.
 """
 import asyncio
@@ -62,6 +63,12 @@ async def main():
         async def places():
             await page.wait_for_timeout(300)
             return await page.evaluate(PLACES)
+
+        # Every section's header looks the same.
+        looks = await page.evaluate('''() => [...document.querySelectorAll('[data-section-host="left"] .sidebar-panel-header')].map((h) => {
+          const style = getComputedStyle(h), section = getComputedStyle(h.closest(".sidebar-panel"));
+          return [style.fontSize, style.letterSpacing, style.fontWeight, style.textTransform, style.color, style.padding, section.paddingLeft, section.paddingTop]; })''')
+        assert len(looks) >= 2 and all(look == looks[0] for look in looks), looks
 
         async def move(target, to):
             await target.click(button='right')
@@ -145,7 +152,7 @@ async def main():
 
         assert not errors, errors
         await browser.close()
-        print(json.dumps({'checks': ['menu on a section', 'section to a tab host', 'its toolbar in the header', 'the area shows',
+        print(json.dumps({'checks': ['every section header alike', 'menu on a section', 'section to a tab host', 'its toolbar in the header', 'the area shows',
                                      'tab to another tab host', 'tab to the left as a section', 'no button in a button',
                                      'an emptied area says so', 'kept over a reload', 'moved back', 'dragged between areas',
                                      'no drop mark left']}))

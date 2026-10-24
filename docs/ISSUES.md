@@ -68,6 +68,18 @@ lost while the page is in view count, not one left on purpose).
 
 ## Fixed
 
+### v0.3.5: a project's tree is headed by its name
+
+Found by the user (2026-10-24). A team project's tree was headed
+"Workspace": a project was made with that name, and the server kept it. A
+project is named by its folder now, when it is made and whenever it opens
+(a project made before keeps its files where they are; only the heading
+changes). The left area's sections were not drawn alike: Linked Notes had
+its own header (smaller, bolder, darker, indented less); every section's
+header is one style now. Tests: `cloud.test.py` (a project made, and one
+from before, named by its folder), `area-pages-browser.py` (every header
+alike; both fail before).
+
 ### v0.3.4: the tab strips
 
 Found by the user (2026-10-24). The tab in use was the darker one in a dark

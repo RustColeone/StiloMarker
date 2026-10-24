@@ -7,9 +7,24 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
 import mdnotes_server as server  # noqa: E402
+from stilo.modules.workspace import FolderStore, default_project  # noqa: E402
 
 USERS = [{"username": "amy", "password": "pw", "teams": ["red"]}, {"username": "ben", "password": "pw", "teams": ["red"]}]
 PNG = b"\x89PNG\r\n\x1a\nimage"
+
+
+class Names(unittest.TestCase):
+    """A team project is named by its folder: made there, or opened from a
+    manifest written when every project was called "Workspace"."""
+
+    def test_a_project_is_named_by_its_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "team_red" / "Novel"
+            FolderStore(folder).save(default_project(), 1, None)  # the name a project once had
+            manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["project"]["name"], "Workspace")
+            project, _ = FolderStore(folder).load()
+            self.assertEqual((project["name"], project["nodes"][project["rootId"]]["name"]), ("Novel", "Novel"))
 
 
 class Routes(unittest.TestCase):
@@ -46,6 +61,8 @@ class Routes(unittest.TestCase):
         amy, ben = self.login("amy"), self.login("ben")
         status, made = self.call("POST", f"/api/workspaces/create?token={amy}", {"team": "red", "path": "", "name": "Novel"})
         self.assertEqual((status, made["path"], made["kind"], made["createdBy"]), (200, "Novel", "project", "amy"))
+        manifest = json.loads((Path(self.tmp.name) / "data" / "team_red" / "Novel" / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["project"]["name"], "Novel", "named by its folder when made, not Workspace")
         self.assertEqual(self.call("POST", f"/api/workspaces/create?token={amy}", {"team": "red", "path": "", "name": "Novel"}),
                          (400, {"message": "A file or folder with that name already exists"}))
         self.assertEqual(self.call("POST", f"/api/workspaces/create?token={amy}", {"team": "red", "path": "Novel", "name": "Inner"}),
