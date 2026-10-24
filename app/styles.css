@@ -245,6 +245,20 @@ p {
   z-index: 30;
 }
 
+/* The desktop app's window has no title bar of the system's: the top bar is
+   it (dragged, it moves the window; whatever is pressed in it is not a
+   handle), and the system's window buttons are drawn over its end (a Mac's
+   over its start): env(titlebar-area-*) is the room they leave. */
+:root[data-window-frame="overlay"] .topbar {
+  -webkit-app-region: drag;
+  padding-left: max(10px, env(titlebar-area-x, 0px));
+  padding-right: max(10px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
+}
+
+:root[data-window-frame="overlay"] .topbar :is(button, a, input, select, .menu-popover, .mobile-file-list) {
+  -webkit-app-region: no-drag;
+}
+
 .brand-cluster,
 .status-item,
 .settings-actions-row {

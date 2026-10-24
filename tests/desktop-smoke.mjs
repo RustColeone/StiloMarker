@@ -101,6 +101,15 @@ async function first(win) {
   await page(contents, 'window.__ui.shell.settings.change({ autoSave: false }, "test");');
   await contents.insertText(" Unsaved words.");
   await until(contents, "window.__ui.controller.getActiveFile().dirty", "an unsaved change");
+  // One bar: no title bar of the system's; the top bar is the window's (a
+  // handle, its controls not), the system's buttons over its end, room kept for them.
+  found.frame = await page(contents, `const bar = document.querySelector(".topbar"), region = (e) => getComputedStyle(e).getPropertyValue("-webkit-app-region");
+    return { overlay: navigator.windowControlsOverlay?.visible ?? null, marked: document.documentElement.dataset.windowFrame,
+      bar: region(bar), menu: region(document.querySelector(".menu-trigger")), toggle: region(document.querySelector("#right-panel-toggle")),
+      room: Math.round(parseFloat(getComputedStyle(bar).paddingRight)), top: Math.round(bar.getBoundingClientRect().top) };`);
+  // The dark theme: the buttons take its bar's colours (kept: desktop-browser.py reads window.json).
+  await page(contents, 'window.__ui.shell.settings.change({ theme: "dark" }, "test");');
+  await pause(500);
   // The window's zoom: Ctrl+= twice and Ctrl+- (the page never gets them: no
   // text typed), then Ctrl+wheel; the status bar says it; kept for the next start.
   found.zoomAtStart = [contents.getZoomFactor(), await zoomShown(contents)];
@@ -186,6 +195,10 @@ async function serve(win) {
   contents.sendInputEvent({ type: "keyDown", keyCode: "End", modifiers: ["control"] });
   contents.sendInputEvent({ type: "keyUp", keyCode: "End", modifiers: ["control"] });
   await pause(300);
+  // Where the focus is, and what is under the line clicked (for a failure's report: once, typing here never landed).
+  found.focusBeforeTyping = await page(contents, `const e = document.activeElement; const line = document.querySelector("#editor-content .editor-line:last-child")?.getBoundingClientRect();
+    return [e?.id, e?.className, document.querySelector("#settings-dialog")?.open, line && [Math.round(line.top), Math.round(line.bottom)], innerHeight,
+      document.elementFromPoint(line ? line.left + line.width / 2 : 0, line ? line.top + line.height / 2 : 0)?.className];`);
   await contents.insertText(" Shared from the desktop.");
   await until(contents, 'window.__ui.controller.getActiveFile().content.endsWith("The end. Shared from the desktop.")', "typed", 30);
   process.stdout.write(`SERVING ${JSON.stringify(found.server)}\n`); // desktop-browser.py joins it as someone else now

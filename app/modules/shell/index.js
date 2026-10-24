@@ -87,7 +87,7 @@ import { addMaintenanceCommands, announceCleared, clearAppStorage, clearedAt, fo
 import { createRender } from "./adapters/render.js";
 import { createFrame } from "./adapters/frame/index.js";
 import { registerOfflineShell, takeUpdate, updateWaiting, upgradeApp } from "./adapters/offline.js";
-import { addZoom, desktopBridge, watchReleases } from "./adapters/desktop.js";
+import { addZoom, desktopBridge, joinTitleBar, watchReleases } from "./adapters/desktop.js";
 import { APP_VERSION } from "./model/version.js";
 import { createLogPanel, flash } from "./adapters/log-panel.js";
 import { createCommandLine, listCommands } from "./adapters/command-line.js";
@@ -266,6 +266,8 @@ export default defineModule({
       action: () => void (desktop ? desktop.openUpdate() : reload.reloadWindow()) }) : null;
     // In the desktop build, the window's zoom: View's Zoom In / Out / Reset, the status bar's item.
     if (desktop?.zoom && globalThis.document) addZoom({ zoom: desktop.zoom, commands, statusBar });
+    // And its one bar: the top bar is the window's title bar.
+    if (desktop?.frame && globalThis.document) joinTitleBar({ frame: desktop.frame });
     // Once the app is there: its files kept for offline use (in a page), or the desktop build's releases watched.
     ctx.whenStarted(() => {
       logPanel.log("response", "Debug log initialized", `panel=${settings.debugPanel ? "visible" : "hidden"}`);

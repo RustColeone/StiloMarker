@@ -7,7 +7,9 @@
 // this computer (server.mjs), or another; the choice is kept, so at the next
 // start that server is started again and the app reconnects on its own. The
 // window's zoom (its keys and Ctrl+wheel are the app's: it has no menu with
-// them) is kept too, and told to the page.
+// them) is kept too, and told to the page. The window has no title bar of the
+// system's: the page's top bar is it, the system's buttons drawn over it in
+// the colours the page tells.
 // main.mjs starts it; tests/desktop-smoke.mjs starts it with stand-ins for
 // the native dialog and the system's browser.
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, session, shell } from "electron";
@@ -16,7 +18,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { contextMenuTemplate } from "./context-menu.mjs";
-import { FEED, ORIGIN, SCHEME, keptZoom, linkAction, noServer, route, updateFrom, zoomKey, zoomStep } from "./policy.mjs";
+import { DEFAULT_FRAME, FEED, ORIGIN, SCHEME, frameLook, keptZoom, linkAction, noServer, overlayOf, route, updateFrom, zoomKey, zoomStep } from "./policy.mjs";
 import { createLocalServer } from "./server.mjs";
 import { forwardHeaders, forwardTarget, forwardUrl, serverChoice } from "./server-policy.mjs";
 
@@ -82,9 +84,14 @@ async function checkForUpdate(feed, version) {
   }
 }
 
-function openWindow({ root, ask, openExternal, zoom }) {
+function openWindow({ root, ask, openExternal, zoom, look }) {
+  const mac = process.platform === "darwin";
   const win = new BrowserWindow({ width: 1280, height: 860, minWidth: 640, minHeight: 420, show: false, backgroundColor: "#0f172a",
     title: "Stilo Marker", icon: join(root, "assets/icons/icon-512.png"), autoHideMenuBar: true,
+    // One bar: the page's top bar is the title bar, the system's window
+    // buttons drawn over its end (a Mac's over its start, in their own colours).
+    titleBarStyle: "hidden", titleBarOverlay: mac ? true : overlayOf(look, zoom.factor()),
+    ...(mac ? { trafficLightPosition: { x: 14, y: 14 } } : {}),
     webPreferences: { preload: join(HERE, "preload.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: true } });
   win.once("ready-to-show", () => win.show());
   const contents = win.webContents;
@@ -136,7 +143,7 @@ function openWindow({ root, ask, openExternal, zoom }) {
 }
 
 // What the app keeps in its folder: the desktop settings (the server
-// choice), the window's (its zoom).
+// choice), the window's (its zoom, its title bar's look).
 async function readKept(file, what) {
   try {
     return JSON.parse(await readFile(file, "utf8"));
@@ -184,20 +191,34 @@ export function start({ root = webRoot(), server = serverRoot(), userData = null
     tell();
     return serverState();
   }
-  // The window's zoom: a step from where it is, applied, told to the page, kept.
+  // The window's zoom and its title bar's look, kept for the next start.
   const windowFile = () => join(app.getPath("userData"), "window.json");
   let zoomFactor = 1;
+  let look = DEFAULT_FRAME;
+  const keepWindow = () => void writeFile(windowFile(), `${JSON.stringify({ zoom: zoomFactor, frame: look })}\n`)
+    .catch((error) => console.warn("Could not keep the window's settings:", error.message));
+  // The system's buttons over the bar, as the page and the zoom say (a Mac's keep their own).
+  const drawButtons = () => {
+    if (process.platform === "darwin" || !win || win.isDestroyed()) return;
+    try {
+      win.setTitleBarOverlay(overlayOf(look, zoomFactor));
+    } catch (error) {
+      console.warn("Could not colour the window's buttons:", error.message);
+    }
+  };
+  // The zoom: a step from where it is, applied, told to the page, kept.
   const zoom = {
     factor: () => zoomFactor,
     step(direction) {
       const next = zoomStep(zoomFactor, direction);
       if (next !== zoomFactor) {
         zoomFactor = next;
-        void writeFile(windowFile(), `${JSON.stringify({ zoom: zoomFactor })}\n`).catch((error) => console.warn("Could not keep the zoom:", error.message));
+        keepWindow();
       }
       if (win && !win.isDestroyed()) {
         win.webContents.setZoomFactor(zoomFactor);
         win.webContents.send("stilo:zoom-changed", zoomFactor);
+        drawButtons();
       }
       return zoomFactor;
     }
@@ -240,11 +261,24 @@ export function start({ root = webRoot(), server = serverRoot(), userData = null
     // The window's zoom: what it is, and a step ("in", "out", "reset").
     ipcMain.handle("stilo:zoom", (event) => (fromApp(event) ? zoomFactor : null));
     ipcMain.handle("stilo:zoom-step", (event, direction) => (fromApp(event) && ["in", "out", "reset"].includes(direction) ? zoom.step(direction) : null));
+    // The top bar's colours and height (the theme's): the window's buttons drawn in them.
+    ipcMain.handle("stilo:frame", (event, next) => {
+      const valid = fromApp(event) ? frameLook(next) : null;
+      if (!valid) return null;
+      if (JSON.stringify(valid) !== JSON.stringify(look)) {
+        look = valid;
+        keepWindow();
+      }
+      drawButtons();
+      return true;
+    });
     // The app draws its own menus; macOS needs its application and Edit menus (copy and paste).
     Menu.setApplicationMenu(process.platform === "darwin"
       ? Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, { role: "windowMenu" }]) : null);
-    zoomFactor = keptZoom((await readKept(windowFile(), "window's settings")).zoom);
-    win = openWindow({ root, ask, openExternal, zoom });
+    const keptWindow = await readKept(windowFile(), "window's settings");
+    zoomFactor = keptZoom(keptWindow.zoom);
+    look = frameLook(keptWindow.frame) ?? DEFAULT_FRAME;
+    win = openWindow({ root, ask, openExternal, zoom, look });
     onWindow(win);
     // The kept choice: the server this app runs is started again.
     void readKept(settingsFile(), "desktop settings").then((kept) => apply(kept));

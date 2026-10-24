@@ -7,8 +7,9 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { FEED, ORIGIN, WEB_ENTRIES, ZOOM_STEPS, isNewer, keptZoom, linkAction, noServer, route, updateFrom, zoomKey, zoomStep } from "../desktop/policy.mjs";
-import { addZoom, desktopBridge, watchReleases } from "../app/modules/shell/adapters/desktop.js";
+import { DEFAULT_FRAME, FEED, ORIGIN, WEB_ENTRIES, ZOOM_STEPS, frameLook, isNewer, keptZoom, linkAction, noServer, overlayOf, route, updateFrom, zoomKey,
+  zoomStep } from "../desktop/policy.mjs";
+import { addZoom, desktopBridge, hexColor, watchReleases } from "../app/modules/shell/adapters/desktop.js";
 import { contextMenuTemplate } from "../desktop/context-menu.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -94,7 +95,7 @@ test("desktop: the build carries the app's files and the server's code, never it
 test("desktop: the page gets only the bridge's calls, in an isolated, sandboxed window", () => {
   const preload = readFileSync(join(ROOT, "desktop/preload.cjs"), "utf8");
   assert.deepEqual([...preload.matchAll(/ipcRenderer\.invoke\("([^"]+)"/g)].map((m) => m[1]),
-    ["stilo:version", "stilo:check-update", "stilo:open-update", "stilo:zoom", "stilo:zoom-step", "stilo:server-state", "stilo:server-choose",
+    ["stilo:version", "stilo:check-update", "stilo:open-update", "stilo:zoom", "stilo:zoom-step", "stilo:frame", "stilo:server-state", "stilo:server-choose",
       "stilo:server-first-admin"]);
   assert.deepEqual([...preload.matchAll(/ipcRenderer\.on\("([^"]+)"/g)].map((m) => m[1]), ["stilo:zoom-changed", "stilo:server-changed"]);
   const main = readFileSync(join(ROOT, "desktop/app.mjs"), "utf8");
@@ -170,6 +171,20 @@ test("desktop: the page's zoom: View's three commands, and the status bar while 
   await new Promise((resolve) => { setTimeout(resolve, 0); });
   assert.equal(item.state.hidden, true, "a click: 100% again");
   assert.equal(factor, 1);
+});
+
+test("desktop: the title bar is the page's: the buttons drawn in the colours and height it tells", () => {
+  assert.deepEqual(frameLook({ color: "#252526", symbolColor: "#CCCCCC", height: 42 }), { color: "#252526", symbolColor: "#cccccc", height: 42 });
+  for (const look of [null, "dark", {}, { color: "red", symbolColor: "#cccccc", height: 42 }, { color: "#252526", symbolColor: "#ccc", height: 42 },
+    { color: "#252526", symbolColor: "#cccccc", height: 10 }, { color: "#252526", symbolColor: "#cccccc", height: 42.5 },
+    { color: "#252526;x", symbolColor: "#cccccc", height: 42 }]) {
+    assert.equal(frameLook(look), null, JSON.stringify(look));
+  }
+  assert.deepEqual(frameLook(DEFAULT_FRAME), { ...DEFAULT_FRAME });
+  assert.deepEqual(overlayOf({ color: "#ffffff", symbolColor: "#1f1f1f", height: 42 }, 1.25), { color: "#ffffff", symbolColor: "#1f1f1f", height: 53 },
+    "the zoom draws the bar taller in the window's pixels");
+  assert.deepEqual(["rgb(37, 37, 38)", "rgba(255, 255, 255, 0.5)", "rgb(0,0,0)", "#fff", "", null].map(hexColor),
+    ["#252526", "#ffffff", "#000000", null, null, null]);
 });
 
 test("desktop: the right-click menu: a misspelled word's suggestions, then cut, copy and paste", () => {

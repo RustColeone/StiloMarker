@@ -7,8 +7,11 @@ It loads from app://stilo/; the server's addresses answer at once as offline
 Mermaid diagram draw from the app's own libraries; a link and a navigation
 away open in the system's browser (a stand-in) and the window stays; a newer
 release (a feed of the test's own) shows "Update available", whose item opens
-its page; typing is saved; the zoom's keys (Ctrl+= and Ctrl+-, which never
-reach the page) and Ctrl+wheel zoom the window, said in the status bar;
+its page; typing is saved; the window has no title bar of the system's: the
+top bar is it (a handle, its buttons and menus not, room kept for the
+system's buttons drawn over it, in the theme's colours, kept); the zoom's
+keys (Ctrl+= and Ctrl+-, which never reach the page) and Ctrl+wheel zoom
+the window, said in the status bar;
 closing with unsaved work asks (Stay keeps the window, Leave closes it).
 Reopened, the work and the zoom are still there (one origin at every start;
 the zoom kept by the app), Ctrl+0 is 100% again, and a second start hands
@@ -106,6 +109,12 @@ try:
     assert first["stillHere"] == "app://stilo/", first
     assert first["updateItem"][0] == "Update available" and "9.9.9" in first["updateItem"][1], first["updateItem"]
     assert first["stayed"] and first["askedAfterStay"] == 1 and first["asked"] == 2, first
+    # One bar: the top bar is the title bar; the dark theme's colours kept for the buttons (and the zoom).
+    frame = first["frame"]
+    assert frame["overlay"] is True and frame["marked"] == "overlay" and frame["top"] == 0, frame
+    assert (frame["bar"], frame["menu"], frame["toggle"]) == ("drag", "no-drag", "no-drag") and frame["room"] > 40, frame
+    kept = json.loads((PROFILE / "window.json").read_text())
+    assert kept == {"zoom": 1.25, "frame": {"color": "#252526", "symbolColor": "#cccccc", "height": 42}}, kept
     # The zoom: 100% and unsaid at first; Ctrl+= twice and Ctrl+- (no key reached the page), then Ctrl+wheel.
     assert first["zoomAtStart"] == [1, None], first
     assert first["zoomKeys"] == [1.1, "110%", True], first
@@ -239,6 +248,7 @@ print(json.dumps({"checks": ["loads from app://stilo/; no server, answered at on
                              "a formula and a Mermaid diagram from the app's own libraries",
                              "a link and a navigation away open in the system's browser; the window stays",
                              "a newer release: Update available, its item opens the release's page",
+                             "one bar: the top bar is the title bar (a handle, its controls not), the system's buttons over it in the theme's colours",
                              "the zoom's keys (not the page's) and Ctrl+wheel zoom the window, said in the status bar",
                              "closing with unsaved work asks: Stay keeps the window, Leave closes it",
                              "reopened: the work and the zoom are there, Ctrl+0 resets it; a second start hands over and quits",

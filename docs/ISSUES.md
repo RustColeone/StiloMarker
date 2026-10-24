@@ -78,6 +78,20 @@ lost while the page is in view count, not one left on purpose).
 
 ## Fixed
 
+### v0.3.9: the desktop app has one bar
+
+Asked for by the user (2026-10-24): the desktop window had the system's
+title bar above the app's own top bar, two bars doing one job. The window
+has no title bar of the system's now: the top bar is it. Dragging it moves
+the window (its menus and buttons stay buttons); the system's window
+buttons are drawn
+over its right end (on a Mac, its left), in the theme's colours, with room
+kept for them. The look is kept for the next start (`window.json`), so the
+buttons start in the right colours. Tests: `desktop.test.mjs` (what the
+page may tell, the buttons' height with the zoom, the colours read),
+`desktop-browser.py` (the bar a handle and its controls not, the room, the
+dark theme's colours kept).
+
 ### v0.3.8: the desktop app zooms
 
 Asked for by the user (2026-10-24): the desktop app had no way to zoom. The

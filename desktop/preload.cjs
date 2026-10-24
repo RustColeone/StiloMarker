@@ -2,8 +2,8 @@
 // Cloud's adapters/desktop-server.js): its release, whether a newer one is
 // out, and to open that one's download page; the server it connects to (none,
 // one it runs on this computer, another), and that server's state as it
-// changes, and its first admin; the window's zoom. Nothing else of Electron or
-// Node reaches the page.
+// changes, and its first admin; the window's zoom, and its title bar's look.
+// Nothing else of Electron or Node reaches the page.
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("stiloDesktop", Object.freeze({
@@ -20,6 +20,11 @@ contextBridge.exposeInMainWorld("stiloDesktop", Object.freeze({
       ipcRenderer.on("stilo:zoom-changed", relay);
       return () => ipcRenderer.removeListener("stilo:zoom-changed", relay);
     }
+  }),
+  // The top bar is the window's title bar: its colours and height
+  // ({ color, symbolColor, height }), for the system's buttons drawn over it.
+  frame: Object.freeze({
+    set: (look) => ipcRenderer.invoke("stilo:frame", look)
   }),
   server: Object.freeze({
     state: () => ipcRenderer.invoke("stilo:server-state"),

@@ -1,7 +1,7 @@
 // The desktop build's rules, apart from Electron so they are tested in Node
 // (tests/desktop.test.mjs): what the window may load, what answers the
 // server's addresses when there is no server, where a link goes, the window's
-// zoom, and whether a release is newer. (A file's type is Electron's to say: app.mjs.)
+// zoom and its title bar, and whether a release is newer. (A file's type is Electron's to say: app.mjs.)
 import { join, resolve, sep } from "node:path";
 
 // One fixed origin, so this browser storage (IndexedDB, localStorage) is the
@@ -80,6 +80,23 @@ export function zoomKey(input, mac = false) {
   if (key === "0" || code === "Digit0" || code === "Numpad0") return "reset";
   return null;
 }
+
+// The window has no title bar of the system's: the page's top bar is it, and
+// the system's window buttons are drawn over it in the colours and height the
+// page tells (CSS pixels). A look from the page -> { color, symbolColor,
+// height } or null; at first, the Light theme's bar.
+export const DEFAULT_FRAME = Object.freeze({ color: "#ffffff", symbolColor: "#1f1f1f", height: 42 });
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+export function frameLook(look) {
+  if (!look || typeof look !== "object") return null;
+  const { color, symbolColor, height } = look;
+  if (!HEX_COLOR.test(color) || !HEX_COLOR.test(symbolColor) || !Number.isInteger(height) || height < 24 || height > 120) return null;
+  return { color: color.toLowerCase(), symbolColor: symbolColor.toLowerCase(), height };
+}
+
+// The buttons' overlay: the bar's height in the window's pixels (the zoom
+// draws the page larger, the window's buttons stay as they are).
+export const overlayOf = (look, zoom = 1) => ({ color: look.color, symbolColor: look.symbolColor, height: Math.round(look.height * zoom) });
 
 // "v1.2.3" or "1.2.3" -> [1, 2, 3]; anything else (a pre-release) -> null.
 function parse(version) {
