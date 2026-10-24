@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    name: Unit tests + backend self-test
+    name: Node and Python tests
     runs-on: ubuntu-latest
 
     steps:
@@ -23,10 +23,18 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.13"
 
       - name: Run Node.js unit tests
         run: node --test tests/
 
-      - name: Run Python backend self-test
-        run: python3 server/mdnotes_server.py --selftest
+      - name: Release labels and generated copies agree
+        run: |
+          node tools/release-version.mjs --check
+          node tools/protocol-sync.mjs --check
+
+      # Every server suite and the backend end to end over HTTP (the self-test
+      # was mdnotes_server.py --selftest until v0.1.41). The browser suites need
+      # Playwright and a display: they run on the developer's machine.
+      - name: Run the Python suites
+        run: for t in tests/*.test.py tests/backend-selftest.py; do echo "== $t"; python3 -B "$t" || exit 1; done

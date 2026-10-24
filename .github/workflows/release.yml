@@ -1,0 +1,97 @@
+name: Release
+
+# A version tag (v0.3.1) builds the desktop app after the tests pass, on
+# Linux, Windows and macOS, portable only (nothing to install): an AppImage,
+# a portable .exe, the app zipped for Intel and Apple Silicon Macs. Unsigned:
+# Windows and macOS warn on first open. It then makes a DRAFT release with
+# those files and the notes in docs/releases/<tag>.md, published by hand
+# after a look. Run by hand (Actions → Release → Run workflow), it only
+# builds, keeping the files as the run's artifacts: a build tried before a tag.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Release labels agree, and with the tag
+        run: |
+          node tools/release-version.mjs --check
+          node tools/protocol-sync.mjs --check
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="v$(node -p "require('./package.json').version")"
+            [ "$version" = "$GITHUB_REF_NAME" ] || { echo "The tag $GITHUB_REF_NAME is not the app's version $version"; exit 1; }
+            [ -f "docs/releases/$GITHUB_REF_NAME.md" ] || { echo "No notes: docs/releases/$GITHUB_REF_NAME.md"; exit 1; }
+          fi
+      - name: Node tests
+        run: node --test tests/
+      - name: Python suites
+        run: for t in tests/*.test.py tests/backend-selftest.py; do echo "== $t"; python3 -B "$t" || exit 1; done
+
+  build:
+    name: Desktop (${{ matrix.os }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            targets: --linux AppImage --x64
+          - os: windows-latest
+            targets: --win portable --x64
+          - os: macos-latest
+            targets: --mac zip --x64 --arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Electron and electron-builder (pinned in desktop/package.json)
+        working-directory: desktop
+        run: npm install --no-audit --no-fund
+      - name: Build
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npx electron-builder ${{ matrix.targets }} --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          path: |
+            desktop/dist/*.AppImage
+            desktop/dist/*.exe
+            desktop/dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Draft release
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: The draft, with the files and the notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --draft --verify-tag --title "Stilo Marker ${GITHUB_REF_NAME#v}" --notes-file "docs/releases/$GITHUB_REF_NAME.md"

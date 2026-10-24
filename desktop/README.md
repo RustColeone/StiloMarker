@@ -17,7 +17,8 @@ npm start          # the app, from this checkout's files
 ## Build it
 
 ```sh
-npm run dist       # electron-builder: AppImage and .deb (Linux), NSIS (Windows), .dmg (macOS)
+npm run dist       # electron-builder, portable (nothing to install): an AppImage (Linux),
+                   # a portable .exe (Windows), the app zipped (macOS, Intel and Apple Silicon)
 ```
 
 The build carries, beside the program as `stilo/`, a tree shaped like the

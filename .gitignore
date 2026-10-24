@@ -14,6 +14,9 @@ server/stilomarker.env
 # Per-team cloud workspace storage (runtime data)
 data/
 
+# The PIN session's workspace as the server keeps it (runtime data: someone's work).
+server/session-state.json
+
 # The desktop build's tools and output (npm install / npm run dist in desktop/)
 desktop/node_modules/
 desktop/dist/
