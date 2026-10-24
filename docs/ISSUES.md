@@ -78,6 +78,17 @@ lost while the page is in view count, not one left on purpose).
 
 ## Fixed
 
+### v0.3.10: the Agent's status says "Ready" only once it is
+
+Found by a test that failed once (2026-10-24). Settings → Agent said
+"Ready — using your own API key, through this server." while the server was
+still being asked, and two askings close together (the dialog opening, a
+setting changed, a session joined) could finish out of order, the earlier
+answer last. Now the line says "Checking the server…" until the server
+answers, and only the latest asking's answer counts. Tests:
+`models.test.mjs` (both fail before), `agent-here-browser.py` reads the
+line as it sees it.
+
 ### v0.3.9: the desktop app has one bar
 
 Asked for by the user (2026-10-24): the desktop window had the system's

@@ -15,8 +15,8 @@ export function addAgentSettings({ dialog, settings, agent, doc = globalThis.doc
   function drawStatus() {
     const { text, ok } = agent.settingsLine();
     statusLine.textContent = text;
-    statusLine.classList.toggle("is-success", ok);
-    statusLine.classList.toggle("is-error", !ok);
+    statusLine.classList.toggle("is-success", ok === true);
+    statusLine.classList.toggle("is-error", ok === false);
   }
 
   function show() {

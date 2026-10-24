@@ -123,8 +123,9 @@ async def main():
         # Through the server, which can't be reached: said, not "ready".
         await page.evaluate('window.__byok.shell.settingsDialog.open("agent")')
         await page.select_option('#agent-runner-select', 'server')
-        await page.wait_for_function('document.querySelector("#agent-status-line").textContent.includes("unreachable")', timeout=15000)
-        line = await page.locator('#agent-status-line').inner_text()
+        # (Read as it is seen: the app may ask the server again meanwhile, and say "Checking" while it does.)
+        seen = await page.wait_for_function('(() => { const text = document.querySelector("#agent-status-line").textContent; return text.includes("unreachable") && text; })()', timeout=15000)
+        line = await seen.json_value()
         assert 'Directly from this browser' in line, line
 
         # Chats in the same browser-only workspace: a character's reply from the same endpoint.

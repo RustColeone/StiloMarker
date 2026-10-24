@@ -14,7 +14,7 @@
 //   { status, detail, configured, models, modelProviders, selectedModel... },
 //   refresh({ signedIn?, silent }) (signedIn as last told when left out), choose(model), served({ provider, model }), ensureReady({ signedIn }),
 //   ownKeyReady(), requestOverride() (what a request carries with the user's
-//   own key), settingsLine() -> { text, ok }, on(listener).
+//   own key), settingsLine() -> { text, ok } (ok null while the server is asked), on(listener).
 import { defineModule } from "../../kernel/index.js";
 import { runDirectReply } from "./adapters/direct.js";
 import { chosenModel, groupByProvider } from "./model/catalog.js";

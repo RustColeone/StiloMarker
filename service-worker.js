@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v0.3.9";
+const CACHE_NAME = "mdnotes-shell-v0.3.10";
 // The libraries served with the app (vendor/: each in a folder named for its
 // version), kept across the app's versions once used.
 const VENDOR_CACHE = "mdnotes-vendor";

@@ -94,15 +94,17 @@ export function statusWithoutServer(error, { settings }) {
     status: error?.status === 403 ? "restricted" : "offline", detail: error instanceof Error ? error.message : String(error) };
 }
 
-// The line in Settings → Agent: { text, ok }.
+// The line in Settings → Agent: { text, ok } (ok null: neither, yet).
 export function settingsLine(state, settings) {
   if (runsHere(settings)) {
     return trimmed(settings.agentApiUrl) ? { text: "Ready — your own endpoint, called from this browser.", ok: true }
       : { text: "Enter the API URL below to run the agent from this browser.", ok: false };
   }
+  if (settings.agentSource === "own" && !ownKeyReady(settings)) return { text: "Enter your API key below to enable the agent.", ok: false };
+  // Not "ready" before the server has answered.
+  if (state.status === "checking") return { text: "Checking the server…", ok: null };
   if (ownKeyReady(settings) && state.status === "offline") return { text: "Server unreachable — your key goes through it. Choose “Directly from this browser” to work without it.", ok: false };
   if (ownKeyReady(settings)) return { text: "Ready — using your own API key, through this server.", ok: true };
-  if (settings.agentSource === "own") return { text: "Enter your API key below to enable the agent.", ok: false };
   if (state.configured) return { text: `Ready — ${state.provider ?? "server"}${state.model ? " · " + state.model : ""}.`, ok: true };
   if (state.status === "signin") {
     return { text: "Sign in with your account (Settings → Collaboration) to use this server's agent, or switch to “My own API key”.", ok: false };

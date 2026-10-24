@@ -106,4 +106,29 @@ test("the agent's connection: the server's answer, the user's own key, sign-in a
   assert.deepEqual(settingsLine(AGENT_STATUS, here), { text: "Ready — your own endpoint, called from this browser.", ok: true });
   const noUrl = statusWithoutServer(null, { settings: { ...here, agentApiUrl: " " } });
   assert.deepEqual([noUrl.status, noUrl.configured], ["unconfigured", false]);
+  // While the server is asked: not "ready" yet (v0.3.10), neither success nor error; no key is said at once.
+  const checking = { ...AGENT_STATUS, status: "checking" };
+  assert.deepEqual(settingsLine(checking, own), { text: "Checking the server…", ok: null });
+  assert.deepEqual(settingsLine({ ...checking, ...ready, status: "checking" }, server), { text: "Checking the server…", ok: null });
+  assert.equal(settingsLine(checking, { ...own, agentApiKey: "" }).text, "Enter your API key below to enable the agent.");
+});
+
+test("the agent's connection: only the latest asking counts (an earlier answer arriving late is dropped)", async () => {
+  const { createAgentConnection } = await import("../app/modules/models/adapters/agent.js");
+  const { AGENT_STATUS, settingsLine } = await import("../app/modules/models/model/agent-status.js");
+  let value = { ...AGENT_STATUS };
+  const state = { get: () => value, set: (why, patch) => { value = { ...value, ...patch }; }, on: () => () => {} };
+  const settings = { agentSource: "own", agentApiKey: "sk-1", agentRunner: "server", chatModel: "" };
+  const answers = [];
+  const server = { request: () => new Promise((resolve, reject) => { answers.push({ resolve, reject }); }) };
+  const agent = createAgentConnection({ state, server, settings });
+  const first = agent.refresh({ silent: true });
+  const second = agent.refresh({ silent: true });
+  answers[1].reject(new Error("down")); // the latest: the server can't be reached
+  await second;
+  assert.equal(value.status, "offline");
+  answers[0].resolve({}); // the earlier one, late: dropped
+  await first;
+  assert.equal(value.status, "offline", "the late answer did not undo the latest");
+  assert.equal(settingsLine(value, settings).ok, false);
 });

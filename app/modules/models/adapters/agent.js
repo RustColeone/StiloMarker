@@ -10,8 +10,12 @@ export function createAgentConnection({ state, server, settings }) {
   // signedIn: whether someone is signed in (Identity's to say, told by the
   // caller); without it, as the last caller said.
   let lastSignedIn = false;
+  // Only the latest asking counts: an earlier one answering late (the
+  // settings changed meanwhile) is dropped.
+  let asked = 0;
   async function refresh({ signedIn = lastSignedIn, silent = false } = {}) {
     lastSignedIn = signedIn;
+    const mine = ++asked;
     state.set("checking the agent", { status: "checking", ...(silent ? {} : { detail: "Checking chat backend..." }) });
     // Replies run in this browser: there is no server to ask.
     if (runsHere(settings)) {
@@ -20,9 +24,9 @@ export function createAgentConnection({ state, server, settings }) {
     }
     try {
       const answer = await server.request("/api/chat/status", { failure: "Chat status failed." });
-      state.set("the server answered", statusFromServer(answer ?? {}, { settings, signedIn }));
+      if (mine === asked) state.set("the server answered", statusFromServer(answer ?? {}, { settings, signedIn }));
     } catch (error) {
-      state.set("the server did not answer", statusWithoutServer(error, { settings }));
+      if (mine === asked) state.set("the server did not answer", statusWithoutServer(error, { settings }));
     }
     return state.get();
   }
