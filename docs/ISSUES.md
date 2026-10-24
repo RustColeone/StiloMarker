@@ -13,7 +13,17 @@ fixed in v0.2.39–v0.2.42.
 
 ## Open
 
-None. Everything the stability review of 2026-10-21 found (the app as a PWA,
+### O9. The caret can jump to the top after a reconnect
+
+Found by the user (2026-10-24), not yet reproduced: after the connection
+comes back (a shared or cloud workspace), the caret sometimes goes to the
+very start of the file (position 0) instead of staying where it was.
+Suspects to look at first: the open file's text replaced whole when the
+session is joined again or the latest copy is merged in (a replace that
+does not carry the selection over), and a full redraw of the source pane
+after the reconnect. To be looked into after the usability fixes.
+
+Before this: none. Everything the stability review of 2026-10-21 found (the app as a PWA,
 in Electron, with the user's own key and no server; each found by an
 experiment) is fixed: the storage limit (O0) in v0.2.19, a copy per
 workspace (O7) in v0.2.20, two windows (O1) in v0.2.21, the Agent and Chats
