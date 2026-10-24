@@ -1192,3 +1192,34 @@ desktop app's in Electron 44, with its server).
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261023T111131Z-v0.3.0`.
 173/173 data files (taken with the service stopped), every JSON file valid;
 the account file and the environment file as they were.
+
+## Verified release: v0.3.1
+
+Deployed on 2026-10-24: a browser keeps a sign-in, not a password (the
+server keeps its sign-ins in `server/data/sign-ins.json`, fingerprints
+only; a sign-in ends when it signs out, its account gets a new password or
+goes, or after 30 days unused). App version `0.3.1`; sync compatibility
+unchanged at `117`. The service's command line and environment file are
+unchanged; it was down under 4 seconds. Sign-ins from before (kept in
+memory) ended with the restart, one last time; browsers that kept a
+password sign in with it once more and keep a token from then on.
+
+Public checks: ping (`0.3.1`), the service worker's cache label
+`mdnotes-shell-v0.3.1`, the new browser code served, `/api/auth/me`
+refusing an unknown or missing token (403), `/api/auth/logout` answering,
+the sign-ins file and the server's own files refused under any path
+(`server/data/sign-ins.json`, `data/sign-ins.json`, `sign-ins.json`,
+`server/whitelist.json`, `SERVER/stilomarker.env`, the new adapter's
+source answer as the app's page), an unknown session token answered 403,
+`Cache-Control: no-store` on a JSON reply, and a clean journal. A fresh
+browser on the public site (its own welcome workspace, no real data) was
+controlled by `0.3.1`, opened offline, fetched nothing from a CDN, and had
+no page errors.
+
+Validation: 406 Node tests, all 25 Python suites, the browser suites (42 of
+45 in the full run: one rewritten for the new sign-in and passing, two
+timing checks passing alone), the desktop app's in Electron 44.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261024T042233Z-v0.3.1`.
+173/173 data files (taken with the service stopped), every JSON file valid.
+

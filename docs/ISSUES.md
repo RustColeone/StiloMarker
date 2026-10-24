@@ -5,8 +5,8 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-23 · release `v0.3.0`, the stable version (deployed; public checks
-passed). v0.2.30–v0.2.42 were gone over again before calling it so; what that found is
+Last updated: 2026-10-24 · release `v0.3.1` deployed (public checks passed); `v0.3.0` is
+the stable version. v0.2.30–v0.2.42 were gone over again before calling it so; what that found is
 fixed in v0.2.39–v0.2.42.
 
 ---
