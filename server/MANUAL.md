@@ -743,8 +743,19 @@ change is made: here, with `server/accounts.py`, or in the file by hand.
 Account names may not hold invisible characters or look-alike forms, and two
 names that differ only in case are the same name. Team names are folder names
 (letters, numbers, spaces and `_.-`, up to 64), spelled the way the accounts
-already spell them. A sign-in lasts two weeks at most. After five wrong
-passwords for a name, that name waits a minute before the next try. If the
+already spell them. After five wrong passwords for a name, that name waits a
+minute before the next try.
+
+**Staying signed in.** A browser that signed in keeps the sign-in the
+server gave it (a token, never the password) and signs in again by itself
+when the page comes back, also after the server restarts. A sign-in ends
+when you sign out (on the server too), when the account gets a new
+password or is removed, or after 30 days unused (each use keeps it). The
+server keeps its sign-ins in its data folder (`sign-ins.json`, readable by
+its owner only, holding only a fingerprint of each token, so the file
+itself signs no one in). A browser that kept a password before this
+(v0.3.0 and earlier) signs in with it once more, then keeps the token and
+forgets the password. If the
 account file stops reading (a typo made by hand), the accounts it had still
 sign in, but nothing is changed here until the file is fixed.
 

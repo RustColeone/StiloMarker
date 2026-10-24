@@ -3,9 +3,9 @@
   "level": 2,
   "uses": ["transport"],
   "owns": {
-    "names": ["account file", "access file", "account prefs file"],
+    "names": ["account file", "access file", "account prefs file", "sign-ins file"],
     "state": ["account sign-ins"],
-    "routes": ["/api/auth/login", "/api/accounts"],
+    "routes": ["/api/auth/login", "/api/auth/me", "/api/auth/logout", "/api/accounts"],
     "rules": ["who may open a project", "roles", "what each role may do"]
   }
 }

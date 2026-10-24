@@ -2,12 +2,15 @@
 accounts (amy owns a project, ben is in her team).
 
 Checks: a wrong password shows the server's refusal; signing in shows the
-account and its team; a reload signs in again by itself; the access dialog
-reads and saves the project's lists (the server keeps them); ben, not the
-owner, is refused; signing out forgets the password but keeps the username,
-and a reload then stays signed out.
+account and its team, and keeps the server's token, never the password; a
+reload signs in again by itself, also after the server restarted (it keeps
+its sign-ins); the access dialog reads and saves the project's lists (the
+server keeps them); ben, not the owner, is refused; a page from before
+v0.3.1 that kept ben's password signs in with it once and keeps a token
+instead; signing out ends the token on the server, keeps the username, and
+a reload then stays signed out.
 """
-import asyncio, json, os, socket, subprocess, sys, tempfile, time, urllib.request
+import asyncio, json, os, socket, subprocess, sys, tempfile, time, urllib.error, urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
@@ -28,13 +31,21 @@ ACCOUNTS.write_text(json.dumps({"users": [
     {"username": "amy", "password": "pw", "teams": ["red"]},
     {"username": "ben", "password": "pw", "teams": ["red"]}]}))
 env = {**os.environ, "MDNOTES_CHAT_API_KEY": "", "OPENAI_API_KEY": ""}
-SERVER = subprocess.Popen([sys.executable, str(ROOT / "server/mdnotes_server.py"), "--host", "127.0.0.1", "--port", str(PORT),
-                           "--data-dir", str(Path(TMP.name) / "data"), "--whitelist", str(ACCOUNTS),
-                           "--state-file", str(Path(TMP.name) / "state.json")],
-                          cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-for _ in range(100):
-    try: urllib.request.urlopen(f"http://127.0.0.1:{PORT}/api/ping", timeout=1); break
-    except Exception: time.sleep(0.1)
+
+
+def start_server():
+    """The server, (re)started on the same port, data and accounts."""
+    process = subprocess.Popen([sys.executable, str(ROOT / "server/mdnotes_server.py"), "--host", "127.0.0.1", "--port", str(PORT),
+                                "--data-dir", str(Path(TMP.name) / "data"), "--whitelist", str(ACCOUNTS),
+                                "--state-file", str(Path(TMP.name) / "state.json")],
+                               cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for _ in range(100):
+        try: urllib.request.urlopen(f"http://127.0.0.1:{PORT}/api/ping", timeout=1); break
+        except Exception: time.sleep(0.1)
+    return process
+
+
+SERVER = start_server()
 BASE = f"http://127.0.0.1:{PORT}"
 
 
@@ -104,14 +115,25 @@ async def main():
         assert await page.is_visible("#account-logout-button")
         assert not await page.is_visible("#account-login-fields")
         saved = await stored(page)
-        assert saved["accountUsername"] == "amy" and saved["accountPassword"] == "pw" and list(saved["accountSuccess"].values()) == ["amy"], saved
-        ok("signing in shows the account and its team, and stores the sign-in")
+        assert saved["accountUsername"] == "amy" and saved["accountToken"] and saved.get("accountPassword", "") == "" and list(saved["accountSuccess"].values()) == ["amy"], saved
+        token = saved["accountToken"]
+        ok("signing in shows the account and its team, and keeps the server's token, never the password")
 
         # The page loaded (not "network idle": a slow request elsewhere once held that
         # past 30 s); the next line waits for what matters, the account signed in again.
         await page.reload(wait_until="domcontentloaded")
         await page.wait_for_function("Boolean(window.__id) && window.__id.identity.account()?.username === 'amy'", timeout=15000)
         ok("a reload signs in again by itself")
+
+        # The server restarted (a deploy): the next reload is signed in all the same, with the same token.
+        global SERVER
+        SERVER.terminate(); SERVER.wait(timeout=10)
+        SERVER = start_server()
+        await page.reload(wait_until="domcontentloaded")
+        await page.wait_for_function("Boolean(window.__id) && window.__id.identity.account()?.username === 'amy'", timeout=15000)
+        assert (await stored(page))["accountToken"] == token and await page.evaluate("window.__id.identity.token()") == token
+        assert api("GET", f"/api/auth/me?token={amy}")["username"] == "amy", "the test's own sign-in kept too"
+        ok("after the server restarted, a reload signs in again by itself with the same token")
 
         # Signed in, the welcome page offers to open a workspace from the server
         # (the button did nothing from the unified file browser until v0.1.75).
@@ -141,6 +163,8 @@ async def main():
 
         ctx_b, ben_page, errors_b = await open_page(b, {"serverUrl": "", "accountUsername": "ben", "accountPassword": "pw", "accountSuccess": {BASE: "ben"}})
         await ben_page.wait_for_function("window.__id.identity.account()?.username === 'ben'", timeout=15000)
+        ben_saved = await stored(ben_page)
+        assert ben_saved.get("accountPassword", "") == "" and ben_saved["accountToken"], "a page from before v0.3.1: its password used once, a token kept"
         await ben_page.evaluate(f"window.__id.openAccessEditor('red', {json.dumps(path)}, 'Novel')")
         await ben_page.wait_for_function("document.querySelector('#access-whitelist').value === 'amy\\nben'")
         await ben_page.fill("#access-whitelist", "ben")
@@ -154,14 +178,18 @@ async def main():
         await page.wait_for_function("window.__id.identity.account() === null")
         assert await page.is_visible("#account-login-fields")
         saved = await stored(page)
-        assert saved["accountUsername"] == "amy" and saved["accountPassword"] == "" and saved["accountSuccess"] == {}, saved
+        assert saved["accountUsername"] == "amy" and saved["accountToken"] == "" and saved.get("accountPassword", "") == "" and saved["accountSuccess"] == {}, saved
+        for _ in range(50):  # the sign-out reaches the server a moment later
+            try: api("GET", f"/api/auth/me?token={token}"); time.sleep(0.1)
+            except urllib.error.HTTPError as error: assert error.code == 403; break
+        else: raise AssertionError("the server still takes the token after signing out")
         await page.reload(wait_until="domcontentloaded")
         await page.wait_for_function("Boolean(window.__id)")
         await page.wait_for_timeout(1500)
         assert await page.evaluate("window.__id.identity.account()") is None
         await collaboration_settings(page)
         assert await page.input_value("#account-username-input") == "amy"
-        ok("signing out forgets the password, keeps the username, and stays signed out after a reload")
+        ok("signing out ends the token on the server, keeps the username, and stays signed out after a reload")
 
         assert not errors and not errors_b, errors + errors_b
         await ctx.close(); await ctx_b.close(); await b.close()

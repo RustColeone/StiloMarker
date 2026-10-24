@@ -6,7 +6,7 @@
 // changing it unseen. `settings.on(listener)` hears every change.
 
 // Settings whose values the trace never shows.
-export const SECRET_SETTINGS = ["serverPin", "accountPassword", "agentApiKey"];
+export const SECRET_SETTINGS = ["serverPin", "accountToken", "accountPassword", "agentApiKey"];
 
 // The keys a change saves: the changed ones. The revision a cloud copy was
 // last in sync with is saved only together with the workspace it belongs to

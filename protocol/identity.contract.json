@@ -1,5 +1,5 @@
 {
-  "about": "Identity's network messages (rule 7): signing in, and an admin's accounts (the admin page). (Who may open a project is read and set through Projects' routes, protocol/projects.contract.json.) The server half registers exactly these routes (server/stilo/modules/identity/adapters/routes.py); only the browser half (app/modules/identity/adapters/api.js) calls them. Raise the version when a message changes in a way an older browser cannot read.",
+  "about": "Identity's network messages (rule 7): signing in (with a password, or again with the token a page kept) and out, and an admin's accounts (the admin page). (Who may open a project is read and set through Projects' routes, protocol/projects.contract.json.) The server half registers exactly these routes (server/stilo/modules/identity/adapters/routes.py); only the browser half (app/modules/identity/adapters/api.js) calls them. Raise the version when a message changes in a way an older browser cannot read.",
   "module": "identity",
   "version": 1,
   "routes": [
@@ -7,6 +7,16 @@
       "method": "POST", "path": "/api/auth/login",
       "body": ["username", "password"],
       "reply": ["token", "username", "teams", "admin", "lastWorkspace"]
+    },
+    {
+      "method": "GET", "path": "/api/auth/me",
+      "query": ["token"],
+      "reply": ["username", "teams", "admin", "lastWorkspace"]
+    },
+    {
+      "method": "POST", "path": "/api/auth/logout",
+      "query": ["token"],
+      "reply": ["message"]
     },
     {
       "method": "GET", "path": "/api/accounts",

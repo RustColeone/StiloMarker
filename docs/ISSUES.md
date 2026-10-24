@@ -68,6 +68,33 @@ lost while the page is in view count, not one left on purpose).
 
 ## Fixed
 
+### v0.3.1: a browser keeps a sign-in, not a password
+
+Asked for 2026-10-24, after the review noted it. Until now a browser kept
+the account's password (in its settings, readable by anyone at that
+computer and by any script the page ran) so it could sign in again after a
+reload, because the server kept sign-ins only in memory: every restart
+ended them all.
+
+- The server keeps its sign-ins in its data folder (`sign-ins.json`,
+  owner-only), only a fingerprint (SHA-256) of each token, so the file signs
+  no one in and a restart or a deploy signs no one out.
+- A sign-in ends when its account signs out (the server is told), gets a
+  new password or is removed, or after 30 days unused (each use keeps it);
+  this replaces v0.2.40's fixed 14 days, which made sense only for sign-ins
+  in memory.
+- A browser keeps the token and signs in again with it
+  (`GET /api/auth/me`); signing out ends it on the server
+  (`POST /api/auth/logout`). A browser that kept a password (v0.3.0 and
+  before) signs in with it once more, then keeps the token and empties the
+  password. A token the server no longer takes is forgotten, and the account
+  signs in by hand.
+- Tests: `account-security.test.py` (a restart, the file, signing out, a
+  new password, 30 days, the two routes over HTTP), `identity.test.mjs`
+  (the token kept, no password sent, the move from a kept password),
+  `identity-browser.py` (a reload after the server restarted, ben's page
+  from before, signing out ends the token on the server).
+
 ### v0.2.42: Find in Files, tables and the extension API, as the review asked
 
 Found by the review before calling a version stable (2026-10-23), in

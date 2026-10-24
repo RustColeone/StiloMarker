@@ -70,17 +70,17 @@ export function createSurface({ shell, workspace, identity, sync, editor, histor
   installCloudEvents(app);
   addProjectCommands(app, { shell, editor, sync });
   // What Sync and the Editor need from the server's accounts and workspaces:
-  // signing in again when the account's token died (a server restart; only
-  // with a sign-in proven before, and null to let Sync stop retrying), and the
-  // open tabs kept for this workspace.
+  // signing in again when the account's token was refused (with the token kept,
+  // for a sign-in proven before; null when it has ended, so Sync stops
+  // retrying and the account signs in by hand), and the open tabs kept for
+  // this workspace.
   sync.configure({
     async reauthenticate() {
       if (!identity.canRestore()) return null;
       const token = sync.session().getConnectionInfo()?.token;
       try {
-        await app.performLogin(app.settings.accountUsername, app.settings.accountPassword, {
-          silent: true, isCurrent: () => Boolean(token) && sync.session().getConnectionInfo()?.token === token
-        });
+        const result = await app.restoreLogin({ silent: true, isCurrent: () => Boolean(token) && sync.session().getConnectionInfo()?.token === token });
+        if (!result) return null;
         app.logDebug("action", "Re-authenticated after token expiry", app.settings.accountUsername);
         return identity.token();
       } catch (error) {

@@ -21,9 +21,7 @@ export function createResume(app, { sync, doc = globalThis.document, win = globa
     const ping = await app.pingCurrentServer({ silent: true });
     if (!isCurrent()) return;
     if (!ping) throw new Error("Waiting for the server — your workspace will resume automatically.");
-    if (syncState.accountsAvailable && identity.canRestore()) {
-      await app.performLogin(settings.accountUsername, settings.accountPassword, { silent: true, isCurrent });
-    }
+    if (syncState.accountsAvailable && identity.canRestore()) await app.restoreLogin({ silent: true, isCurrent });
     const target = rememberedWorkspace(settings.lastWorkspace) ?? last;
     if (target && identity.account()) {
       await app.handleOpenWorkspace(target.team, target.path, { reason: manual ? "welcome-resume" : "automatic-restore", automatic: true, isCurrent });

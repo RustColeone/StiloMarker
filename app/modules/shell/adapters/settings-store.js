@@ -58,12 +58,14 @@ function coreDefaults() {
     showFormatToolbar: false,
     // The browser's spelling check in the source editor (its own dictionary, its language).
     spellcheck: false,
-    // Accounts mode (state 3) auto-restore. Credentials are plaintext (matching
-    // the server whitelist choice). accountSuccess maps a normalized server URL
-    // to the username that last logged in there successfully — auto-login only
-    // fires for a server+username that previously succeeded. lastWorkspace is the
-    // last-opened cloud workspace, reopened on boot.
+    // Accounts mode (state 3): signed in again by itself with the token the
+    // server gave (it keeps its sign-ins), never a password. accountSuccess maps
+    // a normalized server URL to the username that last signed in there, so this
+    // happens only for a server and username that worked before. accountPassword
+    // is what pages before v0.3.1 kept instead: used once to sign in, then emptied.
+    // lastWorkspace is the last-opened cloud workspace, reopened on boot.
     accountUsername: "",
+    accountToken: "",
     accountPassword: "",
     accountSuccess: {},
     lastWorkspace: null,

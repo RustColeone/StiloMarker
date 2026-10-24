@@ -1,34 +1,47 @@
 """Signed-in accounts and the access questions about them. One per server
-(tests make several). The account file, the access records and the
-preferences are reached through the stores it is given."""
+(tests make several). The account file, the sign-ins, the access records
+and the preferences are reached through the stores it is given."""
 import secrets
 import threading
 import time
 
 from stilo.kernel.log import log as _log
+from ..adapters.sign_ins_file import SignIns, token_key
 from ..model import accounts as account_rules
 from ..model.access import can, changed_access, may_open, owned_by_other, owner_record, require_owner, role_of
 
 
-TOKEN_DAYS = 14          # an account token signs in this long at most
+IDLE_DAYS = 30           # a sign-in not used this long ends (each use keeps it)
+USE_KEPT_EVERY = 3600    # a sign-in's use is written down at most this often (seconds)
 TRIES, TRIES_WINDOW = 5, 300  # wrong passwords for one name within that many seconds, then...
 TRIES_WAIT = 60          # ...that name waits this long (no more than this, so no one is locked out for good)
 CHECKS_AT_ONCE = 2       # password checks running together (each takes memory and time on purpose)
 
 
 class Identity:
-    def __init__(self, accounts, prefs, access_store):
+    def __init__(self, accounts, prefs, access_store, sign_ins=None):
         self.accounts = accounts          # the account file (adapters/account_file.py)
         self.prefs = prefs                # adapters/prefs_file.py
         self._access = access_store       # read(project_dir, legacy), write(project_dir, data), projects_in(folder)
-        self._tokens: dict[str, tuple] = {}  # account token -> (username, when made, time.monotonic())
+        self._sign_ins = sign_ins or SignIns(None)  # token key -> {username, made, used} (adapters/sign_ins_file.py)
         self._tries: dict[str, list] = {}    # username as typed -> when its recent wrong passwords were
         self._checks = threading.BoundedSemaphore(CHECKS_AT_ONCE)
-        self._lock = threading.RLock()     # the tokens and the tries
+        self._lock = threading.RLock()     # the sign-ins and the tries
         self._changing = threading.Lock()  # one change of the accounts at a time (read, change, write)
         self._keeping = None               # (username, token): kept through that account's own change of password
         self._listeners = []
         accounts.listeners.append(self._account_changed)
+        self._forget(lambda key, entry: time.time() - entry["used"] > IDLE_DAYS * 86400)  # gone unused while the server was off
+
+    def _forget(self, which) -> None:
+        """The sign-ins `which(key, entry)` picks end (and the file says so)."""
+        with self._lock:
+            entries = self._sign_ins.entries
+            ending = [key for key, entry in entries.items() if which(key, entry)]
+            for key in ending:
+                del entries[key]
+            if ending:
+                self._sign_ins.save()
 
     def on_change(self, listener) -> None:
         """listener(username, change) when an account must lose what it has open:
@@ -40,9 +53,8 @@ class Identity:
     def _account_changed(self, username: str, change) -> None:
         keeping = self._keeping if self._keeping and self._keeping[0] == username else None
         if change is None or change == "password":
-            with self._lock:
-                self._tokens = {token: entry for token, entry in self._tokens.items()
-                                if entry[0] != username or (keeping and token == keeping[1])}
+            kept = token_key(keeping[1]) if keeping else None
+            self._forget(lambda key, entry: entry["username"] == username and key != kept)
             if change == "password" and keeping:
                 return  # its own change, on the admin page: what it has open stays
         _log("AUTH", f"{username}: {'removed' if change is None else 'new password' if change == 'password' else 'teams changed'}; "
@@ -59,7 +71,9 @@ class Identity:
 
     def login(self, username: str, password: str) -> dict:
         """Check a password and mint an account token (not a workspace session
-        token). The reply also names the workspace the account last opened."""
+        token), kept until it is IDLE_DAYS unused, signed out, or the account
+        changes its password or goes. The reply also names the workspace the
+        account last opened."""
         username = str(username).strip()
         self._wait_if_guessed(username)
         if not self._checks.acquire(timeout=10):
@@ -74,9 +88,11 @@ class Identity:
             _log("AUTH", f"Rejected login for {username!r}")
             raise PermissionError("Invalid username or password")
         token = secrets.token_urlsafe(24)
+        now = time.time()
         with self._lock:
             self._tries.pop(username, None)
-            self._tokens[token] = (identity["username"], time.monotonic())
+            self._sign_ins.entries[token_key(token)] = {"username": identity["username"], "made": now, "used": now}
+            self._sign_ins.save()
         _log("AUTH", f"{identity['username']} logged in", teams=identity["teams"])
         return {"token": token, "username": identity["username"], "teams": identity["teams"], "admin": identity["admin"],
                 "lastWorkspace": self.prefs.get(identity["username"]).get("lastWorkspace")}
@@ -99,20 +115,28 @@ class Identity:
     def who(self, token: str) -> dict | None:
         """{username, teams, admin} for an account token, or None. They are read
         from the account file each time, so a change there applies at once, and
-        an account removed from it is signed out. A token signs in for
-        TOKEN_DAYS at most."""
+        an account removed from it is signed out. A sign-in IDLE_DAYS unused
+        has ended; each use keeps it."""
+        key, now = token_key(token), time.time()
         with self._lock:
-            username, made = self._tokens.get(token, (None, 0))
-            if username is not None and time.monotonic() - made > TOKEN_DAYS * 86400:
-                self._tokens.pop(token, None)
+            entry = self._sign_ins.entries.get(key)
+            username = entry["username"] if entry else None
+            if entry and now - entry["used"] > IDLE_DAYS * 86400:
                 username = None
-        if username is None:
-            return None
-        if not self.accounts.exists(username):
-            with self._lock:
-                self._tokens.pop(token, None)
+            elif entry and now - entry["used"] > USE_KEPT_EVERY:
+                entry["used"] = now
+                self._sign_ins.save()
+        if username is None or not self.accounts.exists(username):
+            if entry:
+                self._forget(lambda other, _: other == key)
             return None
         return {"username": username, "teams": self.accounts.teams_for(username), "admin": self.accounts.is_admin(username)}
+
+    def signed_in(self, token: str) -> dict:
+        """The account a kept token signs in, as a sign-in answers (a page coming
+        back signs in with its token, never a password)."""
+        identity = self.require(token)
+        return {**identity, "lastWorkspace": self.prefs.get(identity["username"]).get("lastWorkspace")}
 
     def require(self, token: str) -> dict:
         identity = self.who(token)
@@ -174,8 +198,9 @@ class Identity:
         return account_rules.listing(self.accounts.users)
 
     def logout(self, token: str) -> None:
-        with self._lock:
-            self._tokens.pop(token, None)
+        """Signed out on purpose: the token signs in no more, on any server start."""
+        key = token_key(token)
+        self._forget(lambda other, _: other == key)
 
     def team_members(self, team: str) -> list[str]:
         return self.accounts.team_members(team)

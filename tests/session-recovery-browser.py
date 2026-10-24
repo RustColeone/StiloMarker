@@ -16,10 +16,11 @@ async def main():
   project={'id':'root-team','name':'Campaign','rootId':'root','activeFileId':None,'sourceMode':'memory','nodes':{
    'root':{'id':'root','kind':'folder','name':'Campaign','children':['file'],'expanded':True},
    'file':{'id':'file','kind':'file','parentId':'root','name':'session.md','content':'Cloud campaign notes','dirty':False}}}
-  login_gate=asyncio.Event()
-  state={'pings':0,'logins':0,'opens':0,'fail_open':True,'revision':1,'expired':False,'login_outage':False,'writes':0}
+  me_gate=asyncio.Event()
+  state={'pings':0,'logins':0,'mes':0,'opens':0,'fail_open':True,'revision':1,'me_outage':False,'writes':0}
   settings={'serverUrl':BASE,'accountUsername':'test-user','accountPassword':'test-only','accountSuccess':{BASE:'test-user'},'lastWorkspace':{'team':'friends','path':''},'syncedProjectId':'friends/','syncedRevision':1}
-  await page.add_init_script('localStorage.setItem("mdnotes.settings.v1",'+json.dumps(json.dumps(settings))+');localStorage.setItem("mdnotes.project.v1",'+json.dumps(json.dumps(project))+');')
+  # The settings as a page from before v0.3.1 kept them (a password), seeded once: a reload keeps what the page made of them.
+  await page.add_init_script('if(!localStorage.getItem("mdnotes.settings.v1"))localStorage.setItem("mdnotes.settings.v1",'+json.dumps(json.dumps(settings))+');localStorage.setItem("mdnotes.project.v1",'+json.dumps(json.dumps(project))+');')
   await page.add_init_script('''window.EventSource=class {constructor(){(window.testStreams??=[]).push(this);}close(){this.closed=true;}};''')
   async def route(route):
    path=urlparse(route.request.url).path
@@ -32,17 +33,20 @@ async def main():
     elif path=='/api/chat/status':payload={'configured':False}
     elif path=='/api/auth/login':
      state['logins']+=1
-     if state.get('hold_login'):
-      state['pending_login']=True
-      await login_gate.wait()
-     if state['login_outage']:state['login_outage']=False;await route.abort('internetdisconnected');return
      payload={'token':'account-'+str(state['logins']),'username':'test-user','teams':['friends']}
+    elif path=='/api/auth/me':
+     state['mes']+=1
+     if state.get('hold_me'):
+      state['pending_me']=True
+      await me_gate.wait()
+     if state['me_outage']:state['me_outage']=False;await route.abort('internetdisconnected');return
+     payload={'username':'test-user','teams':['friends'],'admin':False,'lastWorkspace':{'team':'friends','path':''}}
     elif path=='/api/workspaces/open':
      state['opens']+=1
      body=route.request.post_data_json
      assert body['team']=='friends' and body['path']=='',body
      token=parse_qs(urlparse(route.request.url).query).get('token',[''])[0]
-     if state.get('expire_all') or (state['expired'] and token=='account-2'):code=403;payload={'message':'Not logged in'}
+     if state.get('expire_open'):code=403;payload={'message':'Not logged in'}
      elif state['fail_open']:code=503;payload={'message':'Temporary outage'}
      else:payload={'token':'session-'+str(state['opens']),'clientId':'mobile','workspace':'friends/','revision':state['revision'],'role':'master','resume':{'openFiles':[],'activeFile':None}}
     elif path=='/api/session/state':payload={'project':project,'revision':state['revision'],'presence':[]}
@@ -98,16 +102,21 @@ async def main():
   # Suspension persists the active file locally even before server resume save.
   saved=await page.evaluate('JSON.parse(localStorage.getItem("mdnotes.workspaceView.v1"))')
   assert saved['activeFile']=='session.md' and saved['workspace']=='friends/',saved
-  # An expired account plus a temporary login outage must keep retrying.
-  state['expired']=True;state['login_outage']=True
-  before=state['logins']
-  await page.evaluate('window.dispatchEvent(new Event("online"))')
-  for _ in range(200):
-   if state['logins']>=before+2 and await page.evaluate('recoveryTest.getStatus()==="connected"'):break
+  # A reload signs in again with the kept token, never the password (sent once,
+  # by the page from before v0.3.1); a moment offline while asking keeps
+  # retrying, with the same token.
+  stored=await page.evaluate('JSON.parse(localStorage.getItem("mdnotes.settings.v1"))')
+  assert stored['accountToken']=='account-1' and not stored.get('accountPassword'),stored
+  state['me_outage']=True;before=state['mes']
+  await page.reload(wait_until='domcontentloaded')
+  await page.wait_for_function('!!window.recoveryTest')
+  for _ in range(300):
+   if state['mes']>=before+2 and await page.evaluate('recoveryTest.getStatus()==="connected"'):break
    await page.wait_for_timeout(50)
-  assert state['logins']>=before+2,state
+  assert state['mes']>=before+2,state
   assert await page.evaluate('recoveryTest.getStatus()')=='connected',state
-  assert 'Newer cloud campaign notes' in await page.locator('#editor-content').inner_text()
+  assert state['logins']==1,state
+  await page.wait_for_function('document.querySelector("#editor-content").textContent.includes("Newer cloud campaign notes")')
   assert state['writes']==0,state
   # BFCache suspension keeps the session; a real tab close sends a best-effort
   # leave signal for this token. A lost signal is handled by the server lease.
@@ -119,19 +128,22 @@ async def main():
    return sent;
   }''')
   assert len(beacons)==1 and '/api/session/leave?token=session-' in beacons[0],beacons
-  # Logout while a replacement login is pending must remain logged out.
-  state['expire_all']=True;state['hold_login']=True
+  # Signing out while signing in again is pending (the workspace refused the
+  # account's token) stays signed out, and keeps no token or password.
+  state['expire_open']=True;state['hold_me']=True
   await page.evaluate('window.dispatchEvent(new Event("online"))')
-  for _ in range(100):
-   if state.get('pending_login'):break
+  for _ in range(200):
+   if state.get('pending_me'):break
    await page.wait_for_timeout(50)
-  assert state.get('pending_login'),state
+  assert state.get('pending_me'),state
   await page.evaluate('recoveryTest.handleAccountLogout()')
-  login_gate.set()
-  await page.wait_for_timeout(200)
+  me_gate.set()
+  await page.wait_for_timeout(300)
   assert not await page.evaluate('recoveryTest.hasAccount()')
-  assert await page.evaluate('JSON.parse(localStorage.getItem("mdnotes.settings.v1")).accountPassword')==''
+  kept=await page.evaluate('JSON.parse(localStorage.getItem("mdnotes.settings.v1"))')
+  assert not kept.get('accountToken') and not kept.get('accountPassword'),kept
+  assert state['logins']==1,state
   assert not errors,errors
-  print(json.dumps({'checks':['offline boot retries','failed open recovers','root-path auto restore works','connected empty view resumes on foreground','foreground replaces silent stream','duplicate events coalesce','new cloud text not overwritten','active file persists on suspension','expired account and login outage recover','pagehide closes phone session','logout invalidates pending login'],'runtimeErrors':len(errors),'opens':state['opens'],'writes':state['writes']}))
+  print(json.dumps({'checks':['offline boot retries','failed open recovers','root-path auto restore works','connected empty view resumes on foreground','foreground replaces silent stream','duplicate events coalesce','new cloud text not overwritten','active file persists on suspension','a reload signs in again with the kept token (no password), retrying through a moment offline','pagehide closes phone session','signing out while signing in again stays signed out, nothing kept'],'runtimeErrors':len(errors),'opens':state['opens'],'writes':state['writes']}))
   await browser.close()
 asyncio.run(main())

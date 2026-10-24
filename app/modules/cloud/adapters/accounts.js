@@ -135,6 +135,19 @@ export function createAccounts(app) {
 
   async function performLogin(username, password, { silent = false, isCurrent = () => true } = {}) {
     const result = await app.identity.signIn(username, password, { isCurrent });
+    signedIn(result, { silent });
+  }
+
+  // Signed in again by itself (the page back, a reload, a token that died): with
+  // the token kept, never a password. The reply, or null when there is nothing
+  // to sign in with (or the kept sign-in has ended: then it is by hand).
+  async function restoreLogin({ silent = true, isCurrent = () => true } = {}) {
+    const result = await app.identity.restore({ isCurrent });
+    if (result) signedIn(result, { silent });
+    return result;
+  }
+
+  function signedIn(result, { silent }) {
     // Cross-device resume: if THIS browser has no remembered workspace but the
     // account opened one elsewhere, adopt it so boot / the welcome page can resume.
     if (!app.settings.lastWorkspace?.team && result.lastWorkspace?.team) {
@@ -180,8 +193,8 @@ export function createAccounts(app) {
     app.collaboration.disconnect("Logged out.");
     // Leaving the account also leaves any cloud workspace it opened.
     if (app.mode.get().workspaceMode === "synced") app.switchWorkspaceMode?.("private");
-    // Identity forgets the stored password and that this server knew the
-    // account, so it is not signed in again by itself (the username stays).
+    // Identity ends the sign-in on the server and forgets its token and that this
+    // server knew the account, so it is not signed in again by itself (the username stays).
     app.identity.signOut();
     app.settings.change({ lastWorkspace: null, syncedProjectId: null });
     app.elements.browserList?.replaceChildren();
@@ -191,5 +204,5 @@ export function createAccounts(app) {
     void app.refreshChatStatus({ silent: true }); // the server's agent needs an account
   }
 
-  return { pingCurrentServer, renderAccountControls, renderHostTargets, handleHost, performLogin, handleAccountLogin, handleAccountLogout };
+  return { pingCurrentServer, renderAccountControls, renderHostTargets, handleHost, performLogin, restoreLogin, handleAccountLogin, handleAccountLogout };
 }
