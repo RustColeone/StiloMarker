@@ -22,6 +22,7 @@ export function findElements() {
     explorerAddButton: query("#explorer-add-button"),
     explorerContextMenu: query("#explorer-context-menu"),
     explorerFilterButton: query("#explorer-filter-button"),
+    explorerNameFilter: query("#explorer-name-filter"),
     explorerPanel: query("#explorer-panel"),
     explorerTree: query("#explorer-tree"),
     newFileCancelButton: query("#new-file-cancel-button"),

@@ -148,6 +148,7 @@ export function createSurface({ workspace, editor, shell, sync, types, fileMenus
     getFilterMode() {
       return app.settings.explorerFilter;
     },
+    getNameQuery: () => app.elements.explorerNameFilter?.value ?? "",
     getAssetPreviewSrc(fileId) {
       const project = app.controller.getProject();
       const file = project.nodes[fileId];

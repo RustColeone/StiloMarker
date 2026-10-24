@@ -680,7 +680,7 @@ p {
   border-right: 1px solid var(--border);
   background: var(--sidebar);
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto; /* the header, the name search, the tree, its sections */
   padding-top: 10px;
 }
 
@@ -703,6 +703,27 @@ p {
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+}
+
+/* The name search, under the explorer's header and above the tree. */
+.explorer-search {
+  padding: 6px 10px 4px;
+}
+
+.explorer-search-input {
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface-0);
+  color: var(--text);
+}
+
+.explorer-search-input:focus {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
 }
 
 .explorer-tree {

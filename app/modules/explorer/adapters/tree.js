@@ -2,6 +2,7 @@
 // menu, the quick-add and filter menus, renaming in place. Moved from
 // app/ui/explorer-view.js; it reports what the user does through callbacks.
 import { ROOT_ID, listVisibleNodes } from "../../workspace/index.js";
+import { rowsMatching } from "../model/filter.js";
 import { builtinTypes } from "../../file-types/index.js";
 
 function getFileIconClass(node) {
@@ -27,7 +28,7 @@ function menuGroupOf([, action, submenu]) {
   return groups.size === 1 ? [...groups][0] : "more";
 }
 
-function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenPart, onToggleFolder, onSelectNode, onAction, canPasteTarget, canPreviewFile, rootEntries = () => [], onDragNodeStart, onDragPartStart, getFilterMode, getAssetPreviewSrc, listParts, getPartAdder, getSelectedTarget, markOf = () => null, extraEntriesFor = () => [] }) {
+function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpenPart, onToggleFolder, onSelectNode, onAction, canPasteTarget, canPreviewFile, rootEntries = () => [], onDragNodeStart, onDragPartStart, getFilterMode, getNameQuery = () => "", getAssetPreviewSrc, listParts, getPartAdder, getSelectedTarget, markOf = () => null, extraEntriesFor = () => [] }) {
   let menuTarget = null;
   let currentProject = null;
   let activeMenuMode = null;
@@ -421,11 +422,11 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
   // sub-pixel correction, which read as the explorer creeping up on every key.
   let renderedSignature = null;
 
-  function treeSignature(project, rows, filterMode) {
+  function treeSignature(project, rows, filterMode, query) {
     const selected = getSelectedTarget?.() ?? { nodeId: ROOT_ID, partId: null };
-    const parts = [project?.name ?? "", filterMode, selected.nodeId ?? "", selected.partId ?? ""];
-    for (const { node, depth, path } of rows) {
-      parts.push(node.id, node.kind, node.name, depth, path, node.expanded ? 1 : 0, markOf(path)?.kind ?? "");
+    const parts = [project?.name ?? "", filterMode, query, selected.nodeId ?? "", selected.partId ?? ""];
+    for (const { node, depth, path, open } of rows) {
+      parts.push(node.id, node.kind, node.name, depth, path, (open ?? node.expanded) ? 1 : 0, markOf(path)?.kind ?? "");
       if (builtinTypes.isImage(node.name)) {
         // Data-URL sources can be huge; their length and ends identify them.
         const src = String(getAssetPreviewSrc?.(node.id) ?? "");
@@ -443,8 +444,10 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
   function render(project) {
     currentProject = project;
     const filterMode = getFilterMode?.() ?? "all";
-    const rows = listVisibleNodes(project).filter(({ node }) => nodeMatchesFilter(node, filterMode));
-    const signature = treeSignature(project, rows, filterMode);
+    // The name search (the box above the tree): the matching rows, their folders open.
+    const query = getNameQuery();
+    const rows = (rowsMatching(project, query) ?? listVisibleNodes(project)).filter(({ node }) => nodeMatchesFilter(node, filterMode));
+    const signature = treeSignature(project, rows, filterMode, query);
     if (signature === renderedSignature && container.childElementCount > 0) return;
     renderedSignature = signature;
     // A real rebuild still must not move the list: keep the reader's place.
@@ -455,13 +458,13 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
     if (rows.length === 0) {
       const empty = document.createElement("div");
       empty.className = "subtle-label";
-      empty.textContent = "No files yet. Right-click to create one.";
+      empty.textContent = query.trim() ? "No file names match." : "No files yet. Right-click to create one.";
       container.append(empty);
       container.scrollTop = scrollTop;
       return;
     }
 
-    rows.forEach(({ node, depth, path }) => {
+    rows.forEach(({ node, depth, path, open }) => {
       const row = document.createElement("div");
       const selectedTarget = getSelectedTarget?.() ?? { nodeId: ROOT_ID, partId: null };
       const isSelectedNode = selectedTarget.nodeId === node.id && !selectedTarget.partId;
@@ -487,7 +490,7 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
       toggle.type = "button";
       toggle.className = "icon-button";
       const expandable = node.kind === "folder" || isExpandableFile(node);
-      toggle.textContent = expandable ? (node.expanded ? "▾" : "▸") : "·";
+      toggle.textContent = expandable ? ((open ?? node.expanded) ? "▾" : "▸") : "·";
       toggle.classList.toggle("is-leaf", !expandable);
       toggle.addEventListener("click", (event) => {
         event.stopPropagation();

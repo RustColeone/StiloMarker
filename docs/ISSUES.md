@@ -68,6 +68,18 @@ lost while the page is in view count, not one left on purpose).
 
 ## Fixed
 
+### v0.3.6: a search box for file names above the tree
+
+Asked for by the user (2026-10-24): the Search under the tree was unclear
+(file names, or the text in the files?), and a file-name search belongs at
+the top of the Explorer. A box now sits under the Explorer's header, above
+the tree: typed, the tree keeps the files and folders whose name holds it
+(any case) and the folders that hold them, shown open while it lasts (their
+own open or closed state is kept); nothing found is said; Enter opens the
+first file found; Escape clears it. Searching the files' text stays Find in
+Files (its own tab from v0.3.7). Tests: `explorer-filter.test.mjs`,
+`explorer-filter-browser.py` (new; the tree keeps its height under the box).
+
 ### v0.3.5: a project's tree is headed by its name
 
 Found by the user (2026-10-24). A team project's tree was headed

@@ -95,6 +95,7 @@ Supported file types:
 The explorer is the main organizer for your workspace.
 
 - Click a file to open it in the source pane
+- Type in the box above the tree to keep only the files and folders whose name holds it (Enter opens the first file, Escape clears it)
 - Click folder arrows to expand or collapse folders
 - Right-click items for actions like rename, delete, export, copy, and paste
 - Drag files to reorder them or move them into folders

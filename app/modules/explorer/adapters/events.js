@@ -5,6 +5,7 @@
 // `app` is the Explorer's shared context (surface.js).
 import { builtinTypes } from "../../file-types/index.js";
 import { getPath } from "../../workspace/index.js";
+import { firstFileMatching } from "../model/filter.js";
 
 export function installExplorerEvents(app) {
   function bindExplorerDropTarget() {
@@ -109,6 +110,22 @@ export function installExplorerEvents(app) {
     app.view.select(parent.id);
     const opened = app.tree.toggleFilterMenu(app.elements.explorerFilterButton, parent.id);
     app.logDebug("action", opened ? "Explorer filter menu opened" : "Explorer filter menu closed", app.settings.explorerFilter);
+  });
+
+  // The name search above the tree: typed, the tree keeps the matching names
+  // (their folders open); Enter opens the first file found, Escape clears it.
+  const nameFilter = app.elements.explorerNameFilter;
+  nameFilter?.addEventListener("input", () => app.tree.render(app.controller.getProject()));
+  nameFilter?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && nameFilter.value) {
+      event.preventDefault();
+      nameFilter.value = "";
+      app.tree.render(app.controller.getProject());
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      const file = firstFileMatching(app.controller.getProject(), nameFilter.value);
+      if (file) app.openFileFromExplorer(file.id);
+    }
   });
 
   app.elements.addFilePickerButton.addEventListener("click", () => app.elements.addFilePickerInput.click());
