@@ -78,6 +78,28 @@ lost while the page is in view count, not one left on purpose).
 
 ## Fixed
 
+### v0.3.7: the left window has tabs
+
+Asked for by the user (2026-10-24). The activity bar's Search icon showed
+nothing (it only opened a section under the tree), its Chat icon opened the
+right panel, and dragging the Agent to the left split the Explorer. The
+left area is now a window of tabs, like the editor's: the activity bar holds
+its icons, one per page (the Explorer first, then Search: Find in Files, on
+a tab of its own); an icon shows its page, and pressing the icon of the page
+showing hides the window. A page dragged anywhere on the left window or its
+activity bar is one of its tabs, with its name, its toolbar and its "+" in a
+title row. Linked Notes and Session stay sections under the Explorer's tree
+(Move to Explorer puts any page there). The right panel is toggled from a
+button at the right end of the top bar (and View → Show Chat).
+On a phone the left drawer shows the icons in a row at its top. Pages moved
+to the left before are its tabs now (they were sections). Found on the
+way: Find in Files' rows ran past the window's right edge, and on a phone
+its search box was squeezed to a sliver (since v0.2.30: it took the phone
+layout meant for the editor's find bar); both fit now. Tests:
+`area-pages-browser.py` (rewritten), `search-files-browser.py` (Ctrl+Shift+F
+shows the Search tab; on a phone the box is wide and both rows fit, which
+fails before).
+
 ### v0.3.6: a search box for file names above the tree
 
 Asked for by the user (2026-10-24): the Search under the tree was unclear

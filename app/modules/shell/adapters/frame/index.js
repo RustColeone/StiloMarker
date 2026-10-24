@@ -17,7 +17,7 @@ export function createFrame({ settings, events, registry, pages, commands, run, 
   areas.usePhone(phone);
 
   const toggleLog = () => areas.toggle("bottom");
-  commands.add({ id: "shell.toggle-explorer", title: "Toggle Explorer", menu: { id: "view", group: 0, order: 1 }, run: () => areas.toggle("left") });
+  commands.add({ id: "shell.toggle-explorer", title: "Toggle the Left Window", menu: { id: "view", group: 0, order: 1 }, run: () => areas.toggle("left") });
   commands.add({ id: "shell.toggle-log", title: "Toggle Log", menu: { id: "view", group: 0, order: 5 }, run: toggleLog });
   commands.add({ id: "shell.open-settings", title: "Open Settings", menu: { id: "settings", group: 0, order: 1 }, run: () => openSettings("appearance") });
   commands.add({ id: "shell.log-panel", title: () => (areas.shown("bottom") ? "Hide Log Panel" : "Show Log Panel"), menu: { id: "settings", group: 0, order: 2 }, run: toggleLog });

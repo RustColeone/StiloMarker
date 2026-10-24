@@ -497,7 +497,6 @@ p {
   left: -1px;
   width: var(--sidebar-width);
   z-index: 35;
-  padding-top: 10px;
   border-right: 1px solid var(--border);
   box-shadow: 6px 0 22px rgba(0, 0, 0, 0.30);
   /* Collapsed: tucked away + non-interactive; expanded: slides into view. */
@@ -657,10 +656,53 @@ p {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-.app-shell[data-explorer="expanded"] #explorer-toggle-button {
+/* The left window's pages, as icons: the one showing marked while the
+   window is open (pressing it again hides the window). */
+.activity-pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.app-shell[data-explorer="expanded"] .activity-pages .activity-button[aria-selected="true"] {
   color: var(--text);
   background: var(--surface-2);
   box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.page-icon-letter {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* The top bar's toggle of the right panel (desktop; the phone has its own). */
+.topbar-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.topbar-icon-button:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.topbar-icon-button.is-active {
+  color: var(--text);
+}
+
+.topbar-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 
 .activity-bar-spacer {
@@ -673,15 +715,66 @@ p {
   display: block;
 }
 
+/* The left window: one page at a time (the activity bar's icons choose),
+   each filling it. */
 .sidebar {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   border-right: 1px solid var(--border);
   background: var(--sidebar);
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-pages {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-pages > * {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.sidebar-pages > [hidden] {
+  display: none;
+}
+
+/* The Explorer page: its header, the name search, the tree, its sections. */
+.explorer-page {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto; /* the header, the name search, the tree, its sections */
   padding-top: 10px;
+}
+
+/* The open page's title row (its name, its "+" and toolbar); the Explorer
+   page has its own header. */
+.sidebar-tab-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: none;
+  min-height: 35px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-tab-header[hidden] {
+  display: none;
+}
+
+.sidebar-tab-header > .eyebrow {
+  margin: 0;
+  white-space: nowrap;
+}
+
+/* The phone's row of the left window's icons (no activity bar there). */
+.sidebar-phone-tabs {
+  display: none;
 }
 
 .app-shell[data-explorer="collapsed"] .sidebar {
@@ -4450,8 +4543,34 @@ menu {
   .activity-bar,
   .workspace-splitter,
   .chat-splitter,
-  .editor-splitter {
+  .editor-splitter,
+  .topbar-desktop-only {
     display: none;
+  }
+
+  .sidebar-phone-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 8px 10px 6px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar-phone-tab {
+    width: var(--control-square);
+    height: var(--control-square);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-dim);
+  }
+
+  .sidebar-phone-tab[aria-selected="true"] {
+    color: var(--text);
+    background: var(--surface-2);
   }
 
   /* ── Explorer: left flyout overlay driven by data-mobile-explorer ── */
@@ -5193,23 +5312,34 @@ menu {
   min-width: 0;
 }
 
-/* A wide page toolbar moved into the side panel's header (the Log's) scrolls;
-   the panel's own buttons keep their size. */
-.chat-toolbar-actions > button {
+/* A wide page toolbar moved into the side panel's header or the left
+   window's title row (the Log's) scrolls; the host's own buttons keep their size. */
+.sidebar-tab-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chat-toolbar-actions > button,
+.sidebar-tab-actions > button {
   flex: none;
 }
 
-.chat-toolbar-actions .log-toolbar {
+.chat-toolbar-actions .log-toolbar,
+.sidebar-tab-actions .log-toolbar {
   flex: 0 1 auto;
   overflow-x: auto;
   scrollbar-width: none;
 }
 
-.chat-toolbar-actions .log-toolbar > * {
+.chat-toolbar-actions .log-toolbar > *,
+.sidebar-tab-actions .log-toolbar > * {
   flex: none;
 }
 
-.chat-toolbar-actions .log-toolbar-spacer {
+.chat-toolbar-actions .log-toolbar-spacer,
+.sidebar-tab-actions .log-toolbar-spacer {
   display: none;
 }
 
@@ -6357,7 +6487,7 @@ pre.proposal-diff-block {
   .editor-format-toolbar { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; }
   .format-toolbar-btn { flex: 0 0 auto; min-width: 44px; height: 44px; font-size: 14px; }
   .format-toolbar-sep { flex-shrink: 0; }
-  .find-row:not(#find-replace-row) { display: grid; grid-template-columns: repeat(6, minmax(44px, 1fr)); }
+  #editor-find-bar .find-row:not(#find-replace-row) { display: grid; grid-template-columns: repeat(6, minmax(44px, 1fr)); }
   #find-input { grid-column: 1 / 5; grid-row: 1; }
   #find-count { grid-column: 5; grid-row: 1; min-width: 0; white-space: normal; }
   #find-close { grid-column: 6; grid-row: 1; }
@@ -7059,10 +7189,12 @@ pre.proposal-diff-block {
   display: none;
 }
 
-/* Find in Files (editor/adapters/search-files.js): a section of the left area
-   (or a tab, moved); its results scroll inside it, so the file tree keeps its room. */
+/* Find in Files (editor/adapters/search-files.js): the left window's Search
+   tab (or a section, moved; its results scroll inside it then, so the file
+   tree keeps its room). Its rows never widen it past the window. */
 .search-files {
   gap: 6px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .search-files-row {

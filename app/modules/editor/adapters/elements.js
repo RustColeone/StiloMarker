@@ -27,7 +27,6 @@ export function findElements() {
     findClose: query("#find-close"),
     findCount: query("#find-count"),
     findInput: query("#find-input"),
-    searchActivityButton: query("#search-activity-button"),
     findNext: query("#find-next"),
     findPrev: query("#find-prev"),
     findReplaceRow: query("#find-replace-row"),

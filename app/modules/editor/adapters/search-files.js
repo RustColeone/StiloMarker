@@ -1,5 +1,5 @@
-// Find in Files: a page (Shell's pages: a section of the left area, which the
-// user may move) that searches every text file of the workspace as you type,
+// Find in Files: a page (Shell's pages: the left window's Search tab, which
+// the user may move) that searches every text file of the workspace as you type,
 // with Match case, whole word and regular expressions (model/search.js);
 // results grouped by file, each with its line and the words around it, and a
 // click opens the file at the match. Replace All (or a file's own Replace)
@@ -272,16 +272,14 @@ export function addFindInFiles({ app, shell, workspace, doc = globalThis.documen
     againTimer = setTimeout(search, AGAIN_AFTER);
   });
 
-  shell.pages.add({ host: "left", id: "search", order: 5, label: "Search", title: "Find in Files", body, className: "search-files-panel",
+  shell.pages.add({ host: "left", id: "search", order: 5, label: "Search", title: "Find in Files (Ctrl+Shift+F)", body, className: "search-files-panel",
+    icon: `<svg class="activity-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20.5 20.5 16 16"/></svg>`,
     shown: (visible) => { if (visible && query.value) search(); } });
 
-  // Find in Files: the page shown wherever it is, the query focused (the selection as the query).
+  // Find in Files: the page shown wherever it is (the left window's Search
+  // tab, unless moved), the query focused (the selection as the query).
   function reveal() {
-    const area = shell.pages.areaOf("search") ?? "left";
-    if (!shell.frame.shown(area)) shell.frame.toggle(area);
-    const host = shell.pages.hostOf("search") ?? "left";
-    if (host === "left") shell.pages.reveal(host, "search");
-    else shell.pages.show(host, "search");
+    shell.pages.open("search");
     const selection = app.getEditorSelection();
     const selected = selection.end > selection.start ? app.getEditorText().slice(selection.start, selection.end) : "";
     if (selected && !selected.includes("\n") && doc.activeElement === app.elements.editorContent) {
@@ -292,6 +290,5 @@ export function addFindInFiles({ app, shell, workspace, doc = globalThis.documen
   }
   shell.commands.add({ id: "editor.find-in-files", title: "Find in Files", keywords: ["search", "all files", "replace"],
     keys: ["Mod+Shift+F"], menu: { id: "edit", group: 0, order: 2 }, run: reveal });
-  app.elements.searchActivityButton?.addEventListener("click", reveal);
   return { reveal, search };
 }

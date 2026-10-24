@@ -121,8 +121,8 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
     isPreviewableFileName,
     resolveProjectAssetUrl,
     editorLinkTooltip: createLinkTooltip(),
-    // The left area's Linked Notes section (Shell's pages): shown while the open file is a note.
-    showLinksPanel: (shown) => shell.pages.available("left", "links", shown),
+    // The Explorer's Linked Notes section (Shell's pages): shown while the open file is a note.
+    showLinksPanel: (shown) => shell.pages.available(shell.pages.hostOf("links") ?? "explorer", "links", shown),
     outgoingLinksListEl: document.getElementById("outgoing-links-list"),
     backlinksListEl: document.getElementById("backlinks-list")
   };
@@ -200,10 +200,10 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
     app.drawPreviewPane(project, previewFileId ? project.nodes[previewFileId] : null);
     app.renderLinksPanel(project, activeFile);
   });
-  // The left area's Linked Notes section (Shell's pages), shown while a note is open.
-  shell.pages.add({ host: "left", id: "links", order: 10, label: "Linked Notes", title: "Linked notes",
+  // The Explorer's Linked Notes section (Shell's pages), shown while a note is open.
+  shell.pages.add({ host: "explorer", id: "links", order: 10, label: "Linked Notes", title: "Linked notes", icon: `<svg class="activity-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1"/><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1"/></svg>`,
     body: document.getElementById("links-panel-body"), className: "links-sidebar-panel", available: false });
-  // Find in Files: a section of the left area too (it can be moved), above Linked Notes.
+  // Find in Files: the left window's Search tab (it can be moved).
   addFindInFiles({ app, shell, workspace });
   installFrameParts(app, shell);
   installTogether(app, workspace, composing);

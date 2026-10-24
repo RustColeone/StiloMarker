@@ -167,6 +167,10 @@ export function createSurface({ workspace, editor, shell, sync, types, fileMenus
       return getSelectedTarget();
     }
   });
+  // The Explorer is the left window's first page (its header, the name search,
+  // the tree and its sections); it stays there.
+  shell.pages.add({ host: "left", id: "explorer", order: 0, label: "Explorer", title: "Explorer (files)", movable: false, ownHeader: true,
+    body: document.getElementById("explorer-page"), icon: `<svg class="activity-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"/><path d="M15 2v5h5"/><path d="M3 7v13a2 2 0 0 0 2 2h10"/></svg>` });
   // The tree, on each full redraw (Shell's).
   shell.events.on("render", ({ project, only }) => { if (project && only !== "status") app.tree.render(project); });
   // A mark put on a file or taken off shows on its row at once.

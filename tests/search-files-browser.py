@@ -1,7 +1,8 @@
 """Browser regression: Find in Files (v0.2.30, editor/adapters/search-files.js).
 
-Ctrl+Shift+F shows the Search section and its query (and not the open
-file's find bar); a word selected in the editor becomes the query. Typed, it
+Ctrl+Shift+F shows the left window's Search tab and its query (and not
+the open file's find bar; v0.3.7: a tab, no longer a section under the
+tree); a word selected in the editor becomes the query. Typed, it
 searches every text file (images aside): grouped by file in path order, each
 match's line and the words around it, the totals said; Chinese text too.
 Match case, whole word and regular expressions narrow it; a pattern that
@@ -85,15 +86,16 @@ async def main():
             await page.wait_for_timeout(500)
             return await results()
 
-        # Ctrl+Shift+F: the Search section and its query; not the open file's find bar.
+        # Ctrl+Shift+F: the Search tab and its query; not the open file's find bar.
         await page.click('#editor-content')
         await page.keyboard.press('Control+Shift+F')
         await page.wait_for_timeout(400)
         state = await page.evaluate('''() => ({ focused: document.activeElement?.classList.contains("search-files-query"),
           findBar: !document.querySelector("#editor-find-bar").hidden,
-          section: !document.querySelector("#search-files-body").closest(".sidebar-panel")?.dataset.collapsed?.includes("true") })''')
-        assert state == {'focused': True, 'findBar': False, 'section': True}, state
-        checks.append('Ctrl+Shift+F: the Search section, its query focused, no find bar')
+          tab: document.querySelector('.activity-pages [aria-selected="true"]')?.dataset.page,
+          window: document.querySelector("#app").dataset.explorer, tree: document.querySelector("#explorer-tree").offsetParent !== null })''')
+        assert state == {'focused': True, 'findBar': False, 'tab': 'search', 'window': 'expanded', 'tree': False}, state
+        checks.append('Ctrl+Shift+F: the Search tab, its query focused, no find bar')
 
         # Every text file, grouped in path order, totals said; the image aside.
         r = await search_for('lantern')
@@ -213,6 +215,18 @@ async def main():
         await page.wait_for_timeout(500)
         assert await page.input_value('.search-files-query') == 'lantern', await page.input_value('.search-files-query')
         checks.append('a selected word becomes the query')
+
+        # On a phone, the left drawer's Search tab: the query box takes the row's room and both
+        # rows fit the drawer (the phone's grid for the editor's find bar is that bar's own).
+        await page.set_viewport_size({'width': 390, 'height': 844})
+        await page.wait_for_timeout(400)
+        await page.evaluate('() => document.querySelector(\'[data-command="shell.toggle-explorer"]\').click()')
+        await page.wait_for_timeout(500)
+        fit = await page.evaluate('''() => { const box = (s) => document.querySelector(s).getBoundingClientRect();
+          return { drawer: document.querySelector("#app").dataset.mobileExplorer, query: box(".search-files-query").width,
+            room: box("#explorer-panel").right - Math.max(box(".search-files-replace-all").right, box('[data-option="regex"]').right) }; }''')
+        assert fit['drawer'] == 'open' and fit['query'] > 120 and fit['room'] >= 8, fit
+        checks.append('on a phone: the query box wide, both rows inside the drawer')
 
         print(json.dumps({'checks': checks, 'runtimeErrors': len(errors)}, ensure_ascii=False))
         assert not errors, errors

@@ -41,9 +41,10 @@
 //                            (IndexedDB) and saved before it is to be dropped
 //   registerOffline()        keep the app's files for offline use (the service worker)
 //   events "clearing-caches" before Clear All Cache reloads: drop what you cache
-//   pages                    features as pages in tab hosts, like a browser's tabs:
-//                            pages.add({ host, id, label, body, newItem?, shown? }),
-//                            show(host, id), active(host), badge(host, id, n) (adapters/pages.js)
+//   pages                    features as pages in tab hosts, like a browser's tabs (the left
+//                            window, the right panel, the bottom) or sections (the Explorer's):
+//                            pages.add({ host, id, label, icon?, body, newItem?, shown? }),
+//                            show(host, id), open(id), active(host), badge(host, id, n) (adapters/pages.js)
 //   settingsDialog           the Settings dialog: addPage({ id, label, order, body }), fields.add({ page, id,
 //                            order, label, key, control: select|checkbox, options } | { page, id, order,
 //                            render(box) }), open(page?), onOpen(listener) (adapters/settings-dialog.js)
@@ -127,10 +128,11 @@ export default defineModule({
     // The pages in the areas' hosts; whether an area shows (and the phone,
     // where the left's sections start collapsed) the frame tells, made below.
     let frame = null;
-    const AREA_OF_HOST = { left: "left", side: "right", bottom: "bottom" };
+    const AREA_OF_HOST = { explorer: "left", left: "left", side: "right", bottom: "bottom" };
     const pages = createPages({ registry: ctx.registry({ key: "key" }), settings, events, isPhone: () => frame?.isPhone() ?? false,
       areaShown: (host) => frame?.shown(AREA_OF_HOST[host]) ?? false,
-      showArea: (host) => { if (frame && !frame.shown(AREA_OF_HOST[host])) frame.toggle(AREA_OF_HOST[host]); } });
+      showArea: (host) => { if (frame && !frame.shown(AREA_OF_HOST[host])) frame.toggle(AREA_OF_HOST[host]); },
+      hideArea: (host) => { if (frame?.shown(AREA_OF_HOST[host])) frame.toggle(AREA_OF_HOST[host]); } });
     const settingsDialog = createSettingsDialog({ pages, settings, registry: ctx.registry() });
     // The theme follows its setting, and the system's when it is "system":
     // Light, Dark, or one an extension contributes (model/themes.js).
@@ -141,9 +143,9 @@ export default defineModule({
     settingsDialog.addPage({ id: "appearance", label: "Appearance", order: 10, body: globalThis.document?.querySelector("#settings-panel-appearance") });
     settingsDialog.fields.add({ page: "appearance", id: "theme-picker", order: 10, render: createThemePicker({ themes, settings }).render });
     // The frame's layout (main.js applies it until the areas are Shell's).
-    settingsDialog.fields.add({ page: "appearance", id: "explorer-select", order: 20, label: "Explorer", key: "explorer", control: "select",
+    settingsDialog.fields.add({ page: "appearance", id: "explorer-select", order: 20, label: "Left window", key: "explorer", control: "select",
       options: [["expanded", "Expanded"], ["collapsed", "Collapsed"]] });
-    settingsDialog.fields.add({ page: "appearance", id: "explorer-anchor-select", order: 30, label: "Explorer anchor", key: "explorerAnchor", control: "select",
+    settingsDialog.fields.add({ page: "appearance", id: "explorer-anchor-select", order: 30, label: "Left window anchor", key: "explorerAnchor", control: "select",
       options: [["docked", "Docked (resizes content)"], ["floating", "Floating (overlay)"]] });
     settingsDialog.fields.add({ page: "appearance", id: "preview-select", order: 40, label: "Preview", key: "preview", control: "select",
       options: [["shown", "Shown"], ["hidden", "Hidden"]] });
@@ -214,7 +216,7 @@ export default defineModule({
     // The bottom area's page: its filters, Copy and Clear beside its tab.
     const doc = globalThis.document;
     if (doc) {
-      pages.add({ host: "bottom", id: "log", order: 10, label: "Log", title: "What the app did, and the kernel's trace",
+      pages.add({ host: "bottom", id: "log", order: 10, label: "Log", title: "What the app did, and the kernel's trace", icon: `<svg class="activity-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3"/><path d="M13 15h4"/></svg>`,
         body: doc.getElementById("log-page"), toolbar: doc.getElementById("log-toolbar"), shown: (visible) => { if (visible) logPanel.render(); } });
     }
     logPanel.render();
@@ -237,13 +239,7 @@ export default defineModule({
     } });
     // Another window cleared the app's storage (Reset, Empty Everything): this one follows.
     followClears({ reload: () => reload.reloadNow(), log: (message) => ctx.log(message) });
-    function showLog() {
-      const area = pages.areaOf("log") ?? "bottom";
-      if (!frame.shown(area)) frame.toggle(area);
-      const host = pages.hostOf("log") ?? "bottom";
-      if (host === "left") pages.reveal(host, "log");
-      else pages.show(host, "log");
-    }
+    const showLog = () => pages.open("log");
     commands.add({ id: "shell.run-command", title: "Run Command…", keywords: ["palette", "console", "terminal"], keys: ["F1"],
       menu: { id: "view", group: 1, order: 1 }, run() {
         showLog();

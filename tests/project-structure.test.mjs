@@ -33,7 +33,8 @@ test("index.html exposes required element ids", async () => {
   const ids = [
     "explorer-tree",
     "editor-content",
-    "explorer-toggle-button",
+    "explorer-page",
+    "right-panel-toggle",
     "presence-strip",
     "workspace-mode-toggle",
     "workspace-mode-row",

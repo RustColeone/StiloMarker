@@ -7,9 +7,9 @@ import { participantColor } from "../../identity/index.js";
 
 export function addSessionView({ shell, status, mode, doc = globalThis.document }) {
   const $ = (id) => doc?.getElementById(id);
-  // The left area's Session section (Shell's pages), the connection state in its header.
+  // The Explorer's Session section (Shell's pages), the connection state in its header.
   if (doc) {
-    shell.pages.add({ host: "left", id: "session", order: 20, label: "Session", title: "Collaboration panel",
+    shell.pages.add({ host: "explorer", id: "session", order: 20, label: "Session", title: "Collaboration panel", icon: `<svg class="activity-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17.5" cy="9" r="2.5"/><path d="M16 14.6a5 5 0 0 1 5.5 5.4"/></svg>`,
       body: $("session-panel-body"), toolbar: $("session-id-label"), className: "collaboration-sidebar-panel" });
   }
   const item = shell.statusBar.add({ id: "presence", order: 40, grow: true, title: "Show the session panel", text: "0 collaborators",

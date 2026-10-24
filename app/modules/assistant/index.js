@@ -64,6 +64,7 @@ export default defineModule({
     if (globalThis.document) {
       shell.pages.add({
         host: "side", id: "agent", order: 1, label: "Agent", title: "The workspace agent: asks, edits and organizes files",
+        icon: `<svg class="activity-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.5L3 21l2-5.7A8.4 8.4 0 1 1 21 11.5z"/><path d="M12 7.5l1 2.3 2.3 1-2.3 1-1 2.3-1-2.3-2.3-1 2.3-1z"/></svg>`,
         body: document.querySelector("#agent-page"), toolbar: document.querySelector("#chat-history-toggle-button"),
         newItem: () => void load().then((loaded) => loaded?.createNewChatConversation()),
         shown(visible) {

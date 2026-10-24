@@ -92,7 +92,7 @@ Supported file types:
 
 ## 3. Work In The Explorer
 
-The explorer is the main organizer for your workspace.
+The explorer is the main organizer for your workspace. It is the first tab of the left window, whose icons are in the activity bar at the far left: the Explorer, Search (find text in every file, `Ctrl+Shift+F`), and any page dragged there. Right-click a tab, an icon or a section's header to move it to another area.
 
 - Click a file to open it in the source pane
 - Type in the box above the tree to keep only the files and folders whose name holds it (Enter opens the first file, Escape clears it)

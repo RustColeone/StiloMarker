@@ -41,10 +41,10 @@ Stilo Marker is a browser-based Markdown workspace. It lets you write notes, bui
 └─────────────────────────────────────────────────────────┘
 ```
 
-- **Explorer** — tree of folders and files in the current project.
+- **Explorer** — tree of folders and files in the current project: the first tab of the left window, whose icons are in the activity bar at the far left (the Explorer, Search, and any panel moved there; click the icon of the tab showing to hide the window).
 - **Source pane** — text editor for the active file; also shows image previews.
 - **Preview pane** — rendered output (HTML for Markdown, SVG tree for MTREE, album grid for URLDB, interactive canvas for BMAP).
-- **Chat panel** — AI assistant sidebar wired to the backend chat proxy.
+- **Chat panel** — the right panel (Agent, Chats): AI assistant wired to the backend chat proxy; the button at the right end of the top bar shows or hides it.
 - **Status bar** — where the project lives, the server's state, collaborators
   online and the open file's version (each once there is something to show),
   and the file's length.
@@ -518,6 +518,7 @@ The explorer shows the project tree as a collapsible file/folder list.
 **Actions:**
 - **Click** a file to open it in the source pane.
 - **Click** a folder arrow to expand/collapse.
+- **Type** in the box above the tree to keep only the files and folders whose name holds it (any case), their folders open; **Enter** opens the first file found, **Escape** clears it.
 - **Double-click** a node label to rename it inline.
 - **Right-click** a node for the context menu: Rename, Delete, Export, Copy, Paste, New File, New Folder, Add Album Entry (for `.urldb` files).
 - **Drag a file or folder** to reorder it or move it into a folder.
@@ -546,8 +547,8 @@ left them anywhere.
 **On a phone:** one file shows at a time. The top bar names it; tap the name
 for the list of open files (and Rename). The switch next to it shows the same
 file in its other view (Source ↔ Preview); it is hidden when the file has only
-one. The explorer is a drawer (≡); a file picked there shows in the view on
-screen. The chat button opens the Agent and Chats as a drawer from the right,
+one. The explorer is a drawer (≡), the left window's tabs in a row at its top;
+a file picked there shows in the view on screen. The chat button opens the Agent and Chats as a drawer from the right,
 with the note still showing at its left (it takes the whole width while you
 type). Tap the note, drag the drawer to the right, or use its › button to
 close it. A swipe that starts a finger's width inside the left or right edge
@@ -557,10 +558,13 @@ its header up for the full height and down again to shrink or close it, or
 tap above it, or use its ×. Opening it on the phone does not change whether
 the desktop shows it.
 
-**Moving panels:** right-click a section's title in the left sidebar
-(Linked Notes, Session) or a tab in the side panel (Agent, Chats) or the
-bottom panel (Log) and choose **Move to Left**, **Move to Right** or **Move
-to Bottom**, or drag the title or tab onto another area. The panel stays
+**Moving panels:** right-click a tab of the left window (its icon in the
+activity bar: Search), a section's title under the Explorer's tree (Linked
+Notes, Session), a tab in the right panel (Agent, Chats) or the bottom panel
+(Log) and choose **Move to Explorer** (a section under the tree), **Move to
+Left** (a tab of the left window), **Move to Right** or **Move to Bottom**,
+or drag it onto another area: dropped anywhere on the left window or the
+activity bar, it is a tab there. The Explorer itself stays. The panel stays
 where you put it; move it back the same way.
 
 **Copy/paste rules:**
@@ -591,8 +595,8 @@ Preview beside it, move it to the other pane or open it there too. Tabs
 that don't fit scroll with the mouse wheel, and **⋯** at the strip's end
 lists them all.
 
-**Find in Files** (Edit → Find in Files, `Ctrl+Shift+F`, or the magnifier
-on the left): search every file of the workspace, with Match case, whole
+**Find in Files** (Edit → Find in Files, `Ctrl+Shift+F`, or the Search icon
+in the activity bar, the left window's Search tab): search every file of the workspace, with Match case, whole
 word (in any language) and regular expressions (`^` and `$` are a line's
 start and end). Results are grouped by file with their line numbers; click
 one to open the file there. At most 20,000 results are listed ("20,000+").
@@ -794,7 +798,7 @@ The chat panel provides an AI assistant scoped to the current workspace.
 
 ### Opening the panel
 
-`View > Toggle Chat` or the `AI` button in the activity bar.
+`View > Show Chat` or the panel button at the right end of the top bar.
 
 ### Conversations
 

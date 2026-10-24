@@ -29,6 +29,9 @@
 
         <nav class="menu-bar" aria-label="Application menus"></nav>
 
+        <button id="right-panel-toggle" class="topbar-icon-button topbar-desktop-only" type="button" aria-label="Toggle the right panel"
+          title="Toggle the Right Panel" aria-pressed="false"><svg class="topbar-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
+
         <div class="topbar-mobile-actions topbar-mobile-only">
           <button id="mobile-view-toggle" class="topbar-mobile-btn" type="button" data-target="preview"
             aria-label="Show preview" title="Show preview"><svg class="topbar-mobile-icon view-icon-source" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5"/><path d="M13 3v5h5"/><path d="M19.6 13.4a1.5 1.5 0 0 1 2.1 2.1L17 20.2l-2.8.6.6-2.8 4.8-4.6z"/></svg><svg class="topbar-mobile-icon view-icon-preview" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4"/><path d="M13 3v5h5"/><circle cx="17" cy="15.8" r="3.2"/><path d="M19.4 18.2 21.8 20.6"/></svg></button>
@@ -41,54 +44,69 @@
       </header>
 
       <div id="workspace-shell" class="workspace-shell">
-        <aside class="activity-bar" aria-label="Activity bar">
-          <button id="explorer-toggle-button" class="activity-button" type="button" aria-label="Toggle explorer" title="Explorer"><svg class="activity-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"/><path d="M15 2v5h5"/><path d="M3 7v13a2 2 0 0 0 2 2h10"/></svg></button>
-          <button id="search-activity-button" class="activity-button" type="button" aria-label="Find in files" title="Find in Files (Ctrl+Shift+F)"><svg class="activity-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20.5 20.5 16 16"/></svg></button>
-          <button id="chat-toggle-activity-button" class="activity-button" type="button" aria-label="Toggle chat" title="Chat"><svg class="activity-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.5L3 21l2-5.7A8.4 8.4 0 1 1 21 11.5z"/><path d="M12 7.5l1 2.3 2.3 1-2.3 1-1 2.3-1-2.3-2.3-1 2.3-1z"/></svg></button>
-          <button id="settings-button" class="activity-button" type="button" aria-label="Open settings" title="Settings"><svg class="activity-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+        <aside class="activity-bar" aria-label="Activity bar" data-page-drop="left">
+          <!-- The left window's pages, one icon each (Shell's pages draw them). -->
+          <div class="activity-pages" data-tab-host="left" data-tab-class="activity-button" data-tab-style="icons" data-tab-toggles="area"
+            role="tablist" aria-orientation="vertical" aria-label="The left window's pages"></div>
           <div class="activity-bar-spacer"></div>
+          <button id="settings-button" class="activity-button" type="button" aria-label="Open settings" title="Settings"><svg class="activity-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
         </aside>
 
-        <aside id="explorer-panel" class="sidebar" aria-label="Project explorer sidebar" data-page-drop="left">
-          <header class="sidebar-header">
-            <div>
-              <div class="eyebrow">Explorer</div>
-              <div id="project-name-label" class="sidebar-title">Workspace</div>
-            </div>
-            <div class="sidebar-actions">
-              <button id="explorer-anchor-button" class="sidebar-icon-button sidebar-anchor-button" type="button" aria-label="Dock or float the explorer" title="Float the explorer (overlay)" aria-pressed="false"><svg class="sidebar-icon-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="16" x2="12" y2="22"/><path d="M9 2h6l-1 6 3 3v2H7v-2l3-3-1-6z"/></svg></button>
-              <button id="explorer-filter-button" class="sidebar-icon-button sidebar-funnel-button" type="button" aria-label="Filter items" title="Filter items"><svg class="sidebar-icon-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg></button>
-              <button id="explorer-add-button" class="sidebar-add-button" type="button" aria-label="Add items" title="Add items"><svg class="sidebar-icon-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+        <aside id="explorer-panel" class="sidebar" aria-label="The left window" data-page-drop="left">
+          <!-- On a phone (no activity bar), the left window's pages as a row of icons. -->
+          <div class="sidebar-phone-tabs" data-tab-host="left" data-tab-class="sidebar-phone-tab" data-tab-style="icons"
+            role="tablist" aria-label="The left window's pages"></div>
+          <!-- The open page's title row (not the Explorer's: it has its own header). -->
+          <header class="sidebar-tab-header" data-tab-host-header="left" hidden>
+            <div class="eyebrow" data-tab-host-title="left"></div>
+            <div class="sidebar-tab-actions">
+              <button class="chat-toolbar-icon-btn" type="button" aria-label="New" title="New" data-tab-host-new="left" hidden>&#43;</button>
+              <span class="tab-host-toolbar" data-tab-host-toolbar="left"></span>
             </div>
           </header>
+          <div class="sidebar-pages" data-tab-host-pages="left">
+            <div id="explorer-page" class="explorer-page">
+              <header class="sidebar-header">
+                <div>
+                  <div class="eyebrow">Explorer</div>
+                  <div id="project-name-label" class="sidebar-title">Workspace</div>
+                </div>
+                <div class="sidebar-actions">
+                  <button id="explorer-anchor-button" class="sidebar-icon-button sidebar-anchor-button" type="button" aria-label="Dock or float the left window" title="Float the left window (overlay)" aria-pressed="false"><svg class="sidebar-icon-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="16" x2="12" y2="22"/><path d="M9 2h6l-1 6 3 3v2H7v-2l3-3-1-6z"/></svg></button>
+                  <button id="explorer-filter-button" class="sidebar-icon-button sidebar-funnel-button" type="button" aria-label="Filter items" title="Filter items"><svg class="sidebar-icon-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg></button>
+                  <button id="explorer-add-button" class="sidebar-add-button" type="button" aria-label="Add items" title="Add items"><svg class="sidebar-icon-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+                </div>
+              </header>
 
-          <div class="explorer-search">
-            <input id="explorer-name-filter" class="explorer-search-input" type="search" placeholder="Search file names" aria-label="Search file names" autocomplete="off" spellcheck="false">
-          </div>
-          <div id="explorer-tree" class="explorer-tree" role="tree" aria-label="Project files"></div>
+              <div class="explorer-search">
+                <input id="explorer-name-filter" class="explorer-search-input" type="search" placeholder="Search file names" aria-label="Search file names" autocomplete="off" spellcheck="false">
+              </div>
+              <div id="explorer-tree" class="explorer-tree" role="tree" aria-label="Project files"></div>
 
-          <!-- The left area's sections (Shell's pages: Linked Notes, Session): each
-               owner adds its page and Shell draws its section around the body. -->
-          <div class="sidebar-sections" data-section-host="left">
-            <div id="links-panel-body" class="sidebar-panel-body">
-            <div class="links-section">
-              <div class="links-section-label">Outgoing Links</div>
-              <div id="outgoing-links-list" class="links-list"></div>
-            </div>
-            <div class="links-section">
-              <div class="links-section-label">Backlinks</div>
-              <div id="backlinks-list" class="links-list"></div>
-            </div>
-            </div>
-            <!-- Stays in the Session's header so the connection state is readable
-                 while the section is collapsed. -->
-            <span id="session-id-label" class="subtle-label">Offline</span>
-            <div id="session-panel-body" class="sidebar-panel-body">
-              <p id="session-detail-text" class="subtle-label">Not connected to a shared session.</p>
-              <div id="presence-strip" class="presence-strip"></div>
-              <div id="workspace-mode-row" class="workspace-mode-row" hidden>
-                <span class="subtle-label">Workspace</span>
-                <button id="workspace-mode-toggle" class="workspace-mode-toggle" type="button">⟳ Synced</button>
+              <!-- The Explorer's sections (Shell's pages: Linked Notes, Session): each
+                   owner adds its page and Shell draws its section around the body. -->
+              <div class="sidebar-sections" data-section-host="explorer">
+                <div id="links-panel-body" class="sidebar-panel-body">
+                <div class="links-section">
+                  <div class="links-section-label">Outgoing Links</div>
+                  <div id="outgoing-links-list" class="links-list"></div>
+                </div>
+                <div class="links-section">
+                  <div class="links-section-label">Backlinks</div>
+                  <div id="backlinks-list" class="links-list"></div>
+                </div>
+                </div>
+                <!-- Stays in the Session's header so the connection state is readable
+                     while the section is collapsed. -->
+                <span id="session-id-label" class="subtle-label">Offline</span>
+                <div id="session-panel-body" class="sidebar-panel-body">
+                  <p id="session-detail-text" class="subtle-label">Not connected to a shared session.</p>
+                  <div id="presence-strip" class="presence-strip"></div>
+                  <div id="workspace-mode-row" class="workspace-mode-row" hidden>
+                    <span class="subtle-label">Workspace</span>
+                    <button id="workspace-mode-toggle" class="workspace-mode-toggle" type="button">⟳ Synced</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

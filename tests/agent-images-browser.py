@@ -88,7 +88,7 @@ async def main():
         await page.goto(BASE, wait_until='networkidle')
         await page.wait_for_function('Boolean(window.__imgTest)')
         if await page.locator('#chat-panel').is_hidden():
-            await page.locator('#chat-toggle-activity-button').click()
+            await page.locator('#right-panel-toggle').click()
         await page.wait_for_function(WAIT_LOADED)  # the chat panel loads on demand
 
         # Signed out: the server's agent asks for a sign-in and sends nothing.

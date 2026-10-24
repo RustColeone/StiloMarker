@@ -1,6 +1,7 @@
 // The desktop frame (Shell's): the areas around the editor and whether they
-// show: the left area (the explorer sidebar, docked or floating over the
-// editor, with its sections: pages.js draws them), the right area (the side panel), the
+// show: the left area (the left window, docked or floating over the editor:
+// its pages are tabs, the activity bar their icons, the Explorer one of them;
+// pages.js draws them), the right area (the side panel, its toggle in the top bar), the
 // bottom area (the log), and the middle's source and preview panes; their
 // sizes (the splitters), all kept in the settings. Showing an area is
 // announced ("area" { area, shown }) so its owner can draw or load it; a
@@ -12,7 +13,7 @@ const LAYOUT_KEYS = ["explorer", "explorerAnchor", "preview", "source", "chatPan
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
-const NAMES = { left: "Explorer", right: "Chat", bottom: "Log", source: "Source", preview: "Preview" };
+const NAMES = { left: "Left window", right: "Right panel", bottom: "Log", source: "Source", preview: "Preview" };
 
 export function createAreas({ settings, events, pages, log = () => {}, doc = globalThis.document, win = globalThis.window }) {
   const $ = (id) => doc.getElementById(id);
@@ -25,10 +26,10 @@ export function createAreas({ settings, events, pages, log = () => {}, doc = glo
   function toggle(area) {
     if (area === "left") {
       if (isPhone()) { phone.toggleExplorer(); return; }
-      settings.change({ explorer: settings.explorer === "collapsed" ? "expanded" : "collapsed" }, "Toggle Explorer");
+      settings.change({ explorer: settings.explorer === "collapsed" ? "expanded" : "collapsed" }, "Toggle the Left Window");
     } else if (area === "right") {
       if (isPhone()) { phone.toggleRight(); return; }
-      settings.change({ chatPanel: settings.chatPanel === "hidden" ? "shown" : "hidden" }, "Toggle Chat");
+      settings.change({ chatPanel: settings.chatPanel === "hidden" ? "shown" : "hidden" }, "Toggle the Right Panel");
     } else if (area === "bottom") {
       if (isPhone()) { phone.toggleBottom(); return; }
       settings.change({ debugPanel: !settings.debugPanel }, "Toggle Log");
@@ -61,15 +62,13 @@ export function createAreas({ settings, events, pages, log = () => {}, doc = glo
   doc.addEventListener("pointerdown", (event) => {
     if (settings.explorerAnchor !== "floating" || settings.explorer !== "expanded") return;
     const target = event.target;
-    if (explorerPanel?.contains(target) || $("explorer-toggle-button")?.contains(target) || $("explorer-context-menu")?.contains(target)) return;
+    if (explorerPanel?.contains(target) || doc.querySelector(".activity-bar")?.contains(target) || $("explorer-context-menu")?.contains(target)) return;
     settings.change({ explorer: "collapsed" }, "pressed outside the floating explorer");
   }, true);
 
-  // Show one of the left area's sections (pages.js draws them): the explorer
-  // opened, the section expanded, scrolled to.
+  // Show a page (one of the Explorer's sections, or a tab) wherever it is.
   function revealSection(id) {
-    if (settings.explorer !== "expanded") settings.change({ explorer: "expanded" }, `show the ${id} section`);
-    pages?.reveal("left", id);
+    pages?.open(id);
   }
 
   // ── Applying the settings to the page ──
@@ -93,13 +92,15 @@ export function createAreas({ settings, events, pages, log = () => {}, doc = glo
     $("preview-collapse-button")?.setAttribute("aria-expanded", String(settings.preview === "shown"));
     $("chat-collapse-button")?.setAttribute("aria-expanded", String(settings.chatPanel === "shown"));
     showsDrawers();
-    $("chat-toggle-activity-button")?.classList.toggle("is-active", settings.chatPanel === "shown");
+    const rightToggle = $("right-panel-toggle");
+    rightToggle?.classList.toggle("is-active", settings.chatPanel === "shown");
+    rightToggle?.setAttribute("aria-pressed", String(settings.chatPanel === "shown"));
     const anchorButton = $("explorer-anchor-button");
     if (anchorButton) {
       const floating = settings.explorerAnchor === "floating";
       anchorButton.classList.toggle("is-active", floating);
       anchorButton.setAttribute("aria-pressed", String(floating));
-      anchorButton.title = floating ? "Dock the explorer (fixed panel)" : "Float the explorer (overlay)";
+      anchorButton.title = floating ? "Dock the left window (fixed panel)" : "Float the left window (overlay)";
     }
     phone?.applyView();
     events.emit("layout", {});
@@ -148,10 +149,9 @@ export function createAreas({ settings, events, pages, log = () => {}, doc = glo
 
   // ── Its controls ──
   const bind = (id, area) => $(id)?.addEventListener("click", () => toggle(area));
-  bind("explorer-toggle-button", "left");
   bind("preview-toggle-activity-button", "preview");
   bind("source-toggle-activity-button", "source");
-  bind("chat-toggle-activity-button", "right");
+  bind("right-panel-toggle", "right");
   bind("preview-collapse-button", "preview");
   bind("source-collapse-button", "source");
   bind("chat-collapse-button", "right");

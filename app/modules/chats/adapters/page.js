@@ -320,6 +320,7 @@ export function createChatsPage(app) {
 
   pages.add({
     host: "side", id: "chats", order: 2, label: "Chats", title: "Chat live with the people in this project and with its characters",
+    icon: `<svg class="activity-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 9a5 5 0 0 0-5-5H7a5 5 0 0 0-3.5 8.6L3 16l3.3-1.4A5 5 0 0 0 7 14h5a5 5 0 0 0 5-5z"/><path d="M17 9.5a5 5 0 0 1 3.5 8.1L21 21l-3.3-1.4A5 5 0 0 1 17 20h-3a5 5 0 0 1-4-2"/></svg>`,
     body: chatsEl.page, newItem: () => chats?.newChat(),
     shown(visible) {
       if (!visible) { chats?.closeMenu(); return; }

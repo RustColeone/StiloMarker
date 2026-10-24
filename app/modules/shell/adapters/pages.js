@@ -3,19 +3,29 @@
 // module adds its feature there as a page with its own body. A page never
 // knows what other pages share its host. Two kinds of host:
 //
-//   a tab host ([data-tab-host="side"]: the side panel, the bottom area, the
-//   Settings dialog): Shell draws the strip, shows one page at a time and
-//   remembers which (settings.openPages[host]); the open page's toolbar shows
-//   in [data-tab-host-toolbar], what its "+" does in [data-tab-host-new].
-//   A strip's `data-tab-class` names its tabs' look.
-//   a section host ([data-section-host="left"]: the left area, under the
-//   explorer): each page is a collapsible section Shell draws around its body
-//   (which carries .sidebar-panel-body), its toolbar in the section's header.
-//   Collapsed per section and kept (settings.sidebarPanels); never chosen,
-//   they start collapsed on a phone, where they pushed the file tree off screen.
+//   a tab host ([data-tab-host="side"]: the left window, the side panel, the
+//   bottom area, the Settings dialog): Shell draws the strip, shows one page
+//   at a time and remembers which (settings.openPages[host]); the open page's
+//   toolbar shows in [data-tab-host-toolbar], what its "+" does in
+//   [data-tab-host-new], its label in [data-tab-host-title] (a title row,
+//   [data-tab-host-header], hidden while a page with its own header is open).
+//   A strip's `data-tab-class` names its tabs' look; a
+//   host may have several strips (the left window's: the activity bar, and
+//   the phone's row at the drawer's top). An icons strip
+//   (data-tab-style="icons") draws each page's icon, its label as the tip;
+//   pressing the icon of the page showing hides the area (data-tab-toggles).
+//   a section host ([data-section-host="explorer"]: under the explorer's tree,
+//   in the left window's Explorer page): each page is a collapsible section
+//   Shell draws around its body (which carries .sidebar-panel-body), its
+//   toolbar in the section's header. Collapsed per section and kept
+//   (settings.sidebarPanels); never chosen, they start collapsed on a phone,
+//   where they pushed the file tree off screen.
 //
-//   pages.add({ host, id, label, title?, order?, body, toolbar?, className?, headerClass?,
-//               available?, newItem?(), shown?(visible) })
+//   pages.add({ host, id, label, title?, icon?, order?, body, toolbar?, className?, headerClass?,
+//               available?, movable?, ownHeader?, newItem?(), shown?(visible) })
+//     icon       an SVG's markup, shown when the page is in the left window
+//     movable    false: it stays in its host (the Explorer page)
+//     ownHeader  its body draws its own header (the host's title row hides)
 //     body       the element holding the page (shown only while it is open)
 //     toolbar    shown with it: in its tab host's header while open, or in its section's header
 //     newItem    what the host's "+" button does on this page (hidden without one)
@@ -23,22 +33,26 @@
 //   pages.show(host, id)   pages.active(host) -> id   pages.badge(host, id, count)
 //   pages.available(host, id, available)   a page with nothing to show hides
 //   pages.reveal(host, id)   its section expanded and scrolled to
+//   pages.open(id)   brought on screen wherever it is: its area shown, its tab
+//                    chosen or its section expanded
 //   pages.onChange(host, listener(id))
 //
 // The areas' pages move (step 5k): right-click a tab or a section's header
-// for Move to Left / Right / Bottom, or drag it onto another area (an area's
-// element carries [data-page-drop="<host>"]); the page's body (and toolbar) goes to
-// that host as a section or a tab, the area shows it, and the choice is kept
-// (settings.pageHosts). A page shown when its area shows is told (shown).
+// for Move to Explorer / Left / Right / Bottom, or drag it onto another area
+// (an area's element carries [data-page-drop="<host>"]); the page's body (and
+// toolbar) goes to that host as a section or a tab, the area shows it, and
+// the choice is kept (settings.pageHosts). Dropped anywhere on the left window
+// or its activity bar, a page is one of its tabs. A page shown when its area
+// shows is told (shown).
 //   pages.move(id, host)   pages.hostOf(id) -> host   pages.areaOf(id) -> "left" | "right" | "bottom"
 //   pages.isOpen(id)   the open tab of its host, or a section
 //   pages.visible(id)   open, and its area showing (and its section not collapsed)
 // areaShown(host) and showArea(host): the frame's, for the area holding a host.
-const AREA_HOSTS = { left: "Left", side: "Right", bottom: "Bottom" };
-const HOST_OF_AREA = { left: "left", right: "side", bottom: "bottom" };
+const AREA_HOSTS = { explorer: "Explorer", left: "Left", side: "Right", bottom: "Bottom" };
+const AREA_OF_HOST = { explorer: "left", left: "left", side: "right", bottom: "bottom" };
 
 export function createPages({ registry, settings, events = null, isPhone = () => false, areaShown = () => true, showArea = () => {},
-  doc = globalThis.document, win = globalThis.window }) {
+  hideArea = () => {}, doc = globalThis.document, win = globalThis.window }) {
   const listeners = new Map(); // host -> Set(listener)
   const places = new Map();    // host -> its elements (looked up once)
   const sections = new Map();  // page key -> its section element
@@ -57,8 +71,10 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
   function placeOf(host) {
     if (!places.has(host)) {
       places.set(host, {
-        strip: doc?.querySelector(`[data-tab-host="${host}"]`) ?? null,
+        strips: doc ? [...doc.querySelectorAll(`[data-tab-host="${host}"]`)] : [],
         toolbar: doc?.querySelector(`[data-tab-host-toolbar="${host}"]`) ?? null,
+        header: doc?.querySelector(`[data-tab-host-header="${host}"]`) ?? null,
+        title: doc?.querySelector(`[data-tab-host-title="${host}"]`) ?? null,
         plus: doc?.querySelector(`[data-tab-host-new="${host}"]`) ?? null,
         bodies: doc?.querySelector(`[data-tab-host-pages="${host}"]`) ?? null,
         sections: doc?.querySelector(`[data-section-host="${host}"]`) ?? null
@@ -72,6 +88,9 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
     const remembered = settings.openPages?.[host];
     return (pages.find((page) => page.id === remembered) ?? pages[0])?.id ?? null;
   }
+  // Whether a host is on screen: its area shown, and the Explorer's sections
+  // only while the left window shows the Explorer page.
+  const hostShown = (host) => (host === "explorer" ? areaShown("left") && active("left") === "explorer" : areaShown(host));
 
   // ── A section host's sections ──
   function collapsed(id) {
@@ -162,24 +181,32 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
       drawSections(host, place.sections);
       return;
     }
-    const { strip } = place;
     const open = active(host);
     const pages = pagesOf(host);
-    if (strip) {
+    for (const strip of place.strips) {
       const ids = pages.map((page) => page.id).join(" ");
+      const icons = strip.dataset.tabStyle === "icons";
       if (strip.dataset.pages !== ids) {
         const empty = doc.createElement("span");
         empty.className = "tab-host-empty";
         empty.textContent = "Empty: right-click a tab or a section and choose Move to…";
-        strip.replaceChildren(...(pages.length ? [] : [empty]), ...pages.map((page) => {
+        strip.replaceChildren(...(pages.length || icons ? [] : [empty]), ...pages.map((page) => {
           const button = doc.createElement("button");
           button.type = "button";
           button.className = strip.dataset.tabClass ?? "chat-tab"; // the host's look
-          button.draggable = Boolean(AREA_HOSTS[host]);
+          button.draggable = Boolean(AREA_HOSTS[host]) && page.movable !== false;
           button.setAttribute("role", "tab");
           button.dataset.page = page.id;
-          button.textContent = page.label;
-          if (page.title) button.title = page.title;
+          if (icons) {
+            // The page's icon (a module's own markup), or its label's first letter.
+            if (page.icon) button.innerHTML = page.icon;
+            else button.append(Object.assign(doc.createElement("span"), { className: "page-icon-letter", textContent: page.label.slice(0, 1) }));
+            button.setAttribute("aria-label", page.label);
+            button.title = page.title ?? page.label;
+          } else {
+            button.textContent = page.label;
+            if (page.title) button.title = page.title;
+          }
           return button;
         }));
         strip.dataset.pages = ids;
@@ -198,7 +225,10 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
         page.toolbar.hidden = !visible;
       }
     }
-    if (place.plus) place.plus.hidden = !pages.find((page) => page.id === open)?.newItem;
+    const openPage = pages.find((page) => page.id === open);
+    if (place.title) place.title.textContent = openPage?.label ?? "";
+    if (place.header) place.header.hidden = !openPage || Boolean(openPage.ownHeader);
+    if (place.plus) place.plus.hidden = !openPage?.newItem;
   }
 
   function show(host, id) {
@@ -206,18 +236,23 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
     if (!shownPagesOf(host).some((page) => page.id === id) || previous === id) return;
     settings.change({ openPages: { ...(settings.openPages ?? {}), [host]: id } }, `open the ${id} page`);
     pagesOf(host).find((page) => page.id === previous)?.shown?.(false);
+    // The Explorer page leaving or coming: its sections with it.
+    if (host === "left" && previous === "explorer") for (const page of pagesOf("explorer")) page.shown?.(false);
     draw(host);
     pagesOf(host).find((page) => page.id === id)?.shown?.(true);
+    if (host === "left" && id === "explorer") for (const page of pagesOf("explorer")) if (visible(page.id)) page.shown?.(true);
     for (const listener of [...(listeners.get(host) ?? [])]) listener(id);
   }
 
   function badge(host, id, count) {
-    const button = placeOf(host).strip?.querySelector(`[data-page="${id}"]`);
     const value = count ? String(count) : "";
-    if (!button || button.dataset.unread === value) return;
-    button.dataset.unread = value;
     const label = pagesOf(host).find((page) => page.id === id)?.label ?? id;
-    button.setAttribute("aria-label", count ? `${label}, ${count} unread` : label);
+    for (const strip of placeOf(host).strips) {
+      const button = strip.querySelector(`[data-page="${id}"]`);
+      if (!button || button.dataset.unread === value) continue;
+      button.dataset.unread = value;
+      button.setAttribute("aria-label", count ? `${label}, ${count} unread` : label);
+    }
   }
 
   function available(host, id, yes) {
@@ -243,17 +278,24 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
     draw(from);
     draw(host);
     // It shows where it went, and its area with it.
-    if (!placeOf(host).sections) show(host, page.id);
-    showArea(host);
+    open(page.id);
     if (visible(page.id)) page.shown?.(true);
-    if (placeOf(host).sections) reveal(host, page.id);
+  }
+
+  // A page brought on screen wherever it is.
+  function open(id) {
+    const host = hostOf(id);
+    if (!host) return;
+    if (placeOf(host).sections) reveal(host, id);
+    else show(host, id);
+    showArea(host);
   }
 
   const hostOf = (id) => {
     const page = pageById(id);
     return page ? hostOfPage(page) : null;
   };
-  const areaOf = (id) => Object.keys(HOST_OF_AREA).find((area) => HOST_OF_AREA[area] === hostOf(id)) ?? null;
+  const areaOf = (id) => AREA_OF_HOST[hostOf(id)] ?? null;
   function isOpen(id) {
     const host = hostOf(id);
     if (!host || unavailable.has(pageById(id).key)) return false;
@@ -261,7 +303,7 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
   }
   function visible(id) {
     const host = hostOf(id);
-    return Boolean(host) && isOpen(id) && areaShown(host) && !(placeOf(host).sections && collapsed(id));
+    return Boolean(host) && isOpen(id) && hostShown(host) && !(placeOf(host).sections && collapsed(id));
   }
 
   // The menu on a page's tab or section header: Move to….
@@ -271,7 +313,7 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
   }
   function openMenu(id, x, y) {
     const host = hostOf(id);
-    if (!host || !doc) return;
+    if (!host || !doc || pageById(id)?.movable === false) return;
     if (!menu) {
       menu = doc.createElement("div");
       menu.className = "explorer-context-menu tab-context-menu page-move-menu";
@@ -305,8 +347,9 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
     menu.querySelector("button:not(:disabled)")?.focus({ preventScroll: true });
   }
 
-  // A section shown: expanded, and scrolled to.
+  // A section shown: expanded, and scrolled to (the Explorer's: its page shown).
   function reveal(host, id) {
+    if (host === "explorer") show("left", "explorer");
     if (collapsed(id)) toggleSection(host, id);
     const page = pagesOf(host).find((entry) => entry.id === id);
     if (page && sections.has(page.key)) sections.get(page.key).scrollIntoView({ block: "nearest" });
@@ -371,10 +414,18 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
       bind(element);
     };
     const area = Boolean(AREA_HOSTS[host]);
-    bindOnce(place.strip, (strip) => {
+    for (const element of place.strips) bindOnce(element, (strip) => {
       strip.addEventListener("click", (event) => {
         const button = event.target.closest("[data-page]");
-        if (button) show(host, button.dataset.page);
+        if (!button) return;
+        const id = button.dataset.page;
+        // The left window's activity bar: an icon shows its page and the window;
+        // the page showing, pressed again, hides the window. (A strip inside its
+        // area, as the phone's row in the drawer, only shows the page.)
+        const toggles = strip.dataset.tabToggles === "area";
+        if (toggles && active(host) === id && hostShown(host)) { hideArea(host); return; }
+        show(host, id);
+        if (toggles) showArea(host);
       });
       if (area) strip.addEventListener("contextmenu", (event) => {
         const button = event.target.closest("[data-page]");
@@ -402,7 +453,7 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
       });
       container.addEventListener("dragstart", (event) => startDrag(event, event.target.closest?.(".sidebar-panel-toggle")?.dataset.panel));
     });
-    if (area) bindOnce(doc?.querySelector(`[data-page-drop="${host}"]`), (zone) => bindDrop(zone, host));
+    if (area) for (const zone of doc?.querySelectorAll(`[data-page-drop="${host}"]`) ?? []) bindOnce(zone, (element) => bindDrop(element, host));
   }
 
   // The sections follow their kept state, and the viewport while never chosen.
@@ -414,13 +465,14 @@ export function createPages({ registry, settings, events = null, isPhone = () =>
   events?.on("layout", drawSectionHosts);
   // An area shown: the pages open in it are told (they draw, or load).
   events?.on("area", ({ area, shown }) => {
-    const host = HOST_OF_AREA[area];
-    if (!shown || !host) return;
-    for (const page of pagesOf(host)) if (visible(page.id)) page.shown?.(true);
+    if (!shown) return;
+    for (const host of Object.keys(AREA_OF_HOST).filter((key) => AREA_OF_HOST[key] === area)) {
+      for (const page of pagesOf(host)) if (visible(page.id)) page.shown?.(true);
+    }
   });
 
   return Object.freeze({
-    add, show, active, badge, available, reveal, move, hostOf, areaOf, isOpen, visible, closeMenu,
+    add, show, active, badge, available, reveal, open, move, hostOf, areaOf, isOpen, visible, closeMenu,
     onChange(host, listener) {
       if (!listeners.has(host)) listeners.set(host, new Set());
       listeners.get(host).add(listener);

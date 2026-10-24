@@ -135,7 +135,7 @@ export default defineModule({
 | `copyText` | `copyText(text)`: to the clipboard |
 | `render` | `render(project)`: ask for the app to be drawn again |
 | `settings` | the settings, read (`settings.<key>`: the extension's own contributed keys, and `serverUrl`); `settings.change({ key: value }, why)` for its own keys; `settings.on(listener(view, changedKeys))` |
-| `pages` | pages in the areas' tab hosts and the left's sections: `pages.add({ host, id, label, title?, order?, body, toolbar?, shown?(visible) })`, `pages.show(host, id)`, `pages.available(host, id, yes)` |
+| `pages` | pages in the areas' tab hosts (`left`: the left window, its icons in the activity bar; `side`: the right panel; `bottom`) and the Explorer's sections (`explorer`): `pages.add({ host, id, label, title?, icon?, order?, body, toolbar?, shown?(visible) })` (`icon`: an SVG's markup, the page's icon in the activity bar; without one, its label's first letter), `pages.show(host, id)`, `pages.open(id)` (brought on screen wherever the user moved it), `pages.available(host, id, yes)` |
 | `settingsDialog` | `settingsDialog.addPage({ id, label, order, body })` (body: a `.settings-tab-panel` placed in `.settings-tab-panels`), `settingsDialog.fields.add(...)`, `settingsDialog.open(page?)` |
 | `statusBar` | `statusBar.add({ id, order, title?, action?, dot?, grow?, hidden? }) -> { set({ text, tone, title, hidden }) }` (`dot`: a coloured dot before the text, in the item's tone; `grow`: it takes the spare width; `hidden`: not shown until `set({ hidden: false })`) |
 
