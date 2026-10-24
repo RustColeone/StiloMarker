@@ -68,6 +68,14 @@ lost while the page is in view count, not one left on purpose).
 
 ## Fixed
 
+### v0.3.2: a project opens only with Open
+
+Found by the user (2026-10-24). In Open Project, a double-click on a
+project opened it straight away, and two quick clicks (one to select, one
+more, as the list redraws) count as one; the dialog is meant to open a
+project only with its Open button. A double-click now enters a team or a
+folder and only selects a project. Test: `trash-browser.py` (fails before).
+
 ### v0.3.1: a browser keeps a sign-in, not a password
 
 Asked for 2026-10-24, after the review noted it. Until now a browser kept

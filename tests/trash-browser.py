@@ -1,7 +1,9 @@
 """Browser regression for the team's trash, with a real backend: deleting a
 cloud project in the file manager says it goes to the Trash; the Trash lists
 it with the days left; Restore brings it back where it was; Delete now
-removes it for good."""
+removes it for good. In Open Project, a double-click enters a team but only
+selects a project: it opens with Open (two quick clicks never open it
+unasked)."""
 import asyncio, json, os, socket, subprocess, sys, tempfile, time, urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
@@ -97,6 +99,22 @@ async def main():
         await page.wait_for_selector("#trash-dialog .subtle-label:text-is('The trash is empty.')", timeout=10000)
         assert list((DATA / "_trash" / "qa").iterdir()) == []
         checks.append("Delete now removes it for good")
+
+        # Open Project: a double-click enters the team; on a project it only selects; Open opens it.
+        await page.keyboard.press("Escape")
+        await page.keyboard.press("Escape")
+        await page.evaluate('window.__t.shell.run("cloud.open-project")')
+        await page.locator('#browser-list .browser-item:has-text("qa")').dblclick()
+        await page.wait_for_selector('#browser-list .browser-item-label:text-is("Novel")', timeout=15000)
+        await page.locator('#browser-list .browser-item:has-text("Novel")').dblclick()
+        await page.wait_for_timeout(1500)
+        state = await page.evaluate("""() => ({ open: Boolean(document.querySelector("#open-server-dialog")?.open),
+          selected: document.querySelector("#browser-list .browser-item.is-selected .browser-item-label")?.textContent,
+          button: [document.querySelector("#browser-open-btn").textContent, document.querySelector("#browser-open-btn").disabled] })""")
+        assert state == {"open": True, "selected": "Novel", "button": ["Open project", False]}, state
+        await page.click("#browser-open-btn")
+        await page.wait_for_function('!document.querySelector("#open-server-dialog")?.open', timeout=15000)
+        checks.append("a double-click enters a team, only selects a project; Open opens it")
 
         assert not errors, errors
         await b.close()

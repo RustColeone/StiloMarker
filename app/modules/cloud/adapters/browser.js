@@ -227,9 +227,10 @@ export function createBrowser(app) {
     return Boolean(left && right && left.path === right.path && left.kind === right.kind);
   }
 
-  // A row is just selectable text now: single-click selects, double-click acts
-  // (enter a folder/team or open a project). The Open/Access buttons live in the
-  // bottom action bar and follow the current selection.
+  // A row is just selectable text now: single-click selects; double-click enters
+  // a folder or team. A project opens only with Open (the bottom action bar's
+  // Open/Access buttons follow the selection): two quick clicks on a project,
+  // which the browser counts as a double-click, must not open it unasked.
   function makeBrowserRow(entry) {
     const li = document.createElement("li");
     li.className = "browser-item";
@@ -288,9 +289,7 @@ export function createBrowser(app) {
       }
     });
     li.addEventListener("dblclick", () => {
-      if (multi && entry.kind === "project") return;
-      if (app.browserState.mode === "pick" && entry.kind === "project") return;
-      activateBrowserEntry(entry);
+      if (entry.kind === "team" || entry.kind === "folder") activateBrowserEntry(entry);
     });
     return li;
   }
