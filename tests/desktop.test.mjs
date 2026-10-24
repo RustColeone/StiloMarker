@@ -7,8 +7,8 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { FEED, ORIGIN, WEB_ENTRIES, isNewer, linkAction, noServer, route, updateFrom } from "../desktop/policy.mjs";
-import { desktopBridge, watchReleases } from "../app/modules/shell/adapters/desktop.js";
+import { FEED, ORIGIN, WEB_ENTRIES, ZOOM_STEPS, isNewer, keptZoom, linkAction, noServer, route, updateFrom, zoomKey, zoomStep } from "../desktop/policy.mjs";
+import { addZoom, desktopBridge, watchReleases } from "../app/modules/shell/adapters/desktop.js";
 import { contextMenuTemplate } from "../desktop/context-menu.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -94,8 +94,9 @@ test("desktop: the build carries the app's files and the server's code, never it
 test("desktop: the page gets only the bridge's calls, in an isolated, sandboxed window", () => {
   const preload = readFileSync(join(ROOT, "desktop/preload.cjs"), "utf8");
   assert.deepEqual([...preload.matchAll(/ipcRenderer\.invoke\("([^"]+)"/g)].map((m) => m[1]),
-    ["stilo:version", "stilo:check-update", "stilo:open-update", "stilo:server-state", "stilo:server-choose", "stilo:server-first-admin"]);
-  assert.deepEqual([...preload.matchAll(/ipcRenderer\.on\("([^"]+)"/g)].map((m) => m[1]), ["stilo:server-changed"]);
+    ["stilo:version", "stilo:check-update", "stilo:open-update", "stilo:zoom", "stilo:zoom-step", "stilo:server-state", "stilo:server-choose",
+      "stilo:server-first-admin"]);
+  assert.deepEqual([...preload.matchAll(/ipcRenderer\.on\("([^"]+)"/g)].map((m) => m[1]), ["stilo:zoom-changed", "stilo:server-changed"]);
   const main = readFileSync(join(ROOT, "desktop/app.mjs"), "utf8");
   for (const setting of ["contextIsolation: true", "sandbox: true", "nodeIntegration: false"]) assert.ok(main.includes(setting), setting);
   assert.ok(main.includes('"will-prevent-unload"'), "the leave question is answered");
@@ -121,6 +122,54 @@ test("desktop: the app tells of a newer release once, and says when it could not
   }
   assert.deepEqual(told, ["0.3.0", "0.3.1"]);
   assert.deepEqual(logged, ["Looking for a newer release failed: offline"]);
+});
+
+test("desktop: the window's zoom: a browser's steps, its keys, kept between starts", () => {
+  assert.equal(zoomStep(1, "in"), 1.1);
+  assert.equal(zoomStep(1.1, "out"), 1);
+  assert.equal(zoomStep(1, "out"), 0.9);
+  assert.equal(zoomStep(3, "in"), 3, "the largest stays");
+  assert.equal(zoomStep(0.5, "out"), 0.5, "the smallest stays");
+  assert.equal(zoomStep(2, "reset"), 1);
+  assert.equal(zoomStep(1.3, "in"), 1.1, "a zoom that is no step counts as 100%");
+  let factor = 1;
+  for (let i = 0; i < 20; i += 1) factor = zoomStep(factor, "in");
+  assert.equal(factor, ZOOM_STEPS.at(-1));
+  assert.deepEqual([1.25, 7, "2", null, undefined].map(keptZoom), [1.25, 1, 1, 1, 1]);
+  const key = (key, more = {}) => ({ type: "keyDown", key, code: "", control: true, meta: false, alt: false, ...more });
+  assert.deepEqual(["=", "+", "-", "_", "0"].map((k) => zoomKey(key(k))), ["in", "in", "out", "out", "reset"]);
+  assert.deepEqual(["NumpadAdd", "NumpadSubtract", "Numpad0", "Equal", "Minus", "Digit0"].map((code) => zoomKey(key("x", { code }))),
+    ["in", "out", "reset", "in", "out", "reset"]);
+  assert.equal(zoomKey(key("=", { control: false })), null, "without Ctrl");
+  assert.equal(zoomKey(key("=", { alt: true })), null, "with Alt");
+  assert.equal(zoomKey(key("=", { type: "keyUp" })), null, "only as it goes down");
+  assert.equal(zoomKey(key("s")), null);
+  assert.equal(zoomKey(key("=", { control: false, meta: true }), true), "in", "Cmd on a Mac");
+  assert.equal(zoomKey(key("=", { control: true, meta: false }), true), null, "not Ctrl on a Mac");
+});
+
+test("desktop: the page's zoom: View's three commands, and the status bar while it is not 100%", async () => {
+  let factor = 1;
+  let told = null;
+  const zoom = { get: async () => factor, step: async (direction) => (factor = zoomStep(factor, direction)), onChange: (listener) => { told = listener; } };
+  const added = [];
+  const commands = { add: (command) => added.push(command) };
+  let item = null;
+  const statusBar = { add: (spec) => (item = { spec, state: { hidden: spec.hidden }, set(next) { Object.assign(this.state, next); } }) };
+  addZoom({ zoom, commands, statusBar });
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+  assert.deepEqual(added.map((c) => [c.id, c.title, c.keys[0], c.menu.id]), [["shell.zoom-in", "Zoom In", "Mod+=", "view"],
+    ["shell.zoom-out", "Zoom Out", "Mod+-", "view"], ["shell.zoom-reset", "Reset Zoom", "Mod+0", "view"]]);
+  assert.equal(item.state.hidden, true, "100%: nothing said");
+  added[0].run();
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+  assert.deepEqual([item.state.text, item.state.hidden], ["110%", false]);
+  told(1.5); // Ctrl+wheel, or the keys: the desktop app tells
+  assert.equal(item.state.text, "150%");
+  item.spec.action();
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
+  assert.equal(item.state.hidden, true, "a click: 100% again");
+  assert.equal(factor, 1);
 });
 
 test("desktop: the right-click menu: a misspelled word's suggestions, then cut, copy and paste", () => {

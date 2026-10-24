@@ -1,7 +1,7 @@
 // The desktop build's rules, apart from Electron so they are tested in Node
 // (tests/desktop.test.mjs): what the window may load, what answers the
-// server's addresses when there is no server, where a link goes, and whether
-// a release is newer. (A file's type is Electron's to say: app.mjs.)
+// server's addresses when there is no server, where a link goes, the window's
+// zoom, and whether a release is newer. (A file's type is Electron's to say: app.mjs.)
 import { join, resolve, sep } from "node:path";
 
 // One fixed origin, so this browser storage (IndexedDB, localStorage) is the
@@ -51,6 +51,34 @@ export function linkAction(address) {
   try { url = new URL(address); } catch { return "deny"; }
   if (url.protocol === `${SCHEME}:`) return url.host === HOST ? "app" : "deny";
   return ["https:", "http:", "mailto:"].includes(url.protocol) ? "external" : "deny";
+}
+
+// The window's zoom (how large the page draws; 1 is 100%): a browser's steps.
+// Electron leaves its keys and Ctrl+wheel to the app (it has no View menu).
+export const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+
+// A zoom kept between starts, read back: one of the steps, else 100%.
+export const keptZoom = (factor) => (ZOOM_STEPS.includes(factor) ? factor : 1);
+
+// The zoom after "in" or "out" (the next step that way; the last one stays)
+// or "reset" (100%).
+export function zoomStep(factor, direction) {
+  const now = keptZoom(factor);
+  if (direction === "in") return ZOOM_STEPS.find((step) => step > now) ?? now;
+  if (direction === "out") return ZOOM_STEPS.findLast((step) => step < now) ?? now;
+  return direction === "reset" ? 1 : now;
+}
+
+// A key pressed (Electron's input: { type, key, code, control, meta, alt })
+// -> "in" (+ or =), "out" (-), "reset" (0), the number pad's too, with Ctrl
+// (Cmd on a Mac); anything else -> null.
+export function zoomKey(input, mac = false) {
+  if (input?.type !== "keyDown" || input.alt || !(mac ? input.meta : input.control)) return null;
+  const { key, code } = input;
+  if (key === "=" || key === "+" || code === "Equal" || code === "NumpadAdd") return "in";
+  if (key === "-" || key === "_" || code === "Minus" || code === "NumpadSubtract") return "out";
+  if (key === "0" || code === "Digit0" || code === "Numpad0") return "reset";
+  return null;
 }
 
 // "v1.2.3" or "1.2.3" -> [1, 2, 3]; anything else (a pre-release) -> null.

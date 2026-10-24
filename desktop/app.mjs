@@ -5,7 +5,9 @@
 // requests to the server (/api/) are sent on from here to the server the
 // desktop settings name (server-policy.mjs): none, the one this app runs on
 // this computer (server.mjs), or another; the choice is kept, so at the next
-// start that server is started again and the app reconnects on its own.
+// start that server is started again and the app reconnects on its own. The
+// window's zoom (its keys and Ctrl+wheel are the app's: it has no menu with
+// them) is kept too, and told to the page.
 // main.mjs starts it; tests/desktop-smoke.mjs starts it with stand-ins for
 // the native dialog and the system's browser.
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, session, shell } from "electron";
@@ -14,7 +16,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { contextMenuTemplate } from "./context-menu.mjs";
-import { FEED, ORIGIN, SCHEME, linkAction, noServer, route, updateFrom } from "./policy.mjs";
+import { FEED, ORIGIN, SCHEME, keptZoom, linkAction, noServer, route, updateFrom, zoomKey, zoomStep } from "./policy.mjs";
 import { createLocalServer } from "./server.mjs";
 import { forwardHeaders, forwardTarget, forwardUrl, serverChoice } from "./server-policy.mjs";
 
@@ -80,7 +82,7 @@ async function checkForUpdate(feed, version) {
   }
 }
 
-function openWindow({ root, ask, openExternal }) {
+function openWindow({ root, ask, openExternal, zoom }) {
   const win = new BrowserWindow({ width: 1280, height: 860, minWidth: 640, minHeight: 420, show: false, backgroundColor: "#0f172a",
     title: "Stilo Marker", icon: join(root, "assets/icons/icon-512.png"), autoHideMenuBar: true,
     webPreferences: { preload: join(HERE, "preload.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: true } });
@@ -98,6 +100,23 @@ function openWindow({ root, ask, openExternal }) {
     if (action === "external") void openExternal(url);
   });
   contents.on("will-prevent-unload", (event) => { if (ask(win)) event.preventDefault(); });
+  // Zoom: Ctrl+= / Ctrl+- / Ctrl+0 (Cmd on a Mac) before the page sees them,
+  // and Ctrl+wheel; the kept zoom again on every load.
+  contents.on("before-input-event", (event, input) => {
+    const direction = zoomKey(input, process.platform === "darwin");
+    if (!direction) return;
+    event.preventDefault();
+    zoom.step(direction);
+  });
+  // Ctrl+wheel: one step at most every tenth of a second (a touchpad may send
+  // many in a moment; a wheel's notch is one).
+  let wheelAt = 0;
+  contents.on("zoom-changed", (event, direction) => {
+    if (Date.now() - wheelAt < 100) return;
+    wheelAt = Date.now();
+    zoom.step(direction);
+  });
+  contents.on("did-finish-load", () => contents.setZoomFactor(zoom.factor()));
   // The right-click menu (Electron shows none of its own): a misspelled word's
   // suggestions where the page checks spelling, then cut, copy and paste, and
   // Select All as the keys do it (the page's own handling of Ctrl+A).
@@ -116,17 +135,19 @@ function openWindow({ root, ask, openExternal }) {
   return win;
 }
 
-// Starts the app: one instance (a second start shows the first's window).
-// Options are for tests: the files, the profile, the dialog and the browser.
-// The desktop settings (the server choice), kept in this app's folder.
-async function readSettings(file) {
+// What the app keeps in its folder: the desktop settings (the server
+// choice), the window's (its zoom).
+async function readKept(file, what) {
   try {
     return JSON.parse(await readFile(file, "utf8"));
   } catch (error) {
-    if (error.code !== "ENOENT") console.warn("The desktop settings could not be read; starting from the defaults.", error.message);
+    if (error.code !== "ENOENT") console.warn(`The ${what} could not be read; starting from the defaults.`, error.message);
     return {};
   }
 }
+
+// Starts the app: one instance (a second start shows the first's window).
+// Options are for tests: the files, the profile, the dialog and the browser.
 
 export function start({ root = webRoot(), server = serverRoot(), userData = null, ask = askToLeave, openExternal = (url) => shell.openExternal(url),
   feed = FEED, version = VERSION, onWindow = () => {} } = {}) {
@@ -163,6 +184,24 @@ export function start({ root = webRoot(), server = serverRoot(), userData = null
     tell();
     return serverState();
   }
+  // The window's zoom: a step from where it is, applied, told to the page, kept.
+  const windowFile = () => join(app.getPath("userData"), "window.json");
+  let zoomFactor = 1;
+  const zoom = {
+    factor: () => zoomFactor,
+    step(direction) {
+      const next = zoomStep(zoomFactor, direction);
+      if (next !== zoomFactor) {
+        zoomFactor = next;
+        void writeFile(windowFile(), `${JSON.stringify({ zoom: zoomFactor })}\n`).catch((error) => console.warn("Could not keep the zoom:", error.message));
+      }
+      if (win && !win.isDestroyed()) {
+        win.webContents.setZoomFactor(zoomFactor);
+        win.webContents.send("stilo:zoom-changed", zoomFactor);
+      }
+      return zoomFactor;
+    }
+  };
   app.on("second-instance", () => {
     if (!win || win.isDestroyed()) return;
     if (win.isMinimized()) win.restore();
@@ -170,7 +209,7 @@ export function start({ root = webRoot(), server = serverRoot(), userData = null
   });
   app.on("window-all-closed", () => app.quit());
   app.on("will-quit", () => local.kill());
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     protocol.handle(SCHEME, (request) => serve(request, root, target));
     session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => callback(PERMISSIONS.has(permission)));
     ipcMain.handle("stilo:version", () => version);
@@ -198,12 +237,16 @@ export function start({ root = webRoot(), server = serverRoot(), userData = null
       tell();
       return made;
     });
+    // The window's zoom: what it is, and a step ("in", "out", "reset").
+    ipcMain.handle("stilo:zoom", (event) => (fromApp(event) ? zoomFactor : null));
+    ipcMain.handle("stilo:zoom-step", (event, direction) => (fromApp(event) && ["in", "out", "reset"].includes(direction) ? zoom.step(direction) : null));
     // The app draws its own menus; macOS needs its application and Edit menus (copy and paste).
     Menu.setApplicationMenu(process.platform === "darwin"
       ? Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, { role: "windowMenu" }]) : null);
-    win = openWindow({ root, ask, openExternal });
+    zoomFactor = keptZoom((await readKept(windowFile(), "window's settings")).zoom);
+    win = openWindow({ root, ask, openExternal, zoom });
     onWindow(win);
     // The kept choice: the server this app runs is started again.
-    void readSettings(settingsFile()).then((kept) => apply(kept));
+    void readKept(settingsFile(), "desktop settings").then((kept) => apply(kept));
   });
 }

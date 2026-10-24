@@ -65,11 +65,16 @@ gets back on its session by itself.
   keeps the window open without a word.
 - **Links open in your browser** (or mail app); the window only ever shows
   the app. A page never gets Node or Electron: only the bridge in
-  `preload.cjs` (the release, a newer one, its download page).
+  `preload.cjs` (the release, a newer one, its download page; the zoom).
 - **Updates**: the desktop app can't update itself as the web app does. It
   looks at the project's releases on GitHub at start and every few hours;
   a newer one shows "Update available" in the status bar, which opens the
   release's page to download it.
+- **Zoom**: Ctrl+= / Ctrl+- / Ctrl+0 (Cmd on a Mac) and Ctrl+wheel, or
+  View → Zoom In / Zoom Out / Reset Zoom; the status bar says the zoom
+  while it is not 100%. Kept for the next start (`window.json` in the
+  app's folder). The keys are the app's (Electron's own menu, which had
+  them, is not used: the app draws its own).
 - **One instance**: starting it again brings its window to the front.
 - No service worker (the files are already on disk).
 

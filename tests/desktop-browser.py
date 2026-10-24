@@ -7,9 +7,12 @@ It loads from app://stilo/; the server's addresses answer at once as offline
 Mermaid diagram draw from the app's own libraries; a link and a navigation
 away open in the system's browser (a stand-in) and the window stays; a newer
 release (a feed of the test's own) shows "Update available", whose item opens
-its page; typing is saved; closing with unsaved work asks (Stay keeps the
-window, Leave closes it). Reopened, the work is still there (one origin at
-every start), and a second start hands over to the first and quits.
+its page; typing is saved; the zoom's keys (Ctrl+= and Ctrl+-, which never
+reach the page) and Ctrl+wheel zoom the window, said in the status bar;
+closing with unsaved work asks (Stay keeps the window, Leave closes it).
+Reopened, the work and the zoom are still there (one origin at every start;
+the zoom kept by the app), Ctrl+0 is 100% again, and a second start hands
+over to the first and quits.
 
 Its server (Settings → Server): chosen to run on this computer, it starts
 (this computer's Python), the app reaches it through its own address, and
@@ -103,6 +106,10 @@ try:
     assert first["stillHere"] == "app://stilo/", first
     assert first["updateItem"][0] == "Update available" and "9.9.9" in first["updateItem"][1], first["updateItem"]
     assert first["stayed"] and first["askedAfterStay"] == 1 and first["asked"] == 2, first
+    # The zoom: 100% and unsaid at first; Ctrl+= twice and Ctrl+- (no key reached the page), then Ctrl+wheel.
+    assert first["zoomAtStart"] == [1, None], first
+    assert first["zoomKeys"] == [1.1, "110%", True], first
+    assert first["zoomWheel"] == [1.25, "125%"], first
     assert not first["errors"], first["errors"]
 
     again = electron("again")
@@ -126,6 +133,7 @@ try:
     reopened = json.loads(line[6:])
     assert not reopened.get("failed"), reopened
     assert reopened["where"] == "app://stilo/" and reopened["kept"], reopened
+    assert reopened["zoomKept"] == [1.25, "125%"] and reopened["zoomReset"] == [1, None], reopened
     assert second_code == 0 and reopened["focusedBySecond"] == 1, (second_code, reopened)
     assert not reopened["errors"], reopened["errors"]
 
@@ -231,8 +239,9 @@ print(json.dumps({"checks": ["loads from app://stilo/; no server, answered at on
                              "a formula and a Mermaid diagram from the app's own libraries",
                              "a link and a navigation away open in the system's browser; the window stays",
                              "a newer release: Update available, its item opens the release's page",
+                             "the zoom's keys (not the page's) and Ctrl+wheel zoom the window, said in the status bar",
                              "closing with unsaved work asks: Stay keeps the window, Leave closes it",
-                             "reopened: the work is there; a second start hands over and quits",
+                             "reopened: the work and the zoom are there, Ctrl+0 resets it; a second start hands over and quits",
                              "its server: run here, reached through the app, shared on; someone else joins and finds the typing",
                              "reopened: the server starts again and the app is back on its session by itself; quit: it stops",
                              "another server: reached and joined; none: offline",

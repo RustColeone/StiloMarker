@@ -78,6 +78,19 @@ lost while the page is in view count, not one left on purpose).
 
 ## Fixed
 
+### v0.3.8: the desktop app zooms
+
+Asked for by the user (2026-10-24): the desktop app had no way to zoom. The
+app has no menu of Electron's (it draws its own), and with it went the
+zoom keys. Ctrl+= (or +), Ctrl+- and Ctrl+0 (Cmd on a Mac; the number
+pad's too) and Ctrl+wheel zoom the window again, through a browser's steps
+(50% to 300%); View has Zoom In, Zoom Out and Reset Zoom; the status bar
+says the zoom while it is not 100% (a click: 100% again). The zoom is kept
+for the next start (`window.json` in the app's folder). Tests:
+`desktop.test.mjs` (the steps, the keys, the page's commands and item),
+`desktop-browser.py` (the keys and the wheel in Electron, the page given
+no key, kept over a restart, Ctrl+0).
+
 ### v0.3.7: the left window has tabs
 
 Asked for by the user (2026-10-24). The activity bar's Search icon showed

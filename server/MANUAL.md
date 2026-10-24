@@ -80,7 +80,10 @@ of the app starts it too (the browser's own reload keeps the version).
 **The desktop app** (`desktop/`, see its README) is the same app in a window
 of its own, with no server needed. Closing it with unsaved work asks first;
 links open in your browser; a newer release shows "Update available" in the
-status bar, which opens its download page.
+status bar, which opens its download page. Zoom with Ctrl+= / Ctrl+- /
+Ctrl+0 (Cmd on a Mac), Ctrl+wheel, or View → Zoom In / Zoom Out / Reset
+Zoom; the status bar shows the zoom while it is not 100% (click it for
+100%), and the app keeps it for next time.
 
 **Settings → Server** (the desktop app): run a server on this computer, or
 connect to another one (yours, at its address), or none. Running, it says

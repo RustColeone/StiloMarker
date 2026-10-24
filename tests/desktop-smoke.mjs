@@ -62,6 +62,12 @@ async function click(contents, selector) {
 
 const page = (contents, code) => contents.executeJavaScript(`(async () => { ${code} })()`);
 
+// A key pressed with Ctrl, as a person does (down, then up).
+function ctrlKey(contents, keyCode) {
+  for (const type of ["keyDown", "keyUp"]) contents.sendInputEvent({ type, keyCode, modifiers: ["control"] });
+}
+const zoomShown = (contents) => page(contents, 'const item = document.querySelector("#status-zoom-item"); return item && !item.hidden ? item.textContent.trim() : null;');
+
 async function first(win) {
   const contents = win.webContents;
   found.where = await page(contents, "return location.href;");
@@ -95,6 +101,17 @@ async function first(win) {
   await page(contents, 'window.__ui.shell.settings.change({ autoSave: false }, "test");');
   await contents.insertText(" Unsaved words.");
   await until(contents, "window.__ui.controller.getActiveFile().dirty", "an unsaved change");
+  // The window's zoom: Ctrl+= twice and Ctrl+- (the page never gets them: no
+  // text typed), then Ctrl+wheel; the status bar says it; kept for the next start.
+  found.zoomAtStart = [contents.getZoomFactor(), await zoomShown(contents)];
+  ctrlKey(contents, "=");
+  ctrlKey(contents, "=");
+  ctrlKey(contents, "-");
+  await pause(500);
+  found.zoomKeys = [contents.getZoomFactor(), await zoomShown(contents), await page(contents, "return window.__ui.controller.getActiveFile().content.endsWith(\" Unsaved words.\");")];
+  contents.sendInputEvent({ type: "mouseWheel", x: 600, y: 400, deltaX: 0, deltaY: 120, wheelTicksY: 1, canScroll: true, modifiers: ["control"] });
+  await pause(500);
+  found.zoomWheel = [contents.getZoomFactor(), await zoomShown(contents)];
   win.close(); // asked: Stay
   await pause(1500);
   found.stayed = !win.isDestroyed();
@@ -109,6 +126,12 @@ async function again(win) {
   await until(contents, `[...document.querySelectorAll("#explorer-tree .tree-row")].some((row) => row.textContent.includes("flow.md"))`, "flow.md still there");
   found.kept = await page(contents, `const c = window.__ui.controller; const file = Object.values(c.getProject().nodes).find((n) => n.name === "flow.md");
     return file.content.includes("The end. First words kept.");`);
+  // The zoom kept from the first start; Ctrl+0 is 100% again.
+  await until(contents, 'document.querySelector("#status-zoom-item") && !document.querySelector("#status-zoom-item").hidden', "the kept zoom said");
+  found.zoomKept = [contents.getZoomFactor(), await zoomShown(contents)];
+  ctrlKey(contents, "0");
+  await pause(500);
+  found.zoomReset = [contents.getZoomFactor(), await zoomShown(contents)];
   found.ready = true; // desktop-browser.py starts a second instance now: it must hand over and quit
   process.stdout.write("READY\n");
   // Held until the second start has come (a loaded machine may take a while
