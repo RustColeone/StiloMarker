@@ -585,9 +585,9 @@ The source pane header shows the filename, dirty indicator (`•`), and buttons 
 **The two panes are groups of tabs**, each showing its file as Source or as
 Preview. Each pane's label says what it is doing with which file (EDITING
 `notes.md`, PREVIEWING `notes.md`; READING when the file can't be changed);
-click it (▾) to switch that file between Source and Preview in the same
-pane. Right-click a tab for more: open it as Source or Preview, move it to
-the other pane or open it there too.
+click it (▾) to switch the tab in use between Source and Preview, where it
+is (no second tab). Right-click a tab for more: open it as Source or
+Preview beside it, move it to the other pane or open it there too.
 
 **Find in Files** (Edit → Find in Files, `Ctrl+Shift+F`, or the magnifier
 on the left): search every file of the workspace, with Match case, whole

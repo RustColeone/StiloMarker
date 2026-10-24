@@ -68,6 +68,15 @@ lost while the page is in view count, not one left on purpose).
 
 ## Fixed
 
+### v0.3.3: a pane's label switches its tab where it is
+
+Found by the user (2026-10-24). Choosing Source or Preview from a pane's
+label (▾) opened a second tab beside the one in use; it now switches that
+tab's view in its place. The source editor and the preview move on to the
+group's other tab of their kind (or none) as when such a tab closes, so no
+tab comes back by itself. Tests: `editor-view.test.mjs`,
+`tab-menu-browser.py` (the strip keeps its tabs, in their places).
+
 ### v0.3.2: a project opens only with Open
 
 Found by the user (2026-10-24). In Open Project, a double-click on a

@@ -4,7 +4,9 @@ Close, Close Others, Close to the Right, Close All; Open as Source / Preview
 (the view the tab is in is ticked; opening as the other opens it in the same
 group, whose tabs then name their views, while the other group keeps its tab
 behind a placeholder with Show here); Copy Path; History's diff tab only
-closes. Escape and a press outside close the menu. Isolated: every API is mocked; the welcome template
+closes. A group's label switches its tab in use between Source and Preview
+where it is (the strip keeps its tabs, in their places). Escape and a press
+outside close the menu. Isolated: every API is mocked; the welcome template
 is this checkout's Template folder.
 """
 import asyncio
@@ -166,7 +168,9 @@ async def main():
         assert (await page.locator('#editor-content').inner_text()).startswith('# STILO MARKER')
 
         # A group's label says what it does with which file; its ▾ switches
-        # that file between Source and Preview, in the group.
+        # the active tab between Source and Preview where it is (no second tab).
+        strip = '() => [...document.querySelectorAll("#source-tab-strip .editor-tab[data-file-id]")].map((t) => [t.querySelector(".tab-title").textContent, t.dataset.view])'
+        before = await page.evaluate(strip)
         label = await page.evaluate('''() => { const l = document.querySelector("#source-pane-label");
           return [l.querySelector(".pane-label-view").textContent, l.querySelector(".pane-label-file").textContent, l.disabled]; }''')
         assert label == ['Editing', 'welcome.md', False], label
@@ -177,12 +181,15 @@ async def main():
         await choose('Preview')
         groups = await page.evaluate(GROUPS)
         assert (groups['left']['label'], groups['left']['active']) == ('Previewing', ['welcome.md', 'preview']), groups['left']
+        switched = [[name, 'preview' if name == 'welcome.md' and view == 'source' else view] for name, view in before]
+        assert await page.evaluate(strip) == switched, (before, await page.evaluate(strip))
         assert await page.get_attribute('#source-pane-label', 'aria-expanded') == 'false'
         await page.click('#source-pane-label')
         await page.wait_for_timeout(150)
         await choose('Source')
         groups = await page.evaluate(GROUPS)
         assert (groups['left']['label'], groups['left']['body'], groups['left']['active']) == ('Editing', 'source', ['welcome.md', 'source']), groups['left']
+        assert await page.evaluate(strip) == before, ('and back, in its place', before, await page.evaluate(strip))
 
         # Narrowed to a phone with the preview in the left group: the groups
         # draw nothing of their own, and each view shows its body.

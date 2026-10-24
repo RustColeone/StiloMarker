@@ -87,7 +87,8 @@ export function createTabMenu(app) {
   function openViewMenu(group, tab, anchor) {
     app.closeTabOverflowMenu();
     if (app.controller.getProject().nodes[tab?.fileId]?.kind !== "file") return;
-    const view = (name, label) => [label, () => app.activateTab(group, { fileId: tab.fileId, view: name }),
+    // The active tab becomes that view where it is (not a second tab beside it).
+    const view = (name, label) => [label, () => app.switchTabView(group, tab, name),
       { checked: tab.view === name, disabled: tab.view === name || !app.canOpenFileInPane(tab.fileId, name) }];
     const box = anchor.getBoundingClientRect();
     draw([view("source", "Source"), view("preview", "Preview")], box.left, box.bottom);

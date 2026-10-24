@@ -148,6 +148,31 @@ test("activate: a tab comes on screen in its group, and its view's body moves th
   assert.equal(view.get().previewFileId, "a", "closing a tab elsewhere leaves the preview alone");
 });
 
+test("switchView: the tab changes its view where it is, no second tab; one already there folds in", () => {
+  const { view, log } = fresh();
+  view.reset(project("a", "a", "b"));
+  view.openTab("source", "b");
+  view.activate("left", source("b"));
+  view.switchView("left", source("a"), "preview");
+  let left = groupOf(view.get(), "left");
+  assert.deepEqual(plain(left.tabs), [preview("a"), source("b")], "in its place");
+  assert.deepEqual(plain(left.active), preview("a"));
+  assert.equal(view.get().hosts.preview, "left", "the preview's body comes here");
+  assert.equal(view.get().previewFileId, "a");
+  view.activate("left", source("b"));
+  view.openTab("preview", "b", "left");
+  view.switchView("left", source("b"), "preview");
+  left = groupOf(view.get(), "left");
+  assert.deepEqual(plain(left.tabs), [preview("a"), preview("b")], "the preview tab already there folds in");
+  view.switchView("left", preview("b"), "source");
+  assert.deepEqual(plain(groupOf(view.get(), "left").tabs), [preview("a"), source("b")], "and back");
+  assert.equal(view.get().hosts.source, "left");
+  assert.equal(view.get().previewFileId, "a", "the preview moved on to the group's other preview tab");
+  view.switchView("left", preview("a"), "source");
+  assert.equal(view.get().previewFileId, null, "and with none left, it shows nothing");
+  assert.ok(log.entries().some((entry) => entry.message === "switch tab to preview"), "named in the trace");
+});
+
 test("moveToGroup: a tab moves (or is opened too) to the other group, its body following; closeGroup hands the bodies over", () => {
   const { view, log } = fresh();
   view.reset(project("a", "a", "b"));

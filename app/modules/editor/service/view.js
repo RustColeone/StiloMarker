@@ -156,6 +156,26 @@ export function createView(state) {
       }), patch);
     },
 
+    // The group's tab switched to another view where it is (the pane label's
+    // Source / Preview): the same place in the strip, no second tab; one of
+    // that file in that view already there folds into it. It then comes on
+    // screen as activate does (its view's body moves to the group).
+    switchView(group, tab, view) {
+      const was = { fileId: tab.fileId, view: tab.view };
+      const next = { fileId: tab.fileId, view };
+      const patch = { hosts: Object.freeze({ ...get().hosts, [view]: group }), focus: group };
+      if (view === "preview") Object.assign(patch, { previewFileId: next.fileId, previewPart: null });
+      else if (get().hosts.preview === group && get().previewFileId === tab.fileId) {
+        // The preview showed this tab: it moves on to the group's other preview tab, or none (as closing it would).
+        const others = (groupOf(get(), group)?.tabs ?? []).filter((t) => t.view === "preview" && t.fileId !== tab.fileId);
+        Object.assign(patch, { previewFileId: others.at(-1)?.fileId ?? null, previewPart: null });
+      }
+      change(`switch tab to ${view}`, group, (g) => {
+        const tabs = g.tabs.filter((t) => !sameTab(t, next)).map((t) => (sameTab(t, was) ? next : t));
+        return { ...g, tabs: tabs.some((t) => sameTab(t, next)) ? tabs : [...tabs, next], active: next };
+      }, patch);
+    },
+
     // A tab moved within its group, before (or after) another; to the end when target is null.
     moveTab(group, dragged, target, placeAfter = false) {
       change("move tab", group, (g) => {

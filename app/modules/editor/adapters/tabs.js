@@ -61,6 +61,36 @@ export function createTabs(app) {
     scheduleSaveUserState();
   }
 
+  // The pane label's Source / Preview: the group's tab changes its view where
+  // it is (no second tab), then comes on screen as activateTab does.
+  function switchTabView(group, tab, view) {
+    const project = app.controller.getProject();
+    if (project.nodes[tab.fileId]?.kind !== "file" || tab.view === view) return;
+    tabsWorkedIn = true;
+    app.captureViewState();
+    // The source editor always shows the project's active file, with a source
+    // tab for it in its group: a shown source tab turned Preview hands the editor
+    // on, as closing that tab would (the group's other source tab, or none).
+    const handsOn = view === "preview" && project.activeFileId === tab.fileId && app.view.get().hosts.source === group;
+    if (view === "source") app.view.pick(tab.fileId);
+    app.view.switchView(group, { fileId: tab.fileId, view: tab.view }, view);
+    scheduleSaveUserState();
+    if (view === "source" && project.activeFileId !== tab.fileId) {
+      app.controller.setActiveFile(tab.fileId);
+    } else if (handsOn) {
+      const nextId = filesIn(app.view.get(), "source").at(-1) ?? null;
+      if (nextId) {
+        app.controller.setActiveFile(nextId);
+      } else {
+        const nextProject = structuredClone(project);
+        nextProject.activeFileId = null;
+        app.controller.replaceProject(nextProject);
+      }
+    } else {
+      app.updateStatus(project);
+    }
+  }
+
   function setActiveSourceFile(fileId) {
     activateTab(app.view.get().hosts.source, { fileId, view: "source" });
   }
@@ -717,5 +747,5 @@ export function createTabs(app) {
     });
   }
 
-  return { ensureOpenTabs, openSourceTab, openPreviewTab, activateTab, setActiveSourceFile, currentWorkspaceView, cacheWorkspaceView, cachedWorkspaceView, resumeView, showResumedFile, scheduleSaveUserState, restoreResumeState, setActiveSourcePart, setPreviewFile, openFileFromExplorer, canOpenFileInPane, setPaneDropActive, clearPaneDropState, openDroppedFileInPane, openPartInPane, bindPaneDropTarget, closeTab, closeSourceTab, closePreviewTab, reorderTabs, moveTabToGroup, tabOverflowButton, closeTabOverflowMenu, openTabOverflowMenu, renderTabStrip, renderTabs, bindTabStripReorderTarget };
+  return { ensureOpenTabs, openSourceTab, openPreviewTab, activateTab, switchTabView, setActiveSourceFile, currentWorkspaceView, cacheWorkspaceView, cachedWorkspaceView, resumeView, showResumedFile, scheduleSaveUserState, restoreResumeState, setActiveSourcePart, setPreviewFile, openFileFromExplorer, canOpenFileInPane, setPaneDropActive, clearPaneDropState, openDroppedFileInPane, openPartInPane, bindPaneDropTarget, closeTab, closeSourceTab, closePreviewTab, reorderTabs, moveTabToGroup, tabOverflowButton, closeTabOverflowMenu, openTabOverflowMenu, renderTabStrip, renderTabs, bindTabStripReorderTarget };
 }
