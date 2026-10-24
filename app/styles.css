@@ -1191,8 +1191,15 @@ p {
   border-bottom: 0;
 }
 
+/* The tab in use is the darker one, in every theme: on a dark base the
+   editor's own colour (darker than the strip's tabs), on a light base a
+   shade darker than the others (the editor's colour there is the lightest). */
 .editor-tab.is-active {
   background: var(--editor);
+}
+
+:root:not([data-theme="dark"]) .editor-tab.is-active {
+  background: var(--surface-3);
 }
 
 .editor-tab.is-empty {
@@ -1611,6 +1618,7 @@ p {
   max-width: 220px;
   padding: 0 8px 0 12px;
   border: 0;
+  border-right: 1px solid var(--border); /* set apart from the tabs beside it */
   border-radius: 0;
   background: transparent;
   color: var(--text-dim);
@@ -6007,20 +6015,15 @@ pre.proposal-diff-block {
   overflow-x: auto;
   overflow-y: hidden;
   flex-wrap: nowrap;
-  scrollbar-width: thin;
+  scrollbar-width: none;
   overscroll-behavior-x: contain;
 }
 
-/* A slim scrollbar so it never eats into the 35px strip height. */
+/* No scrollbar: it added its height to a full strip's header, so the two
+   panes' headers stopped lining up. The wheel scrolls the strip sideways
+   (tabs.js) and "⋯" lists every tab. */
 .tab-strip-wrap > .tab-strip::-webkit-scrollbar {
-  height: 4px;
-}
-.tab-strip-wrap > .tab-strip::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 2px;
-}
-.tab-strip-wrap > .tab-strip::-webkit-scrollbar-track {
-  background: transparent;
+  display: none;
 }
 
 /* Natural width — never squeeze a tab down to an unreadable sliver. */

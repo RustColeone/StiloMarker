@@ -587,7 +587,9 @@ Preview. Each pane's label says what it is doing with which file (EDITING
 `notes.md`, PREVIEWING `notes.md`; READING when the file can't be changed);
 click it (▾) to switch the tab in use between Source and Preview, where it
 is (no second tab). Right-click a tab for more: open it as Source or
-Preview beside it, move it to the other pane or open it there too.
+Preview beside it, move it to the other pane or open it there too. Tabs
+that don't fit scroll with the mouse wheel, and **⋯** at the strip's end
+lists them all.
 
 **Find in Files** (Edit → Find in Files, `Ctrl+Shift+F`, or the magnifier
 on the left): search every file of the workspace, with Match case, whole

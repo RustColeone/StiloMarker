@@ -123,9 +123,13 @@ async def main():
             assert login("dee", "dee-password")["teams"] == ["red", "blue"]
             ok("an account added can sign in, with its teams")
 
+            stored = lambda: next(u["password"] for u in json.loads(ACCOUNTS.read_text())["users"] if u["username"] == "ben")
+            before = stored()
             await page.click('.accounts-admin tr[data-username="ben"] [data-act="password"]')
             await fill_form(page, {"password": "ben-new-password"})
-            await page.wait_for_timeout(500)
+            for _ in range(150):  # kept once hashed (slow on purpose); signing in to find out would count wrong tries
+                if stored() != before: break
+                await page.wait_for_timeout(100)
             assert login("ben", "ben-new-password") and not login("ben", "ben-password"), "the new password, not the old"
             await page.click('.accounts-admin tr[data-username="ben"] [data-act="teams"]')
             await page.wait_for_selector("#input-dialog[open]")

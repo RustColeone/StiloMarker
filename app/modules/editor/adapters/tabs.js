@@ -695,9 +695,16 @@ export function createTabs(app) {
     }
   }
 
+  // The strips show no scrollbar (it made the header of a full strip taller
+  // than the other's): the wheel scrolls one sideways, and "⋯" lists every tab.
   const stripOf = (group) => (group === "left" ? app.elements.sourceTabStrip : app.elements.previewTabStrip);
   for (const strip of [stripOf("left"), stripOf("right")]) {
     if (strip && globalThis.ResizeObserver) new ResizeObserver(() => revealActiveTab(strip)).observe(strip);
+    strip?.addEventListener("wheel", (event) => {
+      if (strip.scrollWidth <= strip.clientWidth || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+      event.preventDefault();
+      strip.scrollLeft += event.deltaY;
+    }, { passive: false });
   }
 
   function renderTabs(project) {

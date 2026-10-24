@@ -68,6 +68,16 @@ lost while the page is in view count, not one left on purpose).
 
 ## Fixed
 
+### v0.3.4: the tab strips
+
+Found by the user (2026-10-24). The tab in use was the darker one in a dark
+theme but the lighter one in a light theme; it is the darker one in every
+theme now (on a light base, a shade darker than the others). A pane's label
+had no border between it and its tabs; it has one. A strip full of tabs
+showed a scrollbar that made its header taller than the other pane's; the
+strips show none (the wheel scrolls one sideways, "⋯" lists every tab), so
+both headers keep one height. Test: `tab-strip-browser.py` (new).
+
 ### v0.3.3: a pane's label switches its tab where it is
 
 Found by the user (2026-10-24). Choosing Source or Preview from a pane's
