@@ -5,9 +5,10 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-24 · release `v0.3.1` deployed (public checks passed); `v0.3.0` is
+Last updated: 2026-10-25 · release `v0.3.11` deployed (public checks passed); `v0.3.0` is
 the stable version. v0.2.30–v0.2.42 were gone over again before calling it so; what that found is
-fixed in v0.2.39–v0.2.42.
+fixed in v0.2.39–v0.2.42. Where things stand after v0.3.11, what is fixed and what is not, in
+`docs/STATUS-0.3.11.md`.
 
 ---
 
@@ -26,6 +27,18 @@ took one suspect away: an editor without the focus whose file changed was
 loaded again with its caret at the start; it now keeps its caret. Another
 remains: the caret saved per file is found by the file's id, which a project
 loaded again from the server may not keep.)
+
+### O10. Deleting the active file leaves no active editor
+
+Found 2026-10-25 while writing `docs/STATUS-0.3.11.md`, by reading: with
+two editors, deleting the file the active editor shows clears the
+project's active file (`removeNodeRecursive`), and nothing hands the active
+role to the other group's editor (`handOn` runs when a tab closes or turns
+Preview, and when a group closes). The active group shows its preview or
+the welcome page; the other editor keeps its file but is not the active one
+until clicked, and the explorer, Linked Notes and the status bar describe no
+file meanwhile. Minor; the fix is to activate the other group's shown source
+tab on a render that finds no active file (guarded against re-entry).
 
 Before this: none. Everything the stability review of 2026-10-21 found (the app as a PWA,
 in Electron, with the user's own key and no server; each found by an

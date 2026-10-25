@@ -1223,3 +1223,33 @@ timing checks passing alone), the desktop app's in Electron 44.
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261024T042233Z-v0.3.1`.
 173/173 data files (taken with the service stopped), every JSON file valid.
 
+## Verified release: v0.3.11
+
+Deployed on 2026-10-25 at 02:56 UTC: v0.3.2 – v0.3.11 together (Open
+Project opens only with Open; the pane label switches in place; the tab
+strips; a project's tree named for it; the file-name search; the left
+window's tabs; the desktop app's zoom and one bar; the Agent's status; a
+source editor in each group), with `docs/REVIEW-0.3.md`. App version
+`0.3.11`; sync compatibility unchanged at `117`. The service's command line
+and environment file are unchanged; it was down about 2 seconds. No server
+data changed format.
+
+Public checks: ping (`0.3.11`), the service worker's cache label
+`mdnotes-shell-v0.3.11`, the new code served (`editors.js`), the account
+file, the environment file, the sign-ins file, the server's code and the
+tests answered with the app's page (refused) under any spelling, an unknown
+token answered 403 (`/api/auth/me`, `/api/session/state`),
+`Cache-Control: no-store` on a JSON reply, and a clean journal. The machine
+rebooted at 11:30 UTC; the service came back by itself on `0.3.11`. A fresh
+browser on the public site afterwards (its own welcome workspace, no real
+data) was controlled by `0.3.11`, had both source editors, opened offline,
+fetched nothing from a CDN, and had no page errors.
+
+Validation: 415 Node tests, all 25 Python suites, all 48 browser suites
+(the new `two-editors-browser.py` among them) and the desktop app's in
+Electron 44.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261025T025620Z-v0.3.11`.
+185/185 data files (taken with the service stopped), every JSON file valid;
+the account file and the environment file as they were.
+
