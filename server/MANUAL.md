@@ -42,7 +42,7 @@ Stilo Marker is a browser-based Markdown workspace. It lets you write notes, bui
 ```
 
 - **Explorer** — tree of folders and files in the current project: the first tab of the left window, whose icons are in the activity bar at the far left (the Explorer, Search, and any panel moved there; click the icon of the tab showing to hide the window).
-- **Source pane** — text editor for the active file; also shows image previews.
+- **Source pane** — the text editor; also shows image previews. Each pane has its own, so both can show Source (see Tabs and groups); the one you last worked in holds the active file.
 - **Preview pane** — rendered output (HTML for Markdown, SVG tree for MTREE, album grid for URLDB, interactive canvas for BMAP).
 - **Chat panel** — the right panel (Agent, Chats): AI assistant wired to the backend chat proxy; the button at the right end of the top bar shows or hides it.
 - **Status bar** — where the project lives, the server's state, collaborators
@@ -594,9 +594,13 @@ A plain-text editor for `.md`, `.mtree`, `.urldb`, and `.bmap` files. Image file
 - `Tab` / `Shift+Tab` — Indent/unindent (indents selection or inserts a tab)
 - `Enter` on a Markdown list item — continue the list
 - `Enter` on an empty list item — exit the list
+- `Ctrl+Z` / `Cmd+Z` — Undo (the file's last change, made in either pane)
+- `Ctrl+Y` or `Ctrl+Shift+Z` (`Cmd` on a Mac) — Redo
 - `Shift+Enter` in the chat input — newline without sending
 
-The source pane header shows the filename, dirty indicator (`•`), and buttons to toggle preview.
+Each pane's header shows its label (what it does with which file: Editing,
+Previewing, Reading; ▾ switches the file between Source and Preview), its
+tabs (an unsaved file's tab shows a dot, `•`), the preview toggle and `×`.
 
 **The two panes are groups of tabs**, each showing its file as Source or as
 Preview. Each pane's label says what it is doing with which file (EDITING

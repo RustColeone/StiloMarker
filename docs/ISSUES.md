@@ -95,6 +95,22 @@ lost while the page is in view count, not one left on purpose).
 
 ## Fixed
 
+### v0.3.12: the user documents describe the two editors
+
+Found 2026-10-25 when the user asked whether every document was updated.
+The current-behaviour documents still had a few places from before: the
+README's and the welcome page's "Write In The Source Pane" said the left pane
+is where you write; the manual's layout called the Source pane "the text
+editor for the active file", and its Source Pane section described a header
+(file name and buttons) from before the tabs and had no undo or redo keys.
+They now say each pane can show Source (Open to the Side, the same file in
+step, undo from either), and the manual lists Undo and Redo. `docs/HISTORY.md`
+records the two decisions this round superseded (one source editor; the left
+area as stacked sections). The dated records (past releases in
+`DEPLOYMENT.md`, past steps in `ARCHITECTURE.md`, past fixes here) are left as
+they were: they describe their time. The in-app manual changed, so the version
+did too (an installed app keeps its files until a new version).
+
 ### v0.3.11: a source editor in each group
 
 Asked for by the user (2026-10-24): only one group could show a file as

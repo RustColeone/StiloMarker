@@ -124,7 +124,7 @@ Explorer copy/paste rules:
 
 ## 4. Write In The Source Pane
 
-The left editor pane is where you write and edit text-based files.
+The source pane is where you write and edit text-based files. At first Source is on the left and Preview on the right, but each pane can show a file as Source: open a second file beside the first, or the same file twice, with a tab's **Open to the Side** (right-click the tab). The same file in both stays in step as you type, and Ctrl+Z undoes the file's last change from either pane.
 
 - Markdown files are editable directly
 - MTREE files are editable directly

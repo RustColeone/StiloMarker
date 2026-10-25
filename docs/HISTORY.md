@@ -79,6 +79,22 @@ transform was implemented**: the server rebases concurrent `patch-file` offsets
 through its operation log (`_rebase_patch` / `_apply_text_patch`), which is what
 makes concurrent editing of the same file converge.
 
+### One source editor, and the left area as stacked sections
+`docs/ARCHITECTURE.md`'s step 5 (decided 2026-10-18/19) planned **one source
+editor** shared by the two editor groups (a group whose tab wanted it while the
+other group held it showed a placeholder, "Show here"), with two source editors
+"only if wanted"; and **the left area stacking its pages as collapsible
+sections** (Explorer over Linked Notes and Session), each area keeping its style.
+
+**Both were superseded on the user's request (2026-10-24).** Each group has
+its own source editor since v0.3.11: the active one is the group last worked in
+(`view.hosts.source`), the same file in both stays in step, the other editor's
+caret is drawn like a collaborator's, and undo belongs to the file (one history
+shared by both). The left area is a window of tabs since v0.3.7 (the activity
+bar its icons; Linked Notes and Session are sections only inside the Explorer
+tab). Placeholders remain only for a pane view (History's diff). See
+`docs/REVIEW-0.3.md` for how both work.
+
 ---
 
 ## Notable decisions made since
