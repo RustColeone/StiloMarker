@@ -28,6 +28,7 @@ export function createDebugTrace(app, shell) {
     const text = container?.nodeType === Node.TEXT_NODE;
     return Object.entries({
       file: app.controller.getActiveFile()?.name ?? "",
+      editor: app.view.get().hosts.source, // which group's (the active one)
       active: document.activeElement === app.elements.editorContent ? "editor" : document.activeElement?.nodeName?.toLowerCase() ?? "null",
       sel: `${start}-${end}`,
       dom: `${text ? "#text" : container?.nodeName?.toLowerCase() ?? "null"}@${range?.startOffset ?? 0}`,

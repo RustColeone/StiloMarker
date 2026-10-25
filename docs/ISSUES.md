@@ -21,7 +21,11 @@ very start of the file (position 0) instead of staying where it was.
 Suspects to look at first: the open file's text replaced whole when the
 session is joined again or the latest copy is merged in (a replace that
 does not carry the selection over), and a full redraw of the source pane
-after the reconnect. To be looked into after the usability fixes.
+after the reconnect. To be looked into after the usability fixes. (v0.3.11
+took one suspect away: an editor without the focus whose file changed was
+loaded again with its caret at the start; it now keeps its caret. Another
+remains: the caret saved per file is found by the file's id, which a project
+loaded again from the server may not keep.)
 
 Before this: none. Everything the stability review of 2026-10-21 found (the app as a PWA,
 in Electron, with the user's own key and no server; each found by an
@@ -77,6 +81,26 @@ lost while the page is in view count, not one left on purpose).
 ---
 
 ## Fixed
+
+### v0.3.11: a source editor in each group
+
+Asked for by the user (2026-10-24): only one group could show a file as
+Source; the other showed a placeholder ("open as Source in the other
+group"). Each group has its own source editor now, so two files, or the same
+one twice, can be edited side by side. The editor last worked in is the
+active one (its file is the project's active file; the find bar, the
+completions, the links panel, the character count and comments follow it).
+The same file in both stays in step as you type, like a live collaboration:
+the other editor's caret is drawn in the one you type in, named for its
+group, and stays where it was in the text. Undo belongs to the file (one
+history for both editors, as VS Code has it, kept while the file's tab is
+open; it used to start again on every switch of file). On a phone only the
+active editor shows. Found on the way: an editor without the focus whose file
+changed elsewhere (someone else's edit, the agent's) was loaded again with
+its caret at the start; it now follows the change where it is, its caret
+kept (one suspect for O9, which stays open until it is reproduced); a long
+file's comment popover could sit beside the wrong line. Tests:
+`two-editors-browser.py` (new), `editor-view.test.mjs`.
 
 ### v0.3.10: the Agent's status says "Ready" only once it is
 

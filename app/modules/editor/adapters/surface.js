@@ -1,26 +1,29 @@
 // The Editor's parts, created and wired here (main.js used to create each one
-// with its own list of main's values): the source editor, highlighting, find
-// and replace, autocomplete, links, the tab strips and the preview pane,
-// resuming positions, showing the active file, and the editor's events. They
-// share one context, `app`, as before the move. It holds
-//   - the Editor's own state: undo history, search, autocomplete, the render
-//     cache, dragging text, other people's cursors, the file shown;
+// with its own list of main's values): the source editors (one per group:
+// editors.js), highlighting, find and replace, autocomplete, links, the tab
+// strips and the preview pane, resuming positions, and the editor's events.
+// They share one context, `app`, as before the move. It holds
+//   - the Editor's own state: search, autocomplete, dragging text, other
+//     people's cursors;
 //   - every part's functions, the view, the project (Workspace) and dialogs (Shell);
 //   - its elements on the page (elements.js) and the settings (Shell's).
+// A source editor's own (its elements, render cache, shown file, undo history
+// and the core's functions) are the active editor's here: what the shared
+// parts and other modules call acts on the editor last worked in.
 // What other code may call is FUNCTIONS below (editor.parts()).
 import { escapeHtmlAttribute } from "../model/html.js";
 import { getRelativePath, getRelativeProjectPath, normalizePath } from "../../workspace/index.js";
 import { getNodeIdByPath, getPath, isImageFileName, isMarkdownFileName } from "../../workspace/index.js";
 import { createAutocomplete } from "./autocomplete.js";
-import { createEditorCore } from "./editor-core.js";
-import { installEditorEvents } from "./editor-events.js";
+import { EDITOR_API } from "./editor-core.js";
+import { createEditors } from "./editors.js";
+import { installSharedEditorEvents } from "./editor-events.js";
 import { createFindReplace } from "./find-replace.js";
 import { addFindInFiles } from "./search-files.js";
 import { createHighlighter } from "./highlight.js";
 import { createLinks } from "./links.js";
 import { createPreview } from "./preview.js";
 import { createResume } from "./resume.js";
-import { createShowFile } from "./show-file.js";
 import { createTabs } from "./tabs.js";
 import { createTabMenu } from "./tab-menu.js";
 import { createGroups } from "./groups.js";
@@ -57,37 +60,12 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
       matches: [],      // [{ start, end }] plain-text offsets into the active file
       currentIndex: -1
     },
-    // Undo/redo history for the contenteditable editor.
-    // Each entry: { start, end, patch } where `patch` turns the previous entry's
-    // text into this one's: { at, removed, inserted } (null for the first entry).
-    // Only `text` — the text of entry `index` — is held in full. Entries used to
-    // carry a full copy of the document each: on a 90k-character chapter that was
-    // ~180KB per keystroke, ~72MB at the 400-entry cap, for every open file.
-    editorHistory: { stack: [], index: -1, maxSize: 400, text: "" },
-    // Incremental editor render cache (see renderEditorContent).
-    editorRenderCache: {
-      fileId: null,     // file the cache describes
-      kind: null,       // highlighter used
-      els: [],          // the rendered lines' elements, in DOM order: lines ws.. (editor-window.js)
-      ws: 0,            // the first rendered line (a long file renders only the lines in view)
-      winStart: 0,      // the text offset where line ws starts
-      before: "",       // the text of the lines before ws, and after the rendered ones
-      after: "",
-      above: 0,         // the height the lines before ws stand for (px)
-      texts: [],        // every line's text as rendered
-      html: [],         // every line's final HTML as rendered
-      heights: [],      // each line's measured height (null: not measured; estimated)
-      gutter: [],       // gutter row HTML as rendered
-      metricsKey: "",   // geometry the heights were measured under (see below)
-      gutterEpoch: "",  // line count / mark range / line notes the gutter rows reflect
-      textExact: true   // every line's DOM text equals its source line
-    },
-    // Text dragged out of the editor, and where a drop would land.
+    // Each editor's undo history (a file's: editors.js), render cache (see
+    // renderEditorContent) and shown file are its own: the active one's below.
+    // Text dragged out of an editor, and where a drop would land.
     editorDragState: { selection: null, dropOffset: null },
     // Other people's cursors, by client id.
     remoteCursorsByClient: new Map(),
-    // The file the editor's text is (what its DOM shows), or null.
-    shown: { fileId: null },
 
     view, marks, paneViews, completions, lineNotes, welcome, previews, highlighters,
     // The notes on a file's lines from every provider: [{ kind, line, title }].
@@ -117,7 +95,6 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
     // A group shown or hidden on the desktop (the frame's "source" and "preview" areas).
     setAreaShown: (area, shown) => { if (!shell.frame.isPhone() && shell.frame.shown(area) !== shown) shell.frame.toggle(area); },
     copyText: (text) => shell.copyText(text),
-    redrawRemoteCursors: () => app.renderRemoteCursors(Array.from(app.remoteCursorsByClient.values())),
     isPreviewableFileName,
     resolveProjectAssetUrl,
     editorLinkTooltip: createLinkTooltip(),
@@ -131,7 +108,32 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
   // Shared or this tab's own (Workspace's location, which Sync tells).
   Object.defineProperty(app, "workspaceMode", { get: () => (workspace.location.shared() ? "synced" : "private"), enumerable: true });
   app.settings = shell.settings;
-  app.elements = findElements();
+
+  // The source editors, and the active one's own values and functions here.
+  const editors = createEditors(app, composing, findElements());
+  const each = (fn) => { for (const editor of editors.all()) fn(editor); };
+  for (const name of ["elements", "editorRenderCache", "shown", "editorHistory"]) {
+    Object.defineProperty(app, name, { get: () => editors.active()[name], enumerable: true });
+  }
+  for (const name of [...EDITOR_API, "getSelectedPart", "fileContentFromEditor"]) app[name] = (...args) => editors.active()[name](...args);
+  Object.assign(app, {
+    // While any editor applies a keystroke or redraws, the app waits.
+    isTyping: () => editors.all().some((editor) => editor.isTyping()),
+    isRendering: () => editors.all().some((editor) => editor.isRendering()),
+    // Others' carets drawn again in every editor.
+    redrawRemoteCursors: () => each((editor) => editor.redrawRemoteCursors()),
+    // Each editor on screen shows its file; the count is the active one's.
+    showActiveFile(project) {
+      const length = editors.showFiles(project);
+      app.showCharCount(length);
+      return length;
+    },
+    activateEditor: editors.activateEditor,
+    editorOf: editors.of,
+    eachEditor: each,
+    editorTyped: editors.typedIn,
+    peersMoved: editors.peersMoved
+  });
 
   // The parts. Assigning a function onto a name the context already holds
   // throws: two parts (or a part and the port) never share a name.
@@ -144,7 +146,6 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
   };
   add(createDebugTrace(app, shell));
   add(createHighlighter(app));
-  add(createEditorCore(app));
   add(createAutocomplete(app));
   add(createFindReplace(app));
   add(createLinks(app));
@@ -152,33 +153,26 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
   add(createTabMenu(app));
   add(createGroups(app));
   add(createResume(app));
-  add(createShowFile(app, composing));
   add(createCharCount(app, shell.statusBar));
   add(createPreviewPane(app));
-  installEditorEvents(app, composing);
-  // A click on a line number goes to the line notes' providers (comments: add or edit one).
-  app.elements.editorGutter?.addEventListener("click", (event) => {
-    const row = event.target.closest?.(".editor-gutter-line");
-    if (!row || row.dataset.line === undefined) return;
-    lineNotes.all().find((provider) => provider.click)?.click(Number(row.dataset.line));
-  });
+  installSharedEditorEvents(app);
   // The editor's settings, whoever changed them: new glyph metrics mean every
   // measured overlay (caret, cursors, search highlights) and the gutter's
-  // scroll are worked out again; wrapping redraws the lines.
+  // scroll are worked out again; wrapping redraws the lines (in every editor).
   shell.settings.on((settings, changed) => {
     const fontChanged = changed.includes("sourceFontSize") || changed.includes("sourceFontFamily");
-    if (fontChanged || changed.includes("wordWrap")) app.editorRenderCache.metricsKey = "";
+    if (fontChanged || changed.includes("wordWrap")) each((editor) => { editor.editorRenderCache.metricsKey = ""; });
     if (changed.includes("wordWrap")) app.elements.app.dataset.wordWrap = settings.wordWrap ? "on" : "off";
     if (fontChanged || changed.includes("wordWrap")) {
       app.render(app.controller.getProject());
       if (fontChanged) {
         app.redrawRemoteCursors();
         if (app.searchState.open) app.computeSearchMatches({ keepCaret: true });
-        app.syncEditorScroll();
+        each((editor) => editor.syncEditorScroll());
       }
     }
-    if (changed.includes("showFormatToolbar")) app.refreshFormatToolbar();
-    if (changed.includes("spellcheck")) app.elements.editorContent.spellcheck = Boolean(settings.spellcheck);
+    if (changed.includes("showFormatToolbar")) each((editor) => editor.refreshFormatToolbar());
+    if (changed.includes("spellcheck")) each((editor) => { editor.elements.editorContent.spellcheck = Boolean(settings.spellcheck); });
   });
   shell.commands.add({ id: "preview.save-pdf", title: "Save as PDF", menu: { id: "file", group: 2, order: 2 }, run: () => app.printPreviewAsPdf() });
   // Drawing: while a keystroke is applied the editor has drawn it, and the rest
@@ -214,10 +208,9 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
   window.addEventListener("beforeunload", () => app.captureViewState());
   // Reload Window (Shell) keeps it too, so the reload opens the same tabs at the same place.
   shell.beforeReload.add({ id: "editor.view", label: "Where you were", order: 30, keep() { keepView(); return ""; } });
-  // A mark put or taken off shows at once: the shown file's lines and bar, the tabs' badges.
+  // A mark put or taken off shows at once: the shown files' lines and bars, the tabs' badges.
   marks.on(() => {
-    const file = app.controller.getActiveFile();
-    if (file) app.renderEditorContent(file.content);
+    each((editor) => { if (editor.shown.fileId) editor.renderEditorContent(editor.getEditorText()); });
     app.renderTabs(app.controller.getProject());
   });
   app.editorLinkTooltip.el.addEventListener("mouseleave", () => app.hideLinkTooltip(true));
@@ -240,8 +233,7 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
     view.reset(project);
     shell.render(project);
   });
-  app.attachSelectionChangeListener();
-  window.addEventListener("resize", app.scheduleOverviewRuler);
+  window.addEventListener("resize", () => each((editor) => editor.scheduleOverviewRuler()));
   // Files dropped on the groups and their tab strips; tabs reordered on a strip.
   app.bindPaneDropTarget(app.elements.sourcePane, "left");
   app.bindPaneDropTarget(app.elements.sourceTabStrip, "left");
@@ -258,6 +250,18 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
       .map(([name, d]) => [name, d.value])),
     isComposing: () => composing.now,
     focusEditor: () => app.elements.editorContent.focus(),
+    // The active editor's gutter and text (Comments places its popover by them).
+    editorElements: () => ({ editorGutter: app.elements.editorGutter, editorContent: app.elements.editorContent }),
+    // Notes on lines changed (comments): every editor's gutter drawn again, carets kept.
+    redrawLineNotes() {
+      each((editor) => {
+        if (!editor.shown.fileId) return;
+        const focused = document.activeElement === editor.elements.editorContent;
+        const selection = focused ? editor.getEditorSelection() : null;
+        editor.renderEditorContent(editor.getEditorText());
+        if (selection) editor.setEditorSelection(selection.start, selection.end);
+      });
+    },
     isFindOpen: () => app.searchState.open,
     dropOffset: () => app.editorDragState.dropOffset,
     historyPosition: () => `${app.editorHistory.index}/${app.editorHistory.stack.length}`, // for the log panel's editor trace
@@ -267,7 +271,7 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
       if (cached) app.remoteCursorsByClient.set(clientId, { ...cached, selStart: position, selEnd: position });
     },
     // Settings changed the glyph metrics: measure again on the next render.
-    forgetMeasurements() { app.editorRenderCache.metricsKey = ""; },
+    forgetMeasurements() { each((editor) => { editor.editorRenderCache.metricsKey = ""; }); },
     // Show a marked file (editor.marks) in the source editor, scrolled to its first marked line.
     revealMark(path) {
       const mark = marks.get(path);

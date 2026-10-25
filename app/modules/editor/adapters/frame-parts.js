@@ -20,7 +20,7 @@ export function installFrameParts(app, shell) {
       .map((id) => ({ id, name: project().nodes[id].name }));
   };
   frame.phonePanes.add({
-    id: "source", order: 10, element: () => app.elements.sourceBody, alternate: "preview",
+    id: "source", order: 10, element: () => app.elements.sourceBody, alternate: "preview", // the active editor's
     caption: () => app.controller.getActiveFile()?.name ?? "",
     fileId: () => app.controller.getActiveFile()?.id ?? null,
     canShow: (fileId) => app.canOpenFileInPane(fileId, "source"),
@@ -46,14 +46,16 @@ export function installFrameParts(app, shell) {
   });
   shell.events.on("render", () => frame.redrawCaption());
 
-  // A splitter moved: the lines are measured and drawn again; any resize: the gutter's scroll follows.
-  shell.events.on("resized", ({ by }) => {
-    if (by === "splitter") app.renderEditorContent(app.getEditorText());
-    app.syncEditorScroll();
-  });
-  shell.events.on("layout", () => app.refreshFormatToolbar());
+  // A splitter moved: the lines are measured and drawn again; any resize: the
+  // gutter's scroll follows (in every editor).
+  shell.events.on("resized", ({ by }) => app.eachEditor((editor) => {
+    // (Not a hidden one: it would measure nothing; it is drawn when it shows.)
+    if (by === "splitter" && editor.shown.fileId && editor.elements.editorContent.clientWidth > 0) editor.renderEditorContent(editor.getEditorText());
+    editor.syncEditorScroll();
+  }));
+  shell.events.on("layout", () => app.eachEditor((editor) => editor.refreshFormatToolbar()));
   app.elements.app.dataset.wordWrap = app.settings.wordWrap ? "on" : "off";
-  app.elements.editorContent.spellcheck = Boolean(app.settings.spellcheck);
+  app.eachEditor((editor) => { editor.elements.editorContent.spellcheck = Boolean(app.settings.spellcheck); });
   app.elements.app.style.setProperty("--indent-tab-size", "4");
 
   // The groups' tab strips' overflow menus.

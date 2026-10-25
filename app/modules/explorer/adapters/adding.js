@@ -151,7 +151,9 @@ export function createAdding(app) {
     if (!Number.isInteger(sourceStart) || !Number.isInteger(sourceEnd) || sourceStart < 0 || sourceEnd < sourceStart) {
       return false;
     }
-    if (value.slice(sourceStart, sourceEnd) !== text) {
+    // From another file (the other source editor's) or changed since: a copy.
+    const otherFile = payload.fileId && payload.fileId !== app.controller.getActiveFile()?.id;
+    if (otherFile || value.slice(sourceStart, sourceEnd) !== text) {
       app.replaceEditorRange(insertOffset, insertOffset, text, insertOffset + text.length, insertOffset + text.length);
       return true;
     }

@@ -2,8 +2,9 @@
 open tabs (step 5i).
 
 Opening the workspace on a new device restores the groups the server kept
-(by path; a file that is gone is dropped), the source editor and the
-preview in the groups showing them. A change to the groups is saved again,
+(by path; a file that is gone is dropped), each group showing its own
+source editor or the preview, the active editor the one showing the active
+file (v0.3.11). A change to the groups is saved again,
 with the source tabs and the active file as before, and kept in this
 browser, so a reload brings the groups back. Isolated: a mocked account and workspace; no
 real account or writing project is used.
@@ -24,9 +25,15 @@ GROUPS = '''() => Object.fromEntries([...document.querySelectorAll(".editor-grou
   return [g.dataset.group, {
     tabs: [...g.querySelectorAll(".editor-tab[data-file-id]")].map((t) => [t.querySelector(".tab-title").textContent, t.dataset.view]),
     active: active ? [active.querySelector(".tab-title").textContent, active.dataset.view] : null,
-    bodies: [...g.querySelectorAll(":scope > .source-body, :scope > .preview-body")].filter((b) => b.dataset.shown !== "false").map((b) => b.id)
+    bodies: [...g.querySelectorAll(":scope > .source-body, :scope > .preview-body")].filter((b) => b.dataset.shown !== "false")
+      .map((b) => b.id || (b.classList.contains("source-body") ? "right-source-body" : "")),
+    activeEditor: g.querySelector(":scope > .source-body")?.dataset.active === "true"
   }];
 }))'''
+
+
+# The active file in a source editor (whichever group's).
+SHOWN = '[...document.querySelectorAll(".source-body .editor-content")].some((e) => e.innerText.includes("Session notes"))'
 
 
 async def main():
@@ -85,7 +92,7 @@ async def main():
                 await rt.fulfill(status=404, body='not found')
         await context.route('**/*', route)
         await page.goto(BASE, wait_until='domcontentloaded')
-        await page.wait_for_function('document.querySelector("#editor-content")?.innerText.includes("Session notes")', timeout=20000)
+        await page.wait_for_function(SHOWN, timeout=20000)
         await page.wait_for_timeout(600)
 
         # The kept groups come back; the file that is gone is dropped.
@@ -93,7 +100,8 @@ async def main():
         assert now['left']['tabs'] == [['session.md', 'source'], ['plan.md', 'preview']], now['left']
         assert now['left']['active'] == ['plan.md', 'preview'] and now['left']['bodies'] == ['preview-body'], now['left']
         assert now['right']['tabs'] == [['session.md', 'source']], now['right']
-        assert now['right']['active'] == ['session.md', 'source'] and now['right']['bodies'] == ['source-body'], now['right']
+        assert now['right']['active'] == ['session.md', 'source'] and now['right']['bodies'] == ['right-source-body'], now['right']
+        assert now['right']['activeEditor'] and not now['left']['activeEditor'], 'the editor showing the active file is the active one'
         assert 'The plan' in await page.locator('#preview-output').inner_text()
 
         # A change is saved with the groups (after the save's short wait).
@@ -115,7 +123,7 @@ async def main():
 
         # A reload: the groups this browser kept come back (the server's resume is older).
         await page.reload(wait_until='domcontentloaded')
-        await page.wait_for_function('document.querySelector("#editor-content")?.innerText.includes("Session notes")', timeout=20000)
+        await page.wait_for_function(SHOWN, timeout=20000)
         for _ in range(40):
             now = await page.evaluate(GROUPS)
             if now['right']['active'] == ['plan.md', 'preview']:

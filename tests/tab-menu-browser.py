@@ -2,8 +2,8 @@
 
 Close, Close Others, Close to the Right, Close All; Open as Source / Preview
 (the view the tab is in is ticked; opening as the other opens it in the same
-group, whose tabs then name their views, while the other group keeps its tab
-behind a placeholder with Show here); Copy Path; History's diff tab only
+group, whose tabs then name their views, while the other group keeps its tab,
+a preview in a second preview of its own); Copy Path; History's diff tab only
 closes. A group's label switches its tab in use between Source and Preview
 where it is (the strip keeps its tabs, in their places). Escape and a press
 outside close the menu. Isolated: every API is mocked; the welcome template

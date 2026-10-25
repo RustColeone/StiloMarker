@@ -19,10 +19,14 @@ export function createLineComments(app) {
   }
 
   function commentsForActiveFile() {
+    return commentsForFile(app.controller.getActiveFile());
+  }
+
+  // A file's comments (either source editor's file).
+  function commentsForFile(file) {
     const project = app.controller.getProject();
-    const activeFile = app.controller.getActiveFile();
-    if (!activeFile) return [];
-    return commentsForPath(getPath(project, activeFile.id));
+    if (!file || !project?.nodes[file.id]) return [];
+    return commentsForPath(getPath(project, file.id));
   }
 
   async function loadLineComments({ force = false } = {}) {
@@ -44,18 +48,10 @@ export function createLineComments(app) {
     }
   }
 
-  // Re-render the editor (and therefore the gutter markers) from the current model
-  // without disturbing the caret.
+  // Re-render the editors (and therefore the gutter markers) from the current
+  // model without disturbing the caret (the Editor's: every editor showing a file).
   function renderEditorFromModel() {
-    const activeFile = app.controller.getActiveFile();
-    if (!activeFile || !isTextFileName(activeFile.name)) return;
-    if (app.elements.editorContent !== document.activeElement) {
-      app.renderEditorContent(app.getEditorText());
-      return;
-    }
-    const { start, end } = app.getEditorSelection();
-    app.renderEditorContent(app.getEditorText());
-    app.setEditorSelection(start, end);
+    app.redrawLineNotes();
   }
 
   // Follow the text: a commented line that moved is found again by its own
@@ -118,8 +114,9 @@ export function createLineComments(app) {
     popover.dataset.commentId = existing?.id ?? "";
     popover.hidden = false;
 
-    // Sit beside the line being commented, clamped to the viewport.
-    const row = app.elements.editorGutter?.querySelectorAll(".editor-gutter-line")[lineIndex];
+    // Sit beside the line being commented, clamped to the viewport (its row by
+    // its number: of a long file only the lines in view have rows).
+    const row = app.elements.editorGutter?.querySelector(`.editor-gutter-line[data-line="${lineIndex}"]`);
     const rect = (row ?? app.elements.editorGutter).getBoundingClientRect();
     popover.style.top = `${Math.min(rect.top, window.innerHeight - popover.offsetHeight - 12)}px`;
     popover.style.left = `${rect.right + 8}px`;
@@ -173,7 +170,7 @@ export function createLineComments(app) {
   }
 
   return {
-    closeCommentPopover, commentsAvailable, commentsForActiveFile, loadLineComments,
+    closeCommentPopover, commentsAvailable, commentsForActiveFile, commentsForFile, loadLineComments,
     openCommentPopover, removeLineComment, renderEditorFromModel, scheduleCommentReanchor,
     submitLineComment
   };

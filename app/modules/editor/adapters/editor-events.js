@@ -1,9 +1,11 @@
-// The source editor's events: typing (input, IME composition, the edits the
-// browser would otherwise do itself), focus and scroll, keys, the find bar's
-// controls, links under the mouse, dragging text in and out, the wheel over the
-// gutter, and re-rendering when the pane's width or the fonts change. Moved
-// from main.js with the Editor's other parts; `app` is the Editor's shared
-// context (surface.js), `composing` whether an IME composition is under way.
+// A source editor's events: typing (input, IME composition, the edits the
+// browser would otherwise do itself), focus (working in it makes it the
+// active editor) and scroll, keys, links under the mouse, dragging text in and
+// out, the wheel over the gutter, and re-rendering when the pane's width or the
+// fonts change; installed on each editor, `app` being that editor's context
+// (editors.js), `composing` whether an IME composition is under way. The find
+// bar's controls and the previews' links are the Editor's, bound once
+// (installSharedEditorEvents, `app` its shared context: surface.js).
 import { isMarkdownFileName, isTextFileName } from "../../workspace/index.js";
 
 export function installEditorEvents(app, composing) {
@@ -217,12 +219,26 @@ export function installEditorEvents(app, composing) {
     }
   });
 
+  // Working in an editor makes it the active one (its file the project's
+  // active file, the tools its): the text, or anything else in its body (its
+  // toolbar's buttons). A key or an edit in an editor that has the focus
+  // without being the active one (a drop elsewhere left the focus here, the
+  // groups restored while typing) makes it the active one first, so the tools
+  // never act on the other editor's file.
+  app.elements.sourceBody.addEventListener("focusin", () => app.activateEditor(app.group));
+  const claim = () => { if (!app.isActiveEditor()) app.activateEditor(app.group); };
+  app.elements.editorContent.addEventListener("keydown", claim, true);
+  app.elements.editorContent.addEventListener("beforeinput", claim, true);
   // File tabs and workspace opens need not move focus into the editor. Restore the
-  // saved caret when the user returns with keyboard or pointer focus instead.
+  // caret when the user returns with keyboard or pointer focus instead: where
+  // this editor's was (the same file in the other editor has its own), else the
+  // file's saved one.
   app.elements.editorContent.addEventListener("focus", () => {
+    app.activateEditor(app.group);
     const active = app.controller.getActiveFile();
     if (!active || app.shown.fileId !== active.id) return;
-    const saved = app.savedEditorSelection(active.id, app.getEditorText());
+    const kept = app.keptSelection();
+    const saved = kept ? app.clampEditorSelection(app.getEditorText(), kept.start, kept.end) : app.savedEditorSelection(active.id, app.getEditorText());
     if (saved) app.setEditorSelection(saved.start, saved.end);
   });
 
@@ -235,75 +251,20 @@ export function installEditorEvents(app, composing) {
   });
   app.elements.editorContent.addEventListener("keydown", app.handleEditorKeydown);
 
-  // ── Find / Replace controls ─────────────────────────────────────────────────
-  let findRecomputeTimer = null;
-  app.elements.findInput?.addEventListener("input", () => {
-    if (findRecomputeTimer) clearTimeout(findRecomputeTimer);
-    findRecomputeTimer = setTimeout(() => {
-      findRecomputeTimer = null;
-      app.computeSearchMatches({ keepCaret: true });
-      // Jump to the first match as the user refines the query.
-      if (app.searchState.matches.length) app.gotoMatch(app.searchState.currentIndex);
-    }, 100);
-  });
-  app.elements.findInput?.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      if (event.shiftKey) app.findPrev(); else app.findNext();
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      app.closeFindBar();
-    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
-      event.preventDefault();
-      app.elements.findInput.select();
-    }
-  });
-  app.elements.replaceInput?.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") { event.preventDefault(); app.replaceCurrent(); }
-    else if (event.key === "Escape") { event.preventDefault(); app.closeFindBar(); }
-  });
-  app.elements.findNext?.addEventListener("click", app.findNext);
-  app.elements.findPrev?.addEventListener("click", app.findPrev);
-  app.elements.findClose?.addEventListener("click", app.closeFindBar);
-  app.elements.findToggleCase?.addEventListener("click", () => app.toggleFindOption("caseSensitive", app.elements.findToggleCase));
-  app.elements.findToggleWord?.addEventListener("click", () => app.toggleFindOption("wholeWord", app.elements.findToggleWord));
-  app.elements.findToggleRegex?.addEventListener("click", () => app.toggleFindOption("regex", app.elements.findToggleRegex));
-  app.elements.findToggleReplace?.addEventListener("click", () => {
-    app.searchState.replaceMode = !app.searchState.replaceMode;
-    if (app.elements.findReplaceRow) app.elements.findReplaceRow.hidden = !app.searchState.replaceMode;
-    (app.searchState.replaceMode ? app.elements.replaceInput : app.elements.findInput)?.focus();
-  });
-  app.elements.replaceOne?.addEventListener("click", app.replaceCurrent);
-  app.elements.replaceAll?.addEventListener("click", app.replaceAllMatches);
+  // Links under the mouse: this editor's file's (hovering does not make it the active one).
   app.elements.editorContent.addEventListener("mousedown", (event) => {
     if ((event.ctrlKey || event.metaKey) && event.button === 0) {
       const linkEl = event.target?.closest?.(".token-link[data-href]");
       if (linkEl) {
         event.preventDefault();
         app.hideLinkTooltip(true);
-        app.openLinkFromEditor(linkEl.dataset.href);
+        app.openLinkFromEditor(linkEl.dataset.href, app.controller.getActiveFile());
       }
     }
   });
-  app.elements.editorContent.addEventListener("click", app.hideEditorAutocomplete);
-  app.elements.editorContent.addEventListener("mousemove", app.handleEditorLinkHover);
-  app.elements.editorContent.addEventListener("mouseleave", app.handleEditorMouseLeave);
-
-  // Links in a preview (the preview, or a group's second one).
-  (app.elements.preview.closest(".editor-grid") ?? app.elements.preview).addEventListener("click", (event) => {
-    if (!event.target.closest?.(".preview-output")) return;
-    const fileLink = event.target.closest("a[data-open-file-id]");
-    if (fileLink) {
-      event.preventDefault();
-      app.openFileFromExplorer(fileLink.dataset.openFileId);
-      return;
-    }
-    const unresolved = event.target.closest("a[data-unresolved-link]");
-    if (unresolved) {
-      event.preventDefault();
-      app.notify(`Cannot resolve link: ${unresolved.dataset.unresolvedLink}`);
-    }
-  });
+  app.elements.editorContent.addEventListener("click", () => app.hideEditorAutocomplete());
+  app.elements.editorContent.addEventListener("mousemove", (event) => app.handleEditorLinkHover(event, app.controller.getActiveFile()));
+  app.elements.editorContent.addEventListener("mouseleave", () => app.handleEditorMouseLeave());
 
   app.elements.editorContent.addEventListener("dragstart", (event) => {
     const { start: selectionStart, end: selectionEnd } = app.getEditorSelection();
@@ -312,7 +273,8 @@ export function installEditorEvents(app, composing) {
       return;
     }
     const text = app.getEditorText().slice(selectionStart, selectionEnd);
-    app.editorDragState.selection = { start: selectionStart, end: selectionEnd, text };
+    // Its file: dropped in the other editor on another file, it is copied (moved only within its own).
+    app.editorDragState.selection = { start: selectionStart, end: selectionEnd, text, fileId: app.shown.fileId };
     event.dataTransfer?.setData("text/mdnotes-editor-selection", JSON.stringify(app.editorDragState.selection));
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = "copyMove";
@@ -355,6 +317,9 @@ export function installEditorEvents(app, composing) {
   app.elements.editorContent.addEventListener("drop", (event) => {
     event.preventDefault();
     event.stopPropagation();
+    // A drop lands in the editor it was dropped on: it has the focus, and is the active one.
+    if (document.activeElement !== app.elements.editorContent) app.elements.editorContent.focus({ preventScroll: true });
+    app.activateEditor(app.group);
     void app.onDrop(event).catch((error) => app.notify(error.message));
   });
   app.elements.editorGutter.addEventListener("wheel", app.forwardEditorWheel, { passive: false });
@@ -403,5 +368,67 @@ export function installEditorEvents(app, composing) {
     if (!app.editorRenderCache.els.length) return;
     app.editorRenderCache.metricsKey = "";
     app.renderEditorContent(app.getEditorText());
+  });
+}
+
+// The Editor's own controls, bound once: the find bar's (it sits in the active
+// editor: editors.js) and the links in a preview (the preview, or a group's
+// second one). `app` is the Editor's shared context (surface.js).
+export function installSharedEditorEvents(app) {
+  // ── Find / Replace controls ─────────────────────────────────────────────────
+  let findRecomputeTimer = null;
+  app.elements.findInput?.addEventListener("input", () => {
+    if (findRecomputeTimer) clearTimeout(findRecomputeTimer);
+    findRecomputeTimer = setTimeout(() => {
+      findRecomputeTimer = null;
+      app.computeSearchMatches({ keepCaret: true });
+      // Jump to the first match as the user refines the query.
+      if (app.searchState.matches.length) app.gotoMatch(app.searchState.currentIndex);
+    }, 100);
+  });
+  app.elements.findInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (event.shiftKey) app.findPrev(); else app.findNext();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      app.closeFindBar();
+    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      app.elements.findInput.select();
+    }
+  });
+  app.elements.replaceInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); app.replaceCurrent(); }
+    else if (event.key === "Escape") { event.preventDefault(); app.closeFindBar(); }
+  });
+  app.elements.findNext?.addEventListener("click", app.findNext);
+  app.elements.findPrev?.addEventListener("click", app.findPrev);
+  app.elements.findClose?.addEventListener("click", app.closeFindBar);
+  app.elements.findToggleCase?.addEventListener("click", () => app.toggleFindOption("caseSensitive", app.elements.findToggleCase));
+  app.elements.findToggleWord?.addEventListener("click", () => app.toggleFindOption("wholeWord", app.elements.findToggleWord));
+  app.elements.findToggleRegex?.addEventListener("click", () => app.toggleFindOption("regex", app.elements.findToggleRegex));
+  app.elements.findToggleReplace?.addEventListener("click", () => {
+    app.searchState.replaceMode = !app.searchState.replaceMode;
+    if (app.elements.findReplaceRow) app.elements.findReplaceRow.hidden = !app.searchState.replaceMode;
+    (app.searchState.replaceMode ? app.elements.replaceInput : app.elements.findInput)?.focus();
+  });
+  app.elements.replaceOne?.addEventListener("click", app.replaceCurrent);
+  app.elements.replaceAll?.addEventListener("click", app.replaceAllMatches);
+
+  // Links in a preview (the preview, or a group's second one).
+  (app.elements.preview.closest(".editor-grid") ?? app.elements.preview).addEventListener("click", (event) => {
+    if (!event.target.closest?.(".preview-output")) return;
+    const fileLink = event.target.closest("a[data-open-file-id]");
+    if (fileLink) {
+      event.preventDefault();
+      app.openFileFromExplorer(fileLink.dataset.openFileId);
+      return;
+    }
+    const unresolved = event.target.closest("a[data-unresolved-link]");
+    if (unresolved) {
+      event.preventDefault();
+      app.notify(`Cannot resolve link: ${unresolved.dataset.unresolvedLink}`);
+    }
   });
 }

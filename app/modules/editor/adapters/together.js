@@ -24,8 +24,17 @@ export function installTogether(app, workspace, composing) {
     const position = Number(operation.start) + String(operation.text ?? "").length;
     if (cached) app.remoteCursorsByClient.set(clientId, { ...cached, selStart: position, selEnd: position });
   });
-  events.on("other-caret", (cursor) => app.onRemoteCursor(cursor));
-  events.on("carets-kept", ({ clientIds }) => app.pruneRemoteCursors(clientIds.map((clientId) => ({ clientId }))));
+  // Their carets in every editor showing their file (not only the active one).
+  events.on("other-caret", (cursor) => {
+    if (!cursor?.clientId) return;
+    app.remoteCursorsByClient.set(cursor.clientId, cursor);
+    app.redrawRemoteCursors();
+  });
+  events.on("carets-kept", ({ clientIds }) => {
+    const alive = new Set(clientIds);
+    for (const clientId of [...app.remoteCursorsByClient.keys()]) if (!alive.has(clientId)) app.remoteCursorsByClient.delete(clientId);
+    app.redrawRemoteCursors();
+  });
 
   // A reload while reconnecting keeps the open tabs and the shown file.
   let kept = null;

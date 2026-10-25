@@ -7,9 +7,11 @@
 //   editor-cursors.js  other people's cursors and the overview ruler
 //   editor-toolbar.js  the formatting toolbar's edits, the drop caret
 //   editor-keys.js     indentation and key handling
-// main.js creates it on first use and passes its shared values in `app`
-// (including fileContentFromEditor(file, text), which maps the edited text back
-// into the whole file when the editor shows only part of it).
+// Each source editor has its own (editors.js): `app` is that editor's context,
+// its elements, render cache, shown file and history its own, the rest the
+// Editor's shared values (including fileContentFromEditor(file, text), which
+// maps the edited text back into the whole file when the editor shows only
+// part of it).
 import { installCursors } from "./editor-cursors.js";
 import { installDom } from "./editor-dom.js";
 import { installHistory } from "./editor-history.js";
@@ -18,10 +20,11 @@ import { installRender } from "./editor-render.js";
 import { installToolbar } from "./editor-toolbar.js";
 import { installWindow } from "./editor-window.js";
 
-// What the app calls (the same functions as before the split).
-const API = [
+// What the app calls (the same functions as before the split): each editor's
+// own; the Editor's shared context hands them to the active editor.
+export const EDITOR_API = [
     "applyEditorEdit", "applyEditorRender", "attachSelectionChangeListener", "caretIntoView", "clamp",
-    "clampEditorSelection", "clearEditorDropCaret", "clientColor", "consumeExternalEditorSelection", "editedOneLine",
+    "clampEditorSelection", "clearEditorDropCaret", "clientColor", "consumeExternalEditorSelection", "diffEditorTexts", "editedOneLine",
     "forwardEditorWheel", "getEditorLineHeight", "getEditorSelection", "getEditorText",
     "getEditorTextOffsetFromPoint", "handleEditorKeydown", "handleIndentKeydown", "loadEditorContent",
     "notifyEditorChanged", "onRemoteCursor", "pruneRemoteCursors", "pushEditorHistoryState",
@@ -35,7 +38,7 @@ export function createEditorCore(app) {
   const ed = { rendering: false, typing: false };
   for (const install of [installDom, installRender, installWindow, installHistory, installCursors, installToolbar, installKeys]) install(ed, app);
   return {
-    ...Object.fromEntries(API.map((name) => [name, ed[name]])),
+    ...Object.fromEntries(EDITOR_API.map((name) => [name, ed[name]])),
     isRendering: () => ed.rendering, // redrawing the text (the page may report focus oddly meanwhile)
     isTyping: () => ed.typing        // applying a keystroke: the rest of the app may catch up later
   };

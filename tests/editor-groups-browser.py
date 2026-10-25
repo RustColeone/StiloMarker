@@ -1,8 +1,9 @@
 """Browser regression: editor groups come and go (step 5h).
 
-A tab moves to the other group (its view's body follows; the group it left
-keeps its own tab behind a placeholder), opens there too ("Open to the
-Side"), or is dragged onto the other group's strip. A group whose last tab
+A tab moves to the other group (a source tab shows in that group's own
+editor, v0.3.11; the group it left shows its own tab in its own editor, no
+placeholder), opens there too ("Open to the Side"), or is dragged onto the
+other group's strip. A group whose last tab
 closes closes: the other takes the width and the bodies, so a file opened
 from the explorer shows there; View → Toggle Source brings the group back.
 Two previews at once: a second one with an editor of its own; while focus
@@ -28,7 +29,8 @@ GROUPS = '''() => Object.fromEntries([...document.querySelectorAll(".editor-grou
     width: Math.round(g.getBoundingClientRect().width),
     tabs: [...g.querySelectorAll(".editor-tab[data-file-id]")].map((t) => [t.querySelector(".tab-title").textContent, t.dataset.view]),
     active: active ? [active.querySelector(".tab-title").textContent, active.dataset.view] : null,
-    bodies: [...g.querySelectorAll(":scope > .source-body, :scope > .preview-body")].filter((b) => b.dataset.shown !== "false").map((b) => b.id),
+    bodies: [...g.querySelectorAll(":scope > .source-body, :scope > .preview-body")].filter((b) => b.dataset.shown !== "false")
+      .map((b) => b.id || (b.classList.contains("source-body") ? "right-source-body" : "")),
     placeholder: placeholder.hidden ? null : placeholder.querySelector(".group-placeholder-text").textContent
   }];
 }))'''
@@ -72,14 +74,15 @@ async def main():
         now = await groups()
         assert now['left']['tabs'] == [['welcome.md', 'source'], ['LULUKA.urldb', 'source']], now
 
-        # Move to Other Group: the source editor follows; the left group keeps welcome.md behind a placeholder.
+        # Move to Other Group: it shows in the right group's own editor; the left group keeps welcome.md in its own.
         await menu('left', 'LULUKA.urldb', 'source', 'Move to Other Group')
         now = await groups()
-        assert now['left']['tabs'] == [['welcome.md', 'source']] and now['left']['bodies'] == [], now['left']
-        assert now['left']['placeholder'] == 'welcome.md is open as Source in the other group.', now['left']
+        assert now['left']['tabs'] == [['welcome.md', 'source']] and now['left']['bodies'] == ['source-body'], now['left']
+        assert now['left']['placeholder'] is None, now['left']
         assert now['right']['tabs'] == [['welcome.md', 'preview'], ['LULUKA.urldb', 'source']], now['right']
-        assert now['right']['active'] == ['LULUKA.urldb', 'source'] and now['right']['bodies'] == ['source-body'], now['right']
-        assert (await page.locator('#editor-content').inner_text()).startswith('[Moria Luluka]')
+        assert now['right']['active'] == ['LULUKA.urldb', 'source'] and now['right']['bodies'] == ['right-source-body'], now['right']
+        assert (await page.locator('.source-body[data-group="right"] .editor-content').inner_text()).startswith('[Moria Luluka]')
+        assert (await page.locator('#editor-content').inner_text()).startswith('# STILO MARKER')
 
         # Open to the Side: welcome.md's preview opens in the left group too.
         await menu('right', 'welcome.md', 'preview', 'Open to the Side')

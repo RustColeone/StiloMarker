@@ -1,11 +1,12 @@
-// Editor (browser): the source editor (the contenteditable, its incremental
-// rendering, caret and selection, undo, other people's cursors, the
-// formatting toolbar, keys), highlighting, find and replace, autocomplete,
+// Editor (browser): the source editors, one in each group (the
+// contenteditable, its incremental rendering, caret and selection, undo,
+// other people's cursors, the formatting toolbar, keys; the one last worked in
+// is the active one: adapters/editors.js), highlighting, find and replace, autocomplete,
 // links between notes, the tab strips and panes, and the preview pane with
 // its extension point for other kinds of file (adapters/preview.js), and the
 // Markdown renderer.
 //
-// API: parts() -> the source editor's, find's, autocomplete's, links', the tab
+// API: parts() -> the active source editor's, find's, autocomplete's, links', the tab
 // strips' and the preview's functions (adapters/surface.js), created when the
 // Editor starts in a page.
 // previews, codeBlocks (code blocks of a language drawn in a Markdown
@@ -46,7 +47,7 @@ export default defineModule({
   name: "editor",
   level: 3,
   uses: ["shell", "file-types", "workspace", "identity"],
-  owns: { elements: ["the source editor", "the formatting toolbar", "the find bar", "the tab strips", "the preview pane"],
+  owns: { elements: ["the source editors", "the formatting toolbar", "the find bar", "the tab strips", "the preview pane"],
     state: ["the open tabs", "what each pane shows", "the explorer selection"],
     registries: ["previews", "code blocks", "highlighters", "toolbars", "completions", "line notes", "marks", "pane views", "the welcome page"], rules: ["Markdown rendering"] },
   start(ctx) {

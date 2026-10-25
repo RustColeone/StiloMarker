@@ -1,7 +1,7 @@
-// Links in the source pane: the hover tooltip that previews a linked file and
-// Ctrl+Click to follow it, and the sidebar's Linked Notes panel (outgoing
-// links and backlinks). main.js creates this on first use and passes its
-// shared values in `app`.
+// Links in the source editors: the hover tooltip that previews a linked file
+// and Ctrl+Click to follow it (a link is read from the file of the editor it is
+// in), and the sidebar's Linked Notes panel (outgoing links and backlinks, the
+// active file's). `app` is the Editor's shared context (surface.js).
 import { getNodeIdByPath, getPath, isImageFileName, isMarkdownFileName } from "../../workspace/index.js";
 import { extractMarkdownLinks, renderMarkdown } from "../model/markdown.js";
 import { builtinTypes } from "../../file-types/index.js";
@@ -12,9 +12,10 @@ export function createLinks(app) {
   let _linkTooltipCurrentHref = null;
   let _lastHoveredLinkEl = null;
 
-  function resolveEditorLinkHref(href) {
+  // A link in `file` (an editor's; the active file when not said).
+  function resolveEditorLinkHref(href, file = app.controller.getActiveFile()) {
     const project = app.controller.getProject();
-    const activeFile = app.controller.getActiveFile();
+    const activeFile = file;
     if (!activeFile || !href) return null;
     if (/^(https?:\/\/|mailto:|data:|blob:|#|\/)/i.test(href)) return null;
     const basePath = getPath(project, activeFile.id);
@@ -26,13 +27,13 @@ export function createLinks(app) {
     return node?.kind === "file" ? { nodeId, node, path: resolvedPath } : null;
   }
 
-  function openLinkFromEditor(href) {
+  function openLinkFromEditor(href, file = app.controller.getActiveFile()) {
     if (!href) return;
     if (/^https?:\/\//i.test(href)) {
       window.open(href, "_blank", "noreferrer");
       return;
     }
-    const resolved = resolveEditorLinkHref(href);
+    const resolved = resolveEditorLinkHref(href, file);
     if (!resolved) {
       app.notify(`Cannot resolve link: ${href}`);
       return;
@@ -40,12 +41,12 @@ export function createLinks(app) {
     app.openFileFromExplorer(resolved.nodeId);
   }
 
-  function showLinkTooltipContent(linkEl) {
+  function showLinkTooltipContent(linkEl, file) {
     const href = linkEl.dataset.href ?? "";
     _linkTooltipCurrentHref = href;
 
     const project = app.controller.getProject();
-    const resolved = resolveEditorLinkHref(href);
+    const resolved = resolveEditorLinkHref(href, file);
 
     if (!resolved) {
       app.editorLinkTooltip.nameEl.textContent = href || "(empty link)";
@@ -99,14 +100,14 @@ export function createLinks(app) {
     el.style.top = `${Math.max(4, top)}px`;
   }
 
-  function showLinkTooltip(linkEl, clientX, clientY) {
+  function showLinkTooltip(linkEl, clientX, clientY, file) {
     clearTimeout(_linkTooltipTimer);
     clearTimeout(_linkTooltipHideTimer);
     const href = linkEl.dataset.href ?? "";
     if (!href) return;
     _linkTooltipTimer = setTimeout(() => {
       if (_lastHoveredLinkEl !== linkEl) return;
-      showLinkTooltipContent(linkEl);
+      showLinkTooltipContent(linkEl, file);
       app.editorLinkTooltip.el.hidden = false;
       positionLinkTooltip(clientX, clientY);
     }, 400);
@@ -128,8 +129,8 @@ export function createLinks(app) {
     }, 120);
   }
 
-  function handleEditorLinkHover(event) {
-    const activeFile = app.controller.getActiveFile();
+  function handleEditorLinkHover(event, file = app.controller.getActiveFile()) {
+    const activeFile = file;
     if (!isMarkdownFileName(activeFile?.name ?? "")) {
       if (!app.editorLinkTooltip.el.hidden) hideLinkTooltip(true);
       _lastHoveredLinkEl = null;
@@ -139,7 +140,7 @@ export function createLinks(app) {
     if (linkEl !== _lastHoveredLinkEl) {
       _lastHoveredLinkEl = linkEl;
       if (linkEl) {
-        showLinkTooltip(linkEl, event.clientX, event.clientY);
+        showLinkTooltip(linkEl, event.clientX, event.clientY, activeFile);
       } else if (!app.editorLinkTooltip.el.matches(":hover")) {
         hideLinkTooltip();
       }

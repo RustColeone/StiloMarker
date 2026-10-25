@@ -537,11 +537,18 @@ double-click the line to make them even again. A tab is a file
 shown one way, as Source or as Preview. Right-click a tab for Close, Close
 Others, Close to the Right, Close All, Open as Source or Preview (the same
 file shown the other way, in the same group), and Copy Path. When a group
-holds tabs of both kinds, each tab says which it is. There is one source
-editor: if the other group was showing it, that group keeps its tab and
-says where it went; press **Show here** to take it back. Previews are not
-limited: each group can show a preview at the same time, so a note and a
-diagram can sit side by side. **Move to Other Group** moves a tab across, **Open to the Side**
+holds tabs of both kinds, each tab says which it is. Each group has its own
+source editor, so two files (or the same one twice) can be edited side by
+side. The editor you last worked in is the active one: its file is the open
+file (the explorer, Linked Notes and the status bar follow it), and Find,
+completions and comments act there. The same file in both stays in step as
+you type, like a live collaboration: the other editor's caret is drawn in
+the one you type in, named for its group (Left editor, Right editor), and
+stays where it was in the text. Undo belongs to the file: Ctrl+Z in either
+editor undoes its last change, whichever editor made it, and a file's undo
+history is kept while its tab is open. Previews are not limited either: each
+group can show a preview at the same time, so a note and a diagram can sit
+side by side. **Move to Other Group** moves a tab across, **Open to the Side**
 opens it in the other group too, and you can drag a tab onto the other
 group's tabs. When a group's last tab closes, the group closes and the other
 takes its place; View → Toggle Source or Toggle Preview brings it back. In a

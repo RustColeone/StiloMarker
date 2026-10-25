@@ -1,7 +1,8 @@
 // Other people in the file: their cursors and selections drawn over the
-// editor, the overview ruler beside it, and where this tab's own caret is.
-// Installed on the editor object `ed` that the other parts share (see
-// editor-core.js); calls into another part go through `ed`.
+// editor (and the other source editor's, when it shows the same file: as a
+// collaborator's), the overview ruler beside it, and where this tab's own
+// caret is. Installed on the editor object `ed` that the other parts share
+// (see editor-core.js); calls into another part go through `ed`.
 import { getPath, isTextFileName } from "../../workspace/index.js";
 import { participantColor } from "../../identity/index.js";
 
@@ -10,13 +11,15 @@ export function installCursors(ed, app) {
   // A person's cursor has their colour (Identity's, the same as their dot and chip).
   const clientColor = participantColor;
 
-  /** Render remote peer cursor overlays inside #editor-cursors.
-   *  `cursors` is an array of { clientId, displayName, fileId, selStart, selEnd }.
-   *  Only cursors for the currently active file are shown.
+  /** Render remote peer cursor overlays inside the editor's cursors layer.
+   *  `remote` is an array of { clientId, displayName, fileId, selStart, selEnd },
+   *  joined by the other source editor's caret when it shows the same file.
+   *  Only cursors for this editor's file are shown.
    *  When selEnd > selStart a per-line selection highlight is drawn in addition
    *  to the caret so peers can see highlighted text. */
-  function renderRemoteCursors(cursors) {
+  function renderRemoteCursors(remote) {
     scheduleOverviewRuler(); // peer markers live on the ruler too
+    const cursors = [...remote, ...(app.localPeers?.() ?? [])]; // the other editor's caret too
     const activeFile = app.controller.getActiveFile();
     const container = app.elements.editorCursors;
     container.textContent = "";
@@ -193,7 +196,7 @@ export function installCursors(ed, app) {
 
     // Collaborators' selections first, so their caret marks sit on top of them.
     const activePath = getPath(app.controller.getProject(), activeFile.id);
-    for (const cursor of app.remoteCursorsByClient.values()) {
+    for (const cursor of [...app.remoteCursorsByClient.values(), ...(app.localPeers?.() ?? [])]) {
       if (cursor.fileId !== activePath) continue;
       const color = clientColor(cursor.clientId);
       const who = cursor.displayName || "A collaborator";
@@ -207,8 +210,8 @@ export function installCursors(ed, app) {
             title: `${who} — line ${startLine + 1}` });
     }
 
-    // Search hits.
-    if (app.searchState.open) {
+    // Search hits (the find bar's: the active editor's text).
+    if (app.searchState.open && app.isActiveEditor?.() !== false) {
       for (const match of app.searchState.matches) {
         add({ line: lineIndexForOffset(text, match.start), className: "editor-overview-tick is-search",
               title: "Search match" });
@@ -307,7 +310,14 @@ export function installCursors(ed, app) {
       if (!app.elements.editorContent.contains(event.target)) app.rememberEditorSelection();
     }, true);
     document.addEventListener("selectionchange", () => {
-      if (document.activeElement === app.elements.editorContent && !ed.rendering && !app.editorIsComposing) app.rememberEditorSelection();
+      const focused = document.activeElement === app.elements.editorContent;
+      if (focused && !ed.rendering && !app.editorIsComposing) {
+        app.rememberEditorSelection();
+        app.keepSelection?.(ed.getEditorSelection()); // its caret, for when another element has the focus
+        app.peersMoved?.(); // the other editor draws it
+      }
+      // Only the active editor's caret is mine to others (the other editor's would read as at the start).
+      if (app.isActiveEditor && !app.isActiveEditor()) return;
       const activeFile = app.controller.getActiveFile();
       if (!activeFile) return;
       const sel = ed.getEditorSelection();

@@ -1,6 +1,8 @@
 // Edits and undo: every programmatic edit goes through applyEditorEdit,
 // history checkpoints, undo / redo, keeping a selection in place across
-// someone else's edit, and telling the app a file's text changed.
+// someone else's edit, and telling the app a file's text changed. The history
+// (app.editorHistory) is the file's (and part's), kept while its text is what
+// it holds, and shared by both editors when they show it (editors.js).
 // Installed on the editor object `ed` that the other parts share (see
 // editor-core.js); calls into another part go through `ed`.
 import { getPath, isTextFileName } from "../../workspace/index.js";
@@ -139,11 +141,15 @@ export function installHistory(ed, app) {
     notifyEditorChanged(newText);
   }
 
-  /** Load a file's content into the editor, resetting undo history.
+  /** Load a file's content into the editor; its undo history starts again
+   *  unless it holds this text (a file switched back to, or shown in the other
+   *  editor too: undo goes on as it was).
    *  Does NOT notify the domain model — used exclusively by updateStatus
    *  when the active file changes so we don't trigger a render feedback loop. */
   function loadEditorContent(text, start = 0, end = start) {
-    const selection = resetEditorHistory(text, start, end);
+    const kept = app.editorHistory.stack.length > 0 && app.editorHistory.text === text;
+    const selection = kept ? clampEditorSelection(text, start, end) : resetEditorHistory(text, start, end);
+    app.keepSelection?.(selection);
     pendingExternalEditorSelection = null;
     app.hideEditorAutocomplete();
     ed.renderEditorContent(text);
@@ -178,6 +184,8 @@ export function installHistory(ed, app) {
     }
     // Typed: Workspace says so, and Sync sends the patch when the workspace is shared.
     app.workspace.typed(getPath(app.controller.getProject(), activeFile.id), activeFile.content, nextContent);
+    // The other editor showing this file follows at once (editors.js).
+    app.editorTyped?.(app);
     // Keep find matches/highlights accurate as the text changes underneath them.
     if (app.searchState.open) app.computeSearchMatches();
   }

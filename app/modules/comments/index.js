@@ -29,11 +29,15 @@ export default defineModule({
       lineComments: { byFile: new Map(), loadedFor: null }, // path -> comments, and for which workspace
       cloudWorkspaceTarget: () => sync.cloudWorkspace(),
       elements: { lineCommentPopover: $("line-comment-popover"), lineCommentInput: $("line-comment-input"), lineCommentMeta: $("line-comment-meta"),
-        lineCommentDelete: $("line-comment-delete"), editorGutter: $("editor-gutter"), editorContent: $("editor-content") },
+        lineCommentDelete: $("line-comment-delete"),
+        // The active source editor's (the Editor has one per group).
+        get editorGutter() { return parts().editorElements().editorGutter; },
+        get editorContent() { return parts().editorElements().editorContent; } },
       getEditorText: () => parts().getEditorText(),
       getEditorSelection: () => parts().getEditorSelection(),
       setEditorSelection: (...args) => parts().setEditorSelection(...args),
       renderEditorContent: (...args) => parts().renderEditorContent(...args),
+      redrawLineNotes: () => parts().redrawLineNotes(),
       logDebug: (kind, message, detail) => ctx.log(detail ? `${message}: ${detail}` : message),
       notify: (message) => shell.notify(message),
       showToast: (message, options) => shell.toast(message, options)
@@ -43,10 +47,10 @@ export default defineModule({
     Object.defineProperty(app, "workspaceMode", { get: () => sync.mode.get().workspaceMode, enumerable: true });
     const comments = createLineComments(app);
 
-    // In the gutter and on the overview ruler; a line number's click adds or edits one.
+    // In the gutter and on the overview ruler (of either source editor); a line number's click adds or edits one.
     editor.lineNotes.add({
       id: "comments", kind: "comment",
-      notes: (file) => (file?.id === workspace.project()?.getActiveFile()?.id ? comments.commentsForActiveFile() : [])
+      notes: (file) => comments.commentsForFile(file)
         .map((comment) => ({ line: comment.line, title: `${comment.author ?? ""}: ${comment.text}`.trim() })),
       click: (line) => comments.openCommentPopover(line)
     });

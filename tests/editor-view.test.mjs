@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createState, createTrace } from "../app/kernel/index.js";
-import { EMPTY_VIEW, createView, filesIn, groupOf, groupsFromSaved, hostOf, savedGroups } from "../app/modules/editor/service/view.js";
+import { EMPTY_VIEW, createView, filesIn, groupOf, groupsFromSaved, hostOf, partOf, savedGroups } from "../app/modules/editor/service/view.js";
 
 const project = (active, ...files) => ({
   rootId: "root", activeFileId: active,
@@ -229,4 +229,38 @@ test("the groups kept by path and restored: unknown files dropped, each body in 
     groups: [{ id: "left", tabs: [], active: null }, { id: "right", tabs: [], active: null }],
     hosts: { source: "left", preview: "right" }, previewFileId: null
   }, "nothing kept: today's layout, empty");
+});
+
+test("two editors (v0.3.11): the active one is the group last worked in; a part stays with its group's editor", () => {
+  const { view } = fresh();
+  view.reset(project("a", "a", "b"));
+  view.pick("a", "p1"); // the left editor shows a part of a
+  view.moveToGroup("left", "right", source("b"), { keep: true }); // b to the side: the right editor is the active one
+  let state = view.get();
+  assert.equal(state.hosts.source, "right");
+  assert.deepEqual(plain(groupOf(state, "left").active), source("a"), "the left keeps its own source tab");
+  assert.deepEqual(plain(partOf(state, "left")), { fileId: "a", partId: "p1" }, "and the part its editor shows");
+  assert.equal(partOf(state, "right"), null);
+  view.pick("b", "q1");
+  view.activate("left", source("a")); // working in the left again
+  state = view.get();
+  assert.equal(state.hosts.source, "left");
+  assert.deepEqual(plain(state.sourcePart), { fileId: "a", partId: "p1" }, "its part again");
+  assert.deepEqual(plain(partOf(state, "right")), { fileId: "b", partId: "q1" }, "the right's kept");
+  view.activate("right", source("a")); // another file in the right: its kept part (of b) is not shown
+  assert.equal(view.get().sourcePart, null);
+  view.clearParts();
+  assert.deepEqual({ ...view.get().groupParts }, { left: null, right: null });
+  // A group closing hands the active editor to the other one.
+  view.closeGroup("right");
+  assert.equal(view.get().hosts.source, "left");
+});
+
+test("groups restored with the active file: the group showing it as Source holds the active editor", () => {
+  const saved = [{ id: "left", tabs: [{ path: "a.md", view: "source" }], active: { path: "a.md", view: "source" } },
+    { id: "right", tabs: [{ path: "b.md", view: "source" }], active: { path: "b.md", view: "source" } }];
+  const idOf = (path) => ({ "a.md": "a", "b.md": "b" })[path] ?? null;
+  assert.equal(groupsFromSaved(saved, idOf).hosts.source, "left", "the left first, as before");
+  assert.equal(groupsFromSaved(saved, idOf, "b").hosts.source, "right", "where the active file shows");
+  assert.equal(groupsFromSaved(saved, idOf, "c").hosts.source, "left");
 });

@@ -195,7 +195,8 @@ export function installWindow(ed, app) {
     ed.renderEditorContent(text, { keep: selLines });
     content().scrollTop = Math.max(0, lineTop(anchorLine) - anchorDelta);
     ed.syncEditorScroll();
-    if (held) applyHeldClip();
+    // (Only while this editor has the focus: the page's one selection may be the other editor's.)
+    if (held && focused) applyHeldClip();
     else if (focused) ed.setEditorSelection(selection.start, selection.end, { anchor: selection.anchor, focus: selection.focus });
     return true;
   }

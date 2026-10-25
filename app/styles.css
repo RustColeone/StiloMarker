@@ -1454,9 +1454,10 @@ p {
 }
 
 /* A group (the left #source-pane, the right #preview-pane): its header, then
-   the body its active tab shows (the source editor or the preview, which move
-   between the groups) or a placeholder. The source body stacks the toolbar
-   (its natural height) over the editor surface (the rest). */
+   the body its active tab shows (its own source editor, or the preview, which
+   moves between the groups) or a placeholder. The source body stacks the
+   toolbar (its natural height) over the editor surface (the rest). On the
+   phone only the active editor shows (the one last worked in). */
 .editor-group > .pane-header {
   flex: none;
 }
@@ -1964,7 +1965,7 @@ p {
 }
 
 /* Single contenteditable — owns scrolling, caret, and syntax colour */
-#editor-content,
+.editor-content,
 .preview-output {
   width: 100%;
   min-height: 0;
@@ -1975,7 +1976,7 @@ p {
   padding: 6px;
 }
 
-#editor-content {
+.editor-content {
   display: block;
   position: relative;
   height: 100%;
@@ -1997,19 +1998,19 @@ p {
    for the lines above and below them (editor-window.js sets the heights).
    Inside the scrolled content (the editor's own padding would grow the box
    instead), and not elements: every child of the editor is a line. */
-#editor-content::before,
-#editor-content::after {
+.editor-content::before,
+.editor-content::after {
   content: "";
   display: block;
   height: var(--lazy-above, 0px);
   pointer-events: none;
 }
 
-#editor-content::after {
+.editor-content::after {
   height: var(--lazy-below, 0px);
 }
 
-.app-shell[data-word-wrap="on"] #editor-content {
+.app-shell[data-word-wrap="on"] .editor-content {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -2018,7 +2019,7 @@ p {
    continuation rows (which wrap) are pulled to the same indent column.
    This works because both visual layout AND caret position come from
    the same DOM element, so there is no dual-layer mismatch. */
-.app-shell[data-word-wrap="on"] #editor-content .editor-line.has-wrapped-indent {
+.app-shell[data-word-wrap="on"] .editor-content .editor-line.has-wrapped-indent {
   padding-left: calc(var(--wrapped-indent-columns, 0) * 1ch);
   text-indent: calc(var(--wrapped-indent-columns, 0) * -1ch);
 }
@@ -2026,7 +2027,7 @@ p {
 /* Placeholder shown when no file is open. Absolutely positioned so it overlays
    the first line instead of consuming a line box (which would push the caret
    onto the second visual line). */
-#editor-content[data-empty="true"]::before {
+.editor-content[data-empty="true"]::before {
   content: attr(data-placeholder);
   height: auto;
   position: absolute;
@@ -2038,7 +2039,7 @@ p {
 
 /* When no file is open the editor is not editable; this overlay replaces the
    plain placeholder and offers a clickable "create a new file" affordance. */
-#editor-content[data-no-file="true"]::before {
+.editor-content[data-no-file="true"]::before {
   content: none;
 }
 
@@ -2628,8 +2629,8 @@ p {
   user-select: none;
 }
 
-#editor-content::selection,
-#editor-content *::selection {
+.editor-content::selection,
+.editor-content *::selection {
   background: var(--selection);
 }
 
@@ -4694,7 +4695,8 @@ menu {
 
   .app-shell[data-mobile-view="preview"] .editor-group > .source-body,
   .app-shell[data-mobile-view="source"] .editor-group > .preview-body,
-  .editor-group > .preview-body.second-preview {
+  .editor-group > .preview-body.second-preview,
+  .editor-group > .source-body:not([data-active="true"]) {
     display: none;
   }
 
@@ -6422,22 +6424,22 @@ pre.proposal-diff-block {
 }
 
 /* The ruler's `right` offset assumes this width, so pin it on both engines. */
-#editor-content {
+.editor-content {
   scrollbar-width: thin;
 }
-#editor-content::-webkit-scrollbar {
+.editor-content::-webkit-scrollbar {
   width: 10px;
 }
-#editor-content::-webkit-scrollbar-thumb {
+.editor-content::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--text-dim) 45%, transparent);
   border-radius: 5px;
 }
-#editor-content::-webkit-scrollbar-track {
+.editor-content::-webkit-scrollbar-track {
   background: transparent;
 }
 
 /* Read-only session (access.readers): make it visible that edits aren't possible. */
-#editor-content[data-readonly="true"] {
+.editor-content[data-readonly="true"] {
   background: color-mix(in srgb, var(--text-dim) 4%, var(--editor));
   cursor: default;
 }
@@ -6449,7 +6451,7 @@ pre.proposal-diff-block {
      shrinks the viewport. The editor/preview remain the scrollable surfaces. */
   html, body { overscroll-behavior-y: none; }
   body { height: var(--mobile-viewport-height, 100dvh); min-height: 0; }
-  #editor-content, .preview-output, .explorer-tree, .editor-empty-state {
+  .editor-content, .preview-output, .explorer-tree, .editor-empty-state {
     overscroll-behavior-y: contain;
   }
   .app-shell {

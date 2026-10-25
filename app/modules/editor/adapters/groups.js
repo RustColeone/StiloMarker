@@ -1,15 +1,15 @@
 // The editor's groups on the page (step 5 of docs/ARCHITECTURE.md): the two
 // panes are the groups ("left" is #source-pane and "right" #preview-pane,
-// named for today's layout), each with its tab strip. The source body and the
-// preview body go to the group the view says holds them (its hosts); a group
-// shows the body its active tab wants. When the other group holds that body:
-// a preview tab gets a second preview of its own (stage 2: two previews side
-// by side; History's diff stays in the preview), a source tab a placeholder
-// with Show here (one source editor). Each group's label says what it does
-// with which file ("Editing" / "Previewing", and its name); its ▾ switches the
+// named for today's layout), each with its tab strip and its own source
+// editor (editors.js). The preview body goes to the group the view says holds
+// it (hosts.preview); a group shows the body its active tab wants: its editor
+// for a source tab; for a preview tab the preview, or when the other group
+// holds it, a second preview of its own (History's diff stays in the preview:
+// a placeholder with Show here). Each group's label says what it does with
+// which file ("Editing" / "Previewing", and its name); its ▾ switches the
 // file between Source and Preview. Drawn on every render (surface.js); on the
-// phone the groups draw nothing of their own and the second previews none
-// (the CSS), so the views show as before.
+// phone the groups draw nothing of their own, the second previews none and
+// only the active editor shows (the CSS), so the views show as before.
 // Part of the Editor: `app` is its shared context (surface.js).
 import { getPath } from "../../workspace/index.js";
 
@@ -17,7 +17,6 @@ const VIEWS = { source: "Source", preview: "Preview" };
 
 export function createGroups(app) {
   const groupElement = (id) => document.querySelector(`.editor-group[data-group="${id}"]`);
-  const bodyOf = (view) => (view === "source" ? app.elements.sourceBody : app.elements.previewBody);
 
   // A group's second preview: made the first time it needs one.
   const seconds = new Map(); // group id -> its second preview's body
@@ -59,18 +58,19 @@ export function createGroups(app) {
 
   function drawGroups(project) {
     const state = app.view.get();
-    for (const view of Object.keys(VIEWS)) {
-      const home = groupElement(state.hosts[view]);
-      const body = bodyOf(view);
-      if (home && body && body.parentElement !== home) home.append(body);
-    }
+    const previewBody = app.elements.previewBody;
+    const home = groupElement(state.hosts.preview);
+    if (home && previewBody.parentElement !== home) home.append(previewBody);
     for (const group of state.groups) {
       const element = groupElement(group.id);
       if (!element) continue;
-      const held = Object.keys(VIEWS).filter((view) => state.hosts[view] === group.id);
-      const wants = group.active?.view ?? held[0] ?? null;
-      const holds = held.includes(wants);
-      for (const view of held) bodyOf(view).dataset.shown = String(holds && view === wants);
+      const previewHere = state.hosts.preview === group.id;
+      // Its active tab's view; with none, the active editor (the welcome page) or the preview it holds.
+      const wants = group.active?.view ?? (state.hosts.source === group.id ? "source" : previewHere ? "preview" : null);
+      const holds = wants === "source" || (wants === "preview" && previewHere);
+      const editorBody = app.editorOf(group.id)?.elements.sourceBody;
+      if (editorBody) editorBody.dataset.shown = String(wants === "source");
+      if (previewHere) previewBody.dataset.shown = String(wants === "preview");
       element.dataset.view = wants ?? "";
       const label = element.querySelector(".pane-label");
       if (label && wants) drawLabel(label, wants, group, project);
