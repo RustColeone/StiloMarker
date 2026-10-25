@@ -29,7 +29,7 @@ every issue's history, `docs/ISSUES.md`.
 | v0.3.10 | Settings → Agent says "Checking the server…" until the server answers (it said "Ready" first), and an older check finishing late no longer overwrites the newest one. |
 | v0.3.11 | A source editor in each group: two files, or the same file twice, side by side. The same file stays in step as you type, each editor shows the other's caret, and undo belongs to the file. Fixed on the way: an editor without the focus whose file changed elsewhere reloaded with its caret at the start; a long file's comment popover could sit beside the wrong line. A review before release found seven more bugs, fixed before the commit. |
 
-Then v0.3.12 (docs only): the README, the welcome page and the in-app manual describe the two editors, and `docs/HISTORY.md` records the decisions they superseded.
+Then v0.3.12 (docs only): the README, the welcome page and the in-app manual describe the two editors, and `docs/HISTORY.md` records the decisions they superseded; deployed 2026-10-25.
 
 Also done: open issue O9 written down (2026-10-24); the maintainers'
 review (`docs/REVIEW-0.3.md`); v0.3.11 deployed and checked from a fresh

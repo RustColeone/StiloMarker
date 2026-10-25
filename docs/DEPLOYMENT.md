@@ -1253,3 +1253,28 @@ Private deployment backup: `/home/laplacengan/backups/stilomarker/20261025T02562
 185/185 data files (taken with the service stopped), every JSON file valid;
 the account file and the environment file as they were.
 
+## Verified release: v0.3.12
+
+Deployed on 2026-10-25 at 22:13 UTC: documents only (the README, the
+welcome page and the in-app manual describe the two editors;
+`docs/HISTORY.md` records the decisions they superseded). App version
+`0.3.12` (the in-app manual changed, and an installed app keeps its files
+until a new version); sync compatibility unchanged at `117`. The service's
+command line and environment file are unchanged; it was down about a second.
+
+Public checks: ping (`0.3.12`), the service worker's cache label
+`mdnotes-shell-v0.3.12`, the new manual and status document served, the
+account file, the environment file, the sign-ins file and the server's code
+answered with the app's page (refused), an unknown token answered 403,
+`Cache-Control: no-store` on a JSON reply, and a clean journal. A fresh
+browser on the public site (its own welcome workspace, no real data) was
+controlled by `0.3.12`, had both source editors, opened offline, fetched
+nothing from a CDN, and had no page errors.
+
+Validation: 415 Node tests, all 25 Python suites, all 48 browser suites and
+the desktop app's in Electron 44.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261025T221339Z-v0.3.12`.
+185/185 data files (taken with the service stopped), every JSON file valid;
+the account file and the environment file as they were.
+
