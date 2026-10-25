@@ -240,6 +240,7 @@ The log panel is useful for checking drag/drop actions, file operations, and int
 For a full technical reference including all file format specifications and detailed usage, see [server/MANUAL.md](server/MANUAL.md).
 
 - [docs/ISSUES.md](docs/ISSUES.md) — known issues, open and fixed, with severity and confidence.
+- [docs/REVIEW-0.3.md](docs/REVIEW-0.3.md) — a code review of v0.3.2–v0.3.11 for developers new to the code: how the Editor is built, the two source editors in depth (data flow, invariants, pitfalls, tests), and each smaller change.
 - [docs/HISTORY.md](docs/HISTORY.md) — project history, architecture rules, and superseded decisions.
 
 ## Code layout
