@@ -2,7 +2,8 @@ name: Release
 
 # A version tag (v0.3.1) builds the desktop app after the tests pass, on
 # Linux, Windows and macOS, portable only (nothing to install): an AppImage,
-# a portable .exe, the app zipped for Intel and Apple Silicon Macs. Unsigned:
+# a portable .exe in a zip (a browser warns about a downloaded .exe more
+# readily than a .zip), the app zipped for Intel and Apple Silicon Macs. Unsigned:
 # Windows and macOS warn on first open. It then makes a DRAFT release with
 # those files and the notes in docs/releases/<tag>.md, published by hand
 # after a look. Run by hand (Actions → Release → Run workflow), it only
@@ -69,6 +70,17 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: npx electron-builder ${{ matrix.targets }} --publish never
+      # Windows: the portable .exe goes out in a zip of its own name, holding it alone.
+      - name: Zip the Windows build
+        if: runner.os == 'Windows'
+        working-directory: desktop/dist
+        shell: pwsh
+        run: |
+          Get-ChildItem -File -Filter *.exe | ForEach-Object {
+            Compress-Archive -Path $_.Name -DestinationPath ($_.BaseName + ".zip")
+            Remove-Item $_.Name
+          }
+          Get-ChildItem -File
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.os }}

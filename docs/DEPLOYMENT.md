@@ -1286,6 +1286,15 @@ passed the tests, built the portable files (an AppImage, a portable Windows
 `.exe`, the Mac app zipped for Apple Silicon and Intel) and drafted the
 release with `docs/releases/v0.3.15.md` and `SHA256SUMS.txt`. Not published.
 
+The Windows build was then put in a zip (the user's choice: a browser warns
+about a downloaded `.exe` more readily than a `.zip`):
+`StiloMarker-0.3.15-win-x64.zip`, holding the `.exe` alone, replaced the bare
+`.exe` in the draft, with `SHA256SUMS.txt` and the notes updated. It was
+zipped here from the draft's own `.exe` after checking its checksum; the
+workflow zips it from now on. Windows still marks a file unzipped from a
+download, so SmartScreen may ask once when the unsigned `.exe` first runs;
+only signing would end that.
+
 Checked here: the Linux AppImage's checksum matches `SHA256SUMS.txt`, and
 extracted it carries version `0.3.15` and the new editor code, and no
 account file or server data. Not launched; the Windows and macOS builds not
