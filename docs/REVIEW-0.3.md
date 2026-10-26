@@ -463,9 +463,9 @@ Split in two:
   editor's links resolve from its own folder.
 - **`together.js`**: collaborators' carets (`other-caret`, `carets-kept`)
   update the shared map and redraw **every** editor. The write path
-  (`workspace.editing`) still writes through the active editor only, when
-  it shows the file whole. Another editor showing that file follows on the
-  render.
+  (`workspace.editing`) writes through the editor that shows the file whole
+  (since v0.3.15 the other one too, when the active one doesn't; see §1.11).
+  Another editor showing that file follows on the render.
 - **`frame-parts.js`**: settings, splitter moves and layout changes go to
   every editor. A hidden editor is not re-rendered on a splitter move: it
   would measure zero widths. The phone's source pane is the active
@@ -623,9 +623,10 @@ selection) and notifies; the left editor follows.
 ### 1.11 Known limits and next steps
 
 - **The write path** (the agent's edits, Find in Files' replace) goes
-  through the active editor's undo history only when it shows the file
-  whole. Otherwise the file is written directly, and editors showing it
-  follow (with a history fence).
+  through whichever editor shows the file whole (the active one first:
+  `writerFor` / `applyWrite` in `editors.js`, since v0.3.15), so it joins the
+  file's undo history from either editor. A file shown only as a part is
+  written directly, and its editors follow (with a history fence).
 - **Resume** keeps one caret and scroll per file
   (`mdnotes.viewstate.v1`). With the same file in both editors, the last
   one captured wins on reload.

@@ -132,8 +132,10 @@ impact, why it is still open, where to look, and a next step.
 
 Details in `docs/REVIEW-0.3.md` §1.8 and §1.11.
 
-- **The agent's edits and Find in Files' Replace** go through the active
-  editor's undo history only when it shows the file whole
+- **Fixed in v0.3.15:** ~~the agent's edits and Find in Files' Replace
+  go through the active editor's undo history only when it shows the file
+  whole~~ (now through whichever editor shows it whole). As it stood: they
+  went through the active editor's undo history only when it showed the file whole
   (`workspace.editing` in `together.js`). Otherwise the file is written
   directly; editors showing it follow, and their history starts again
   from the new text, so Ctrl+Z there cannot undo that edit.
@@ -174,6 +176,9 @@ Details in `docs/REVIEW-0.3.md` §1.8 and §1.11.
   a release.
 
 ### 5. Nothing of v0.3.2 – v0.3.11 is on GitHub or in a desktop release
+
+**Update (2026-10-26):** GitHub's `main` has since been pushed up to v0.3.12.
+The desktop release (a tag and its builds) is what remains.
 
 - **What.**
   - GitHub's `main` is still at v0.3.1 plus the CI removal (dc91c00).
@@ -226,9 +231,14 @@ Kept as they are, with reasons, in `docs/ISSUES.md`:
 - **Seen this round:**
   - `pwa-browser`: a page load over 240 s;
   - `agent-here-browser`: a real race, fixed in v0.3.10;
-  - the desktop test's serve phase: typing that never landed, seen once
-    and not reproduced. The test now records where the focus was if it
-    happens again (`focusBeforeTyping` in `tests/desktop-smoke.mjs`).
+  - the desktop test's serve phase: typing that never landed. Explained
+    later, from two failed full runs (v0.3.14, v0.3.15), by its own sync
+    log: on the loaded machine the shared session's connection dropped
+    right after the typing; the app joined the session again as a client
+    and took the server's copy, which did not have the unconfirmed typing
+    yet. That is accepted issue A3, set off by the load (it passes run
+    alone). The test records where the focus was (`focusBeforeTyping` in
+    `tests/desktop-smoke.mjs`) and the sync log.
 - **Impact.** A failed run needs a rerun before trusting it; the commits
   say when one was rerun. Nothing ships on a failure unless it passes
   alone.

@@ -12,8 +12,10 @@ the find bar, which opens in the editor worked in and searches its text).
 Closing the active editor's last source tab hands the active file to the
 other group's editor. A part (an album's entry) stays with its editor, and
 only on its own file. A key in an editor that has the focus without being
-the active one makes it the active one. The active file deleted while the
-other editor shows a file: that editor is the active one. On a phone only the active editor
+the active one makes it the active one. A write (the agent's) to the file the
+other editor shows goes through it, so undo there takes it back. The active
+file deleted while the other editor shows a file: that editor is the active
+one. On a phone only the active editor
 shows. No page errors.
 
 Isolated: every API is mocked; the welcome template is this checkout's
@@ -209,6 +211,21 @@ async def main():
         assert (await editors())['left']['text'].startswith('Z'), 'typed where the focus is'
         await page.keyboard.press('Control+z')
         checks.append('a key in a focused editor makes it the active one')
+
+        # A write (the agent's) to the file the other editor shows goes through that editor
+        # (v0.3.15): undo there takes it back.
+        await caret('right', 0)
+        assert (await page.evaluate(STATE))['host'] == 'right'
+        before = await page.evaluate('Object.values(window.__t.controller.getProject().nodes).find((n) => n.name === "welcome.md").content')
+        await page.evaluate('(text) => window.__t.workspace.write("welcome.md", text, { source: "agent" })', before + '\nA LINE FROM THE AGENT')
+        await page.wait_for_timeout(400)
+        assert (await editors())['left']['text'].endswith('A LINE FROM THE AGENT'), 'the left editor shows it'
+        await page.evaluate('document.querySelector("#editor-content").focus()')
+        await page.wait_for_timeout(200)
+        await page.keyboard.press('Control+z')
+        await page.wait_for_timeout(300)
+        assert (await editors())['left']['text'] == before, 'undone from the editor it went through'
+        checks.append("a write to the other editor's file is undone there")
 
         # The active file deleted (by anyone) while the other editor shows a file: that editor
         # is the active one (O10, v0.3.14), its file the active file.

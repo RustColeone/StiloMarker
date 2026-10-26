@@ -70,6 +70,22 @@ lost while the page is in view count, not one left on purpose).
 
 ## Fixed
 
+### v0.3.15: the agent's edits undo from either editor
+
+A limit of the two editors (v0.3.11), listed in `docs/STATUS-0.3.11.md`: the
+write path (the agent's edits, Find in Files' Replace) went through the
+editor only when the active editor showed the file whole; when only the
+other editor showed it, the file was written directly, that editor followed
+with its history started again, and Ctrl+Z there could not take the edit
+back. Now a write to a file goes through whichever editor shows it whole
+(the active one first, else the other, if on screen: `writerFor` and each
+editor's `applyWrite` in `editors.js`): it joins the file's undo history, is
+sent as typing is, and moves the caret with the edit (the page's where the
+editor has the focus, else its kept one). The caret of the active editor
+used to stay at the same offsets, so an edit above it shifted the text under
+it; it now moves with the text. Test: `two-editors-browser.py` (fails
+before).
+
 ### v0.3.14: deleting the active file hands it to the other editor (O10)
 
 Found 2026-10-25 while writing `docs/STATUS-0.3.11.md`: with two editors,

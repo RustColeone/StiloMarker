@@ -4,7 +4,7 @@
 // reload of the project keeps my view; and the write path edits the file I
 // show as if I typed it. Saving waits while an IME composition is under way.
 // Part of the Editor: `app` is its shared context (surface.js).
-import { PATCH_FILE, getPath, isTextFileName } from "../../workspace/index.js";
+import { PATCH_FILE, getPath } from "../../workspace/index.js";
 
 export function installTogether(app, workspace, composing) {
   const events = workspace.events;
@@ -52,15 +52,13 @@ export function installTogether(app, workspace, composing) {
     carets = null;
   });
 
-  // The write path's edit to the file shown whole goes through the editor: it
-  // joins the undo history and is sent like typing.
+  // The write path's edit to a file an editor shows whole goes through that
+  // editor (the active one first, else the other: editors.js writerFor): it
+  // joins the file's undo history, from either editor, and is sent like
+  // typing; the caret moves with it.
   workspace.editing.configure({
-    shows: (id) => id === app.controller.getProject().activeFileId && !app.view.get().sourcePart
-      && isTextFileName(app.controller.getActiveFile()?.name ?? ""),
-    apply(next) {
-      const { start, end } = app.getEditorSelection();
-      app.applyEditorEdit(next, Math.min(start, next.length), Math.min(end, next.length));
-    }
+    shows: (id) => Boolean(app.writerFor(id)),
+    apply: (next, id) => app.writerFor(id)?.applyWrite(next)
   });
   workspace.holdSaving(() => composing.now);
 }

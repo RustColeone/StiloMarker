@@ -18,7 +18,7 @@
 // shown file, history, and its view of "the active file" (its own file), with
 // the core's functions (editor-core.js), showing its file (show-file.js) and
 // its events (editor-events.js) installed on it.
-import { getPath } from "../../workspace/index.js";
+import { getPath, isTextFileName } from "../../workspace/index.js";
 import { filesIn } from "../service/view.js";
 import { createEditorCore } from "./editor-core.js";
 import { installEditorEvents } from "./editor-events.js";
@@ -97,7 +97,32 @@ export function createEditors(app, composing, shared) {
       keepSelection: (selection) => { kept = selection ? { start: selection.start, end: selection.end } : null; },
       // The other editor's caret, drawn in this one as a collaborator's.
       localPeers: () => peersOf(editor),
-      redrawRemoteCursors: () => editor.renderRemoteCursors([...app.remoteCursorsByClient.values()])
+      redrawRemoteCursors: () => editor.renderRemoteCursors([...app.remoteCursorsByClient.values()]),
+      // The write path's edit (the agent's, Find in Files' Replace) to the
+      // file this editor shows whole: it joins the file's undo history and is
+      // sent as typing is, the caret moved by it (the page's where this editor
+      // has the focus, else its kept one; the view stays).
+      applyWrite(next) {
+        const content = elements.editorContent;
+        const focused = document.activeElement === content;
+        const current = editor.getEditorText();
+        const was = (focused ? editor.getEditorSelection() : kept) ?? { start: 0, end: 0 };
+        const { at, removed, inserted } = editor.diffEditorTexts(current, next);
+        const shifted = editor.transformEditorSelection(was, at, at + removed.length, inserted.length);
+        const moved = editor.clampEditorSelection(next, shifted.start, shifted.end);
+        if (focused) {
+          editor.applyEditorEdit(next, moved.start, moved.end);
+          return;
+        }
+        editor.pushEditorHistoryState(current, was.start, was.end);
+        kept = moved;
+        const scroll = content.scrollTop;
+        editor.renderEditorContent(next);
+        content.scrollTop = scroll;
+        editor.syncEditorScroll();
+        editor.pushEditorHistoryState(next, moved.start, moved.end);
+        editor.notifyEditorChanged(next);
+      }
     });
     Object.assign(editor, createEditorCore(editor));
     Object.assign(editor, createShowFile(editor, composing));
@@ -266,6 +291,16 @@ export function createEditors(app, composing, shared) {
     });
   }
 
+  // The editor a write to a file goes through: one showing it whole, on
+  // screen, a text file; the active one first. None: the write goes to the
+  // project, and editors showing a part of it follow.
+  function writerFor(id) {
+    const candidates = [active(), ...[...editors.values()].filter((editor) => editor !== active())];
+    return candidates.find((editor) => editor.shown.fileId === id && editor.shown.partId === null
+      && (editor === active() || editor.elements.sourceBody.dataset.shown === "true")
+      && isTextFileName(project()?.nodes[id]?.name ?? "")) ?? null;
+  }
+
   // A reconnect that loads the project again (together.js; O9): before it,
   // each editor's file by path, its caret and its scroll (keptCarets); after
   // it, saved again under the file's id as it is now (a file made during the
@@ -346,6 +381,6 @@ export function createEditors(app, composing, shared) {
     active,
     of: (group) => editors.get(group) ?? null,
     all: () => [...editors.values()],
-    activateEditor, typedIn, peersMoved, showFiles, keptCarets, carryCarets, giveCaretsBack, handOn, handOnWhenGone
+    activateEditor, typedIn, peersMoved, showFiles, keptCarets, carryCarets, giveCaretsBack, handOn, handOnWhenGone, writerFor
   };
 }

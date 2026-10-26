@@ -136,6 +136,8 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
     keptCarets: editors.keptCarets,
     carryCarets: editors.carryCarets,
     giveCaretsBack: editors.giveCaretsBack,
+    // The editor a write to a file goes through (together.js: the write path).
+    writerFor: editors.writerFor,
     editorOf: editors.of,
     eachEditor: each,
     editorTyped: editors.typedIn,

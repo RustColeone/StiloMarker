@@ -10,7 +10,7 @@
 //   replace(project, { keepView, copyKey }) Sync's: the project replaced (a reload, a
 //                                  shared workspace's content: saved as the copy named);
 //                                  announced as "replacing" and "replaced" (the Editor keeps the view)
-//   editing.configure({ shows(id), apply(next) })  the Editor: the file it shows whole,
+//   editing.configure({ shows(id), apply(next, id) })  the Editor: a file it shows whole,
 //                                  and applying an edit to it as if typed (the write path)
 //   presence                       carets: own (the Editor's) and others' (Sync's)
 //   handover.offer(name, value) / handover.receive(name, receiver(value))
@@ -49,7 +49,7 @@ export function createShared({ store, events }) {
       const id = getNodeIdByPath(project, path);
       if (!id) throw new Error(`No file at ${path}`);
       // An edit made in the preview is already shown there and never joins the editor's undo.
-      if (source !== "preview" && editing.shows(id)) { editing.apply(next); return; }
+      if (source !== "preview" && editing.shows(id)) { editing.apply(next, id); return; }
       store().updateContent(id, next);
       typed(path, previous, next, source);
     },
