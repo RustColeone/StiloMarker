@@ -1292,8 +1292,36 @@ account file or server data. Not launched; the Windows and macOS builds not
 tried. The new title bar (v0.3.9) has only been seen on Linux: try the
 builds on Windows and macOS before publishing.
 
-The server is not part of this: it still runs v0.3.12. Its live checkout's
-`main` is behind GitHub's until v0.3.13 – v0.3.15 are deployed there, so a
-`git push` from the live checkout is refused as behind; nothing is lost, and
-nothing there needs pushing (it has no commits of its own).
+The server was not part of the draft: it still ran v0.3.12, and its live
+checkout's `main` was behind GitHub's until v0.3.13 – v0.3.15 were deployed
+there (below), so a `git push` from it was refused as behind; nothing was
+lost, and nothing there needed pushing (it had no commits of its own).
+
+## Verified release: v0.3.15
+
+Deployed on 2026-10-26 at 07:26 UTC: v0.3.13 – v0.3.15 together (the caret
+kept across a reconnect's reload, O9; deleting the active file hands it to
+the other editor, O10; the write path through whichever editor shows the
+file), all browser code, no server change. The live checkout fast-forwarded
+to GitHub's `main`, so it is level with it again. App version `0.3.15`; sync
+compatibility unchanged at `117`. The service's command line and
+environment file are unchanged; it was down about a second.
+
+Public checks: ping (`0.3.15`), the service worker's cache label
+`mdnotes-shell-v0.3.15`, the new code served (`editors.js`), the account
+file, the environment file, the sign-ins file, the server's code and the
+tests answered with the app's page (refused), an unknown token answered
+403, `Cache-Control: no-store` on a JSON reply, and a clean journal. A fresh
+browser on the public site (its own welcome workspace, no real data) was
+controlled by `0.3.15`, had both source editors, opened offline, fetched
+nothing from a CDN, and had no page errors.
+
+Validation: 415 Node tests, all 25 Python suites, the browser suites (47 of
+49 in the full run on the loaded machine; the two that failed, chats-browser
+and the desktop app's serve phase, passed run alone: the latter is accepted
+issue A3 set off by the load), the desktop app's in Electron 44.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261026T061213Z-v0.3.15`.
+185/185 data files (taken with the service stopped), every JSON file valid;
+the account file and the environment file as they were.
 

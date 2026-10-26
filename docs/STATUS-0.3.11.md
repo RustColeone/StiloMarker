@@ -181,8 +181,8 @@ Details in `docs/REVIEW-0.3.md` §1.8 and §1.11.
 then to v0.3.15, which is tagged: its release workflow passed the tests, built
 the portable files on the three systems and drafted the release (not
 published; see `docs/DEPLOYMENT.md`). What remains: trying the builds on
-Windows and macOS (item 4), then publishing the draft. The server still runs
-v0.3.12; v0.3.13 – v0.3.15 are not deployed there yet.
+Windows and macOS (item 4), then publishing the draft. The server runs
+v0.3.15 too (deployed 2026-10-26).
 
 - **What.**
   - GitHub's `main` is still at v0.3.1 plus the CI removal (dc91c00).
