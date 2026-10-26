@@ -1301,6 +1301,9 @@ account file or server data. Not launched; the Windows and macOS builds not
 tried. The new title bar (v0.3.9) has only been seen on Linux: try the
 builds on Windows and macOS before publishing.
 
+**Update (2026-10-26):** the user tried the Windows build: the one bar
+works there. macOS is left untried (no Mac at hand); the notes say so.
+
 The server was not part of the draft: it still ran v0.3.12, and its live
 checkout's `main` was behind GitHub's until v0.3.13 – v0.3.15 were deployed
 there (below), so a `git push` from it was refused as behind; nothing was

@@ -155,7 +155,11 @@ Details in `docs/REVIEW-0.3.md` §1.8 and §1.11.
   history per file means undoing the other editor's typing moves your
   caret there. This is by design, as VS Code does it.
 
-### 4. The desktop app's one bar is unverified on Windows and macOS
+### 4. The desktop app's one bar is unverified on macOS
+
+**Update (2026-10-26):** checked on Windows by the user with the v0.3.15
+build. macOS stays unchecked (no Mac to try it on), and so do real Linux
+desktops; the release notes ask users to say if the bar looks wrong.
 
 - **What.** v0.3.9 hides the system title bar and draws the window buttons
   over the app's top bar (Electron's Window Controls Overlay).

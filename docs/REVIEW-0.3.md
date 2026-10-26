@@ -716,9 +716,10 @@ on its left), in the theme's colours.
   instead.
 - **Full screen.** The overlay hides and `data-window-frame` becomes
   `system` (on `geometrychange`), so the padding goes too.
-- **Not verified by hand on Windows or macOS.** Electron 44 on Linux, under
-  the test's virtual display, reports the overlay visible. Check the real
-  look on each platform before a desktop release.
+- **Not verified by hand on macOS.** Electron 44 on Linux, under the
+  test's virtual display, reports the overlay visible, and the user checked
+  the v0.3.15 build on Windows (2026-10-26). A Mac's look
+  (`trafficLightPosition`) has not been seen.
 
 **Tests.**
 - `tests/desktop.test.mjs`: what the page may tell, the buttons' height
