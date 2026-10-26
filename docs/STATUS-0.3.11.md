@@ -107,7 +107,9 @@ impact, why it is still open, where to look, and a next step.
   - **Test.** A browser test with a mocked server whose reload returns new
     ids.
 
-### 2. Deleting the active file leaves no active editor (O10)
+### 2. Deleting the active file leaves no active editor (O10) — fixed in v0.3.14
+
+**Update (v0.3.14):** fixed as the next step below suggests; see `docs/ISSUES.md`, v0.3.14.
 
 - **What.** With two editors, deleting the file the active editor shows
   clears the project's active file (`removeNodeRecursive` in

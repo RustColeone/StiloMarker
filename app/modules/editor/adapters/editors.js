@@ -19,6 +19,7 @@
 // the core's functions (editor-core.js), showing its file (show-file.js) and
 // its events (editor-events.js) installed on it.
 import { getPath } from "../../workspace/index.js";
+import { filesIn } from "../service/view.js";
 import { createEditorCore } from "./editor-core.js";
 import { installEditorEvents } from "./editor-events.js";
 import { createShowFile } from "./show-file.js";
@@ -211,6 +212,60 @@ export function createEditors(app, composing, shared) {
     if (app.searchState.open) app.computeSearchMatches({ keepCaret: true });
   }
 
+  // ── Handing the active file on (tabs.js asks) ──
+  // The active editor's file left it (its tab closed, or turned Preview): it
+  // shows its group's last source tab (its group shows that tab, unless `show`
+  // is false: a tab turned Preview stays on screen); with none, the other
+  // group's editor is the active one (its shown source tab, else its last);
+  // else no file is open.
+  function handOn(group, project, { show = true } = {}) {
+    const state = app.view.get();
+    const own = filesIn(state, "source").at(-1) ?? null;
+    if (own) {
+      if (show) {
+        app.view.select(own);
+        app.view.showSource(own);
+      }
+      app.controller.setActiveFile(own);
+      return;
+    }
+    const other = state.groups.find((g) => g.id !== group);
+    const next = other?.active?.view === "source" ? other.active : other?.tabs.filter((t) => t.view === "source").at(-1);
+    if (next) {
+      app.view.activate(other.id, next);
+      app.view.select(next.fileId);
+      if (project.activeFileId !== next.fileId) app.controller.setActiveFile(next.fileId);
+      else app.updateStatus(project);
+      return;
+    }
+    const nextProject = structuredClone(project);
+    nextProject.activeFileId = null;
+    app.controller.replaceProject(nextProject);
+  }
+
+  // The active file gone (deleted, by anyone) while the other group's editor
+  // shows a file: that editor becomes the active one (O10), as when the
+  // active file's tab closes (handOn). Right after this render, not inside
+  // it (the hand-on draws again).
+  let handingOn = false;
+  function handOnWhenGone(project) {
+    if (project.activeFileId || handingOn) return;
+    const state = app.view.get();
+    const shows = (group) => group.id !== state.hosts.source && group.active?.view === "source" && project.nodes[group.active.fileId]?.kind === "file";
+    if (!state.groups.some(shows)) return;
+    handingOn = true;
+    queueMicrotask(() => {
+      handingOn = false;
+      const now = app.controller.getProject();
+      const next = app.view.get().groups.find((group) => group.id !== app.view.get().hosts.source && group.active?.view === "source"
+        && now.nodes[group.active.fileId]?.kind === "file");
+      if (now.activeFileId || !next) return;
+      app.view.activate(next.id, next.active);
+      app.view.select(next.active.fileId);
+      app.controller.setActiveFile(next.active.fileId);
+    });
+  }
+
   // A reconnect that loads the project again (together.js; O9): before it,
   // each editor's file by path, its caret and its scroll (keptCarets); after
   // it, saved again under the file's id as it is now (a file made during the
@@ -291,6 +346,6 @@ export function createEditors(app, composing, shared) {
     active,
     of: (group) => editors.get(group) ?? null,
     all: () => [...editors.values()],
-    activateEditor, typedIn, peersMoved, showFiles, keptCarets, carryCarets, giveCaretsBack
+    activateEditor, typedIn, peersMoved, showFiles, keptCarets, carryCarets, giveCaretsBack, handOn, handOnWhenGone
   };
 }

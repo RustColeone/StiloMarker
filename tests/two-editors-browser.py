@@ -12,7 +12,8 @@ the find bar, which opens in the editor worked in and searches its text).
 Closing the active editor's last source tab hands the active file to the
 other group's editor. A part (an album's entry) stays with its editor, and
 only on its own file. A key in an editor that has the focus without being
-the active one makes it the active one. On a phone only the active editor
+the active one makes it the active one. The active file deleted while the
+other editor shows a file: that editor is the active one. On a phone only the active editor
 shows. No page errors.
 
 Isolated: every API is mocked; the welcome template is this checkout's
@@ -208,6 +209,16 @@ async def main():
         assert (await editors())['left']['text'].startswith('Z'), 'typed where the focus is'
         await page.keyboard.press('Control+z')
         checks.append('a key in a focused editor makes it the active one')
+
+        # The active file deleted (by anyone) while the other editor shows a file: that editor
+        # is the active one (O10, v0.3.14), its file the active file.
+        gone = await page.evaluate('Object.values(window.__t.controller.getProject().nodes).find((n) => n.name === "welcome.md").id')
+        await page.evaluate(f'window.__t.controller.remove("{gone}")')
+        await page.wait_for_timeout(400)
+        state = await page.evaluate(STATE)
+        assert (state['host'], state['active']) == ('right', 'MeitanteiCure.mtree'), state
+        assert (await editors())['right']['active'], 'the right editor is the active one'
+        checks.append('the active file deleted: the other editor is the active one')
 
         # On a phone only the active editor shows.
         await page.evaluate(f'window.__t.parts.openDroppedFileInPane("{mtree}", "source", "right")')

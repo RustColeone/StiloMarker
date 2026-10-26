@@ -425,9 +425,10 @@ Split in two:
 - **`activateTab`** now calls `view.activate` before `view.pick`. `pick`
   writes the part for `hosts.source`, so the order decides which editor's
   part it clears.
-- **`handOn(group, project, { show })`** decides who gets the active file
-  when the active editor's file leaves it (its tab closed, or turned
-  Preview), in this order:
+- **`handOn(group, project, { show })`** (written here in v0.3.11, moved
+  to `editors.js` in v0.3.14 with `handOnWhenGone`, below; `tabs.js` calls
+  `app.handOn`) decides who gets the active file when the active editor's
+  file leaves it (its tab closed, or turned Preview), in this order:
   1. the group's last source tab;
   2. the other group's shown source tab (its editor becomes the active
      one), else that group's last source tab;
@@ -435,6 +436,10 @@ Split in two:
 
   `show: false` (a tab turned Preview) leaves the group showing that
   preview, as v0.3.3 did.
+- **`handOnWhenGone(project)`** (v0.3.14, O10): a render that finds no
+  active file (it was deleted) while the other group's editor shows a file
+  makes that editor the active one. It runs right after the render
+  (`queueMicrotask`), because handing on draws again.
 - **`closeGroupIfEmpty`.** When a group closes and the active editor moves
   to the other group, the project's active file becomes that group's shown
   source tab, before the redraw. Otherwise `keepTabs` would drop that

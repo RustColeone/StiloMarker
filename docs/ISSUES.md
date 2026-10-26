@@ -14,19 +14,8 @@ fixed in v0.2.39–v0.2.42. Where things stand after v0.3.11, what is fixed and 
 
 ## Open
 
-### O10. Deleting the active file leaves no active editor
-
-Found 2026-10-25 while writing `docs/STATUS-0.3.11.md`, by reading: with
-two editors, deleting the file the active editor shows clears the
-project's active file (`removeNodeRecursive`), and nothing hands the active
-role to the other group's editor (`handOn` runs when a tab closes or turns
-Preview, and when a group closes). The active group shows its preview or
-the welcome page; the other editor keeps its file but is not the active one
-until clicked, and the explorer, Linked Notes and the status bar describe no
-file meanwhile. Minor; the fix is to activate the other group's shown source
-tab on a render that finds no active file (guarded against re-entry).
-
-Before this: none. Everything the stability review of 2026-10-21 found (the app as a PWA,
+None. O9 (the caret after a reconnect) was fixed in v0.3.13 and O10 (deleting
+the active file) in v0.3.14. Before them, everything the stability review of 2026-10-21 found (the app as a PWA,
 in Electron, with the user's own key and no server; each found by an
 experiment) is fixed: the storage limit (O0) in v0.2.19, a copy per
 workspace (O7) in v0.2.20, two windows (O1) in v0.2.21, the Agent and Chats
@@ -80,6 +69,18 @@ lost while the page is in view count, not one left on purpose).
 ---
 
 ## Fixed
+
+### v0.3.14: deleting the active file hands it to the other editor (O10)
+
+Found 2026-10-25 while writing `docs/STATUS-0.3.11.md`: with two editors,
+deleting the file the active editor shows cleared the project's active file
+and nothing handed the active role to the other group's editor (its file
+showing, but not the open file until clicked; the explorer, Linked Notes and
+the status bar describing none). Now a render that finds no active file while
+the other group's editor shows a file makes that editor the active one
+(`handOnWhenGone` in `editors.js`, right after the render; the hand-over moved there
+from `tabs.js`, which had grown past its size budget), as closing the active
+file's tab does. Test: `two-editors-browser.py` (fails before).
 
 ### v0.3.13: the caret stays where it was when the project is loaded again (O9)
 

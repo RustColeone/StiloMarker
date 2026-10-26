@@ -129,6 +129,9 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
       return length;
     },
     activateEditor: editors.activateEditor,
+    // The active file handed on when it leaves the active editor, or is gone (tabs.js asks).
+    handOn: editors.handOn,
+    handOnWhenGone: editors.handOnWhenGone,
     // A reconnect's reload keeps each editor's caret by path (together.js).
     keptCarets: editors.keptCarets,
     carryCarets: editors.carryCarets,

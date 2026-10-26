@@ -15,6 +15,7 @@ export function createTabs(app) {
   function ensureOpenTabs(project) {
     const views = app.paneViews.all();
     app.view.keepTabs(project, { views: views.map((view) => view.id), open: views.filter((view) => view.tab()).map((view) => view.id) });
+    app.handOnWhenGone(project); // the active file gone: handed to the other editor (editors.js)
   }
 
   function openSourceTab(fileId) {
@@ -72,7 +73,7 @@ export function createTabs(app) {
     app.captureViewState();
     // The active editor always shows the project's active file, with a source
     // tab for it in its group: its shown source tab turned Preview hands the
-    // active file on, as closing that tab would (handOn).
+    // active file on, as closing that tab would (handOn, editors.js).
     const handsOn = view === "preview" && project.activeFileId === tab.fileId && app.view.get().hosts.source === group;
     app.view.switchView(group, { fileId: tab.fileId, view: tab.view }, view);
     if (view === "source") app.view.pick(tab.fileId);
@@ -80,40 +81,10 @@ export function createTabs(app) {
     if (view === "source" && project.activeFileId !== tab.fileId) {
       app.controller.setActiveFile(tab.fileId);
     } else if (handsOn) {
-      handOn(group, project, { show: false }); // the tab stays on screen, as Preview
+      app.handOn(group, project, { show: false }); // the tab stays on screen, as Preview
     } else {
       app.updateStatus(project);
     }
-  }
-
-  // The active editor's file left it (its tab closed, or turned Preview): it
-  // shows its group's last source tab (its group shows that tab, unless `show`
-  // is false: a tab turned Preview stays on screen); with none, the other
-  // group's editor is the active one (its shown source tab, else its last);
-  // else no file is open.
-  function handOn(group, project, { show = true } = {}) {
-    const state = app.view.get();
-    const own = filesIn(state, "source").at(-1) ?? null;
-    if (own) {
-      if (show) {
-        app.view.select(own);
-        app.view.showSource(own);
-      }
-      app.controller.setActiveFile(own);
-      return;
-    }
-    const other = state.groups.find((g) => g.id !== group);
-    const next = other?.active?.view === "source" ? other.active : other?.tabs.filter((t) => t.view === "source").at(-1);
-    if (next) {
-      app.view.activate(other.id, next);
-      app.view.select(next.fileId);
-      if (project.activeFileId !== next.fileId) app.controller.setActiveFile(next.fileId);
-      else app.updateStatus(project);
-      return;
-    }
-    const nextProject = structuredClone(project);
-    nextProject.activeFileId = null;
-    app.controller.replaceProject(nextProject);
   }
 
   function setActiveSourceFile(fileId) {
@@ -374,7 +345,7 @@ export function createTabs(app) {
   }
 
   // Closing a tab, in its group. When it was the active editor's file, the
-  // active file is handed on (handOn).
+  // active file is handed on (handOn, editors.js).
   function closeTab(group, tab) {
     tabsWorkedIn = true;
     const project = app.controller.getProject();
@@ -395,7 +366,7 @@ export function createTabs(app) {
       return;
     }
 
-    handOn(group, project);
+    app.handOn(group, project);
     closeGroupIfEmpty(group);
   }
   const closeSourceTab = (fileId) => closeTab(app.view.get().hosts.source, { fileId, view: "source" });
