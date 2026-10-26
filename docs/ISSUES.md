@@ -14,20 +14,6 @@ fixed in v0.2.39–v0.2.42. Where things stand after v0.3.11, what is fixed and 
 
 ## Open
 
-### O9. The caret can jump to the top after a reconnect
-
-Found by the user (2026-10-24), not yet reproduced: after the connection
-comes back (a shared or cloud workspace), the caret sometimes goes to the
-very start of the file (position 0) instead of staying where it was.
-Suspects to look at first: the open file's text replaced whole when the
-session is joined again or the latest copy is merged in (a replace that
-does not carry the selection over), and a full redraw of the source pane
-after the reconnect. To be looked into after the usability fixes. (v0.3.11
-took one suspect away: an editor without the focus whose file changed was
-loaded again with its caret at the start; it now keeps its caret. Another
-remains: the caret saved per file is found by the file's id, which a project
-loaded again from the server may not keep.)
-
 ### O10. Deleting the active file leaves no active editor
 
 Found 2026-10-25 while writing `docs/STATUS-0.3.11.md`, by reading: with
@@ -94,6 +80,28 @@ lost while the page is in view count, not one left on purpose).
 ---
 
 ## Fixed
+
+### v0.3.13: the caret stays where it was when the project is loaded again (O9)
+
+Found by the user (2026-10-24): after a reconnect, the caret sometimes went to
+the very start of the file. The cause, found by reading and reproduced in a
+browser test: a reconnect that loads the project again from the server keeps
+the open tabs by path, but the caret was kept per file **id**, and a file made
+during the session comes back under another id (the server gives every new
+file its own; each browser had given it one of its own). Its caret was not
+found, and it went to 0. The same happened to a PIN session joined again
+after a drop, which loads the session afresh. Now a reconnect's reload keeps
+each editor's caret and scroll by path and gives them back (`together.js`,
+`keptCarets` / `carryCarets` / `giveCaretsBack` in `editors.js`), and a file's
+saved caret and scroll are found by its path in the workspace when its id is
+new (`resume.js`), so any reload opens a file where it was. (v0.3.11 had
+already removed another way to it: an editor without the focus whose file
+changed elsewhere was loaded again at 0.)
+
+Reproduced by loading the project again as the server would (the file under a
+new id), not with a real dropped connection: should it still happen, it is
+reopened. Tests: `reconnect-caret-browser.py` (new; fails before: the caret
+went from 1,009 to 0, and from 808 to 0 for a session joined again).
 
 ### v0.3.12: the user documents describe the two editors
 

@@ -211,6 +211,52 @@ export function createEditors(app, composing, shared) {
     if (app.searchState.open) app.computeSearchMatches({ keepCaret: true });
   }
 
+  // A reconnect that loads the project again (together.js; O9): before it,
+  // each editor's file by path, its caret and its scroll (keptCarets); after
+  // it, saved again under the file's id as it is now (a file made during the
+  // session comes back under the server's own id, and the caret kept per id
+  // was lost: it went to the start), so the file opens where it was
+  // (carryCarets, before the tabs are restored), then each editor given its
+  // own caret back (giveCaretsBack: two editors may show the file).
+  function keptCarets() {
+    const now = project();
+    // The focused editor last, so the file's saved caret ends up being its.
+    const focusedLast = (editor) => Number(document.activeElement === editor.elements.editorContent);
+    return [...editors.values()].sort((a, b) => focusedLast(a) - focusedLast(b)).flatMap((editor) => {
+      const id = editor.shown.fileId;
+      if (!id || !now?.nodes[id]) return [];
+      const focused = document.activeElement === editor.elements.editorContent;
+      const selection = focused ? editor.getEditorSelection() : editor.keptSelection();
+      return [{ group: editor.group, path: getPath(now, id), partId: editor.shown.partId, selection, scroll: editor.elements.editorContent.scrollTop }];
+    });
+  }
+  const idByPath = (now, path) => Object.values(now?.nodes ?? {}).find((node) => node.kind === "file" && getPath(now, node.id) === path)?.id ?? null;
+  function carryCarets(kept) {
+    const now = project();
+    for (const entry of kept) {
+      const id = idByPath(now, entry.path);
+      if (!id || !entry.selection) continue;
+      app.setViewState(id, { editorSelection: { scope: app.scope(), start: entry.selection.start, end: entry.selection.end }, editorScroll: entry.scroll });
+    }
+  }
+  function giveCaretsBack(kept) {
+    const now = project();
+    for (const entry of kept) {
+      const editor = editors.get(entry.group);
+      const id = editor?.shown.fileId;
+      if (!id || !now?.nodes[id] || getPath(now, id) !== entry.path || editor.shown.partId !== entry.partId) continue;
+      const content = editor.elements.editorContent;
+      content.scrollTop = entry.scroll;
+      editor.updateEditorWindow();
+      editor.syncEditorScroll();
+      if (!entry.selection) continue;
+      const selection = editor.clampEditorSelection(editor.getEditorText(), entry.selection.start, entry.selection.end);
+      editor.keepSelection(selection);
+      if (document.activeElement === content) editor.setEditorSelection(selection.start, selection.end, { reveal: false });
+    }
+    peersMoved({ all: true });
+  }
+
   // On each render: every editor on screen shows its file (the active one
   // always, as before: the welcome page when none is open), the find bar is
   // in the active one, and histories of files no longer open go. Returns the
@@ -245,6 +291,6 @@ export function createEditors(app, composing, shared) {
     active,
     of: (group) => editors.get(group) ?? null,
     all: () => [...editors.values()],
-    activateEditor, typedIn, peersMoved, showFiles
+    activateEditor, typedIn, peersMoved, showFiles, keptCarets, carryCarets, giveCaretsBack
   };
 }

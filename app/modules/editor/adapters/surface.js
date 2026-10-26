@@ -129,6 +129,10 @@ export function createSurface({ view, marks, paneViews, completions, lineNotes, 
       return length;
     },
     activateEditor: editors.activateEditor,
+    // A reconnect's reload keeps each editor's caret by path (together.js).
+    keptCarets: editors.keptCarets,
+    carryCarets: editors.carryCarets,
+    giveCaretsBack: editors.giveCaretsBack,
     editorOf: editors.of,
     eachEditor: each,
     editorTyped: editors.typedIn,

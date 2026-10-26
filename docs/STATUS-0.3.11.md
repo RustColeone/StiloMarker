@@ -70,7 +70,9 @@ browser.
 Ordered by how much it matters to a user. Each item: what it is, its
 impact, why it is still open, where to look, and a next step.
 
-### 1. The caret can jump to the top after a reconnect (O9)
+### 1. The caret can jump to the top after a reconnect (O9) — fixed in v0.3.13
+
+**Update (v0.3.13):** fixed as the next step below suggests (carets kept by path across a reload, and found by path when a file's id is new); see `docs/ISSUES.md`, v0.3.13. What follows is how it stood after v0.3.11.
 
 - **What.** You reported that after the connection comes back (a shared
   or cloud workspace), the caret sometimes goes to the very start of the

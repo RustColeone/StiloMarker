@@ -36,10 +36,21 @@ export function installTogether(app, workspace, composing) {
     app.redrawRemoteCursors();
   });
 
-  // A reload while reconnecting keeps the open tabs and the shown file.
-  let kept = null;
-  events.on("replacing", ({ keepView }) => { kept = keepView ? app.currentWorkspaceView() : null; });
-  events.on("replaced", () => { if (kept) app.restoreResumeState(kept); kept = null; });
+  // A reload while reconnecting keeps the open tabs and the shown files (by
+  // path), and each editor's caret and scroll (by path too: a file made
+  // during the session comes back under the server's id for it; O9).
+  let kept = null, carets = null;
+  events.on("replacing", ({ keepView }) => {
+    kept = keepView ? app.currentWorkspaceView() : null;
+    carets = keepView ? app.keptCarets() : null;
+  });
+  events.on("replaced", () => {
+    if (carets) app.carryCarets(carets);
+    if (kept) app.restoreResumeState(kept);
+    if (carets) app.giveCaretsBack(carets);
+    kept = null;
+    carets = null;
+  });
 
   // The write path's edit to the file shown whole goes through the editor: it
   // joins the undo history and is sent like typing.

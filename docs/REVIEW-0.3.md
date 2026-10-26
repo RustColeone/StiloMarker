@@ -626,10 +626,11 @@ selection) and notifies; the left editor follows.
   one captured wins on reload.
 - **The other editor's caret in the active one** can lag one follow
   interval (90–400 ms) while typing.
-- **Open issue O9** (the caret jumping to the top after a reconnect): this
-  release removed one suspect, an unfocused editor reloading with its caret
-  at 0. Another remains: the saved caret is keyed by file id, which a
-  project reloaded from the server may not keep.
+- **O9** (the caret jumping to the top after a reconnect) was fixed in
+  v0.3.13: a reconnect's reload keeps each editor's caret and scroll by path
+  (`keptCarets` / `carryCarets` / `giveCaretsBack` in `editors.js`, called by
+  `together.js`), and `resume.js` finds a file's saved caret by its path when
+  its id is new (the server gives every new file its own id).
 
 ---
 

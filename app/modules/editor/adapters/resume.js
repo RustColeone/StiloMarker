@@ -3,6 +3,7 @@
 // zoom: a preview with viewState() offers it, stored under the preview's id).
 // Moved from main.js (and its view-state service) with the Editor's other parts.
 import { ignore } from "../../../kernel/index.js";
+import { getPath } from "../../workspace/index.js";
 
 const VIEW_STATE_KEY = "mdnotes.viewstate.v1";
 
@@ -36,8 +37,25 @@ export function forgetViewStates() {
 export function createResume(app) {
   const viewStates = loadViewStates();
 
+  // Where a file is (its path in this workspace), kept with its state: a file
+  // that comes back under another id finds its state by it (one made during a
+  // session, loaded again from the server, which gives it its own id: O9).
+  function placeOf(fileId) {
+    const project = app.controller.getProject();
+    return project?.nodes[fileId]?.kind === "file" ? { path: getPath(project, fileId), scope: app.scope() } : null;
+  }
+
+  // A file's state by its id, else the latest kept for its path.
   function getViewState(fileId) {
-    return fileId ? viewStates[fileId] : null;
+    if (!fileId) return null;
+    if (viewStates[fileId]) return viewStates[fileId];
+    const place = placeOf(fileId);
+    if (!place) return null;
+    let found = null;
+    for (const state of Object.values(viewStates)) {
+      if (state?.path === place.path && state.scope === place.scope && (!found || (state.at ?? 0) > (found.at ?? 0))) found = state;
+    }
+    return found;
   }
 
   // Kept at once in memory; written at most every SAVE_EVERY (the caret moves
@@ -54,7 +72,7 @@ export function createResume(app) {
 
   function setViewState(fileId, patch) {
     if (!fileId) return;
-    viewStates[fileId] = { ...viewStates[fileId], ...patch };
+    viewStates[fileId] = { ...viewStates[fileId], ...placeOf(fileId), at: Date.now(), ...patch };
     saveTimer ??= setTimeout(saveNow, SAVE_EVERY);
   }
 
