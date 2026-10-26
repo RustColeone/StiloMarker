@@ -325,8 +325,9 @@ export function createEditors(app, composing, shared) {
     const now = project();
     for (const entry of kept) {
       const id = idByPath(now, entry.path);
-      if (!id || !entry.selection) continue;
-      app.setViewState(id, { editorSelection: { scope: app.scope(), start: entry.selection.start, end: entry.selection.end }, editorScroll: entry.scroll });
+      if (!id) continue;
+      app.setEditorPlace(id, entry.group, { editorScroll: entry.scroll,
+        ...(entry.selection ? { editorSelection: { scope: app.scope(), start: entry.selection.start, end: entry.selection.end } } : {}) });
     }
   }
   function giveCaretsBack(kept) {

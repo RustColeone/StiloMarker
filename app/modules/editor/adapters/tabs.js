@@ -357,7 +357,9 @@ export function createTabs(app) {
       return;
     }
     const wasShown = project.activeFileId === tab.fileId && app.view.get().hosts.source === group;
+    app.captureViewState(); // where it was left: the file's latest place (resume.js)
     app.view.closeTab("source", tab.fileId, group);
+    app.forgetEditorPlace(tab.fileId, group);
     scheduleSaveUserState();
 
     if (!wasShown) {
@@ -386,6 +388,11 @@ export function createTabs(app) {
     if (project.nodes[tab.fileId]?.kind !== "file") return;
     tabsWorkedIn = true;
     app.captureViewState();
+    if (tab.view === "source") {
+      // Its editor there starts where it was here (resume.js).
+      app.carryEditorPlace(tab.fileId, from, to);
+      if (!keep) app.forgetEditorPlace(tab.fileId, from);
+    }
     app.setAreaShown(areaOf(to), true);
     app.view.moveToGroup(from, to, { fileId: tab.fileId, view: tab.view }, { keep, target, placeAfter });
     if (tab.view === "source") {

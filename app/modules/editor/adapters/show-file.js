@@ -76,13 +76,14 @@ export function createShowFile(app, composing) {
       app.renderRemoteCursors([]);
     }
     if (!app.isRendering() && fileChanged) {
-      const savedSelection = app.savedEditorSelection(activeFile.id, nextText);
+      // Where this editor was in the file, else where the file was last left (resume.js).
+      const savedSelection = app.savedEditorSelection(activeFile.id, nextText, app.group);
       app.shown.fileId = activeFile.id;
       app.shown.partId = partId;
       app.loadEditorContent(nextText, savedSelection?.start ?? 0, savedSelection?.end ?? savedSelection?.start ?? 0);
       // Resume the reader's previous scroll position in this document. The real
       // scroller is the editor's content (its .editor-scroll is overflow:hidden).
-      const savedScroll = app.getViewState(activeFile.id)?.editorScroll;
+      const savedScroll = app.getViewState(activeFile.id, app.group)?.editorScroll;
       if (savedScroll && elements.editorContent) {
         elements.editorContent.scrollTop = savedScroll;
         app.syncEditorScroll();

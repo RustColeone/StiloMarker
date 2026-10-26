@@ -40,7 +40,7 @@ async def main():
                     response = await route.fetch(); body = await response.body()
                 else: body = file.read_bytes()
                 if path == '/app/main.js':
-                    body += app_hook('window.__caretTest={controller,setActiveSourceFile,setEditorSelection,getEditorSelection:(...a)=>editorParts.getEditorSelection(...a),getViewState,setViewState:(...a)=>editorParts.setViewState(...a)};')
+                    body += app_hook('window.__caretTest={controller,setActiveSourceFile,setEditorSelection,getEditorSelection:(...a)=>editorParts.getEditorSelection(...a),getViewState,setEditorPlace:(...a)=>editorParts.setEditorPlace(...a)};')
                 await route.fulfill(status=200, content_type=mimetypes.guess_type(str(file))[0] or 'application/octet-stream', body=body)
             else: await route.continue_()
         await context.route('**/*', route_request)
@@ -76,11 +76,12 @@ async def main():
         await page.locator('#editor-content .editor-line').first.click(position={'x':2,'y':5})
         clicked = await page.evaluate('__caretTest.getEditorSelection()')
         assert clicked['start'] <= 2 and clicked['end'] <= 2, clicked
-        # A stale saved offset must be clamped to the new file length.
+        # A stale saved offset must be clamped to the new file length (the
+        # editor's own place in the file, which it resumes at: v0.3.16).
         await select_file('second')
         await page.evaluate('''() => {
-          const saved=__caretTest.getViewState('first').editorSelection;
-          __caretTest.setViewState('first',{editorSelection:{...saved,start:9999,end:9999}});
+          const saved=__caretTest.getViewState('first','left').editorSelection;
+          __caretTest.setEditorPlace('first','left',{editorSelection:{...saved,start:9999,end:9999}});
         }''')
         await select_file('first')
         actual = await page.evaluate('__caretTest.getEditorSelection()')

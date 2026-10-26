@@ -141,10 +141,11 @@ Details in `docs/REVIEW-0.3.md` §1.8 and §1.11.
   from the new text, so Ctrl+Z there cannot undo that edit.
   - Next step: let the write path apply through any editor showing the
     file, with its kept caret.
-- **Resume keeps one caret and scroll per file.** With the same file in
-  both editors, the last one captured wins on reload. The inactive
-  editor's scroll is not saved at all (`captureViewState` saves the active
-  editor's).
+- **Fixed in v0.3.16:** ~~resume keeps one caret and scroll per file~~
+  (each editor now keeps its own place in each file open in it). As it
+  stood: with the same file in both editors, the last one captured won on
+  reload, and the inactive editor's scroll was not saved at all
+  (`captureViewState` saved the active editor's).
 - **The other editor's caret can lag 90–400 ms while typing.** Following
   is paced so a 20,000-line file stays fast; see `FOLLOW_IDLE` /
   `FOLLOW_MAX` in `editors.js`.

@@ -238,7 +238,7 @@ export function installEditorEvents(app, composing) {
     const active = app.controller.getActiveFile();
     if (!active || app.shown.fileId !== active.id) return;
     const kept = app.keptSelection();
-    const saved = kept ? app.clampEditorSelection(app.getEditorText(), kept.start, kept.end) : app.savedEditorSelection(active.id, app.getEditorText());
+    const saved = kept ? app.clampEditorSelection(app.getEditorText(), kept.start, kept.end) : app.savedEditorSelection(active.id, app.getEditorText(), app.group);
     if (saved) app.setEditorSelection(saved.start, saved.end);
   });
 

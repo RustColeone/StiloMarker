@@ -5,8 +5,9 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-26 · release `v0.3.15` deployed (public checks passed) and drafted as a
-desktop release (GitHub, not yet published); `v0.3.0` is
+Last updated: 2026-10-26 · release `v0.3.16` built on `dev` (not deployed); `v0.3.15`
+deployed (public checks passed) and drafted as a desktop release (GitHub, not yet
+published); `v0.3.0` is
 the stable version. v0.2.30–v0.2.42 were gone over again before calling it so; what that found is
 fixed in v0.2.39–v0.2.42. Where things stand after v0.3.11, what is fixed and what is not, in
 `docs/STATUS-0.3.11.md`.
@@ -70,6 +71,28 @@ lost while the page is in view count, not one left on purpose).
 ---
 
 ## Fixed
+
+### v0.3.16: each editor keeps its own place in a file
+
+A limit of the two editors (v0.3.11), listed in `docs/STATUS-0.3.11.md` and
+picked by the user to fix (2026-10-26): a file's caret and scroll were kept
+once per file, so with the same file in both editors a reload opened both at
+the one place (the last captured), and the editor without the focus kept no
+scroll at all (only the active editor's was captured). Now each editor keeps
+its own place in each file open in it (`byEditor` in the file's saved view
+state, `resume.js`), and the place the file was last left too; an editor
+showing a file resumes at its own place, else at the file's last one. All
+editors on screen are captured (the active one last), the other's scroll
+included. Closing a file's tab in a group forgets that group's place in it
+(reopened there later, it starts where the file was last left, not at a
+stale place), and a tab moved or opened to the other group (Open to the
+Side) starts there where it was. Test: `pane-places-browser.py` (new; fails
+before: both editors came back at the left one's caret). On the way: saving
+the caret of an editor without the focus at a capture first saved a stale one
+on a phone that delivers no selectionchange (`mobile-caret-browser.py`
+caught it); the caret saved as the finger goes down is now the editor's
+kept caret too. `caret-restore-browser.py` now plants its stale offset in
+the editor's own place, which is the one it resumes at.
 
 ### v0.3.15: the agent's edits undo from either editor
 

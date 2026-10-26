@@ -225,7 +225,8 @@ active editor.
   returns early if the editor already is, or if the group's active tab is
   not a source tab. Otherwise it:
   1. applies a pending follow for it first (see "Review notes");
-  2. saves the outgoing editor's scroll and caret (`captureViewState`);
+  2. saves each editor's scroll and caret, the outgoing one's among them
+     (`captureViewState`);
   3. calls `view.activate(group, tab)` and `view.select(fileId)`;
   4. sets the project's active file (or asks for a status redraw if
      unchanged);
@@ -458,6 +459,27 @@ Split in two:
 
 #### Other files
 
+- **`resume.js`** (v0.3.16): a file's saved view state holds the file's
+  latest place (`editorSelection`, `editorScroll`) and each editor's own
+  (`byEditor.left`, `byEditor.right`).
+  - `getViewState(fileId, group)` gives the group's own place over the
+    file's; with no group, the file's. `show-file.js` and the focus handler
+    pass the editor's group.
+  - `captureViewState` saves every editor on screen. It skips a hidden one,
+    which would read scroll 0. It saves the active one last, so the file's
+    latest is that one's.
+  - `rememberEditorSelection` saves the caret of the editor with the
+    focus. Before v0.3.16 it read the active editor only. It also sets that
+    editor's kept caret. A phone may deliver no `selectionchange` before
+    another control takes the focus. The pointer-down's call is then the
+    last word, and `captureViewState` reads the kept caret of an editor
+    without the focus (`mobile-caret-browser.py` caught this).
+  - `tabs.js` calls `forgetEditorPlace` when a source tab closes (after a
+    capture). It calls `carryEditorPlace` and `forgetEditorPlace` when a
+    tab moves to the other group: a moved tab carries its place, an
+    "Open to the Side" copies it.
+  - A file back under a new id (O9) starts from its path's state, the
+    editors' places included.
 - **`links.js`**: `handleEditorLinkHover`, `openLinkFromEditor` and
   `resolveEditorLinkHref` take the file the link is in. The other
   editor's links resolve from its own folder.
@@ -619,6 +641,11 @@ selection) and notifies; the left editor follows.
   - `tab-menu-browser.py`: docstring only.
 - **Every other browser test** still uses the left editor by
   `#editor-content` and passes unchanged.
+- **`tests/pane-places-browser.py`** (v0.3.16): the same file in both
+  editors, each at its own caret and scroll (the right one scrolled without
+  the focus), comes back so after a reload. It also checks that a closed tab
+  forgets its group's place and that Open to the Side starts where the first
+  editor is. It fails before v0.3.16.
 
 ### 1.11 Known limits and next steps
 
@@ -627,9 +654,11 @@ selection) and notifies; the left editor follows.
   `writerFor` / `applyWrite` in `editors.js`, since v0.3.15), so it joins the
   file's undo history from either editor. A file shown only as a part is
   written directly, and its editors follow (with a history fence).
-- **Resume** keeps one caret and scroll per file
-  (`mdnotes.viewstate.v1`). With the same file in both editors, the last
-  one captured wins on reload.
+- **Resume** (since v0.3.16) keeps each editor's own caret and scroll per
+  file, and the file's latest (`mdnotes.viewstate.v1`, see `resume.js` under
+  "Other files" in §1.5). An editor's place is kept only while the file is
+  open in it, so a pane that shows a file again after closing it starts
+  where the file was last left.
 - **The other editor's caret in the active one** can lag one follow
   interval (90–400 ms) while typing.
 - **O9** (the caret jumping to the top after a reconnect) was fixed in
