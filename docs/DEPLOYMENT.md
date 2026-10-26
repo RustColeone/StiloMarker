@@ -1278,3 +1278,22 @@ Private deployment backup: `/home/laplacengan/backups/stilomarker/20261025T22133
 185/185 data files (taken with the service stopped), every JSON file valid;
 the account file and the environment file as they were.
 
+## Desktop release drafted: v0.3.15
+
+2026-10-26: `dev` pushed to GitHub's `main` (a fast-forward from v0.3.12)
+and tagged `v0.3.15`. The release workflow (`.github/workflows/release.yml`)
+passed the tests, built the portable files (an AppImage, a portable Windows
+`.exe`, the Mac app zipped for Apple Silicon and Intel) and drafted the
+release with `docs/releases/v0.3.15.md` and `SHA256SUMS.txt`. Not published.
+
+Checked here: the Linux AppImage's checksum matches `SHA256SUMS.txt`, and
+extracted it carries version `0.3.15` and the new editor code, and no
+account file or server data. Not launched; the Windows and macOS builds not
+tried. The new title bar (v0.3.9) has only been seen on Linux: try the
+builds on Windows and macOS before publishing.
+
+The server is not part of this: it still runs v0.3.12. Its live checkout's
+`main` is behind GitHub's until v0.3.13 – v0.3.15 are deployed there, so a
+`git push` from the live checkout is refused as behind; nothing is lost, and
+nothing there needs pushing (it has no commits of its own).
+

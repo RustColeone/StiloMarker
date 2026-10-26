@@ -5,7 +5,8 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-25 · release `v0.3.12` deployed (public checks passed); `v0.3.0` is
+Last updated: 2026-10-26 · release `v0.3.15` drafted as a desktop release (GitHub, not yet published);
+the server runs `v0.3.12` (deployed, public checks passed); `v0.3.0` is
 the stable version. v0.2.30–v0.2.42 were gone over again before calling it so; what that found is
 fixed in v0.2.39–v0.2.42. Where things stand after v0.3.11, what is fixed and what is not, in
 `docs/STATUS-0.3.11.md`.

@@ -177,8 +177,12 @@ Details in `docs/REVIEW-0.3.md` §1.8 and §1.11.
 
 ### 5. Nothing of v0.3.2 – v0.3.11 is on GitHub or in a desktop release
 
-**Update (2026-10-26):** GitHub's `main` has since been pushed up to v0.3.12.
-The desktop release (a tag and its builds) is what remains.
+**Update (2026-10-26):** GitHub's `main` has since been pushed up to v0.3.12,
+then to v0.3.15, which is tagged: its release workflow passed the tests, built
+the portable files on the three systems and drafted the release (not
+published; see `docs/DEPLOYMENT.md`). What remains: trying the builds on
+Windows and macOS (item 4), then publishing the draft. The server still runs
+v0.3.12; v0.3.13 – v0.3.15 are not deployed there yet.
 
 - **What.**
   - GitHub's `main` is still at v0.3.1 plus the CI removal (dc91c00).
