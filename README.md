@@ -2,6 +2,10 @@
 
 STILO MARKER is a browser-based Markdown workspace for writing notes, organizing files, previewing content, and managing image URL albums in one page.
 
+**How it is built, and how to add to it:** the [architecture page](https://rustcoleone.github.io/StiloMarker/docs/architecture/)
+is a map of the code, made from the code itself. It starts at the whole system and goes in: a module, a file, one
+function and its code. It also has the guides for adding an extension (a mod) and for any change to the project.
+
 It supports:
 
 - Markdown, MTREE, URL album, and image files
@@ -237,6 +241,8 @@ The log panel is useful for checking drag/drop actions, file operations, and int
 
 ## Reference
 
+- [The architecture page](https://rustcoleone.github.io/StiloMarker/docs/architecture/) (`docs/architecture/`) — the code as browsable diagrams, from the whole system down to each function's code, with the guides "How an extension goes in" and "How a change goes in". It is the project's guideline: every change brings it up to date (`python3 tools/architecture.py`).
+
 For a full technical reference including all file format specifications and detailed usage, see [server/MANUAL.md](server/MANUAL.md).
 
 - [docs/ISSUES.md](docs/ISSUES.md) — known issues, open and fixed, with severity and confidence.
@@ -250,21 +256,17 @@ There is no build step: the browser loads the ES modules under `app/` as they ar
 
 | Path | What it holds |
 |------|---------------|
-| `app/main.js` | Starts the modules and attaches what they do not own yet (the page's elements), then resumes the last session. |
+| `app/main.js` | Starts the modules; everything else is theirs. |
 | `app/kernel/` | Modules, their levels, state with named actions, events, extension points and the trace. |
 | `app/modules/` | The core's modules (Shell, File types, Workspace, Editor, Sync, History, Explorer, Comments, Cloud, Models, Characters, Chats, Assistant...); `docs/ARCHITECTURE.md` describes each and the rules between them. |
-| `extensions/` | Extensions (diagrams, module maps, URL albums): each a folder the core never names, using only modules' extension points. |
-| `app/services/`, `app/domain/`, `app/ui/` | What is left from before the restructure. |
+| `extensions/` | Extensions (diagrams, module maps, URL albums, tables, themes...): each a folder the core never names, using only modules' extension points. |
+| `server/stilo/` | The server's kernel and modules, in the same levels as the browser's. |
+| `protocol/`, `spec/` | What both ends agree on: each module's network messages and version, file types, the extension API; the cases a rule written in both languages passes. |
+| `app/services/`, `app/domain/` | Two files left from before the restructure, each passing on to a module. |
 
-How the split modules reach `main.js`'s state: each exports a factory that
-`main.js` calls on first use, passing an `app` object of getters (and setters
-for the few variables a module writes), so a module always reads the current
-value. `main.js` keeps a small forwarding function for every module function it
-calls, so call sites read as before; the instance holders are declared with
-`var` because a forwarding function can run during startup. A new value a
-module needs is added to that `app` object in `main.js`. Structure tests check
-every on-demand `import("…")` path and that the service worker's offline list
-names every module under `app/`.
+The [architecture page](https://rustcoleone.github.io/StiloMarker/docs/architecture/) shows all of it, down to each
+function, and is made from the code: after a change, `python3 tools/architecture.py` (the tests fail while it is out
+of date). To read it locally, serve the repository (`npm start`) and open `/docs/architecture/`.
 
 ## App releases
 

@@ -6,6 +6,14 @@ of work, is in the "Module design" tab of the
 [architecture review](https://claude.ai/code/artifact/ea78ba1f-1850-4b76-9642-8cffb14e6c7a).
 This file is the short reference that the structure tests enforce.
 
+**The architecture page** ([`docs/architecture/`](architecture/README.md), on GitHub Pages at
+https://rustcoleone.github.io/StiloMarker/docs/architecture/) draws all of this from the code itself: the system,
+each module (its files by layer), each file, each function and its code, with the guides "How an extension goes in"
+and "How a change goes in". It is the project's guideline: **after every change, run `python3 tools/architecture.py`
+and commit `docs/architecture/data.js` and `source.js` with the change** (`tests/architecture.test.py` fails while
+they are out of date). A file's opening comment (a docstring in Python) and the comment above each function are its
+text, so write them for a reader.
+
 ## The shape
 
 - **A tiny kernel** starts the modules in dependency order and hands each one

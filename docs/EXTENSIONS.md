@@ -24,7 +24,9 @@ An extension written for another version is refused when the browser's copies
 are written (`node tools/protocol-sync.mjs` stops and says so), and the server
 leaves its file types out (with a warning in its log).
 
-The extensions in the repository are working examples:
+The extensions in the repository are working examples (the
+[architecture page](https://rustcoleone.github.io/StiloMarker/docs/architecture/#/guide/extensions) shows how one goes
+in, with each example's code):
 
 | Extension | What it shows |
 |---|---|
@@ -35,8 +37,6 @@ The extensions in the repository are working examples:
 | `theme-pack` | data only: themes contributed from its manifest, no code |
 | `html-page` | a sandboxed preview; images resolved inside the workspace |
 | `module-map` | a dialog and commands on another type's files |
-| `data-table` | an editor in the preview with its own undo, writing through Workspace |
-| `theme-pack` | data only: themes |
 
 ## The folder
 
