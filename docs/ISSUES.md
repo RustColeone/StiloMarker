@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-27 · release `v0.3.18` built on `dev` (not deployed); `v0.3.15`
+Last updated: 2026-10-27 · release `v0.3.19` built on `dev` (not deployed); `v0.3.15`
 deployed (public checks passed) and drafted as a desktop release (GitHub, not yet
 published); `v0.3.0` is
 the stable version. v0.2.30–v0.2.42 were gone over again before calling it so; what that found is
@@ -16,21 +16,9 @@ fixed in v0.2.39–v0.2.42. Where things stand after v0.3.11, what is fixed and 
 
 ## Open
 
-One, found using the app as a first visitor would (2026-10-27, against a
-scratch server); the small things found with it are fixed in v0.3.17, and
-O11 (the welcome file) in v0.3.18.
-
-### O12. The browser's own workspace forgets its tabs on a reload
-**Confidence:** confirmed · **Severity:** low
-
-A cloud workspace's groups and tabs come back after a reload (kept in this
-browser and on the server); the browser's own workspace keeps only its
-active file, so after a reload both groups show that one file. The cache
-(`cacheWorkspaceView` in `editor/adapters/tabs.js`) is written only for a
-cloud workspace. Next step: keep it for the own workspace too (by its copy's
-key) and restore it once the restored project is drawn, minding the first
-visit's template and a cloud workspace resuming over it. Not a small fix.
-
+None. What using the app as a first visitor would found (2026-10-27,
+against a scratch server) is fixed: the small things in v0.3.17, the
+welcome file (O11) in v0.3.18, the own workspace's tabs (O12) in v0.3.19.
 O9 (the caret after a reconnect) was fixed in v0.3.13 and O10 (deleting
 the active file) in v0.3.14. Before them, everything the stability review of 2026-10-21 found (the app as a PWA,
 in Electron, with the user's own key and no server; each found by an
@@ -86,6 +74,25 @@ lost while the page is in view count, not one left on purpose).
 ---
 
 ## Fixed
+
+### v0.3.19: the browser's own workspace keeps its tabs on a reload (O12)
+
+Found with v0.3.17's small things (open as O12); the user asked for it
+(2026-10-27). A cloud workspace's groups and tabs came back after a reload
+(kept in this browser and on the server); the browser's own workspace kept
+only its active file, so after a reload both groups showed that one file:
+`cacheWorkspaceView` (`editor/adapters/tabs.js`) wrote only a cloud
+workspace's. It now keeps the own workspace's too, one project's (the last
+worked in, by its id, `mdnotes.ownView.v1`), and the Editor brings them back
+once the app has started (`restoreOwnView`, from `editor/index.js`'s
+`whenStarted`): only if the page opened that project from this browser
+(not the first visit's template, not a cloud workspace's copy) and is still
+in its own workspace then. What was kept is read as the page starts, before
+the page's first tabs are kept over it. A cloud workspace opened afterwards
+takes its own tabs as before (the kept ones are used only for the cloud
+workspace this browser already held). Each editor's place in its files
+comes back with them (v0.3.16). Test: `own-tabs-browser.py` (new; fails
+before: each group came back with the welcome file only).
 
 ### v0.3.18: the welcome file, written for someone using the site (O11)
 

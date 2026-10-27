@@ -551,10 +551,10 @@ group can show a preview at the same time, so a note and a diagram can sit
 side by side. **Move to Other Group** moves a tab across, **Open to the Side**
 opens it in the other group too, and you can drag a tab onto the other
 group's tabs. When a group's last tab closes, the group closes and the other
-takes its place; View → Toggle Source or Toggle Preview brings it back. In a
-cloud workspace your groups and tabs come back when you reopen it: after a
-reload as you left them in this browser, and on another device as you last
-left them anywhere. Each editor opens a file where it was in it, so the same
+takes its place; View → Toggle Source or Toggle Preview brings it back. Your
+groups and tabs come back after a reload as you left them in this browser,
+in the workspace kept in this browser too; a cloud workspace's also come
+back on another device, as you last left them anywhere. Each editor opens a file where it was in it, so the same
 file in both comes back at both places; a file new to an editor opens where
 you last left it.
 

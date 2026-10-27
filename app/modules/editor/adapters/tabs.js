@@ -101,13 +101,33 @@ export function createTabs(app) {
       groups: savedGroups(app.view.get(), pathFor) };
   }
   function cacheWorkspaceView() {
-    if (app.workspaceMode !== "synced" || !app.settings.syncedProjectId) return;
     try {
+      if (app.workspaceMode !== "synced") {
+        const project = app.controller.getProject();
+        if (project?.id) localStorage.setItem(OWN_VIEW, JSON.stringify({ project: project.id, ...currentWorkspaceView() }));
+        return;
+      }
+      if (!app.settings.syncedProjectId) return;
       localStorage.setItem("mdnotes.workspaceView.v1", JSON.stringify({
         server: normalizeServerUrl(app.settings.serverUrl), workspace: app.settings.syncedProjectId,
         ...currentWorkspaceView()
       }));
     } catch (error) { app.logDebug("response", "Resume cache failed", error.message); }
+  }
+  // The browser's own workspace keeps its tabs in this browser too (O12): one
+  // project's, the last worked in, by its id. Read as the page starts, before
+  // its first tabs are kept over them; brought back once the app has started
+  // (restoreOwnView, from the Editor's start) if the page opened that project.
+  const OWN_VIEW = "mdnotes.ownView.v1";
+  let ownViewAtStart = null;
+  try { ownViewAtStart = JSON.parse(localStorage.getItem(OWN_VIEW)); } catch (error) { app.logDebug("response", "Kept tabs unreadable", error.message); }
+  function restoreOwnView(projectId) {
+    const saved = ownViewAtStart;
+    ownViewAtStart = null;
+    if (!saved || !projectId || saved.project !== projectId || app.workspaceMode === "synced") return false;
+    if (app.controller.getProject()?.id !== projectId) return false;
+    restoreResumeState(saved);
+    return true;
   }
   function cachedWorkspaceView(workspace) {
     try {
@@ -758,5 +778,5 @@ export function createTabs(app) {
     });
   }
 
-  return { ensureOpenTabs, openSourceTab, openPreviewTab, activateTab, switchTabView, setActiveSourceFile, currentWorkspaceView, cacheWorkspaceView, cachedWorkspaceView, resumeView, showResumedFile, scheduleSaveUserState, restoreResumeState, setActiveSourcePart, setPreviewFile, openFileFromExplorer, canOpenFileInPane, setPaneDropActive, clearPaneDropState, openDroppedFileInPane, openPartInPane, bindPaneDropTarget, closeTab, closeSourceTab, closePreviewTab, reorderTabs, moveTabToGroup, tabOverflowButton, closeTabOverflowMenu, openTabOverflowMenu, renderTabStrip, renderTabs, bindTabStripReorderTarget };
+  return { ensureOpenTabs, openSourceTab, openPreviewTab, activateTab, switchTabView, setActiveSourceFile, currentWorkspaceView, cacheWorkspaceView, cachedWorkspaceView, resumeView, showResumedFile, scheduleSaveUserState, restoreResumeState, restoreOwnView, setActiveSourcePart, setPreviewFile, openFileFromExplorer, canOpenFileInPane, setPaneDropActive, clearPaneDropState, openDroppedFileInPane, openPartInPane, bindPaneDropTarget, closeTab, closeSourceTab, closePreviewTab, reorderTabs, moveTabToGroup, tabOverflowButton, closeTabOverflowMenu, openTabOverflowMenu, renderTabStrip, renderTabs, bindTabStripReorderTarget };
 }

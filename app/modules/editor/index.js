@@ -97,6 +97,10 @@ export default defineModule({
     if (globalThis.document) {
       parts = createSurface({ view, marks, identity: ctx.use("identity"), openTabsStore, drops, paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), welcome: open(welcome), previews: open(previews), codeBlocks: open(codeBlocks), highlighters: open(highlighters), toolbars: open(toolbars),
         workspace: ctx.use("workspace"), shell: ctx.use("shell") });
+      // The browser's own workspace, opened again, comes back with the tabs it
+      // had (a cloud workspace's come back as it opens: tabs.js).
+      const opened = ctx.use("workspace").restoredProject()?.id ?? null;
+      ctx.whenStarted(() => { parts.restoreOwnView(opened); });
     }
     return { previews: open(previews), codeBlocks: open(codeBlocks), highlighters: open(highlighters), toolbars: open(toolbars), paneViews: open(paneViews), completions: open(completions), lineNotes: open(lineNotes), welcome: open(welcome), marks,
       openTabs: { configure: openTabsStore.configure }, drops: { configure: drops.configure }, view, parts: () => parts };

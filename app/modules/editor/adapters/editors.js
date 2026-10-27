@@ -222,7 +222,7 @@ export function createEditors(app, composing, shared) {
     const now = app.controller.getProject();
     if (now.activeFileId !== tab.fileId) app.controller.setActiveFile(tab.fileId);
     else app.updateStatus(now);
-    app.scheduleSaveUserState(); // the open tabs kept (a cloud workspace's)
+    app.scheduleSaveUserState(); // the open tabs kept (in this browser; a cloud workspace's on the server too)
   }
 
   // The find bar and the completions sit in the active editor; moving there,
