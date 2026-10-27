@@ -15,8 +15,8 @@
   <header class="top">
     <nav class="top-links" aria-label="Pages">
       <a class="brand" href="#/">Stilo Marker <span>architecture</span></a>
-      <a class="guide-link" href="#/guide/extensions">How an extension goes in</a>
-      <a class="guide-link" href="#/guide/changes">How a change goes in</a>
+      <a class="guide-link" href="#/guide/extensions"><span class="long">How an extension goes in</span><span class="short">Extension guide</span></a>
+      <a class="guide-link" href="#/guide/changes"><span class="long">How a change goes in</span><span class="short">Change guide</span></a>
     </nav>
     <div class="search">
       <label class="visually-hidden" for="search">Find a module, file or function</label>
@@ -37,6 +37,10 @@
           <button type="button" id="zoom-level" title="Back to 100%">100%</button>
           <button type="button" id="zoom-in" aria-label="Zoom in" title="Zoom in (+)">+</button>
           <button type="button" id="zoom-fit" title="Fit the whole diagram (0)">Fit</button>
+          <button type="button" id="zoom-full" aria-label="Full screen" title="Full screen">
+            <svg class="open" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg>
+            <svg class="close" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>
+          </button>
         </div>
         <p class="chart-help">Drag to move · scroll or pinch to zoom · click a box to go in</p>
       </div>

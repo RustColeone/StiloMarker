@@ -1,7 +1,7 @@
 "use strict";
 // The architecture page: Stilo Marker's own structure (data.js, made by tools/architecture.py) as diagrams to click
-// through, from the whole system down to one function, whose code shows in the pane on the right (the text comes from
-// source.js, loaded the first time code is shown). diagram.js lays the diagrams out and draws them; this file decides
+// through, from the whole system down to one function, whose code shows in the pane on the right, or under the diagram
+// on a narrow screen (the text comes from source.js, loaded the first time code is shown). diagram.js lays the diagrams out and draws them; this file decides
 // what each level shows, and fills the pane, the search and the trail. The two guides (how an extension goes in, how a
 // change goes in) are drawn from the same data.
 (() => {
@@ -19,6 +19,19 @@
   const GUIDE_EXTENSIONS = "guide/extensions";
   const GUIDE_CHANGES = "guide/changes";
   const GUIDES = { [GUIDE_EXTENSIONS]: "How an extension goes in", [GUIDE_CHANGES]: "How a change goes in" };
+  // A narrow screen (a phone) shows the details under the diagram and lays the top map out in one column; a touch
+  // screen taps, and holds where a mouse hovers. The page's words are written for a mouse and a wide screen, and said
+  // here for this one.
+  const narrow = window.matchMedia("(max-width: 860px)");
+  const touch = window.matchMedia("(hover: none)");
+  function say(text) {
+    const instead = { click: touch.matches && "tap", hover: touch.matches && "hold",
+                      "on the right": narrow.matches && "below", "on the left": narrow.matches && "above" };
+    return text.replace(/\b(click|hover|on the right|on the left)\b/gi, (word) => {
+      const other = instead[word.toLowerCase()];
+      return !other ? word : word[0] === word[0].toUpperCase() ? other[0].toUpperCase() + other.slice(1) : other;
+    });
+  }
 
   // ---- the index: every symbol by file, who calls it (inside its file), the modules by name ------------------
   const symbolOf = new Map();
@@ -70,36 +83,47 @@
       : module.twin ? "both ends" : `${module.end} only`;
     return chart.node(module.name, { kind: KIND[module.end], target: link(folder), tip: firstLine(module.about), sub });
   };
-  const partNode = (chart, id, kind) => {
+  const partNode = (chart, id, kind, brief = false) => {  // brief: without its note under the name
     const part = A.parts.find((item) => item.id === id);
-    return chart.node(part.label, { kind, sub: part.note, target: link(part.target), tip: firstLine(files[part.target]?.doc) });
+    return chart.node(part.label, { kind, sub: brief ? "" : part.note, target: link(part.target), tip: firstLine(files[part.target]?.doc) });
   };
 
   // The whole system: each end's modules by level, stacked (calls go down; the kernel under them starts them, lowest
-  // first), and what lies between the ends. A module's uses are drawn when it is hovered.
+  // first), and what lies between the ends. A module's uses are drawn when it is hovered. On a narrow screen it goes
+  // down in one column: where to start, the parts between the ends, the browser, the server under it, each level's
+  // modules in a few rows, the boxes without their notes.
   function topChart() {
-    const chart = new Chart("RIGHT", { overview: true });
+    const column = narrow.matches;
+    const chart = new Chart(column ? "DOWN" : "RIGHT", { overview: true });
     const boxes = {};
+    const startHere = () => chart.group("Start here", () => {
+      chart.node(GUIDES[GUIDE_EXTENSIONS], { kind: "guide", sub: "add a feature as an extension", target: link(GUIDE_EXTENSIONS) });
+      chart.node(GUIDES[GUIDE_CHANGES], { kind: "guide", sub: "the project's rules, and this page", target: link(GUIDE_CHANGES) });
+      for (const root of ["tools", "tests"].filter((item) => A.folders[item])) {
+        chart.node(`${root}/`, { kind: "folder", sub: plural(filesUnder(root).length, "file"), target: link(root) });
+      }
+    }, { kind: "plain", pack: true, first: column });
+    if (column) startHere();
     const end = (key, title, folder, startId, kernelId, extensions) => chart.group(title, () => {
       const rows = [];
       if (extensions) {
         rows.push(chart.group("Level 6 · extensions/", () => extensions.forEach((item) => { boxes[item] = moduleNode(chart, item); }),
-                              { kind: "extensions", pack: true, aspect: 5, target: link("extensions") }));
+                              { kind: "extensions", pack: true, aspect: column ? 1.2 : 5, target: link("extensions") }));
       }
       for (const level of levelsOf(key)) {
         rows.push(chart.group(`Level ${level}`, () => inLevel(key, level).forEach((item) => { boxes[item] = moduleNode(chart, item); }),
-                              { kind: "level", pack: true, aspect: 12 }));
+                              { kind: "level", pack: true, aspect: column ? 1.8 : 12 }));
       }
       const kernel = partNode(chart, kernelId, "kernel");
-      const start = partNode(chart, startId, "boot");
+      const start = partNode(chart, startId, "boot", column);
       rows.forEach((row, index) => chart.edge(row, rows[index + 1] || kernel, index + 1 < rows.length ? {} : { dashed: true, label: "started by" }));
       chart.edge(start, kernel, { label: "starts" });
     }, { kind: key, separate: true, direction: "DOWN", target: link(folder) });
     const extensions = Object.keys(modules).filter((folder) => modules[folder].end === "extension").sort((a, b) => modules[a].name.localeCompare(modules[b].name));
-    const desktop = partNode(chart, "DESK", "desktop");
-    const worker = partNode(chart, "SW", "worker");
-    const protocol = partNode(chart, "PROTO", "contracts");
-    const spec = partNode(chart, "SPEC", "spec");
+    const desktop = partNode(chart, "DESK", "desktop", column);
+    const worker = partNode(chart, "SW", "worker", column);
+    const protocol = partNode(chart, "PROTO", "contracts", column);
+    const spec = partNode(chart, "SPEC", "spec", column);
     const browser = end("browser", "Browser · app/", "app", "MAIN", "BK", extensions);
     const server = end("server", "Server · server/stilo/", "server", "SRV", "SK");
     chart.edge(browser, server, { arrow: "both", label: "HTTP · the event stream" });
@@ -113,13 +137,7 @@
     for (const folder of Object.keys(boxes)) {
       for (const used of usesOf(folder)) if (boxes[used]) chart.edge(boxes[folder], boxes[used], { quiet: true });
     }
-    chart.group("Start here", () => {
-      chart.node(GUIDES[GUIDE_EXTENSIONS], { kind: "guide", sub: "add a feature as an extension", target: link(GUIDE_EXTENSIONS) });
-      chart.node(GUIDES[GUIDE_CHANGES], { kind: "guide", sub: "the project's rules, and this page", target: link(GUIDE_CHANGES) });
-      for (const root of ["tools", "tests"].filter((item) => A.folders[item])) {
-        chart.node(`${root}/`, { kind: "folder", sub: plural(filesUnder(root).length, "file"), target: link(root) });
-      }
-    }, { kind: "plain", pack: true });
+    if (!column) startHere();
     return chart;
   }
 
@@ -287,7 +305,7 @@
         chart.node(`ctx.use("${name}")`, { kind: "module", sub: `${entry.alias}: ${entry.members.slice(0, 4).join(", ")}${entry.members.length > 4 ? ", …" : ""}`,
                                            target: folder ? link(folder) : "" });
       }
-    }, { kind: "level", pack: true, aspect: 2.4, target: fileLink("protocol/extension-api.json") });
+    }, { kind: "level", pack: true, aspect: narrow.matches ? 0.9 : 2.4, target: fileLink("protocol/extension-api.json") });
     const test = chart.node("tests/extension-api.test.mjs", { kind: "check", sub: "holds every extension to the list", target: fileLink("tests/extension-api.test.mjs") });
     chart.edge(folder, sync, { label: "then run" });
     chart.edge(sync, kernel, { label: "app/extensions.js" });
@@ -327,7 +345,7 @@
     pane.push(prose("New features come as extensions wherever they can. An extension is one folder under `extensions/<name>/`: " +
       "a manifest, and a browser module started on level 6, above every core module. It adds its feature through the " +
       "modules' extension points only, so deleting the folder (and running `node tools/protocol-sync.mjs`) leaves an app " +
-      "that works without it. The boxes on the left open the real code; the full reference is docs/EXTENSIONS.md."));
+      say("that works without it. The boxes on the left open the real code; the full reference is docs/EXTENSIONS.md.")));
     pane.push(make("h3", "", "The steps (docs/EXTENSIONS.md)"));
     const list = make("ol", "steps");
     for (const step of A.extensionSteps) list.append(listItem(step));
@@ -425,7 +443,7 @@
       $("#zoom").hidden = false;
     } catch (error) {
       holder.replaceChildren(make("div", "chart-wait", /load/.test(String(error?.message))
-        ? "The diagrams need their layout library (ELK), loaded from the internet, and it could not be reached. The details on the right still work."
+        ? say("The diagrams need their layout library (ELK), loaded from the internet, and it could not be reached. The details on the right still work.")
         : `This diagram could not be drawn: ${error?.message || error}`));
     }
   }
@@ -433,6 +451,18 @@
   $("#zoom-out").addEventListener("click", () => view?.zoomBy(0.8));
   $("#zoom-fit").addEventListener("click", () => view?.fit(1.5));
   $("#zoom-level").addEventListener("click", () => view?.zoomBy(1 / (view?.scale || 1)));  // back to 100%
+  // On a narrow screen the diagram can fill the screen, under its title, keeping its middle; ✕ or Escape puts it back.
+  function fullScreen(on) {
+    const before = view?.svg.getBoundingClientRect();
+    $(".chart").classList.toggle("full", on);
+    document.body.classList.toggle("chart-full", on);
+    $("#zoom-full").setAttribute("aria-label", on ? "Back from full screen" : "Full screen");
+    $("#zoom-full").title = $("#zoom-full").getAttribute("aria-label");
+    const after = view?.svg.getBoundingClientRect();
+    if (before && after) view.panBy((after.width - before.width) / 2, (after.height - before.height) / 2);
+  }
+  $("#zoom-full").addEventListener("click", () => fullScreen(!$(".chart").classList.contains("full")));
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && $(".chart").classList.contains("full")) fullScreen(false); });
 
   // ---- the pane on the right ------------------------------------------------------------------------------
   const linkList = (items) => {
@@ -543,9 +573,9 @@
     const pane = [...heading("Architecture", "Stilo Marker")];
     pane.push(make("div", "doc", "A Markdown workspace for writing, alone or together: a browser app and a Python server, each a " +
       "tiny kernel that starts modules in one-way levels, and extensions above the browser's modules. Every box here is a " +
-      "real module, folder, file or function, read from the code by tools/architecture.py. Click a box (or search above) " +
+      say("real module, folder, file or function, read from the code by tools/architecture.py. Click a box (or search above) " +
       "to go deeper: the system, a module (its files by layer), a file (the functions inside each function drawn inside it), " +
-      "and one function, whose code shows here. Hover a module to see the modules it uses."));
+      "and one function, whose code shows here. Hover a module to see the modules it uses.")));
     pane.push(make("p", "meta", counts()));
     pane.push(make("h3", "", "Read first"));
     pane.push(linkList([[GUIDES[GUIDE_EXTENSIONS], link(GUIDE_EXTENSIONS), "add a feature without touching the core"],
@@ -737,12 +767,16 @@
       [chart, pane, title, hint] = [topChart(), [...heading("Not found", path), make("p", "meta", "Nothing here by that name; the chart shows the whole system.")],
                                     "Not found", ""];
     }
+    // One column: from the details, read under the diagram, back up to it (measured before they change).
+    const back = narrow.matches && $(".chart-frame").getBoundingClientRect().bottom < window.innerHeight / 2;
     $("#chart-title").textContent = title;
-    $("#chart-hint").textContent = hint;
+    $("#chart-hint").textContent = say(hint);
     document.title = `${title} · Stilo Marker architecture`;
     crumbs(path, symbol);
+    $("#crumbs").scrollLeft = $("#crumbs").scrollWidth;  // in one line on a narrow screen: where you are shows
     $("#pane").replaceChildren(...pane);
     $("#pane").scrollTop = 0;
+    if (back) $(".chart").scrollIntoView();
     draw(chart);
   }
 
@@ -797,5 +831,7 @@
 
   // ---- start --------------------------------------------------------------------------------------------------
   window.addEventListener("hashchange", show);
+  narrow.addEventListener("change", () => { if (!narrow.matches) fullScreen(false); show(); });  // its layout and words
+  $(".chart-help").textContent = say($(".chart-help").textContent);
   show();
 })();

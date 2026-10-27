@@ -26,6 +26,7 @@ a { color: var(--accent); }
 .top-links { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .guide-link { font-weight: 600; font-size: .9rem; text-decoration: none; padding: 5px 9px; border-radius: 6px; background: var(--accent-soft); }
 .guide-link:hover { text-decoration: underline; }
+.guide-link .short { display: none; }
 .search { position: relative; width: min(420px, 50vw); }
 .search input { width: 100%; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg);
                 color: var(--ink); font: inherit; font-size: .92rem; }
@@ -58,6 +59,10 @@ a { color: var(--accent); }
 .zoom button { min-width: 32px; height: 30px; border: 0; border-radius: 5px; background: transparent; color: var(--ink);
                font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer; }
 .zoom button:hover, .zoom button:focus-visible { background: var(--panel); outline: none; }
+.zoom svg { width: 15px; height: 15px; vertical-align: middle; fill: none; stroke: currentColor; stroke-width: 1.8;
+            stroke-linecap: round; stroke-linejoin: round; }
+#zoom-full { display: none; }
+.chart.full #zoom-full .open, .chart:not(.full) #zoom-full .close { display: none; }
 #zoom-level { min-width: 54px; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--muted); }
 .chart-help { position: absolute; left: 12px; bottom: 10px; margin: 0; font-size: .75rem; color: var(--muted);
               pointer-events: none; }
@@ -94,18 +99,45 @@ a { color: var(--accent); }
 .code .kw { color: var(--kw); } .code .str { color: var(--str); } .code .com { color: var(--com); font-style: italic; }
 .code .num { color: var(--num); } .code .def { color: var(--def); } .code .dec { color: var(--def); }
 
+/* A narrow screen: the page scrolls as a whole, the diagram first and its details under it. The diagram leaves room
+   above and below it for a finger to scroll the page, and can fill the screen (the ⤢ button). */
 @media (max-width: 860px) {
-  .layout { grid-template-columns: minmax(0, 1fr); }
-  .chart { border-right: 0; border-bottom: 1px solid var(--line); min-height: 55vh; }
-  .top { flex-wrap: wrap; padding: 8px 16px; }
+  html, body { height: auto; }
+  body { min-height: 0; }
+  .top { flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
+  .top-links { flex: 1 1 100%; gap: 6px; }
+  .brand { margin-right: auto; font-size: 1rem; }
+  .brand span { display: none; }
+  .guide-link { font-size: .82rem; padding: 4px 8px; }
+  .guide-link .long { display: none; }
+  .guide-link .short { display: inline; }
   .search { width: 100%; }
-  .pane { padding: 14px 16px 40px; }
-  .chart-frame { min-height: 52vh; margin: 0 16px 12px; }
+  .search input { font-size: 16px; padding: 6px 10px; }  /* 16px: a phone does not zoom the page into the field */
+  .crumbs { flex-wrap: nowrap; overflow-x: auto; white-space: nowrap; padding: 5px 10px; scrollbar-width: none; }
+  .crumbs::-webkit-scrollbar { display: none; }
+  .layout { display: block; }
+  .chart { border-right: 0; border-bottom: 1px solid var(--line); }
+  .chart-head { padding: 10px 12px 6px; }
+  .chart-head h1 { font-size: 1.05rem; word-break: break-word; }
+  .chart-head p { font-size: .84rem; }
+  .chart-frame { flex: none; height: 60vh; height: 60svh; min-height: 280px; margin: 0 12px 12px; }
   .chart-help { display: none; }
+  #zoom-full { display: inline-block; }
+  .chart.full { position: fixed; inset: 0; z-index: 30; background: var(--bg); }
+  .chart.full .chart-frame { flex: 1; height: auto; min-height: 0; }
+  body.chart-full { overflow: hidden; }
+  .pane { overflow: visible; padding: 14px 16px 40px; }
+  .pane .api-row { grid-template-columns: 76px minmax(0, 1fr); }
+  .code { font-size: .76rem; }
+}
+@media (pointer: coarse) {
+  .zoom button { min-width: 40px; height: 38px; }
+  .pane ul.links a, .results a { padding-top: 8px; padding-bottom: 8px; }
 }
 
 /* the diagrams (diagram.js): cards with a badge for their kind, tinted groups, right-angled edges */
-.graph { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; user-select: none;
+.graph { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
+         -webkit-touch-callout: none;
          background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 22px 22px; outline: none; }
 .graph.panning { cursor: grabbing; }
 .graph text { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }

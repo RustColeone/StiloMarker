@@ -1,8 +1,8 @@
 "use strict";
 // Diagrams for the architecture page. A chart is described as nodes, groups and edges (Chart), laid out by ELK (the
 // Eclipse Layout Kernel: layered, with right-angled edges and groups inside groups) and drawn here as SVG, with
-// zooming and panning (wheel, drag, pinch, keys and buttons). Hovering a box lights up what it is connected to; a
-// quiet edge (a module's uses on the top map) shows only then.
+// zooming and panning (wheel, drag, pinch, keys and buttons). Hovering a box (or holding a finger on it) lights up
+// what it is connected to; a quiet edge (a module's uses on the top map) shows only then.
 (() => {
   const ELK_URLS = ["https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js",
                     "https://unpkg.com/elkjs@0.9.3/lib/elk.bundled.js"];
@@ -36,10 +36,10 @@
     }
     // pack: its boxes in a grid (they have no edges inside); separate: laid out on its own, in its own direction (an
     // edge from inside it to outside is drawn as a curve); target: where a click on its title goes
-    // aspect: a packed group's width to height (wide: one row)
-    group(title, build, { kind = "plain", pack = false, aspect = 0, separate = false, direction = "", target = "", current = false, tip = "" } = {}) {
+    // aspect: a packed group's width to height (wide: one row); first: on a row of its own before everything else
+    group(title, build, { kind = "plain", pack = false, aspect = 0, separate = false, direction = "", target = "", current = false, tip = "", first = false } = {}) {
       const id = `g${this.count++}`;
-      this.groups.push({ id, title: String(title), kind, pack, aspect, separate, direction, target, current, tip: String(tip || ""),
+      this.groups.push({ id, title: String(title), kind, pack, aspect, separate, direction, target, current, tip: String(tip || ""), first,
                          parent: this.stack.at(-1) || null });
       this.stack.push(id);
       build();
@@ -91,6 +91,8 @@
         "elk.separateConnectedComponents": "true", "elk.spacing.componentComponent": "34", "elk.aspectRatio": "1.7",
         "elk.edgeLabels.placement": "CENTER", "elk.padding": "[top=24,left=24,bottom=24,right=24]",
         ...(compact ? { "elk.hierarchyHandling": "SEPARATE_CHILDREN" } : {}),
+        // a group first on its own row is laid out with the rest, not packed beside it as a part of its own
+        ...(chart.groups.some((group) => group.first) ? { "elk.separateConnectedComponents": "false" } : {}),
       },
     };
     const holders = new Map([[null, root]]);
@@ -113,7 +115,8 @@
                                "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
                                "elk.edgeLabels.placement": "CENTER" } : {}),
         ...(packed ? { "elk.hierarchyHandling": "SEPARATE_CHILDREN", "elk.algorithm": "rectpacking",
-                       "elk.aspectRatio": String(group.aspect || (group.pack ? 2.2 : 1.5)), "elk.spacing.nodeNode": group.pack ? "12" : "18" } : {}) } });
+                       "elk.aspectRatio": String(group.aspect || (group.pack ? 2.2 : 1.5)), "elk.spacing.nodeNode": group.pack ? "12" : "18" } : {}),
+        ...(group.first ? { "elk.layered.layering.layerConstraint": "FIRST_SEPARATE" } : {}) } });
     }
     for (const group of chart.groups) holders.get(group.parent).children.push(holders.get(group.id));
     for (const node of chart.nodes) holders.get(node.parent).children.push({ id: node.id, ...boxSize(node) });
@@ -301,17 +304,18 @@
         (nodes.get(item.other) || groups.get(item.other))?.classList.toggle("on", on);
       }
     };
+    const hover = (id, on) => (event) => { if (event.pointerType !== "touch") light(id, on); };  // a finger holds instead
     for (const [id, g] of nodes) {
-      g.addEventListener("pointerenter", () => light(id, true));
-      g.addEventListener("pointerleave", () => light(id, false));
+      g.addEventListener("pointerenter", hover(id, true));
+      g.addEventListener("pointerleave", hover(id, false));
       g.addEventListener("focus", () => light(id, true));
       g.addEventListener("blur", () => light(id, false));
     }
     for (const [id, g] of groups) {
       const hit = g.querySelector(".grp-hit");
       if (!hit) continue;
-      hit.addEventListener("pointerenter", () => light(id, true));
-      hit.addEventListener("pointerleave", () => light(id, false));
+      hit.addEventListener("pointerenter", hover(id, true));
+      hit.addEventListener("pointerleave", hover(id, false));
     }
     const bounds = where.get("root");
     const items = [...chart.nodes, ...chart.groups];
@@ -320,7 +324,7 @@
     const down = chart.direction === "DOWN";
     const first = chart.nodes.map((node) => where.get(node.id)).filter(Boolean)
       .sort((a, b) => (down ? a.y - b.y || a.x - b.x : a.x - b.x || a.y - b.y))[0] || null;
-    return { svg, world, bounds: { x: 0, y: 0, width: bounds.width, height: bounds.height }, first, overview: chart.overview,
+    return { svg, world, bounds: { x: 0, y: 0, width: bounds.width, height: bounds.height }, first, down, light, overview: chart.overview,
              current: current ? where.get(current.id) : null,
              targets: new Map(items.filter((item) => item.target).map((item) => [item.id, item.target])) };
   }
@@ -341,6 +345,14 @@
           this.origin = this.point(event);
           this.moved = false;
           this.pressed = event.target.closest(".node.link") || (event.target.classList.contains("grp-hit") ? event.target.parentNode : null);
+          this.byTouch = event.pointerType === "touch";
+          if (this.held) { this.light(this.held, false); this.held = null; }
+          // A finger held still on a box lights it up as hovering does, and lifting it then opens nothing; the box
+          // stays lit until the next touch.
+          const box = event.target.closest(".node") || (event.target.classList.contains("grp-hit") ? event.target.parentNode : null);
+          if (this.byTouch && box) {
+            this.holding = setTimeout(() => { if (!this.moved) { this.held = box.dataset.id; this.light(this.held, true); } }, 400);
+          }
         }
         svg.setPointerCapture(event.pointerId);
       });
@@ -349,7 +361,7 @@
         const before = this.pointers.get(event.pointerId);
         const now = this.point(event);
         if (this.pointers.size === 1) {
-          if (Math.hypot(now[0] - this.origin[0], now[1] - this.origin[1]) > 4) this.moved = true;
+          if (Math.hypot(now[0] - this.origin[0], now[1] - this.origin[1]) > (this.byTouch ? 8 : 4)) this.moved = true;
           if (this.moved) { this.x += now[0] - before[0]; this.y += now[1] - before[1]; this.apply(); svg.classList.add("panning"); }
         } else if (this.pointers.size === 2) {  // pinch: zoom by the change in distance, about the middle
           const [other] = [...this.pointers.entries()].filter(([id]) => id !== event.pointerId).map(([, point]) => point);
@@ -359,16 +371,19 @@
           this.moved = true;
         }
         this.pointers.set(event.pointerId, now);
+        if (this.moved) clearTimeout(this.holding);
       });
       const release = (event) => {
         this.pointers.delete(event.pointerId);
+        clearTimeout(this.holding);
         svg.classList.remove("panning");
-        if (event.type === "pointerup" && !this.moved && this.pressed && this.pointers.size === 0) this.go(this.pressed);
+        if (event.type === "pointerup" && !this.moved && !this.held && this.pressed && this.pointers.size === 0) this.go(this.pressed);
         if (!this.pointers.size) this.pressed = null;
       };
       svg.addEventListener("pointerup", release);
       svg.addEventListener("pointercancel", release);
       svg.addEventListener("dblclick", (event) => { if (!event.target.closest(".node")) this.zoomAt(1.7, ...this.point(event)); });
+      svg.addEventListener("contextmenu", (event) => { if (this.byTouch) event.preventDefault(); });  // holding is not a menu
       svg.addEventListener("keydown", (event) => {
         const node = event.target.closest?.(".node.link, .grp.link");
         if (node && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); this.go(node); return; }
@@ -429,10 +444,14 @@
       this.set(scale, 40 - first.x * scale, Math.max(24, box.height / 3 - (first.y + first.height / 2) * scale));
     }
     // the current box centred; else the whole diagram if it stays readable (an overview: unless it would be too small
-    // to read at all, on a phone), else its beginning at 70%
+    // to read at all, 30%, or half size on a phone); else a diagram going down at its full width, from its top, if that
+    // is readable; else its beginning at 70%
     start() {
       if (this.current) { this.focusOn(this.current, Math.max(0.85, Math.min(1, this.fitScale()))); return; }
-      if ((this.overview && this.fitScale() >= 0.3) || this.fitScale() >= 0.55) { this.fit(1); return; }
+      const box = this.svg.getBoundingClientRect();
+      if ((this.overview && this.fitScale() >= (box.width < 600 ? 0.5 : 0.3)) || this.fitScale() >= 0.55) { this.fit(1); return; }
+      const across = Math.min(1, (box.width - 32) / this.bounds.width);
+      if (this.down && across >= 0.45) { this.set(across, (box.width - this.bounds.width * across) / 2, 16); return; }
       this.begin(0.7);
     }
   }

@@ -34,6 +34,11 @@ reader.
   On the top map, a module's uses show while it is hovered.
 - Diagrams zoom and pan: scroll or pinch to zoom, drag to move, the − / % / + / Fit buttons, or the keys + − 0 and the
   arrows. `style.css` holds the look, in the app's own colours, light and dark.
+- On a phone (860px wide or less) the page is one column that scrolls as a whole: the diagram, then its details under
+  it. The top map goes down instead of across (where to start, then the browser, then the server), a diagram opens at
+  a size that can be read, and ⤢ lets it fill the screen. A finger held on a box does what hovering does (lights up what
+  it is connected to; on the top map, the modules it uses) and opens nothing; a tap goes in. The page's words follow
+  (tap, hold, below). `tests/architecture-phone-browser.py` holds it to this.
 
 **When the shape changes** (a new kind of box on the top map, a new step in a guide), change `PARTS` in
 `tools/architecture.py` or the guides in `app.js` in the same commit.
