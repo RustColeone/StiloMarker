@@ -153,7 +153,7 @@ async def main():
 
         # The find bar opens in the editor worked in and searches its text.
         await page.keyboard.press('Control+f')
-        await page.keyboard.type('Requirements')
+        await page.keyboard.type('Linked Notes')
         await page.wait_for_timeout(400)
         now = await editors()
         assert now['left']['findBar'] and not now['right']['findBar'] and now['left']['highlights'] > 0, now

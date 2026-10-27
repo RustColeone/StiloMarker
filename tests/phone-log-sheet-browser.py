@@ -182,11 +182,13 @@ async def main():
         assert (now['bottom'], now['right']) == ('closed', 'open'), now
         await page.locator('#chat-collapse-button').click()
 
-        # Settings → the Log's entry names the sheet's state on the phone.
+        # View → the Log's entry names the sheet's state on the phone (v0.3.18:
+        # its one entry; Settings had a second).
         await page.locator('#mobile-menu-button').click()
-        await page.locator('#settings-menu-button').click()
-        title = await page.locator('[data-command="shell.log-panel"]').text_content()
-        assert title.strip() == 'Show Log Panel', title
+        await page.locator('#view-menu-button').click()
+        title = await page.locator('[data-command="shell.toggle-log"]').text_content()
+        assert title.strip() == 'Show Log', title
+        assert await page.locator('[data-command="shell.log-panel"]').count() == 0, 'no second entry under Settings'
         await page.locator('#mobile-menu-button').click()
 
         # The desktop shows the Log: on the phone it takes no row of the note.

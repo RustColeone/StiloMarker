@@ -3404,14 +3404,11 @@ p {
   animation: flash-border-error 1.4s ease-out forwards;
 }
 
-/* Account login block (accounts mode / state 3) — visually set off from the
-   PIN connect controls above it. */
+/* Account login block (accounts mode / state 3), under its section's heading
+   (it was set off by a line from the PIN controls once above it). */
 .account-login {
   display: grid;
   gap: 8px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
 }
 
 .account-login[hidden] {

@@ -18,9 +18,10 @@ export function createFrame({ settings, events, registry, pages, commands, run, 
 
   const toggleLog = () => areas.toggle("bottom");
   commands.add({ id: "shell.toggle-explorer", title: "Toggle the Left Window", menu: { id: "view", group: 0, order: 1 }, run: () => areas.toggle("left") });
-  commands.add({ id: "shell.toggle-log", title: "Toggle Log", menu: { id: "view", group: 0, order: 5 }, run: toggleLog });
+  // One entry for the Log, saying what it does now, as Show Chat / Hide Chat beside it
+  // (Settings had a second, "Show Log Panel").
+  commands.add({ id: "shell.toggle-log", title: () => (areas.shown("bottom") ? "Hide Log" : "Show Log"), menu: { id: "view", group: 0, order: 5 }, run: toggleLog });
   commands.add({ id: "shell.open-settings", title: "Open Settings", menu: { id: "settings", group: 0, order: 1 }, run: () => openSettings("appearance") });
-  commands.add({ id: "shell.log-panel", title: () => (areas.shown("bottom") ? "Hide Log Panel" : "Show Log Panel"), menu: { id: "settings", group: 0, order: 2 }, run: toggleLog });
   // The status bar's collaborators (Sync's) reveal the Session section.
   commands.add({ id: "layout.show-session", title: "Show the Session Panel", run: () => areas.revealSection("session") });
   document.getElementById("settings-button")?.addEventListener("click", () => openSettings("appearance"));

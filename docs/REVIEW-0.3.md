@@ -601,7 +601,7 @@ selection) and notifies; the left editor follows.
 
 ### 1.9 Debugging
 
-- **The log panel** (View → Toggle Log): the "Trace" tab lists every view
+- **The log panel** (View → Show Log): the "Trace" tab lists every view
   change by action name (`show source tab`, `open tab to the side`, …).
   Editor trace lines (spaces, Enter) carry `editor=left|right`.
 - **Caret lines.** "followed a change elsewhere (not focused): kept sel=…"

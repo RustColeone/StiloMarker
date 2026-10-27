@@ -53,7 +53,7 @@ Panels can be toggled from the `View` menu.
 
 ### The Log and its command line
 
-The Log (View → Toggle Log) lists what the app did. Under it is a command
+The Log (View → Show Log) lists what the app did. Under it is a command
 line: type part of a command's name and pick it from the suggestions (↑ ↓ to
 choose, Enter to run, Tab to complete, Esc to close). With nothing typed it
 lists every command. `View → Run Command…` (`F1`) opens the Log with the
@@ -567,7 +567,7 @@ with the note still showing at its left (it takes the whole width while you
 type). Tap the note, drag the drawer to the right, or use its › button to
 close it. A swipe that starts a finger's width inside the left or right edge
 opens those drawers too (the edge itself is your phone's "back"). The Log
-(View → Toggle Log) opens as a sheet over the lower half of the screen; drag
+(View → Show Log) opens as a sheet over the lower half of the screen; drag
 its header up for the full height and down again to shrink or close it, or
 tap above it, or use its ×. Opening it on the phone does not change whether
 the desktop shows it.
@@ -943,14 +943,26 @@ When a user asks you to update a character file after new writing:
 
 ## 17. Settings
 
-`Settings` menu or the settings panel:
+`Settings → Open Settings`, or the gear at the bottom of the activity bar,
+opens the Settings dialog, a page for each tab on its left:
 
-- **Server URL** — URL of the collaboration backend, e.g. `http://localhost:8000`.
-- **PIN** — Session PIN for the collaboration backend.
-- **Display Name** — Your name shown to other participants in the session.
-- **Ping Server** — Test connectivity without joining.
-- **Connect / Disconnect** — Join or leave the collaboration session.
-- **Toggle Log Panel** — Show or hide the debug log panel.
+- **Appearance** — the theme (below), the left window and the preview, the
+  source editor (font, size, word wrap, what Tab inserts, the formatting
+  toolbar), Auto-save and the spelling check.
+- **Agent** — who answers the Agent and Chats: the server, or **My own API
+  key** (see Chat Panel).
+- **Collaboration** — **Server**: its URL (left blank: this site's own),
+  **Remember & reconnect automatically**, and **Ping Server** to check it.
+  **Account**: Log In and Log Out, on a server with accounts. **Shared
+  session**: your **Display Name**, someone's **PIN** to **Join** their
+  session, and **Share This Workspace** to let others join yours.
+- **Accounts** (an admin, signed in) and **Server** (the desktop app): see
+  Collaboration Backend and Application Layout.
+
+The Settings menu also has **Reload Window**, and the resets: **Reset to
+Default Workspace**, **Empty Everything** and **Clear All Cache**. The Log is
+shown and hidden from View → Show Log / Hide Log.
+
 - **Theme** — Settings → Appearance shows each theme as a small card in its
   own colours: **System** (light or dark as your device is), **Light**,
   **Dark**, **Paper** (warm off-white, for long writing), **Midnight** (deep

@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { renderMarkdown } from "../app/modules/editor/model/markdown.js";
+import { extractMarkdownLinks, renderMarkdown } from "../app/modules/editor/model/markdown.js";
 import { createHighlighter } from "../app/modules/editor/adapters/highlight.js";
 
 const render = (text) => renderMarkdown(text).replace(/\n/g, "");
@@ -64,4 +64,11 @@ test("highlighting draws every line exactly as typed (list spacing included)", (
   assert.match(out[1].html, /<span class="token-list-mark">-<\/span> {3}three spaces/);
   assert.match(out[6].html, /<span class="token-list-mark">1\.<\/span>/);
   assert.match(out[8].html, /<span class="token-list-mark">\[ \]<\/span>/);
+});
+
+test("links: one written inside a code span is no link (Linked Notes listed it, v0.3.18)", () => {
+  const links = (text) => extractMarkdownLinks(text).map(({ label, href }) => `${label}->${href}`);
+  assert.deepEqual(links("Write `[a name](other-file.md)` for a link; [the diagram](welcome.bmap) is one."), ["the diagram->welcome.bmap"]);
+  assert.deepEqual(links("[`code` in its label](notes.md) and `<https://example.com>`"), ["code in its label->notes.md"]);
+  assert.match(render("`[a](b.md)`"), /<code>\[a\]\(b\.md\)<\/code>/, "the preview shows it as written");
 });

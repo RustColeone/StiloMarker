@@ -84,7 +84,9 @@ async def main():
         labels = await page.locator('.menu-bar .menu-trigger').all_inner_texts()
         assert labels == ['File', 'Edit', 'Create', 'View', 'Settings'], labels
         counts = await page.evaluate('[...document.querySelectorAll(".menu-bar .menu-popover")].map((p) => [p.querySelectorAll("button").length, p.querySelectorAll(".menu-separator").length])')
-        assert counts == [[9, 3], [6, 2], [10, 1], [6, 1], [6, 2]], counts  # Edit: Find in Files too. Create: md, mtree, urldb, bmap, persona, mermaid, html, text, table, folder; a line between groups
+        # Edit: Find in Files too. Create: md, mtree, urldb, bmap, persona, mermaid, html, text, table, folder; a line
+        # between groups. Settings: the Log's entry only under View since v0.3.18.
+        assert counts == [[9, 3], [6, 2], [10, 1], [6, 1], [5, 2]], counts
         save = await page.evaluate('[...document.querySelectorAll("[data-command=\'workspace.save\'] span")].map((s) => s.textContent)')
         assert save == ['Save', 'Ctrl+S'], save
         assert await page.locator('#file-menu').is_hidden()

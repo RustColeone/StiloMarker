@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-27 · release `v0.3.17` built on `dev` (not deployed); `v0.3.15`
+Last updated: 2026-10-27 · release `v0.3.18` built on `dev` (not deployed); `v0.3.15`
 deployed (public checks passed) and drafted as a desktop release (GitHub, not yet
 published); `v0.3.0` is
 the stable version. v0.2.30–v0.2.42 were gone over again before calling it so; what that found is
@@ -16,21 +16,9 @@ fixed in v0.2.39–v0.2.42. Where things stand after v0.3.11, what is fixed and 
 
 ## Open
 
-Two, found using the app as a first visitor would (2026-10-27, against a
-scratch server); the small things found with them are fixed in v0.3.17.
-
-### O11. The welcome file is out of date
-**Confidence:** confirmed · **Severity:** low (every new project shows it)
-
-`Template/welcome.md`, the first file a first visit shows, reads like the
-developers' README: Requirements (Node.js, Python), `npm start` on
-`localhost:4173`, the backend's default PIN. It names things the app no
-longer has (`Open Directory`, now Import Local Folder; Settings → Toggle Log
-Panel; `IMAGE URL` labels) and describes collaboration as a server URL, PIN
-and Connect, from before accounts and cloud workspaces. Sections 3 and 4
-(the explorer, the two editors) are current. Next step: rewrite it for
-someone using the site, from `server/MANUAL.md`; content, so it waits for
-the user.
+One, found using the app as a first visitor would (2026-10-27, against a
+scratch server); the small things found with it are fixed in v0.3.17, and
+O11 (the welcome file) in v0.3.18.
 
 ### O12. The browser's own workspace forgets its tabs on a reload
 **Confidence:** confirmed · **Severity:** low
@@ -98,6 +86,39 @@ lost while the page is in view count, not one left on purpose).
 ---
 
 ## Fixed
+
+### v0.3.18: the welcome file, written for someone using the site (O11)
+
+Found with v0.3.17's small things; the user asked for it and the cosmetic
+ones polished (2026-10-27).
+
+- **The welcome file** (`Template/welcome.md`, the first file a first visit
+  shows) read like the developers' README: Requirements (Node.js, Python),
+  `npm start` on `localhost:4173`, the backend's default PIN; it named things
+  the app no longer has (`Open Directory`, Settings → Toggle Log Panel,
+  `IMAGE URL` labels) and described collaboration from before accounts. It
+  is written again for someone using the site: where the work is kept and
+  how to keep a copy, writing in the two panes, links (with a real one, to
+  the sample diagram), the sample's files, working with others, the Agent
+  and Chats, and the rest in a line each. Every menu item and shortcut it
+  names was checked in the app. One line per paragraph: the preview breaks
+  a line where the text does.
+- **Linked Notes listed a link written inside a code span** (how to write a
+  link, `` `[a](b.md)` ``, showed as a broken outgoing link); the preview
+  shows it as code, and now the panel leaves it out too
+  (`extractMarkdownLinks`, `editor/model/markdown.js`).
+- **The Log had two entries with two names**: View → Toggle Log and
+  Settings → Show Log Panel. It has one, in View, saying what it does now
+  (Show Log / Hide Log, as Show Chat / Hide Chat beside it).
+- **Settings → Collaboration's Account section** had a line under its heading
+  with nothing above it to set off (left from when the sign-in sat under the
+  PIN controls); it is gone, and the section reads as Server's does.
+- `server/MANUAL.md`'s Settings section described Connect / Disconnect and a
+  Toggle Log Panel; it lists the dialog's pages as they are.
+
+Tests: `markdown-syntax.test.mjs` (a link inside a code span; fails before),
+`phone-log-sheet-browser.py` checks the one entry under View (it read the
+Settings one), `two-editors-browser.py` finds a phrase of the new welcome.
 
 ### v0.3.17: small things a first visit ran into
 

@@ -416,7 +416,10 @@ function extractMarkdownLinks(markdown) {
       continue;
     }
 
-    parseInlineElements(line, references).forEach((token) => {
+    // A code span shows its text as written, as the preview does: a link
+    // written inside one (`[a](b.md)`, how to write a link) is no link.
+    const outsideCode = line.replace(/`([^`]+)`/g, (_, code) => code.replace(/[[\]()<>]/g, " "));
+    parseInlineElements(outsideCode, references).forEach((token) => {
       if (token.type === "link") {
         links.push({
           label: token.label.trim() || token.href,
