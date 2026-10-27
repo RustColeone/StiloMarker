@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-26 · release `v0.3.16` built on `dev` (not deployed); `v0.3.15`
+Last updated: 2026-10-27 · release `v0.3.17` built on `dev` (not deployed); `v0.3.15`
 deployed (public checks passed) and drafted as a desktop release (GitHub, not yet
 published); `v0.3.0` is
 the stable version. v0.2.30–v0.2.42 were gone over again before calling it so; what that found is
@@ -16,7 +16,34 @@ fixed in v0.2.39–v0.2.42. Where things stand after v0.3.11, what is fixed and 
 
 ## Open
 
-None. O9 (the caret after a reconnect) was fixed in v0.3.13 and O10 (deleting
+Two, found using the app as a first visitor would (2026-10-27, against a
+scratch server); the small things found with them are fixed in v0.3.17.
+
+### O11. The welcome file is out of date
+**Confidence:** confirmed · **Severity:** low (every new project shows it)
+
+`Template/welcome.md`, the first file a first visit shows, reads like the
+developers' README: Requirements (Node.js, Python), `npm start` on
+`localhost:4173`, the backend's default PIN. It names things the app no
+longer has (`Open Directory`, now Import Local Folder; Settings → Toggle Log
+Panel; `IMAGE URL` labels) and describes collaboration as a server URL, PIN
+and Connect, from before accounts and cloud workspaces. Sections 3 and 4
+(the explorer, the two editors) are current. Next step: rewrite it for
+someone using the site, from `server/MANUAL.md`; content, so it waits for
+the user.
+
+### O12. The browser's own workspace forgets its tabs on a reload
+**Confidence:** confirmed · **Severity:** low
+
+A cloud workspace's groups and tabs come back after a reload (kept in this
+browser and on the server); the browser's own workspace keeps only its
+active file, so after a reload both groups show that one file. The cache
+(`cacheWorkspaceView` in `editor/adapters/tabs.js`) is written only for a
+cloud workspace. Next step: keep it for the own workspace too (by its copy's
+key) and restore it once the restored project is drawn, minding the first
+visit's template and a cloud workspace resuming over it. Not a small fix.
+
+O9 (the caret after a reconnect) was fixed in v0.3.13 and O10 (deleting
 the active file) in v0.3.14. Before them, everything the stability review of 2026-10-21 found (the app as a PWA,
 in Electron, with the user's own key and no server; each found by an
 experiment) is fixed: the storage limit (O0) in v0.2.19, a copy per
@@ -71,6 +98,35 @@ lost while the page is in view count, not one left on purpose).
 ---
 
 ## Fixed
+
+### v0.3.17: small things a first visit ran into
+
+Found using the app as a first visitor would, on a desktop and a phone
+(2026-10-27, against a scratch server), asked for by the user as cheap fixes
+a user would meet:
+
+- **"No server checked yet." with the server reachable.** The page pings
+  its server silently at start; that marked it reachable but kept the
+  placeholder detail, which Session and Settings → Server showed. A silent
+  ping that finds the server from offline now says "Server reachable — not
+  in a shared session." (`cloud/adapters/accounts.js`).
+- **Typing after Create → New Markdown was lost.** The new file opened with
+  the keys left on the page. Its editor now takes them, from the menu, the
+  explorer's + and the New File dialog; not on the phone, where the explorer
+  stays open over it (`explorer/adapters/naming.js`). The empty file's editor
+  said "Select or create a file"; it says "Empty file — start typing".
+- **Escape left the explorer's menus open** (right-click, + and the filter);
+  it closes them now, as it does the tab menu (`explorer/adapters/tree.js`).
+  Not the window resizing, as the tab menu's does: on a phone the keyboard
+  going down would close the + menu as it opens.
+- **Find in Files cut off a match far into its line.** A result kept 40
+  characters before the match, more than the list shows at its usual width;
+  it keeps 16 (`editor/model/search.js`).
+
+Test: `small-things-browser.py` (new; each of its checks fails before, run
+alone against v0.3.16); `editor-search.test.mjs` checks the shorter lead.
+Found and left open: O11 (the welcome file) and O12 (the own workspace's
+tabs).
 
 ### v0.3.16: each editor keeps its own place in a file
 

@@ -46,7 +46,11 @@ test("search: a match's snippet: its line around it, cut with … where long", (
   assert.equal(cut.before, `…${"x".repeat(10)}`);
   assert.equal(cut.hit, "NEEDLE");
   assert.equal(cut.after, `${"y".repeat(20)}…`);
-  const han = "第七回 灯笼在风中摇晃。她又点亮了灯笼。";
+  // Little before the match, so it shows in the narrow list (it was cut off past 30 or so).
+  const deep = "- Python 3.10+ if you want to run the collaboration backend";
+  const [inside] = locate(deep, findMatches(deep, searchPattern("collaboration").pattern));
+  assert.deepEqual(snippet(deep, inside), { before: "…want to run the ", hit: "collaboration", after: " backend" });
+  const han ="第七回 灯笼在风中摇晃。她又点亮了灯笼。";
   const hits = locate(han, findMatches(han, searchPattern("灯笼").pattern));
   assert.equal(hits.length, 2);
   assert.equal(snippet(han, hits[1]).hit, "灯笼");

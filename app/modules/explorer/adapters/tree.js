@@ -237,6 +237,12 @@ function createExplorerView({ container, surface, contextMenu, onOpenFile, onOpe
     if (contextMenu.hidden || contextMenu.contains(event.target)) return;
     hideMenu();
   });
+  // Escape closes it too, as it does the tab menu. (Not the window resizing, as
+  // the tab menu's does: on a phone the keyboard going down resizes it, and the
+  // + tapped from the file-name box would close the menu it opened.)
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !contextMenu.hidden) hideMenu();
+  });
 
   // Touch long-press → context menu. The native `contextmenu` event is unreliable
   // on mobile (text selection / callout can swallow it), so detect a stationary

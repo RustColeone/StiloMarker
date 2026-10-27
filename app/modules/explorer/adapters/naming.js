@@ -4,6 +4,12 @@
 import { fileTypeExtension, findChildByName, getPath } from "../../workspace/index.js";
 
 export function createNaming(app) {
+  // A new file is for writing in: its editor takes the keys typed next. Not on
+  // the phone, where the explorer stays open over it (and the keyboard would rise).
+  function writeInNew() {
+    if (!app.shell.frame.isPhone()) app.focusEditor();
+  }
+
   function createItem(kind) {
     const project = app.controller.getProject();
     const parent = app.getSelectedParent(project);
@@ -30,7 +36,10 @@ export function createNaming(app) {
       // Open the new file as the active document (so it's what you're editing) but
       // leave the explorer open so it can be renamed/managed without reopening it.
       const created = findChildByName(app.controller.getProject(), parent.id, name);
-      if (created) app.setActiveSourceFile(created.id);
+      if (created) {
+        app.setActiveSourceFile(created.id);
+        writeInNew();
+      }
       app.showToast(`Created ${name}`);
     } catch (error) {
       app.notify(error.message);
@@ -129,6 +138,7 @@ export function createNaming(app) {
         app.elements.newFileName.value.trim()
       );
       app.elements.newFileDialog.close();
+      writeInNew(); // after the dialog gives the focus back to what opened it
     } catch (error) {
       if (app.elements.newFileStatus) {
         app.elements.newFileStatus.textContent = error.message || "Could not create the file.";

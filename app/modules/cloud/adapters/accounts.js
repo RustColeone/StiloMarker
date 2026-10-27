@@ -10,10 +10,13 @@ export function createAccounts(app) {
       const result = await pingServer(app.elements.serverUrlInput.value);
       app.settings.change({ serverUrl: app.elements.serverUrlInput.value.trim() });
       // Capability discovery: reveal the account Login / Share controls only when
-      // this server advertises them (state 3).
+      // this server advertises them (state 3). A silent ping that finds the server
+      // from offline says so (else "No server checked yet." stayed under Session).
       app.syncState.change({
         status: app.syncState.status === "connected" ? "connected" : "reachable",
-        ...(silent ? {} : { detail: typeof result === "string" ? result : (result.message || "Server responded to ping.") }),
+        ...(silent
+          ? (app.syncState.status === "offline" ? { detail: "Server reachable — not in a shared session." } : {})
+          : { detail: typeof result === "string" ? result : (result.message || "Server responded to ping.") }),
         accountsAvailable: Boolean(result && typeof result === "object" && result.accounts),
         hostingAvailable: Boolean(result && typeof result === "object" && result.hosting)
       }, "the server answered a ping");

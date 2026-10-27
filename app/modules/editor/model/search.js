@@ -80,14 +80,15 @@ export function locate(text, matches) {
   });
 }
 
-// The match's line around it: { before, hit, after } (cut to `reach` characters each side,
-// with … where cut, leading space dropped), for a result list.
-export function snippet(text, match, reach = 40) {
+// The match's line around it: { before, hit, after } (cut to `lead` characters before it,
+// so the match shows in a narrow list, and twice `reach` after; with … where cut, leading
+// space dropped), for a result list.
+export function snippet(text, match, reach = 40, lead = 16) {
   const lineStart = match.lineStart ?? text.lastIndexOf("\n", match.start - 1) + 1;
   const newline = text.indexOf("\n", match.end);
   const lineEnd = newline === -1 ? text.length : newline;
   const hitEnd = Math.min(match.end, lineEnd);
-  let from = Math.max(lineStart, match.start - reach);
+  let from = Math.max(lineStart, match.start - Math.min(reach, lead));
   const to = Math.min(lineEnd, hitEnd + reach * 2);
   let before = text.slice(from, match.start);
   if (from === lineStart) before = before.trimStart();

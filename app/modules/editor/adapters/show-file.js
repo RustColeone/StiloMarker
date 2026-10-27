@@ -61,7 +61,7 @@ export function createShowFile(app, composing) {
     elements.editorContent.contentEditable = isTextFile && !readOnly ? "true" : "false";
     elements.editorContent.dataset.readonly = readOnly ? "true" : "false";
     elements.editorContent.dataset.placeholder = isTextFile
-      ? "Select or create a file"
+      ? "Empty file — start typing"
       : "Image assets are preview-only in the source pane.";
     const nextText = isTextFile
       ? selectedPart
