@@ -28,7 +28,7 @@ export async function loadModules() {
     fsAccessService,
     syncService
   ] = await Promise.all([
-    load("app/domain/project-model.js"),
+    load("app/modules/workspace/index.js"),
     load("app/modules/workspace/adapters/zip.js"),
     load("app/modules/editor/model/markdown.js"),
     load("extensions/bmap-diagram/browser/model/bmap.js"),

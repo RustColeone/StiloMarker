@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { colorFor, findMentions, initialsFor, parsePersona, personaFileName, personaHandle, personaSummary, personaTemplate } from '../app/services/persona-service.js';
-import { isAllowedFileName, isMarkdownFileName, isPersonaFileName, isTextFileName } from '../app/domain/project-model.js';
+import { colorFor, findMentions, initialsFor, parsePersona, personaFileName, personaHandle, personaSummary, personaTemplate } from '../app/modules/characters/index.js';
+import { isAllowedFileName, isMarkdownFileName, isPersonaFileName, isTextFileName } from '../app/modules/workspace/index.js';
 
 test('persona files are allowed, text, and Markdown', () => {
   assert.ok(isAllowedFileName('aria.persona.skill'));

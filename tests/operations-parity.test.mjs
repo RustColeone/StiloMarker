@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { applySyncOperation, applyTextPatch, createProject, getNodeByPath, getPath } from "../app/domain/project-model.js";
+import { applySyncOperation, applyTextPatch, createProject, getNodeByPath, getPath } from "../app/modules/workspace/index.js";
 
 // The browser's half of spec/workspace/operations.cases.json (the server's is
 // operations-parity.test.py): both must build the same tree, and refuse the same operations.

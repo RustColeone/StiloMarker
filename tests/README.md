@@ -1,27 +1,40 @@
 # Tests
 
-Unit tests for the mdnotes / StlioMarker workspace. They run on the built-in
-[Node.js test runner](https://nodejs.org/api/test.html) — **no dependencies to
-install**.
+The tests of Stilo Marker: `*.test.mjs` run on the built-in
+[Node.js test runner](https://nodejs.org/api/test.html), `*.test.py` on Python
+alone (no dependencies to install), and `*-browser.py` drive a real browser
+with Playwright for Python.
 
-## Run everything (the easy way)
-
-| Platform | Command |
-|----------|---------|
-| Windows  | `tests\run-tests.bat` (or double-click it) |
-| Linux/macOS | `./tests/run-tests.sh` |
-
-Both scripts run the Node.js suite, Python backend self-test, and storage-failure regressions.
-
-## Other entry points
+## Run everything
 
 ```bash
-npm run test:reliability # Sync recovery + broker/storage regressions, no HTTP listener
-npm test                 # Node.js unit tests only (node --test tests/)
-npm run selftest         # same suite via tools/selftest.mjs (prints "Self-test passed.")
-npm run backend:selftest # Python backend self-test only
-npm run test:all         # Node self-test + Python backend self-test
-node --test tests/       # raw test runner
+npm run test:all        # the release labels, the generated copies, the Node tests and every Python test
+npm run test:browser    # the same, and the browser tests
+```
+
+`tests/run-tests.sh` (Linux, macOS) and `tests\run-tests.bat` (Windows; or
+double-click it) do the same; add `--browser` for the browser tests. All of
+them are `tools/run-tests.mjs`, which finds the tests by their names, gives
+each one line, and keeps what each printed in a log folder it names at the
+end. `PYTHON` names the Python to use; for the browser tests it needs
+Playwright (`pip install playwright==1.63.0`, then `playwright install
+chromium`, or `STILO_BROWSER` naming a Chromium). The desktop test also needs
+Electron (`STILO_ELECTRON`, or `npm install` in `desktop/`), and says it was
+skipped without it.
+
+A browser test that fails is run once more by itself at the end, and the
+report says so: on a small or busy machine a test that waits on a real browser
+can fail by timing alone (on the 2 GB development server it happens about once
+a run). The run passes only if the test then passes by itself.
+
+## One by itself
+
+```bash
+node --test tests/text-patch.test.mjs    # a Node test
+python3 -B tests/sync.test.py            # a Python test
+python3 tests/two-editors-browser.py     # a browser test
+npm run test:reliability                 # sync recovery and storage regressions, no HTTP listener
+npm run backend:selftest                 # the backend's end-to-end self-test
 ```
 
 ## Layout
@@ -59,6 +72,7 @@ node --test tests/       # raw test runner
 | `sync-service.test.mjs` | Collaboration transport against a mock HTTP server. |
 | `agent-collaborator.test.mjs` | Agent proposal round-trips + agent-feature wiring. |
 | `project-structure.test.mjs` | Required files, `index.html` ids, and source-symbol wiring. |
+| `service-worker-routes.test.mjs` | The service worker's fetch handler, run in a stand-in for the browser: it answers the app's files and the libraries served with it, and leaves the server's requests, the event stream, other sites and the docs (the architecture page, which changes without a new version of the app) to the network. |
 | `move-node.test.py` / `move-node.test.mjs` | Moves on the server (disk, ordering, refusals, patch barriers) and in the browser; both read `spec/workspace/move-node.cases.json` so peers and server order a moved file identically. |
 | `static-compression.test.py` | Static files are gzipped only when accepted (q=0 honoured), small/binary files untouched, `Vary` sent, never stale after a file changes. |
 | `workspace-backups.test.py` | Workspace backups: a backup only on days the workspace changed, one per day refreshed to its latest state, a safety copy before deletes/replacements (a burst shares one), retention with blob cleanup, images, permissions, and a final backup on shutdown. |

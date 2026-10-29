@@ -27,8 +27,6 @@
 //     restoredKey() (the one the page started with), load(key) -> the project or
 //     null, ownKey() -> the last own workspace's key, localKey(project), isLocal(key),
 //     takeOver() (another window kept this workspace and went: this one writes it all)
-//   attach(ports)   for code from before the restructure, which still edits and
-//                   syncs: { commit(path, previous, next, source), replace(operation, source) }
 //   parts.add(provider) -> remove()    an extension point: a kind of file that
 //       holds named parts, each listed under the file, opened, renamed, moved
 //       and copied on its own. `id` is the file type's id; the rest work on

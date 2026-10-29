@@ -25,7 +25,7 @@
 //   server.configure({ address: () => string })   where the server is (a setting)
 //   server.url()                                   its normalized address
 //   server.request(path, { method, query, body, failure, timeout })
-// Static, for code from before the restructure: normalizeServerUrl,
+// Static, for code with no module context (an adapter's server calls): normalizeServerUrl,
 // parseResponse, throwForResponse, patchStoredSettings (a guarded merge into
 // the stored settings, for the page going away). Static, for any page with a
 // conversation: shouldSubmitChat, isChatNearBottom, paintConversation,

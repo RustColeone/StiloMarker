@@ -5,12 +5,14 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-27 · release `v0.3.19` deployed (public checks passed) and
-tagged as the stable version and the first published desktop release (GitHub; the
+Last updated: 2026-10-29 · `v0.3.20` (the docs brought up to date, one
+test runner, the last code from before the restructure gone). `v0.3.19` is the
+stable version and the first published desktop release (GitHub; the
 unpublished `v0.3.15` draft taken down). Before it `v0.3.0` was
 the stable version. v0.2.30–v0.2.42 were gone over again before calling it so; what that found is
-fixed in v0.2.39–v0.2.42. Where things stand after v0.3.11, what is fixed and what is not, in
-`docs/STATUS-0.3.11.md`.
+fixed in v0.2.39–v0.2.42. `docs/STATUS-0.3.11.md` is a record of where things
+stood after v0.3.11; this file is where they stand now, with what has not been
+tried under "Not tried".
 
 ---
 
@@ -71,9 +73,96 @@ workspace keeps it. Since a shaky connection makes it more likely, drops
 that come close together are said (v0.2.36; since v0.2.41 only sessions
 lost while the page is in view count, not one left on purpose).
 
+### A4. Old commits with a session file can still be fetched from GitHub
+**Confidence:** confirmed · **Severity:** informational
+
+`server/session-state.json` (a PIN session's workspace) was taken out of
+the history and the history force-pushed on 2026-10-24. GitHub still serves
+the old commits to anyone who has their full ids, until GitHub Support
+purges them. The ids are in the private backup
+`~/backups/stilomarker/20261024T043049Z-repo-before-purge/`.
+
+Accepted (2026-10-24, again 2026-10-29): the file held nothing sensitive.
+
+---
+
+## Not tried
+
+What the tests and checks here cannot reach; each would need the real thing.
+
+- **The desktop app on macOS.** It has never been started on a Mac: the
+  window, its one bar (`trafficLightPosition` chosen without seeing it),
+  the first start of an unsigned app. There is no Mac to try it on, and
+  signing the builds (Apple's developer program) is not planned. The
+  release notes say so and ask Mac users to report what they see. Windows
+  was checked by the user with v0.3.15; Linux only under a virtual display,
+  not on a real GNOME or KDE desktop.
+- **A real phone.** The phone layouts (the app's, and the architecture
+  page's since 2026-10-27) were checked in Chromium's phone emulation, with
+  touch, not on a phone.
+- **Speed on other hardware.** Typing in a 20,000-line file in both
+  editors (about 30 ms a key) was measured in headless Chromium on the
+  2 GB development server only.
+
 ---
 
 ## Fixed
+
+### v0.3.20: the docs as the code is, one test runner, the last code from before the restructure
+
+Asked for 2026-10-29 ("fix the out-of-date docs", "small cleanup"), after
+going over what is left before calling the project complete. Each document
+was checked against the code.
+
+- **README:** what the app does now (it listed four file types), how to try
+  it (the Pages copy, the desktop release, a server), the server's settings
+  from its command line (the default model is `deepseek-flash`, not
+  `deepseek-v4-pro`; a reverse proxy on the same computer makes every browser
+  look local to `MDNOTES_CHAT_ALLOW_REMOTE`), the tests, and the reference
+  list (two sections were numbered 9). How to use the app is the welcome
+  file's and the manual's, so the README no longer repeats menus.
+- **The manual** (`server/MANUAL.md`, also the Agent's reference: its copy
+  `assistant/adapters/manual.js` was written again), 14 statements: chat
+  context goes straight from the browser with your own key and "Directly
+  from this browser" (it said only ever to the server); shared chats are
+  kept on disk, not in memory; an `.mtree` preview is its text and the map
+  comes from Generate Module Map (the flags are its dialog's options; it
+  said an SVG tree in the preview); a URL album's preview is a table, not a
+  clickable grid; the project modes (`filesystem`, imports; the browser's
+  copy is IndexedDB); the Explorer's menus (no double-click rename, no New
+  File; Add File, a New … per type); Export Project Zipped and what Export
+  Selected exports; the template installs itself on a first visit; the
+  Chats buttons (New, Invite to a new group…); `move-node`; every server
+  setting the code reads; the Edit menu.
+- **docs/ARCHITECTURE.md**, 16 statements: the restructure is done (it said
+  in progress); the hand-drawn module diagram, wrong in levels and uses, is
+  replaced by the architecture page, which draws them from the module
+  definitions; rules 1 and 10, the baseline, the Editor's view, Sync's
+  session, `Agent._complete`, Cloud's `delete_entry`, the manifest's `api`
+  and `contributes`; four modules' opening comments (Workspace's `attach`,
+  gone; Sync's `publishOperation`; the Editor's view actions; who the static
+  exports are for). `docs/EXTENSIONS.md` was right throughout.
+- **docs/STATUS-0.3.11.md** is a record now, with what changed since at its
+  top; what has not been tried moved here ("Not tried"), with the old
+  commits on GitHub as A4.
+- **One test runner** (`tools/run-tests.mjs`): `npm run test:all` (the
+  release labels, the generated copies, the Node tests and every Python
+  test) and `npm run test:browser` (and the browser tests). It finds the
+  tests by their names, gives each one line, keeps what each printed, and
+  runs a failed browser test again by itself, saying so. `test:all` had
+  listed 21 of the 26 Python tests (not the two account tests, path
+  safety, the architecture page's or the parent watch), and `tests/run-tests.sh` / `.bat` 8 of them, after
+  calling `mdnotes_server.py --selftest`, gone since 2026-10-17: they
+  failed at once. Both scripts now run the runner.
+- **The last code from before the restructure:** `app/services/persona-service.js`
+  and `app/domain/project-model.js` (each only passing a module's exports
+  on) are gone; the tests import the modules.
+- **The offline cache leaves the docs alone:** the service worker kept
+  `docs/` (the architecture page) with each version of the app, so a
+  visitor who had opened the app on GitHub Pages saw the page as it was at
+  that version. It now leaves `/docs/` to the network.
+  Test: `service-worker-routes.test.mjs` (new; runs the worker's fetch
+  handler in a stand-in: the docs fail before).
 
 ### v0.3.19: the browser's own workspace keeps its tabs on a reload (O12)
 

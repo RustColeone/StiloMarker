@@ -12,8 +12,8 @@
 //     uploadAsset, clock? }) -> the runtime (connect, openWorkspace, …)
 //     Events Sync does not own (other modules' events on its stream) go to onEvent.
 //   syncVersion          the sync compatibility level this tab speaks
-// API: session() -> the live connection (connect, openWorkspace, publish,
-// reconnect...), created at start. It reaches the project and the Editor
+// API: session() -> the live connection (connect, openWorkspace, publishOperation,
+// publishSnapshot, isConnected()...), created at start. It reaches the project and the Editor
 // through Workspace (applyRemote, replace, "text-changed", presence…);
 // keepers.add(async (files) => …) keeps local edits before a reload (History);
 // configure({ reauthenticate }) (Cloud). The connection's life (adapters/connection.js): publish(op)

@@ -70,10 +70,10 @@ test("modules are reached only through their public API, and only if declared (r
   assert.deepEqual(problems, []);
 });
 
-test("modules never import code from before the restructure (rule 1)", () => {
+test("modules import only the kernel and other modules (rule 1)", () => {
   // A module (or an extension) imports the kernel, its own files and other
-  // modules' index.js; legacy code (main.js, app/features, app/ui,
-  // app/services, app/domain) may use modules, never the other way round.
+  // modules' index.js. What is not a module (main.js, which starts them) may
+  // use modules, never the other way round.
   const problems = [];
   for (const file of files.filter((f) => /\.m?js$/.test(f))) {
     const from = moduleOf(file, all);

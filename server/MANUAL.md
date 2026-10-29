@@ -31,7 +31,7 @@ Stilo Marker is a browser-based Markdown workspace. It lets you write notes, bui
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Menu bar: File | Create | View | Settings | ...        │
+│  Menu bar: File | Edit | Create | View | Settings | ... │
 ├──────────┬──────────────────────┬────────────┬──────────┤
 │ Explorer │   Source pane        │  Preview   │  Chat    │
 │          │   (editor)           │  pane      │  panel   │
@@ -43,8 +43,8 @@ Stilo Marker is a browser-based Markdown workspace. It lets you write notes, bui
 
 - **Explorer** — tree of folders and files in the current project: the first tab of the left window, whose icons are in the activity bar at the far left (the Explorer, Search, and any panel moved there; click the icon of the tab showing to hide the window).
 - **Source pane** — the text editor; also shows image previews. Each pane has its own, so both can show Source (see Tabs and groups); the one you last worked in holds the active file.
-- **Preview pane** — rendered output (HTML for Markdown, SVG tree for MTREE, album grid for URLDB, interactive canvas for BMAP).
-- **Chat panel** — the right panel (Agent, Chats): AI assistant wired to the backend chat proxy; the button at the right end of the top bar shows or hides it.
+- **Preview pane** — rendered output (HTML for Markdown, a table of entries for URLDB, an interactive canvas for BMAP, the text itself for MTREE and plain text).
+- **Chat panel** — the right panel (Agent, Chats): the AI assistant, through the server or your own key; the button at the right end of the top bar shows or hides it.
 - **Status bar** — where the project lives, the server's state, collaborators
   online and the open file's version (each once there is something to show),
   and the file's length.
@@ -110,7 +110,7 @@ A **project** is an in-memory tree of nodes. Each node is either a **folder** or
 project
   id            string   — unique project identifier
   name          string   — display name shown in the title bar
-  sourceMode    string   — "memory" | "opfs" | "directory"
+  sourceMode    string   — "memory" | "opfs" | "filesystem" | "import-file" | "import-zip"
   rootId        string   — ID of the root folder node
   activeFileId  string?  — ID of the currently open file
   nodes         object   — map of nodeId → Node
@@ -137,9 +137,10 @@ The file type is determined purely by the file extension (`.md`, `.mtree`, `.url
 
 | Mode | Description |
 |------|-------------|
-| `memory` | Entire project lives in browser `localStorage`. |
-| `opfs` | Uses the browser Origin Private File System (Chromium). |
-| `directory` | Backed by a real directory on disk via the File System Access API (Chromium only). |
+| `memory` | The project lives in this browser (IndexedDB, one copy per workspace). |
+| `opfs` | The app's own folder in the browser's Origin Private File System (Chromium). |
+| `filesystem` | A real folder on disk, through the File System Access API (Chromium only). |
+| `import-file`, `import-zip` | Made by importing a file or a ZIP; kept in this browser like `memory`. |
 
 ---
 
@@ -249,20 +250,18 @@ With `...->TargetModule`, the subtree starting at `TargetModule` is injected as 
     ExtraChild
 ```
 
-### Render flags
+### Generating a module map
 
-The preview renderer accepts two boolean render flags (displayed in the preview pane header):
+The preview pane shows an `.mtree` file's text as it is. The map itself is made by **Generate Module Map** (right-click the `.mtree` file in the Explorer), which opens a dialog:
 
-| Flag | Name | Effect |
-|------|------|--------|
-| `T` / `F` | Simplify | Collapse single-child chains into one connector |
-| `T` / `F` | Split continuations | Render each continuation tree as a separate diagram |
+| Option | Effect |
+|--------|--------|
+| Simplify repeated subtrees | A subtree drawn once shows as `...(same as above)...` where it appears again. |
+| Split continuation trees | Each continuation tree (`...`) is drawn as a tree of its own; where it is used, the tree shows `...`. |
+| Include Navigation, Modules, Parents, Children, Description | The sections the map lists for each module. |
+| Show Empty Sections | Lists a section even when it has nothing in it. |
 
-Default flags: `TT`.
-
-### Preview rendering
-
-The MTREE preview renders the graph as an SVG tree diagram. Nodes show their name and (if present) description. Arrows indicate parent→child direction. If a node has multiple parents, it appears in all relevant subtrees.
+The map is a text tree (`├──`, `└──`) in Markdown, written into the chosen **Target Markdown File** or a new one (`module-map.md` unless named). While the dialog has the focus, `Ctrl+S` writes it. A module that leads back to itself is cut with `...`. The dialog counts the modules that passed its checks (a description, no loop).
 
 ---
 
@@ -292,7 +291,7 @@ url = https://example.com/other.png
 
 URL album entries appear as children of the `.urldb` file node in the explorer. Each entry has its own icon. Entries can be:
 
-- Clicked to open an image preview.
+- Clicked to show that entry's image in the preview pane.
 - Dragged to reorder within the same album.
 - Dragged to a different `.urldb` file to move or copy them.
 - Added via the explorer context menu ("Add Album Entry").
@@ -300,7 +299,7 @@ URL album entries appear as children of the `.urldb` file node in the explorer. 
 
 ### Preview
 
-The URLDB preview renders all entries as a clickable image grid. Clicking an entry opens a larger preview.
+The URLDB preview is a table of every entry: its image, name, link (opened in a new browser tab) and description. One entry's image on its own shows when the entry is opened from the Explorer.
 
 ---
 
@@ -512,7 +511,7 @@ Stilo Marker recognizes: `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.bmp
 - Image files are read-only in the source pane (shown as a preview).
 - The preview pane renders the image full-size.
 - In `memory` and `opfs` modes, image content is stored as a base-64 data URL.
-- In `directory` mode, images are read from disk and referenced by filename.
+- In `filesystem` mode (a folder on disk), images are read from disk into the same data URLs, and written back as image files.
 
 ---
 
@@ -524,8 +523,7 @@ The explorer shows the project tree as a collapsible file/folder list.
 - **Click** a file to open it in the source pane.
 - **Click** a folder arrow to expand/collapse.
 - **Type** in the box above the tree to keep only the files and folders whose name holds it (any case), their folders open; **Enter** opens the first file found, **Escape** clears it.
-- **Double-click** a node label to rename it inline.
-- **Right-click** a node for the context menu: Rename, Delete, Export, Copy, Paste, New File, New Folder, Add Album Entry (for `.urldb` files).
+- **Right-click** a node for the context menu. A folder (or the project's root): Copy, Paste, New Folder, a New … for each kind of file (New Markdown, New MTREE…), Add File, Rename, Delete, Export. A file: Open Source, Open Preview, Copy, Rename, Delete, Export, and its type's own entries (Add Album Entry for a `.urldb` file, Generate Module Map for an `.mtree` file, Replace File for an image). **Rename** (also Edit → Rename Selected) asks for the new name in a dialog.
 - **Drag a file or folder** to reorder it or move it into a folder.
 - **Drag a URL album entry** to reorder within its album or move to another album.
 - **Drag a file from the Explorer into the Chat compose area** to attach it as context for the AI assistant.
@@ -638,8 +636,8 @@ Renders the active file's content in read-only mode.
 | File type | Rendered as |
 |-----------|-------------|
 | `.md` | HTML (Markdown rendered to DOM) |
-| `.mtree` | SVG tree diagram |
-| `.urldb` | Image grid with clickable entries |
+| `.mtree` | The file's text (the map is made with Generate Module Map, see §4) |
+| `.urldb` | A table of the entries (image, name, link, description) |
 | `.bmap` | Interactive SVG/HTML node-canvas |
 | Image | Full-size image |
 
@@ -669,13 +667,13 @@ The preview can be shown or hidden with `View > Toggle Preview` or the `×` butt
   is live in both: what you do in one shows in the other, and the status bar
   says "2 windows". The window that opened it first keeps it in the browser;
   when it closes, another takes over.
-- `opfs` / `directory`: writes files back to disk.
+- `opfs` / `filesystem`: writes the files back to the folder.
 
 ### Export
 
-`File > Export` — downloads the entire project as a `.zip` archive containing all files in their original formats.
+`File > Export Project Zipped` — downloads the entire project as a `.zip` archive containing all files in their original formats.
 
-`File > Export Selected` — exports only the files currently selected in the explorer.
+`File > Export Selected` — exports the item selected in the explorer: a file as itself, a folder as a `.zip`.
 
 `File > Save as PDF` — prints the current Markdown preview to PDF via the browser print dialog.
 
@@ -720,6 +718,7 @@ workspace, opened with an account, keeps such typing and merges it.)
 | `rename-node` | Rename a file or folder |
 | `delete-node` | Delete a file or folder (recursive for folders) |
 | `update-file` | Replace a file's full content |
+| `move-node` | Move a file or folder into another folder, or to another place in its folder |
 | `patch-file` | Apply a text patch (start, end, text) with OT rebase |
 | `replace-project` | Replace the entire project tree (master only) |
 
@@ -795,18 +794,32 @@ When a collaboration session is active, the chat thread list is shared across al
 | `MDNOTES_PORT` | `8000` | Port |
 | `MDNOTES_PIN` | `2468` | Session PIN |
 | `MDNOTES_MASTER_PIN` | `1367` | Master PIN |
-| `DEEPSEEK_API_KEY` | — | Enable chat proxy |
-| `DEEPSEEK_MODEL` | `deepseek-v4-pro` | Model name |
+| `MDNOTES_WHITELIST` | `server/whitelist.json` | The account file; without it, no accounts |
+| `MDNOTES_DATA_DIR` | `server/data` | The teams' projects |
+| `MDNOTES_TRASH_DAYS` | `30` | How long deleted projects and folders are kept (at most 30) |
+| `MDNOTES_MIN_CLIENT_VERSION` | — | Ask tabs older than this sync level to reload |
+| `DEEPSEEK_API_KEY` | — | Enable the chat (the server's key) |
+| `DEEPSEEK_MODEL` | `deepseek-flash` | Default model |
 | `DEEPSEEK_API_URL` | DeepSeek endpoint | Override API URL |
-| `MDNOTES_CHAT_API_KEY` | — | Alternative chat API key |
-| `MDNOTES_CHAT_MODEL` | — | Alternative model |
-| `MDNOTES_CHAT_API_URL` | — | Alternative API URL |
-| `MDNOTES_CHAT_ALLOW_REMOTE` | `0` | Allow non-local chat clients |
+| `MDNOTES_CHAT_API_KEY` | — | Alternative chat API key (wins over `DEEPSEEK_API_KEY`) |
+| `MDNOTES_CHAT_MODEL` | — | Alternative default model |
+| `MDNOTES_CHAT_API_URL` | — | Alternative API URL (any OpenAI-compatible endpoint) |
+| `MDNOTES_CHAT_MODELS` | — | More models to offer, comma-separated |
+| `MDNOTES_CHAT_PROVIDER` | `DeepSeek` | The provider's name in the model picker |
+| `MDNOTES_CHAT_ORGANIZATION` | — | An organization header for the provider |
+| `MDNOTES_CHAT_ALLOW_REMOTE` | `0` | Let browsers on other computers spend the server's keys (behind a reverse proxy on the same computer, every browser looks local) |
 | `MDNOTES_CHAT_MAX_CONTEXT_CHARS` | `60000` | Context size limit |
 | `MDNOTES_CHAT_MAX_MESSAGES` | `24` | Message history limit |
-| `MDNOTES_CHAT_TIMEOUT` | `60` | Request timeout (seconds) |
+| `MDNOTES_CHAT_TIMEOUT` | `60` | Request timeout (seconds, 5 to 180) |
 | `DEEPSEEK_ENABLE_THINKING` | `0` | Enable DeepSeek thinking mode |
 | `DEEPSEEK_REASONING_EFFORT` | `high` | Reasoning effort level |
+| `OPENAI_API_KEY` | — | OpenAI's models, and pictures |
+| `OPENAI_API_BASE` | `https://api.openai.com/v1` | Another OpenAI-compatible address |
+| `MDNOTES_OPENAI_MODELS` | — | The OpenAI models to offer, comma-separated (else read from the account) |
+| `MDNOTES_OPENAI_IMAGE_MODEL` | — | The image model (else the newest on the account) |
+| `MDNOTES_IMAGE_QUALITY` | `medium` | Pictures' quality |
+| `MDNOTES_MAX_IMAGES_PER_TURN` | `2` | Pictures per request (0 to 8) |
+| `MDNOTES_MCP_CONFIG` | — | Connected tools (see `docs/MCP.md`) |
 
 ---
 
@@ -842,15 +855,19 @@ Attached files appear as chips above the compose area. Click `×` on a chip to r
 
 ### How context is sent
 
-When you send a message, Stilo Marker reads the full content of each attached file from the current project state and sends it to the server along with the conversation history. The server injects this content into the system prompt before forwarding to the LLM. **File content is only ever sent to your own backend server**, not directly to any third-party API from the browser.
+When you send a message, Stilo Marker reads the full content of each attached file from the current project state and sends it with the conversation history. Where it goes depends on Settings → Agent:
+
+- **The server's key** (the default): to the Stilo Marker server, which puts the content into the system prompt and forwards it to the model's provider.
+- **My own API key**, replies run on the server: the same, with your key, which the server uses for that request only.
+- **My own API key**, replies run **directly from this browser**: the browser sends it straight to the API URL you gave (the provider, or a model on your own computer). No Stilo Marker server sees it.
 
 ### Collaboration sync
 
-When a collaboration session is active, the entire chat workspace (all threads and their messages) is automatically synced across all connected participants via the backend. Changes made by any participant appear in real time on all other clients.
+When a collaboration session is active, the entire chat workspace (all threads and their messages) is automatically synced across all connected participants via the backend. Changes made by any participant appear in real time on all other clients. A thread's unsent draft and its attached files stay on each device.
 
 ### Storage
 
-Chat threads are stored in browser `localStorage` under the key `mdnotes.chat.v1`. When a collaboration session is active, they are also persisted in the server's in-memory state for the duration of the session.
+Chat threads are stored in browser `localStorage` under the key `mdnotes.chat.v1`. A shared workspace's threads are also kept on the server, on disk, so they outlast a restart: a cloud workspace's in `chat.json` in its project folder (hidden in the explorer), the PIN session's beside its state file. Only a workspace shared for a while with a guest PIN keeps them in the server's memory alone.
 
 ### Models and signing in
 
@@ -872,11 +889,11 @@ When the user asks you (the agent) for an image:
 
 The panel has two tabs: **Agent** (this assistant) and **Chats**, a small chat app for the project: private chats and group chats with the other people who can open this workspace and with the characters written in it (`.persona.skill` files). It is for any kind of writing done together: talking to a story's characters, rehearsing a script, running a game scene with several players.
 
-- **The list** shows your chats (newest first, with unread counts), then **People** (a dot shows who is online) and **Characters**. Clicking a person or a character opens your private chat with them; if you have one already, that one is reopened. **New group** picks several people and characters. The Chats tab shows the total of unread messages.
+- **The list** shows your chats (newest first, with unread counts), then **People** (a dot shows who is online) and **Characters**. Clicking a person or a character opens your private chat with them; if you have one already, that one is reopened. **New** opens a picker to start a chat with one person or character, or a group with several. The Chats tab shows the total of unread messages.
 - **In a private chat with a character**, the character answers every message.
 - **In a group**, `@handle` asks a character to reply and `@all` asks every character in turn. A message without a mention is narration (or talk between the people) and gets no reply. Typing `@` suggests names.
 - Everyone in the chat sees new messages, and a character's reply as it is written, live. **Stop** under a reply being written stops it and the replies queued after it.
-- **Details** (the `ⓘ` in a chat's header): for a private chat, your own alias and note for that person or character — only you ever see them — and a search of the chat that jumps to the message. **Invite…** in a private chat starts a *new* group with everyone, so the private chat is kept; in a group it adds the people to that group. Groups can also be renamed and left.
+- **Details** (the `ⓘ` in a chat's header): for a private chat, your own alias and note for that person or character — only you ever see them — and a search of the chat that jumps to the message. **Invite to a new group…** in a private chat starts a *new* group with everyone, so the private chat is kept; in a group, **Invite…** adds the people to that group. Groups can also be renamed and left.
 - Characters can read every file in the workspace and any attached files, but cannot change anything. A character's file is read again before each reply, so editing it changes how the character speaks from then on. Renaming or moving the file keeps the character in its chats.
 
 Where chats are kept: in a cloud workspace, on the server, in one database per project (`conversations.sqlite` in the project folder, hidden in the explorer, kept when the project is published over, and backed up daily). In a workspace kept in the browser, the Chats tab has characters only, stored in this browser; chatting with people needs a cloud workspace. Older Roleplay group chats are moved into Chats the first time the tab opens.
@@ -979,7 +996,7 @@ shown and hidden from View → Show Log / Hide Log.
 
 ## 18. Templates
 
-On first load, Stilo Marker offers to open the built-in template project, which demonstrates all file types:
+On a first visit (nothing kept in this browser yet), Stilo Marker opens the built-in template project by itself, unless a workspace or your typing arrives first:
 
 | File | Type | Content |
 |------|------|---------|
@@ -997,8 +1014,8 @@ The template is defined in `Template/template-manifest.json`.
 | Extension | Type | Editable | Preview |
 |-----------|------|----------|---------|
 | `.md` | Markdown | Yes | HTML |
-| `.mtree` | Module map | Yes | SVG tree |
-| `.urldb` | URL album | Yes | Image grid |
+| `.mtree` | Module map | Yes | The text; Generate Module Map writes the map |
+| `.urldb` | URL album | Yes | Table of entries |
 | `.bmap` | Brainstorm diagram | Yes | Interactive canvas |
 | `.persona.skill` | Chats character (Markdown) | Yes | Character card + Markdown |
 | `.mmd` `.mermaid` | Mermaid diagram | Yes | Diagram |

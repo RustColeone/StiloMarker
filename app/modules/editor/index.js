@@ -17,13 +17,15 @@
 // are not files, such as History's diff) and marks (extension points; marks are
 // what other modules put on files' lines, service/marks.js) and view: what the
 // editor shows, read with view.get() and changed only through its actions
-// (service/view.js): reset(project), pick(nodeId, partId?), select(nodeId),
-// openTab/closeTab(pane, fileId), moveTab(pane, id, targetId, after?),
+// (service/view.js): reset(project), restore(kept), pick(nodeId, partId?),
+// select(nodeId), openTab/closeTab(view, fileId, group?), showSource(fileId),
+// activate(group, tab), switchView(group, tab, view), moveTab(group, dragged,
+// target, after?), moveToGroup(from, to, tab, options?), closeGroup(group),
 // showPreview(fileId, partId?), showView(id), clearParts(), dragTab(state),
 // keepTabs(project, { views, open }). drops.configure(handle(event)): who
 // handles what is dropped into the source editor (the Explorer).
 //
-// Static, for code from before the restructure: renderMarkdown,
+// Static, for code with no module context (other modules' views, extensions): renderMarkdown,
 // extractMarkdownLinks, collectMarkdownReferences, parseMarkdownInlineElements,
 // buildTableSnippet, getEditorToolbarFormat, TOOLBAR_SPECS, escapeHtmlAttribute,
 // the project path helpers, forgetViewStates (the saved resume positions).

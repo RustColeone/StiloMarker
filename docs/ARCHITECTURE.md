@@ -1,8 +1,10 @@
 # Architecture
 
-Stilo Marker is being restructured into a modular monolith on each end (decided
-2026-10-16). The full design, with the reasoning, the module map and the order
-of work, is in the "Module design" tab of the
+Stilo Marker is a modular monolith on each end. The restructure (decided
+2026-10-16) is done: the browser's `main.js` only starts the modules since
+v0.1.82, the server's `mdnotes_server.py` since v0.1.88, and the last two files
+from before it went in v0.3.20. The full design, with the reasoning, the module
+map and the order of work, is in the "Module design" tab of the
 [architecture review](https://claude.ai/code/artifact/ea78ba1f-1850-4b76-9642-8cffb14e6c7a).
 This file is the short reference that the structure tests enforce.
 
@@ -46,10 +48,11 @@ text, so write them for a reader.
   (`protocol/legacy.contract.json` held what no module had taken yet; it
   went in v0.1.87.)
 - **Why Identity and Models sit on level 2** (changed 2026-10-17; the design
-  had them on level 1): they need the frame below them, Transport for their
-  routes on the server and Shell for the server connection and dialogs in the
-  browser. Workspace does not need Identity (who may open a project is asked
-  by the modules above it), so nothing else moved.
+  had them on level 1): in the browser both need Shell (the server connection
+  and dialogs), and on the server Identity needs Transport for its routes;
+  the server's Models uses no module. Workspace does not need Identity (who
+  may open a project is asked by the modules above it), so nothing else
+  moved.
 - **Rules in both languages** (the server stays in Python) live only in a
   `model/` and share one case table in `spec/`, run by both test suites.
 
@@ -57,64 +60,17 @@ text, so write them for a reader.
 
 ### Modules and levels
 
-Arrows are "uses": a module calls only the modules it points at, always on a
-lower level. News travels the other way, as events or extension points, so it
-needs no arrow. Every module exists (as of v0.1.47) and the URL album is an
-extension (v0.1.48); legacy code still wires the modules together. Modules marked *both* have a browser half and a server half that share a
-model and a contract.
+A module calls only the modules it uses, always on a lower level. News
+travels the other way, as events or extension points. Modules marked *both*
+in the architecture page have a browser half and a server half that share a
+model and a contract; the two halves may sit on different levels (Sync is on
+3 in the browser and 4 on the server).
 
-```mermaid
-flowchart TB
-  subgraph L6["Level 6 · extensions"]
-    UrlAlbum["URL album (browser)"]
-  end
-  subgraph L5["Level 5 · features"]
-    Assistant["Assistant (both)"]
-    Chats["Chats (both)"]
-    Cloud["Cloud (browser)"]
-  end
-  subgraph L4["Level 4 · on top of the editor"]
-    History["History (both)"]
-    Comments["Comments (both)"]
-    Explorer["Explorer (browser)"]
-  end
-  subgraph L3["Level 3 · on top of the workspace"]
-    Editor["Editor (browser)"]
-    Sync["Sync (both)"]
-    Characters["Characters (both)"]
-    Projects["Projects (server)"]
-  end
-  subgraph L2["Level 2 · the workspace and who uses it"]
-    Workspace["Workspace (both)"]
-    Identity["Identity and access (both)"]
-    Models["Models (both)"]
-  end
-  subgraph L1["Level 1 · the frame"]
-    Shell["Shell (browser)"]
-    Transport["Transport (server)"]
-    FileTypes["File types (both)"]
-  end
-  Kernel["Kernel (both): starts modules, hands out declared APIs"]
-
-  Assistant --> Editor & Characters & Models
-  Chats --> Characters & Identity & Models
-  Cloud --> History & Sync & Identity
-  History --> Editor
-  Comments --> Editor & Identity
-  Explorer --> Editor & Workspace & Shell
-  Editor --> Workspace & FileTypes & Shell
-  Characters --> Workspace
-  Projects --> Workspace & Identity & Transport
-  Sync --> Workspace & Identity
-  Workspace --> FileTypes
-  Identity --> Shell & Transport
-  Models --> Shell & Transport
-  L1 -.started by.-> Kernel
-  L5 ~~~ L4 ~~~ L3 ~~~ L2 ~~~ L1
-
-  classDef built fill:#d8f5dd,stroke:#2e8b47,color:#123;
-  class Shell,Transport,FileTypes,Workspace,Identity,Models,Sync,Editor,Characters,History,Comments,Explorer,Assistant,Chats,Cloud,Kernel built;
-```
+The [architecture page](https://rustcoleone.github.io/StiloMarker/docs/architecture/)
+draws the levels and every module's uses from the module definitions
+themselves (`defineModule` in a browser module's `index.js`, `module.json` on
+the server): its top map, and each module's own page. A hand-drawn copy here
+went out of date, so there is none.
 
 ### Inside a module
 
@@ -147,7 +103,7 @@ flowchart TB
     BTypes["File types"]
     BWork["Workspace"]
     BSync["Sync"]
-    BMore["Editor, Characters, History,<br/>Comments, Assistant, Chats"]
+    BMore["Identity, Models, Editor, Characters,<br/>Explorer, History, Comments,<br/>Assistant, Chats, Cloud"]
   end
   subgraph Shared["Shared data: both ends load it or run it"]
     Protocol[("protocol/<br/>contracts, file types, versions")]
@@ -158,36 +114,20 @@ flowchart TB
     STypes["File types"]
     SWork["Workspace"]
     SSync["Sync"]
-    SMore["Characters, History, Comments,<br/>Assistant, Chats, Identity, Models"]
+    SMore["Identity, Models, Characters, Projects,<br/>History, Comments, Assistant,<br/>Chats, Cloud"]
   end
   BSync <==>|"operations and events,<br/>as each module's contract spells them"| STrans
   Protocol -.-> BTypes & STypes
   Spec -.-> BWork & SWork
 ```
 
-### Legacy code during the move
+### What starts them
 
-Code from before the restructure (`app/main.js`, `app/services/`, `app/ui/`,
-`mdnotes_server.py` and the rest) is not a module, so nothing may depend on
-it. It may use modules, but only through the APIs the kernel hands back, or
-through a module's static export such as `builtinTypes`. Each step moves a
-piece across, and the baseline records what is left.
-
-```mermaid
-flowchart TB
-  subgraph LegacyB["Legacy browser code"]
-    Main["main.js and app/services/*"]
-    PM["project-model.js<br/>(type helpers ask File types)"]
-  end
-  subgraph LegacyS["Legacy server code"]
-    MS["mdnotes_server.py<br/>(LEGACY_ROUTES)"]
-  end
-  Main -->|"startModules() then the APIs"| BShell2["Shell"] & BTypes2["File types"]
-  PM -->|builtinTypes| BTypes2
-  MS -->|"start_server_modules()"| STrans2["Transport"] & STypes2["File types"]
-  BShell2 -- never calls --x Main
-  Baseline[("tests/structure/baseline.json<br/>may only shrink")] -.records.-> LegacyB & LegacyS
-```
+Nothing lives outside a module but the two entry points, and they only start
+the modules. `app/main.js` starts the kernel with the browser's modules and
+the extensions `app/extensions.js` lists; `server/mdnotes_server.py` reads
+the server's settings and starts the server's modules. Neither is a module,
+so no module may import them (rule 1).
 
 ### The write path (step 4, done in v0.1.33)
 
@@ -217,9 +157,9 @@ sequenceDiagram
 `tests/structure/structure.test.mjs` checks each one.
 
 1. Import another module only through its public API (`index.js`, `__init__.py`).
-   A browser module never imports code from before the restructure (`main.js`,
-   `app/features`, `app/ui`, `app/services`, `app/domain`); that code may use
-   modules, not the other way round.
+   A browser module imports only the kernel, its own files and other modules;
+   what is not a module (`main.js`, which starts them) may use modules, not
+   the other way round.
 2. Use only modules listed in `uses`, all on a lower level; no cycles.
 3. Calls go down, news goes up: call lower APIs; tell higher modules through
    events or extension points.
@@ -237,8 +177,8 @@ sequenceDiagram
    the trace (browser) or the server log.
 10. No code writes another file's variables: no setter (`set name(value)`)
     in browser code. Shared state has one owner (`ctx.state(...)`, below) and
-    changes through the owner's named actions. The getters `main.js` hands to
-    the code it wires are counted in the baseline and may only shrink.
+    changes through the owner's named actions. `main.js` hands out no
+    getters, and the baseline keeps it so.
 
 ## Finding a bug: the trace
 
@@ -266,8 +206,9 @@ modules' public extension points only. The URL album (step 8) is the first:
 deleting `extensions/url-album/` and running `node tools/protocol-sync.mjs`
 leaves an app that works without it.
 
-- `extension.json`: `name`, `about`, `browser` (its browser module) and
-  `fileTypes` (entries in the shape of `protocol/file-types.json`). Both ends
+- `extension.json`: `name`, `about`, `api` (the API version it is written
+  for), `browser` (its browser module), `fileTypes` (entries in the shape of
+  `protocol/file-types.json`) and `contributes` (settings and themes). Both ends
   merge these types after the built-in ones: the server's File types reads the
   manifests, and `tools/protocol-sync.mjs` writes the browser's copy, the list
   of modules `main.js` starts (`app/extensions.js`) and the files the service
@@ -281,15 +222,21 @@ leaves an app that works without it.
   version it is written for (`"api": 1`), and `tests/extension-api.test.mjs`
   holds both sides to the list.
 
-## Legacy code
+## The baseline
 
-Code from before the restructure is not in a module yet. What it breaks today
-is recorded in `tests/structure/baseline.json`: files over the size budget, and
-the files that spell a type name the future owner will hold. The baseline may
-only shrink. After a cleanup, `node tools/structure-baseline.mjs` lowers it; it
-refuses to record anything new.
+`tests/structure/baseline.json` recorded what broke the rules when they came
+in (2026-10-16): files over the size budget, names spelled outside their
+owner, the getters `main.js` handed out. It may only shrink, and all of it is
+gone but one file over the budget: the diagram editor,
+`extensions/bmap-diagram/browser/adapters/view.js` (4,016 lines). After a
+cleanup, `node tools/structure-baseline.mjs` lowers it; it refuses to record
+anything new.
 
 ## Progress
+
+The restructure as it went, and the work after it. Every step is done; each
+row is written as it stood when it was done, so what a row says comes next
+was done in a later row.
 
 | Step | What | State |
 | --- | --- | --- |
@@ -313,13 +260,14 @@ refuses to record anything new.
 | 7g-2 | The tab strips and panes (and resuming the last view, through a port) and the preview pane with a `previews` extension point: images, Markdown and mind-map trees are built in; URL albums, diagrams and character sheets add theirs from `app/features/previews.js` | done |
 | 8 | The URL album as an extension (v0.1.48): `extensions/url-album/` with its file type, model, preview, highlighting, Entry button and entry dialog. The core gained extension points instead of album code: file parts in Workspace (a file's named parts listed, opened, renamed, moved, copied and dropped on their own), highlighters and toolbars in Editor, `shell.form` for dialogs with several fields, and the Create menu drawn from File types. Nothing in the core names the album | done |
 
-### Next: one owner per piece of state (decided 2026-10-18)
+### One owner per piece of state (decided 2026-10-18)
 
-The module graph is clean, but `main.js` still holds the app's shared state
-and hands it to the modules and features: on 2026-10-18, 261 live getters and
-26 setters, and 149 functions that only forward a call. `selectionNodeId` was
-written in 23 places in 4 files, `sourcePart` (the open album entry) in 12.
-That is where bugs are hard to find. Steps, each its own release:
+On 2026-10-18 the module graph was clean, but `main.js` still held the app's
+shared state and handed it to the modules and features: 261 live getters and
+26 setters, and 149 functions that only forwarded a call. `selectionNodeId`
+was written in 23 places in 4 files, `sourcePart` (the open album entry) in
+12. That was where bugs were hard to find. Steps, each its own release (by
+v0.1.82 `main.js` only started the modules):
 
 | Step | What | State |
 | --- | --- | --- |
@@ -337,7 +285,7 @@ That is where bugs are hard to find. Steps, each its own release:
 | S3d-3 | The Chats page is the Chats module's (v0.1.63, `adapters/page.js`, `chats.attach(port)`, 5 names): it registers its page in Shell's side host and draws itself; the Agent page hands it the old Roleplay threads once. On the way, the request to the server's agent became Models' (`sendChatRequest`) and the conversation helpers Shell's; `main.js` now starts Models, Characters and Chats | done (v0.1.63) |
 | S3d-4a | The Agent page is the Assistant module's (v0.1.64, `assistant.load(port)`, loaded on first open): `adapters/panel.js` builds the page's shared context and the pieces are split by job (conversations, threads, render, turns, proposals, events), each a function of that context; its services came along (`api.js`, `store.js`, `workspace-sync.js`, `mcp.js`, `model/undo.js`). `app/features/chat-panel.js` is gone. The operation names are Workspace's constants (`UPDATE_FILE`, `PATCH_FILE`) | done (v0.1.64) |
 | S3d-4b | The review of the agent's edits is the Assistant's (v0.1.65, `adapters/review.js`, `model/review.js`): which lines an applied edit changed, the checkpoints Drop restores deletes from, Keep / Drop / jump. It shows them through a new Editor extension point, `editor.marks` (tinted lines and gutter, a badge on the tab and the explorer row, a bar over the file), which the Explorer reads too; `agentPendingDecorations` and `updateEditorAgentBar` left the Editor's port and eight names left the Assistant's. `main.js` lost 180 lines | done (v0.1.65) |
-| 5 | Areas (decided in principle 2026-10-18): the left, right and bottom areas are tab hosts (the activity bar an icon strip), Explorer, Linked Notes, Session, Agent, Chats and Log are pages, first in today's places, then movable between areas ("Move to…", then drag and drop) and remembered; the editor and preview stay in the middle; on a phone the areas fold into the pane carousel. The middle area too (decided 2026-10-18): editor groups, like VS Code's. A tab is a file and a view ("Open As…" Source / Preview / a file type's own view, from the explorer and the tab's menu); one group or two side by side, closing one makes the other the main one; today's Source | Preview is the default layout (linked scrolling kept when both show one file); the phone draws no tab strip (too cramped): it shows the focused file only, and its switch button changes that file's view in place (Source ↔ Preview in one tap, the "Open As…" list when a type has more views, hidden when there is one); files change from the explorer drawer and from the file name in the top bar (a list of the open files, from the start); on the phone each area is a drawer, as placed on the desktop: the left area a left drawer and the right area a right drawer (about 85% wide, the note peeking out; full width while typing), the bottom area a bottom sheet (half or full height, from a handle on the status bar; decided 2026-10-19: the phone keeps no status bar, so the sheet opens from View → Toggle Log and its own header handle drags it between half and full and down to close); buttons open them, swipes only as an extra that starts inside the screen edge (the edges are the system's "back"; decided 2026-10-19: a drawer swipe starts 24–64px in from its side, and touches in the outer 24px are left to the system); top bar: ≡ · file name ▾ · Source/Preview · right drawer; chat is a side-area page, not a view, so it keeps its own button. Phone and desktop share one state (the groups and tabs), so `mobileView`'s source/preview go. Staged: one source editor and one preview first, then several previews, two source editors only if wanted (the source editor is one element today). Areas (decided 2026-10-19): each area keeps its style — the left stacks its pages as collapsible sections (Explorer over Linked Notes and Session, as now), the right and the bottom show one page at a time with tabs (as Agent | Chats now); a page moved to the left becomes a section, moved right or down a tab; "Move to…" in a page's header menu first, drag and drop later. Stage 1 (decided 2026-10-19): up to two groups, "Open as" opens the file in that view in the same group, closing a group's last tab closes the group, "Move to Other Group" and "Open to the Side" in the tab's menu; when both groups' active tabs want the one source editor (or the one preview), the group that does not hold it keeps its tab and shows a placeholder ("a.md is open as Source in the other group", with Show here) — tabs never move by themselves | |
+| 5 | Areas (decided in principle 2026-10-18): the left, right and bottom areas are tab hosts (the activity bar an icon strip), Explorer, Linked Notes, Session, Agent, Chats and Log are pages, first in today's places, then movable between areas ("Move to…", then drag and drop) and remembered; the editor and preview stay in the middle; on a phone the areas fold into the pane carousel. The middle area too (decided 2026-10-18): editor groups, like VS Code's. A tab is a file and a view ("Open As…" Source / Preview / a file type's own view, from the explorer and the tab's menu); one group or two side by side, closing one makes the other the main one; today's Source | Preview is the default layout (linked scrolling kept when both show one file); the phone draws no tab strip (too cramped): it shows the focused file only, and its switch button changes that file's view in place (Source ↔ Preview in one tap, the "Open As…" list when a type has more views, hidden when there is one); files change from the explorer drawer and from the file name in the top bar (a list of the open files, from the start); on the phone each area is a drawer, as placed on the desktop: the left area a left drawer and the right area a right drawer (about 85% wide, the note peeking out; full width while typing), the bottom area a bottom sheet (half or full height, from a handle on the status bar; decided 2026-10-19: the phone keeps no status bar, so the sheet opens from View → Toggle Log and its own header handle drags it between half and full and down to close); buttons open them, swipes only as an extra that starts inside the screen edge (the edges are the system's "back"; decided 2026-10-19: a drawer swipe starts 24–64px in from its side, and touches in the outer 24px are left to the system); top bar: ≡ · file name ▾ · Source/Preview · right drawer; chat is a side-area page, not a view, so it keeps its own button. Phone and desktop share one state (the groups and tabs), so `mobileView`'s source/preview go. Staged: one source editor and one preview first, then several previews, two source editors only if wanted (the source editor was one element then). Areas (decided 2026-10-19): each area keeps its style — the left stacks its pages as collapsible sections (Explorer over Linked Notes and Session, as now), the right and the bottom show one page at a time with tabs (as Agent | Chats now); a page moved to the left becomes a section, moved right or down a tab; "Move to…" in a page's header menu first, drag and drop later. Stage 1 (decided 2026-10-19): up to two groups, "Open as" opens the file in that view in the same group, closing a group's last tab closes the group, "Move to Other Group" and "Open to the Side" in the tab's menu; when both groups' active tabs want the one source editor (or the one preview), the group that does not hold it keeps its tab and shows a placeholder ("a.md is open as Source in the other group", with Show here) — tabs never move by themselves | done (v0.1.91–v0.3.11: 5a–5k, P3, P4, S15, S16) |
 | S4a-1 | Shell owns the Settings dialog (v0.1.66, `adapters/settings-dialog.js`): its sections are pages in a `settings` tab host, and a section's fields are declared by the module whose setting they change (`settingsDialog.fields.add`); Shell draws, binds and keeps them in step, and owners react to the setting changing, whoever changed it (the theme: Shell; the source font, word wrap, the formatting toolbar: the Editor; auto-save: Workspace). The dialog looks the same, pixel for pixel. `main.js` lost the dialog's tabs, ten handlers and the font picker | done (v0.1.66) |
 | S4a-2 | Settings' other sections to their owners (v0.1.67): Agent is Models' (`adapters/settings-section.js`: where the key comes from, how characters' replies run, the status line drawn from the agent's connection, asking the server again when they or the server address change) with the Assistant's connected tools (drawn when Settings opens); Collaboration is Cloud's (the server address, reconnecting, display name, PIN). The Agent page now redraws when the agent's status changes instead of each caller redrawing it. `main.js` keeps the Collaboration buttons' work (Ping, Join) until S4c and the diagram's two settings until S4d | done (v0.1.67) |
 | S4b | The status bar is Shell's (v0.1.68, `statusBar.add({ id, order, … })` → a handle to set its text, dot, title, visibility), and each item is its owner's, drawn from the owner's own state as it changes rather than on every redraw: where the project lives and folder access (Workspace, from the project), the server (Cloud, from Sync's status and the account), the collaborators and the Session panel (Sync), the character count (Editor), the snapshot version (`main.js` until S4d). A person's colour is Identity's (`participantColor`), shared by their cursor, dot and chip. Pixel-identical | done (v0.1.68) |
@@ -437,7 +385,8 @@ That is where bugs are hard to find. Steps, each its own release:
   `replace`, `presence`...), and anything one hands the other
   (`workspace.handover.offer(name, value)` / `receive(name, receiver)`, in
   either order: the Agent page's old Roleplay threads to Chats).
-- The live session: `sync.session()` (connect, publish, `isConnected()`...);
+- The live session: `sync.session()` (connect, `publishOperation`,
+  `isConnected()`...), and `sync.publish(operation)` to send a change;
   its status `sync.status` (read-only; `status.change({...})` where you ping or
   reconnect); its news `sync.events.on("status" | "remote-cursor" |
   "host-counters" | "patch-confirmed" | "event", listener)`.
@@ -452,7 +401,7 @@ That is where bugs are hard to find. Steps, each its own release:
   order, body, newItem?, shown?(visible) })`; `pages.badge(host, id, n)` shows
   a count. Shell remembers the open page per host (`settings.openPages`).
 - Drawing the app again: `shell.render(project)` (or `{ only: "status" }` for
-  the panes and status bar without the tree). Never call `main.js`'s render.
+  the panes and status bar without the tree).
 - The agent's connection: `models.agent` (`status()`, `refresh({ signedIn })`,
   `ensureReady`, `choose(model)`, `requestOverride()`); what a request carries
   from the project: Characters' `projectSnapshot(project)` and
@@ -460,11 +409,13 @@ That is where bugs are hard to find. Steps, each its own release:
 - Settings: read `shell.settings.key`; change with `shell.settings.change({ key:
   value }, why?)` (a new key needs a default in Shell's `settings-store.js`);
   listen with `shell.settings.on((settings, changedKeys) => …)`.
-- What the editor shows: `editor.view` (`get()` → `sourceOpenTabIds`,
-  `previewOpenTabIds`, `previewFileId`, `previewPart`, `sourcePart`,
-  `selectionNodeId`, `draggingTabState`; actions `reset`, `pick`, `select`,
-  `openTab`, `closeTab`, `moveTab`, `showPreview`, `showDiff`, `clearParts`,
-  `dragTab`, `keepTabs`). Shared or local work: `sync.mode` (`get()` →
+- What the editor shows: `editor.view` (`get()` → `groups` (each group's
+  tabs and active tab), `hosts` (the group each body is in), `focus`,
+  `groupParts`, `previewFileId`, `previewPart`, `sourcePart`,
+  `selectionNodeId`, `draggingTabState`; actions `reset`, `restore`, `pick`,
+  `select`, `openTab`, `closeTab`, `showSource`, `activate`, `switchView`,
+  `moveTab`, `moveToGroup`, `closeGroup`, `showPreview`, `showView`,
+  `clearParts`, `dragTab`, `keepTabs`). Shared or local work: `sync.mode` (`get()` →
   `workspaceMode`, `privateProject`; `share`, `leave`, `forgetKept`, `restore`).
 - Browser: a command id is `<owner>.<action>`; add it with
   `shell.commands.add({ id, title, run, keys?, menu? })`. Menus are drawn
@@ -488,21 +439,19 @@ That is where bugs are hard to find. Steps, each its own release:
 - Server: a new route is `transport.add_route(method, path, run)`, where
   `run(request)` returns the JSON payload and raises `PermissionError`,
   `LookupError` or `ValueError` for 403, 404 and 400. `KeyError` and
-  `IndexError` stay 500: they are bugs. `LEGACY_ROUTES` in
-  `mdnotes_server.py` holds the routes from before the restructure and only
-  shrinks.
+  `IndexError` stay 500: they are bugs.
 - File types: never spell an extension. Ask the module (`typeOf`, `is(name,
-  id)`, `formatOf`, `extensionOf`, `mimeOf`...; code from before the
-  restructure uses `builtinTypes` or the helpers in `project-model.js`). A new
+  id)`, `formatOf`, `extensionOf`, `mimeOf`...; with no module context, File
+  types' static `builtinTypes`). A new
   type is one entry in `protocol/file-types.json`, then
   `node tools/protocol-sync.mjs` writes the browser's copy. Pages mark what
   they need (`data-file-accept`, `data-file-types`, `data-file-type-options`)
   and File types fills it in.
 - The server, from the browser: `shell.server.request(path, { method, query,
   body, failure })`. Never build the address yourself; `shell.server.url()`
-  is it. Each module's calls live in its `adapters/api.js`.
-- The signed-in account: `identity.account()` (`{ token, username, teams }`
-  or null) and `identity.token()`; listen to `identity.events.on("account")`.
+  is it. Each module's calls live in its adapters, most in `adapters/api.js`.
+- The signed-in account: `identity.account()` (`{ token, username, teams,
+  admin }` or null) and `identity.token()`; listen to `identity.events.on("account")`.
   Never read the stored password or the sign-in settings: Identity keeps them.
   On the server, `identity.require(token)`, `require_team`, `may_open`,
   `role` and `can(identity, action, team, access)`.
@@ -510,7 +459,8 @@ That is where bugs are hard to find. Steps, each its own release:
   own_url, own_model)`, then `providers.stream(route, payload, emit)` (or
   `complete`). Build the payload in chat-completions form; Models adds what
   the model needs and translates it for the Responses API. In the agent the
-  seam is `ChatProxy._complete(payload, emit)`, which tests fake. From the
+  seam is `Agent._complete(payload, emit)` (the Assistant's
+  `service/agent.py`), which tests fake. From the
   browser to a user's own endpoint: `runDirectReply` (Models).
 - Changing a shared workspace (server): `SharedWorkspace.apply_operation(token,
   operation)` (Sync) checks the sender's role and the revision, rebases a
@@ -593,7 +543,7 @@ That is where bugs are hard to find. Steps, each its own release:
   resolves to `{ name: value }` or null.
 - A new kind of file that can be created (New ... in the Create menu and the
   explorer): give its File types entry a `create: { label, name, order }`.
-- Deleting a cloud project or folder: `registry.delete_entry` moves it, with
+- Deleting a cloud project or folder: Cloud's `delete_entry` moves it, with
   its history, into History's trash (`history.trash.put`). The trash keeps it
   for `--trash-days` (at most 30) and the backup sweep removes it after
   that. Who may delete or restore is `identity.may_delete(identity, team,

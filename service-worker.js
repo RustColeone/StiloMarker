@@ -1,4 +1,4 @@
-const CACHE_NAME = "mdnotes-shell-v0.3.19";
+const CACHE_NAME = "mdnotes-shell-v0.3.20";
 // The libraries served with the app (vendor/: each in a folder named for its
 // version), kept across the app's versions once used.
 const VENDOR_CACHE = "mdnotes-vendor";
@@ -20,8 +20,6 @@ const APP_SHELL = [
   "./app/modules/shell/model/contributed-settings.js",
   "./app/styles.css",
   "./app/boot-theme.js",
-  "./app/domain/project-model.js",
-  "./app/services/persona-service.js",
   "./app/modules/identity/adapters/stored-sign-in.js",
   "./app/modules/identity/adapters/admin-page.js",
   "./app/modules/workspace/adapters/template.js",
@@ -303,6 +301,13 @@ self.addEventListener("fetch", (event) => {
   // use has nothing in hand, and the app asks the server something every few
   // seconds.
   if (url.pathname.includes("/api/")) {
+    return;
+  }
+
+  // The documentation (docs/: the architecture page) is not the app, and
+  // changes without a new version of it: always from the network, so it is
+  // as new as the site.
+  if (url.pathname.includes("/docs/")) {
     return;
   }
 

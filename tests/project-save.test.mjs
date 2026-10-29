@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createProject, addFolder, addFile, updateFileContent, toggleFolder, renameNode } from '../app/domain/project-model.js';
+import { createProject, addFolder, addFile, updateFileContent, toggleFolder, renameNode } from '../app/modules/workspace/index.js';
 import { buildSourceIndex, saveProjectToHandles } from '../app/modules/workspace/adapters/disk-folders.js';
 import { snapshotProject, savedFileIds, createProjectSaveQueue } from '../app/modules/workspace/adapters/save-queue.js';
 const settle = async () => { for (let i = 0; i < 5; i++) await new Promise(setImmediate); };

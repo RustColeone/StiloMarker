@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCollaborationRuntime } from '../app/modules/sync/index.js';
-import { applySyncOperation as applyModelOperation } from '../app/domain/project-model.js';
+import { applySyncOperation as applyModelOperation } from '../app/modules/workspace/index.js';
 
 function project(content = 'original') {
   return { id: 'test', rootId: 'root', nodes: {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { createCollaborationRuntime } from '../app/modules/sync/index.js';
-import { applySyncOperation } from '../app/domain/project-model.js';
+import { applySyncOperation } from '../app/modules/workspace/index.js';
 const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(setImmediate); };
 
 for (const first of ['a', 'b']) for (const ackFirst of [true, false]) {

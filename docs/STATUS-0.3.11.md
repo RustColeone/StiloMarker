@@ -1,5 +1,17 @@
 # Status after v0.3.11 (2026-10-25)
 
+> **A record, kept as it was written.** Where things stand now is in
+> `docs/ISSUES.md`. Since this was written (to v0.3.20, 2026-10-29):
+> - items 1 and 2 were fixed in v0.3.13 and v0.3.14; of item 3, the first
+>   two limits were fixed in v0.3.15 and v0.3.16;
+> - item 4: Windows was checked by the user; macOS stays untried (there is no
+>   Mac to try it on, and signing the builds is not planned);
+> - item 5 is done: v0.3.19 is on GitHub and is the first published desktop
+>   release;
+> - item 6 is left as it is;
+> - item 8: the test runner (`tools/run-tests.mjs`) runs a failed browser test
+>   once more by itself and says so.
+
 Where the project stands after this round of work:
 - what was fixed: a summary, version by version;
 - what was **not** fixed, or is only partly done: in detail, so whoever

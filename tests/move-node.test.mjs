@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { addFile, addFolder, applySyncOperation, createProject, getNodeIdByPath, moveNode } from "../app/domain/project-model.js";
+import { addFile, addFolder, applySyncOperation, createProject, getNodeIdByPath, moveNode } from "../app/modules/workspace/index.js";
 
 // The same table the server's tests/move-node.test.py uses: a broadcast
 // move-node is applied with this moveNode() in every peer, so the two must

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { findMentions, personaHandle } from '../app/services/persona-service.js';
+import { findMentions, personaHandle } from '../app/modules/characters/index.js';
 
 // The server decides which characters reply (server/stilo/modules/chats, asking Characters) and the
 // browser highlights mentions; both read this table so they agree.

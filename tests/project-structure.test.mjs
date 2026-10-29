@@ -12,7 +12,7 @@ test("required workspace files exist", () => {
     "app/modules/sync/service/runtime.js",
     "app/modules/workspace/adapters/file-content.js",
     "extensions/module-map/browser/model/module-map.js",
-    "app/domain/project-model.js",
+    "app/modules/workspace/index.js",
     "app/modules/workspace/adapters/zip.js",
     "app/modules/shell/adapters/offline.js",
     "app/modules/cloud/adapters/api.js",

@@ -1,258 +1,126 @@
 # STILO MARKER
 
-STILO MARKER is a browser-based Markdown workspace for writing notes, organizing files, previewing content, and managing image URL albums in one page.
+Stilo Marker is a Markdown workspace for writing: notes, diagrams, characters and chats, alone or together with
+others. It runs in the browser, as an installable web app, or as a desktop app that works on its own and can run a
+server for others to join.
 
 **How it is built, and how to add to it:** the [architecture page](https://rustcoleone.github.io/StiloMarker/docs/architecture/)
 is a map of the code, made from the code itself. It starts at the whole system and goes in: a module, a file, one
 function and its code. It also has the guides for adding an extension (a mod) and for any change to the project.
 
-It supports:
+## Try it
 
-- Markdown, MTREE, URL album, and image files
-- Explorer-based file and folder organization
-- Drag and drop for opening, reordering, and moving items
-- Source and preview panes
-- Local browser storage and directory-backed workspaces in Chromium browsers
-- Optional collaboration through the included Python backend
-- A built-in log panel for debugging interactions
+- **In the browser:** [rustcoleone.github.io/StiloMarker](https://rustcoleone.github.io/StiloMarker/). Your work is
+  kept in that browser. The page installs as an app and works offline.
+- **The desktop app:** portable files for Windows, macOS and Linux on the
+  [latest release](https://github.com/RustColeone/StiloMarker/releases/latest), nothing to install. The builds are not
+  signed, so the first start asks once (the release notes say how). It has not been tried on macOS yet.
+- **Your own server:** `python3 server/mdnotes_server.py` serves the app and adds working together, accounts and the
+  server's AI keys ([below](#run-it-from-a-checkout)).
+
+On a first visit the welcome file walks through the basics.
+
+## What it does
+
+- **Files:** Markdown with a live preview; module maps (`.mtree`), brainstorm diagrams (`.bmap`), Mermaid diagrams,
+  HTML pages, plain text, logs and JSON; CSV and TSV tables, as an editable grid with each column's sum, mean, minimum
+  and maximum; URL albums of images; images; and character sheets for Chats.
+- **Writing:** two source editors side by side (two files, or one file twice, kept in step); Find in Files, with
+  Replace (`Ctrl+Shift+F`); a name filter above the Explorer's tree; a spelling check (a setting).
+- **Where your work is kept:** in the browser, in a folder on disk (Chromium browsers), or in projects on a server,
+  shared with accounts and teams. A server keeps snapshots and backups to go back to, and a trash.
+- **Working together:** live editing on a server, with a PIN or with accounts; each person's caret; comments on a
+  line; sharing a workspace for a while with a guest PIN.
+- **The Agent:** an AI assistant that reads the workspace and proposes edits you keep or drop. It uses the server's
+  key, or your own (then it can run straight from your browser, no server needed). **Chats** with people and with
+  characters you write. Pictures, when the server has an OpenAI key. Optional read-only connected tools
+  ([docs/MCP.md](docs/MCP.md)).
+- **The look:** Light and Dark, plus Paper, Midnight, Forest and High Contrast; panels can be dragged between areas.
+- **Extensions:** the diagrams, tables, URL albums, HTML pages, Mermaid, module maps and the extra themes are
+  extensions, written against a versioned API ([docs/EXTENSIONS.md](docs/EXTENSIONS.md), and the extension guide on
+  the architecture page).
+
+## How to use it
+
+The welcome file covers the first steps. The [manual](server/MANUAL.md) covers the rest: each file type and its
+format, the Explorer, the editors and the preview, saving and exporting, working together, the Agent and Chats, and
+the settings.
 
 ## Requirements
 
-- Node.js 18+
-- Python 3.10+ if you want to run the collaboration backend
-- A Chromium-based browser if you want to use `Open Directory`
+- A current browser; opening a folder on disk needs a Chromium-based one.
+- Python 3.10 or later for the server (the desktop app's own server too).
+- Node.js 18 or later for `npm start` and the tests. There is nothing to install and no build step: the browser loads
+  the files as they are.
 
-## Start The App
+## Run it from a checkout
 
-Install dependencies if needed, then run the static frontend server:
-
-```bash
-npm start
-```
-
-This serves the app at:
-
-```text
-http://localhost:4173
-```
-
-## Run The Collaboration Backend
-
-To enable shared sessions, start the backend in a second terminal:
+The server serves the app as well:
 
 ```bash
-npm run backend:start
+python3 server/mdnotes_server.py      # or: npm run backend:start
 ```
 
-Default backend values:
+Then open `http://localhost:8000`. Without a server, `npm start` serves the app alone at `http://localhost:4173`, and
+everything is kept in the browser.
 
-- Host: `0.0.0.0`
-- Port: `8000`
-- PIN: `2468`
+The server's settings are command-line options or environment variables (`python3 server/mdnotes_server.py --help`):
 
-Optional chat backend values:
+| Setting | Default | What it is |
+|---|---|---|
+| `--host`, `MDNOTES_HOST` | `0.0.0.0` | The address to listen on. |
+| `--port`, `MDNOTES_PORT` | `8000` | The port. |
+| `--pin`, `MDNOTES_PIN` | `2468` | The PIN that joins the shared session. |
+| `--master-pin`, `MDNOTES_MASTER_PIN` | `1367` | The PIN that may also replace the whole project. |
+| `--whitelist`, `MDNOTES_WHITELIST` | `server/whitelist.json` | The accounts. Without this file, the server has no accounts. |
+| `--data-dir`, `MDNOTES_DATA_DIR` | `server/data` | The teams' projects. |
+| `--trash-days`, `MDNOTES_TRASH_DAYS` | `30` | How long deleted files are kept. |
 
-- `DEEPSEEK_API_KEY` to use the default DeepSeek chat proxy setup
-- `DEEPSEEK_MODEL` to override the default `deepseek-v4-pro`
-- `DEEPSEEK_API_URL` to override the default `https://api.deepseek.com/chat/completions`
-- `DEEPSEEK_ENABLE_THINKING=1` to send DeepSeek thinking mode parameters
-- `DEEPSEEK_REASONING_EFFORT=low|medium|high` when thinking mode is enabled
-- `MDNOTES_CHAT_API_KEY`
-- `MDNOTES_CHAT_MODEL`
-- `MDNOTES_CHAT_API_URL` for other OpenAI-compatible backends
-- `MDNOTES_CHAT_ALLOW_REMOTE=1` only if you explicitly want remote clients to use the chat proxy
+Change both PINs before anyone else can reach the server. Accounts are managed with `python3 server/accounts.py`
+(`add <name> --teams <a,b> [--admin]`, `password`, `remove`, `list`), and then by an admin in Settings → Accounts.
+The desktop app turns them on from Settings → Server.
 
-You can also override them with environment variables:
+The AI keys stay on the server; browsers never get them:
 
-- `MDNOTES_HOST`
-- `MDNOTES_PORT`
-- `MDNOTES_PIN`
+| Variable | What it is |
+|---|---|
+| `DEEPSEEK_API_KEY` or `MDNOTES_CHAT_API_KEY` | The chat provider's key (DeepSeek unless the address says otherwise). |
+| `MDNOTES_CHAT_API_URL` (or `DEEPSEEK_API_URL`) | Any OpenAI-compatible endpoint; `https://api.deepseek.com/chat/completions` by default. |
+| `MDNOTES_CHAT_MODEL` (or `DEEPSEEK_MODEL`) | The default model; `deepseek-flash` by default. |
+| `OPENAI_API_KEY` | OpenAI's models, and pictures. |
+| `MDNOTES_CHAT_ALLOW_REMOTE=1` | Lets browsers on other computers spend the server's keys. Without it, only a browser on the server's own computer may. |
 
-Chat secrets stay on the backend only. Do not put API keys into the browser settings, project files, or local storage.
+With accounts, spending the server's keys also needs a signed-in account. Behind a reverse proxy on the same computer
+every browser looks local, so turn accounts on there. Anyone can bring their own key instead (Settings → Agent); it is
+kept in their browser and spends nothing of the server's. The manual lists the remaining settings.
 
-DeepSeek is the default provider for the built-in chat proxy in this repo. If `DEEPSEEK_API_KEY` is present, the server will use `deepseek-v4-pro` at `https://api.deepseek.com/chat/completions` unless you override those values explicitly.
-
-## Available Scripts
+## Tests
 
 ```bash
-npm start
-npm run selftest
-npm run backend:start
-npm run backend:selftest
+npm run test:all        # every test but the browser tests; also tests/run-tests.sh or tests\run-tests.bat
+npm run test:browser    # with the browser tests (Playwright for Python and a Chromium)
 ```
 
-## How To Use STILO MARKER
-
-## 1. Create Or Open A Workspace
-
-Use the top menu bar:
-
-- `File > New Project` to start a fresh in-memory workspace
-- `File > Open Directory` to work against a real folder on disk
-- `File > Import File or Zip` to load existing content
-
-If you use `Open Directory`, changes can be saved back to the selected folder. In non-Chromium browsers, STILO MARKER falls back to in-browser storage and export.
-
-## 2. Create Content
-
-Use the `Create` menu or the explorer context menu to add:
-
-- New Folder
-- New Markdown
-- New MTREE
-- New URL Album
-- Imported local files
-
-Supported file types:
-
-- `.md`
-- `.mtree`
-- `.urldb`
-- `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.bmp`
-
-## 3. Work In The Explorer
-
-The explorer is the main organizer for your workspace. It is the first tab of the left window, whose icons are in the activity bar at the far left: the Explorer, Search (find text in every file, `Ctrl+Shift+F`), and any page dragged there. Right-click a tab, an icon or a section's header to move it to another area.
-
-- Click a file to open it in the source pane
-- Type in the box above the tree to keep only the files and folders whose name holds it (Enter opens the first file, Escape clears it)
-- Click folder arrows to expand or collapse folders
-- Right-click items for actions like rename, delete, export, copy, and paste
-- Drag files to reorder them or move them into folders
-- Drag URL album entries only into other URL albums
-
-Explorer copy/paste rules:
-
-- Files and folders can be copied and pasted into folders or the root
-- URL album entries can only be copied and pasted into `.urldb` files
-
-## 4. Write In The Source Pane
-
-The source pane is where you write and edit text-based files. At first Source is on the left and Preview on the right, but each pane can show a file as Source: open a second file beside the first, or the same file twice, with a tab's **Open to the Side** (right-click the tab). The same file in both stays in step as you type, and Ctrl+Z undoes the file's last change from either pane.
-
-- Markdown files are editable directly
-- MTREE files are editable directly
-- URL album files are editable directly
-- Image files are preview-only in the source pane
-
-Use `Ctrl+S` or `Cmd+S` to save.
-
-## 5. Use The Preview Pane
-
-The preview pane renders supported content:
-
-- Markdown preview
-- Image preview
-- URL album preview
-- Individual URL album entry preview
-
-You can show or hide the preview pane from:
-
-- `View > Toggle Preview`
-- The preview close button `×`
-- The preview toggle button in the source pane header
-
-## 6. Work With URL Albums
-
-URL albums are `.urldb` files that store image references.
-
-Each entry contains:
-
-- A name
-- A URL
-- An optional description
-
-What you can do with URL albums:
-
-- Add bookmark entries from the explorer context menu
-- Click an entry to preview it
-- Drag entries between URL albums
-- Reorder entries inside a URL album
-- Copy and paste entries between URL albums
-
-Remote image entries are labeled as `IMAGE URL` in the explorer.
-
-## 7. Save And Export
-
-Use the `File` menu to:
-
-- `Save`
-- `Save as PDF`
-- `Export`
-- `Export Selected`
-
-Behavior depends on workspace mode:
-
-- Directory-backed workspace: saves back to disk
-- In-memory workspace: keeps data in browser storage and lets you export files manually
-
-## 8. Collaboration
-
-Open `Settings` and fill in:
-
-- Server URL, for example `http://localhost:8000`
-- PIN, default `2468`
-- Display name
-
-Then:
-
-- Use `Ping Server` to verify connectivity
-- Use `Connect` to join the session
-
-The collaboration sidebar shows session status and presence.
-
-## 9. Chat Panel
-
-Open the right panel (Agent, Chats) from `View > Show Chat` or the panel button at the right end of the top bar.
-
-- Chat history is stored locally per workspace in browser storage.
-- Attached context files come from the current workspace state.
-- The browser talks only to the local MDNotes backend.
-- Provider API keys remain server-side through environment variables.
-- By default, the chat proxy rejects non-local clients unless `MDNOTES_CHAT_ALLOW_REMOTE=1` is set.
-
-## 9. View And Debug
-
-STILO MARKER includes a built-in log panel.
-
-Use:
-
-- `View > Toggle Log`
-- `Settings > Toggle Log Panel`
-- The log panel close button `×`
-
-The log panel is useful for checking drag/drop actions, file operations, and interaction flow while testing the app.
-
-## Typical Workflow
-
-1. Start the frontend with `npm start`.
-2. Open `http://localhost:4173`.
-3. Create a project or open a directory.
-4. Add folders and Markdown files from the explorer.
-5. Write in the source pane and check the preview pane.
-6. Save, export, or connect to the backend for collaboration.
-
-## Notes
-
-- `Open Directory` works best in Chromium-based browsers.
-- URL album entries are special explorer items and are treated differently from normal files.
-- The app keeps a log panel available for troubleshooting interaction issues.
-
+[tests/README.md](tests/README.md) says what each test covers and how to run one by itself.
 
 ## Reference
 
-- [The architecture page](https://rustcoleone.github.io/StiloMarker/docs/architecture/) (`docs/architecture/`) — the code as browsable diagrams, from the whole system down to each function's code, with the guides "How an extension goes in" and "How a change goes in". It is the project's guideline: every change brings it up to date (`python3 tools/architecture.py`).
-
-For a full technical reference including all file format specifications and detailed usage, see [server/MANUAL.md](server/MANUAL.md).
-
-- [docs/ISSUES.md](docs/ISSUES.md) — known issues, open and fixed, with severity and confidence.
-- [docs/STATUS-0.3.11.md](docs/STATUS-0.3.11.md) — where things stand after v0.3.11: what was fixed (a summary) and what was not (in detail: impact, why, where, next steps).
-- [docs/REVIEW-0.3.md](docs/REVIEW-0.3.md) — a code review of v0.3.2–v0.3.11 for developers new to the code: how the Editor is built, the two source editors in depth (data flow, invariants, pitfalls, tests), and each smaller change.
-- [docs/HISTORY.md](docs/HISTORY.md) — project history, architecture rules, and superseded decisions.
+- [The architecture page](https://rustcoleone.github.io/StiloMarker/docs/architecture/) (`docs/architecture/`): the
+  code as browsable diagrams, from the whole system down to each function's code, with the guides "How an extension
+  goes in" and "How a change goes in". It is the project's guideline: every change brings it up to date
+  (`python3 tools/architecture.py`).
+- [server/MANUAL.md](server/MANUAL.md): the manual, with every file format.
+- [docs/ISSUES.md](docs/ISSUES.md): where things stand. Known issues (none open), the ones accepted and why, what has
+  not been tried, and every fix by version.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the modules, their levels and the rules between them.
+- [docs/EXTENSIONS.md](docs/EXTENSIONS.md): the extension API.
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): how a release is deployed, and each deploy.
+- [docs/REVIEW-0.3.md](docs/REVIEW-0.3.md): a code review of v0.3.2–v0.3.11 for developers new to the code: how the
+  Editor is built, the two source editors in depth, and each smaller change.
+- [docs/STATUS-0.3.11.md](docs/STATUS-0.3.11.md): where things stood after v0.3.11, kept as a record.
+- [docs/HISTORY.md](docs/HISTORY.md): project history, architecture rules, and superseded decisions.
 
 ## Code layout
-
-There is no build step: the browser loads the ES modules under `app/` as they are.
 
 | Path | What it holds |
 |------|---------------|
@@ -262,7 +130,8 @@ There is no build step: the browser loads the ES modules under `app/` as they ar
 | `extensions/` | Extensions (diagrams, module maps, URL albums, tables, themes...): each a folder the core never names, using only modules' extension points. |
 | `server/stilo/` | The server's kernel and modules, in the same levels as the browser's. |
 | `protocol/`, `spec/` | What both ends agree on: each module's network messages and version, file types, the extension API; the cases a rule written in both languages passes. |
-| `app/services/`, `app/domain/` | Two files left from before the restructure, each passing on to a module. |
+| `desktop/` | The desktop app (Electron): the window, its menus, and the server it can run. |
+| `tests/`, `tools/` | The tests, and the tools: the test runner, the release labels, the generated copies, the architecture page. |
 
 The [architecture page](https://rustcoleone.github.io/StiloMarker/docs/architecture/) shows all of it, down to each
 function, and is made from the code: after a change, `python3 tools/architecture.py` (the tests fail while it is out
@@ -270,17 +139,14 @@ of date). To read it locally, serve the repository (`npm start`) and open `/docs
 
 ## App releases
 
-The app uses `vMAJOR.MINOR.PATCH` release labels, beginning with **v0.1.12**.
-This is separate from each document's S.E.N version and the internal numeric
-sync compatibility gate. The installed app version appears in Settings and
+The app uses `vMAJOR.MINOR.PATCH` release labels, beginning with **v0.1.12**. This is separate from each document's
+S.E.N version and the internal numeric sync compatibility gate. The installed app version appears in Settings, and
 `GET /api/ping` returns `appVersion` for deployment checks.
 
-To prepare a release, run `node tools/release-version.mjs 0.1.13`, then
-`node tools/release-version.mjs --check`. This updates `package.json`,
-`app/version.js`, and the service-worker cache label together. It does not
-change sync compatibility or user preferences. Commit/deploy those files with
-the release; there is still no frontend build step.
+To prepare a release, run `node tools/release-version.mjs 0.3.20`, then `node tools/release-version.mjs --check`.
+This updates `package.json`, `desktop/package.json`, `app/modules/shell/model/version.js` and the service worker's
+cache label together. It does not change sync compatibility or user preferences.
 
-See [deployment notes](docs/DEPLOYMENT.md) for the coordinated restart procedure.
-
-In-app chat can use optional owner-configured MCP read tools. See [Connected tools setup](docs/MCP.md).
+A version tag pushed to GitHub (`v0.3.20`) runs the tests, builds the portable desktop files on the three systems and
+drafts a release with the notes in `docs/releases/<tag>.md` (`.github/workflows/release.yml`). See the
+[deployment notes](docs/DEPLOYMENT.md) for the hosted server.

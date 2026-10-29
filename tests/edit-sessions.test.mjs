@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { addFile, createProject, markFileSaved, markFilesSaved, getNode } from "../app/domain/project-model.js";
+import { addFile, createProject, markFileSaved, markFilesSaved, getNode } from "../app/modules/workspace/index.js";
 
 const GAP_MS = 600 * 1000;
 

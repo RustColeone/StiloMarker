@@ -321,7 +321,7 @@
       ["Find the owner", "the module that owns what changes · its level", "module", "#/app/modules"],
       ["Write it in its layer", "model/ rules · service/ state · adapters/ input and output", "folder", ""],
       ["Say what it is", "a file's opening comment · a comment above each function", "file", ""],
-      ["Test it", "node --test tests/ · python tests · browser tests", "check", link("tests")],
+      ["Test it", "npm run test:browser · every test, one line each", "check", link("tests")],
       ["A version of its own", "node tools/release-version.mjs X.Y.Z · docs/ISSUES.md", "boot", fileLink("tools/release-version.mjs")],
       ["python3 tools/architecture.py", "this page, made again; commit data.js and source.js", "boot", fileLink("tools/architecture.py")],
     ];
@@ -400,8 +400,10 @@
       ["3. Say what it is, where this page reads it", "A file starts with a comment (a docstring in Python) saying what it is and what it " +
         "offers; a function has a comment (a docstring) above it when its name does not say enough. They are this page's text: " +
         "the pane shows them beside the code."],
-      ["4. Test it", "`node --test tests/`, the Python tests (`tests/*.test.py`) and the browser tests (`tests/*-browser.py`); " +
-        "tests/README.md lists what each covers. A fix comes with a test that fails without it."],
+      ["4. Test it", "`npm run test:browser` (`tools/run-tests.mjs`): the release labels, the generated copies, the Node tests, " +
+        "every Python test and the browser tests, one line each; a browser test that fails is run again by itself and said so. " +
+        "`npm run test:all` leaves the browser tests out. tests/README.md lists what each covers. A fix comes with a test that " +
+        "fails without it."],
       ["5. A version of its own", "One version per change to the app: `node tools/release-version.mjs X.Y.Z` (it also renames the " +
         "service worker's cache, so browsers fetch the new files) and an entry in docs/ISSUES.md saying what was wrong and what " +
         "changed. A change to the docs alone takes no version; its commit starts with `docs:`."],
