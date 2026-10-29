@@ -5,7 +5,7 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-29 · `v0.3.20` (the docs brought up to date, one
+Last updated: 2026-10-29 · `v0.3.20` deployed (the docs brought up to date, one
 test runner, the last code from before the restructure gone). `v0.3.19` is the
 stable version and the first published desktop release (GitHub; the
 unpublished `v0.3.15` draft taken down). Before it `v0.3.0` was

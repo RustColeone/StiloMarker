@@ -1337,3 +1337,32 @@ Private deployment backup: `/home/laplacengan/backups/stilomarker/20261026T06121
 185/185 data files (taken with the service stopped), every JSON file valid;
 the account file and the environment file as they were.
 
+
+## Verified release: v0.3.20
+
+Deployed on 2026-10-29 at 23:38 UTC: the docs checked against the code
+(README, the manual and with it the Agent's copy, docs/ARCHITECTURE.md), one
+test runner (`tools/run-tests.mjs`), the last two files from before the
+restructure removed, and the service worker leaving `/docs/` to the
+network. Browser code and docs only, no server change; the service was
+restarted so the ping reports the new version (it reads it at start). The
+live checkout fast-forwarded to `dev`, then `main` was pushed and GitHub
+Pages built it. App version `0.3.20`; sync compatibility unchanged at `117`.
+The service's command line and environment file are unchanged; it was down
+under a second.
+
+Public checks: ping (`0.3.20`, accounts on), the service worker's cache label
+`mdnotes-shell-v0.3.20` and its `/docs/` rule, the account file, the
+environment file, the sign-ins file and the server's code answered with the
+app's page (refused), an unknown token answered 403, the architecture page
+served, a clean journal. A fresh browser on the public site and on GitHub
+Pages (no real data) was controlled by `0.3.20`, opened the architecture
+page under it with none of its files in the app's cache, and had no page
+errors.
+
+Validation (`tools/run-tests.mjs --browser`): 417 Node tests, all 27 Python
+tests, all 53 browser tests (the desktop app's in Electron 44), none rerun.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261029T233858Z-v0.3.20`.
+185 data files (taken with the service stopped), all 31 JSON files valid;
+the account file and the environment file as they were.
