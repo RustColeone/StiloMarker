@@ -44,7 +44,8 @@ export function addDesktopServer({ dialog, settings, sync, shell, identity, ping
     <div class="settings-actions-row">
       <button id="desktop-server-apply" type="button">Apply</button>
       <button id="desktop-server-join" type="button" hidden>Share This Workspace</button>
-    </div>`;
+    </div>
+    <p class="subtle-label">To run a server somewhere else, get it from <a href="https://github.com/RustColeone/StiloMarker#run-your-own-server" target="_blank" rel="noreferrer">github.com/RustColeone/StiloMarker</a>.</p>`;
   const $ = (selector) => body.querySelector(selector);
   const radios = () => [...body.querySelectorAll('input[name="desktop-server"]')];
   let state = null;

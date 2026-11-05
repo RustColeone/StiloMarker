@@ -5,8 +5,9 @@ open** (needs a decision) and what is **already fixed and deployed**, with
 confidence stated — some items are confirmed, some are suspicions that could not
 be proven.
 
-Last updated: 2026-10-29 · `v0.3.20` deployed (the docs brought up to date, one
-test runner, the last code from before the restructure gone). `v0.3.19` is the
+Last updated: 2026-11-01 · `v0.3.21` (the server pages say where to get a
+server). `v0.3.20` deployed (the docs brought up to date, one test runner, the
+last code from before the restructure gone). `v0.3.19` is the
 stable version and the first published desktop release (GitHub; the
 unpublished `v0.3.15` draft taken down). Before it `v0.3.0` was
 the stable version. v0.2.30–v0.2.42 were gone over again before calling it so; what that found is
@@ -107,6 +108,27 @@ What the tests and checks here cannot reach; each would need the real thing.
 ---
 
 ## Fixed
+
+### v0.3.21: the server pages say where to get a server
+
+Asked for 2026-11-01. Settings → Collaboration's Server section and the
+desktop app's Settings → Server asked for a server's address, and nothing in
+the app said where a server comes from. Both now link to the repository's
+new README section, "Run your own server". That section had started from a
+checkout, so it now says how to get one (`git clone`, or the ZIP), that
+only Python is needed (tried on a fresh clone: the app and the ping answered
+with nothing installed), and how to reach the server: its own address, or
+Settings → Collaboration from an app opened elsewhere, which browsers let
+reach only an `https://` server (or this computer). The manual says where
+the server is too, so the Agent can answer it. Test:
+`project-structure.test.mjs` (both pages link to a heading the README has,
+and the README says how to clone it).
+
+With it: `docs/DEPLOYMENT.md` says how to move the server to another machine
+(what lives outside Git in `server/` and moves by hand, what the proxy must
+allow), and `accounts-browser.py` waits up to 60 s for a page to sign in
+again (it allowed 20 s; measured here, 3–10 s at rest and 48 s with the
+page's CPU slowed 20 times: it timed out on a loaded machine, never stalled).
 
 ### v0.3.20: the docs as the code is, one test runner, the last code from before the restructure
 

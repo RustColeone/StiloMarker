@@ -681,7 +681,7 @@ The preview can be shown or hidden with `View > Toggle Preview` or the `×` butt
 
 ## 15. Collaboration Backend
 
-The Python backend (`server/mdnotes_server.py`) enables real-time multi-user sessions.
+The Python backend (`server/mdnotes_server.py`) enables real-time multi-user sessions. To run your own, get it from https://github.com/RustColeone/StiloMarker (the README's "Run your own server"): it needs only Python 3.10 or later. Settings → Collaboration links there too.
 
 ### Architecture
 

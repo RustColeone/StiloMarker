@@ -73,8 +73,9 @@ async def open_page(b, username, password):
     await ctx.route("**/*", route)
     page = await ctx.new_page(); errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
-    await page.goto(BASE + "/", wait_until="networkidle")
-    await page.wait_for_function("Boolean(window.__id) && window.__id.identity.account()", timeout=20000)
+    # Sized for a small, busy machine: signing in again takes 3-10 s here at rest, 48 s with the page's CPU slowed 20 times.
+    await page.goto(BASE + "/", wait_until="networkidle", timeout=60000)
+    await page.wait_for_function("Boolean(window.__id) && window.__id.identity.account()", timeout=60000)
     return ctx, page, errors
 
 

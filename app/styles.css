@@ -2770,9 +2770,14 @@ p {
   margin-top: 0;
 }
 
-.preview-output a {
+.preview-output a,
+.subtle-label a {
   color: var(--link);
   text-underline-offset: 2px;
+}
+
+.subtle-label a {
+  overflow-wrap: anywhere;
 }
 
 .preview-output a:hover {

@@ -214,6 +214,16 @@ test("the sync runtime wires transport and OT", async () => {
   symbols.forEach((pattern) => assert.match(collaborationSource, pattern));
 });
 
+test("the server pages say where to get a server, and the README answers there", async () => {
+  const pages = [await readFile(resolveFromRoot("index.html"), "utf8"),
+    await readFile(resolveFromRoot("app/modules/cloud/adapters/desktop-server.js"), "utf8")];
+  const anchors = pages.map((page) => /<a href="https:\/\/github\.com\/RustColeone\/StiloMarker#([\w-]+)" target="_blank" rel="noreferrer">/.exec(page)?.[1]);
+  const readme = await readFile(resolveFromRoot("README.md"), "utf8");
+  const headings = [...readme.matchAll(/^#+ (.+)$/gm)].map((match) => match[1].toLowerCase().replaceAll(" ", "-"));
+  for (const anchor of anchors) assert.ok(headings.includes(anchor), `README has no heading for #${anchor}`);
+  assert.match(readme, /git clone https:\/\/github\.com\/RustColeone\/StiloMarker\.git/);
+});
+
 test("service-worker.js caches the app shell", async () => {
   const serviceWorkerSource = await readFile(resolveFromRoot("service-worker.js"), "utf8");
   assert.match(serviceWorkerSource, /mdnotes-shell-v\d+/);

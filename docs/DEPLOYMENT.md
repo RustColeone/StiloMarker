@@ -50,6 +50,43 @@ removes edits made since that backup. Old code cannot replay the new
 `.pending-state.json` recovery journal, so complete any pending journal with the
 new backend before reverting the backend implementation.
 
+## Moving the server to another machine
+
+The code comes from GitHub; what the server keeps sits beside it in `server/`,
+ignored by Git, and moves by hand. Nothing in it names the old machine's paths,
+so it restores into any checkout.
+
+1. On the old machine, stop the service, so nothing changes while it is copied
+   (a write in progress keeps a `.pending-state.json` in its project folder:
+   stopped, there is none).
+2. Copy, keeping the files' modes (`cp -a`, or `tar` with `-p`):
+
+   | In `server/` | What it is |
+   |---|---|
+   | `data/` (all of it) | Each team's projects (`team_<name>/`, with their chats, comments and access files), the backups (`_backups/`), snapshots (`_snapshots/`), the trash (`_trash/`), the sign-ins (`sign-ins.json`: carried, nobody signs in again), each account's preferences (`user-prefs.json`), and older safety copies (`_restore-safety-*`). |
+   | `session-state.json` | The PIN session's workspace (and `session-state.chat.json`, its agent chats, when there is one). |
+   | `whitelist.json` | The accounts (passwords hashed; mode 0600). Without it the server has no accounts. |
+   | the environment file | The service's settings: the AI keys and chat options (here `server/stilomarker.env`, named by the systemd unit; mode 0600). Never commit it. |
+
+3. On the new machine: `git clone https://github.com/RustColeone/StiloMarker.git`
+   (the folder is `StiloMarker`; this machine's checkout is `StlioMarker`, so point
+   the unit at the clone's real path), put the files back under its `server/`,
+   and start `python3 server/mdnotes_server.py --host 127.0.0.1 --port 8000`
+   under the unit. Python 3.10 or later; nothing to install (a `venv/` in an old
+   checkout is not used).
+4. The proxy in front must pass the event streams unbuffered
+   (`proxy_buffering off`), keep a stream open for an hour
+   (`proxy_read_timeout 3600s`) and take request bodies of at least 1 MB: images
+   go up in 256 KB pieces, but importing a project and a PIN session's state are
+   sent whole, so a larger `client_max_body_size` lets bigger projects through.
+5. Check: `/api/ping` gives the version and `accounts: true`; a browser that was
+   signed in still is; a team project opens with its history and trash.
+
+Each browser keeps its own workspace and copies under the site's address. At the
+same address, everyone keeps them; at a new address, each person's own browser
+workspace stays with the old one, so they export it first (File → Export
+Project Zipped).
+
 ## Verified release: v0.1.12
 
 Deployed on 2026-09-22 at 18:25 UTC. `stilomarker.service` was restarted and

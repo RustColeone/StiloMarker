@@ -16,7 +16,7 @@ function and its code. It also has the guides for adding an extension (a mod) an
   [latest release](https://github.com/RustColeone/StiloMarker/releases/latest), nothing to install. The builds are not
   signed, so the first start asks once (the release notes say how). It has not been tried on macOS yet.
 - **Your own server:** `python3 server/mdnotes_server.py` serves the app and adds working together, accounts and the
-  server's AI keys ([below](#run-it-from-a-checkout)).
+  server's AI keys ([below](#run-your-own-server)).
 
 On a first visit the welcome file walks through the basics.
 
@@ -53,16 +53,24 @@ the settings.
 - Node.js 18 or later for `npm start` and the tests. There is nothing to install and no build step: the browser loads
   the files as they are.
 
-## Run it from a checkout
+## Run your own server
 
-The server serves the app as well:
+Get the code and start the server. It needs only Python 3.10 or later, with nothing to install:
 
 ```bash
-python3 server/mdnotes_server.py      # or: npm run backend:start
+git clone https://github.com/RustColeone/StiloMarker.git      # or download the ZIP from this page
+cd StiloMarker
+python3 server/mdnotes_server.py                              # or: npm run backend:start
 ```
 
-Then open `http://localhost:8000`. Without a server, `npm start` serves the app alone at `http://localhost:4173`, and
-everything is kept in the browser.
+The server serves the app as well: open `http://localhost:8000`. Others on your network open
+`http://<this computer's address>:8000` in a browser and join with the PIN.
+
+To use your server from an app opened elsewhere (the web app, an installed app), set Settings → Collaboration → Server
+URL to its address and press Ping Server. Browsers let an `https://` page reach only `https://` servers (and this
+computer), so a server for that needs HTTPS, such as a reverse proxy in front of it.
+
+Without a server, `npm start` serves the app alone at `http://localhost:4173`, and everything is kept in the browser.
 
 The server's settings are command-line options or environment variables (`python3 server/mdnotes_server.py --help`):
 

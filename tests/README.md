@@ -71,7 +71,7 @@ npm run backend:selftest                 # the backend's end-to-end self-test
 | `server-reliability.test.py` | Production broker: UTF-16, disk-failure recovery, ordered events, a lease refused once its stream is gone, and existing broker regressions. |
 | `sync-service.test.mjs` | Collaboration transport against a mock HTTP server. |
 | `agent-collaborator.test.mjs` | Agent proposal round-trips + agent-feature wiring. |
-| `project-structure.test.mjs` | Required files, `index.html` ids, and source-symbol wiring. |
+| `project-structure.test.mjs` | Required files, `index.html` ids, and source-symbol wiring; both server pages link to a README heading that exists, and the README says how to get the code. |
 | `service-worker-routes.test.mjs` | The service worker's fetch handler, run in a stand-in for the browser: it answers the app's files and the libraries served with it, and leaves the server's requests, the event stream, other sites and the docs (the architecture page, which changes without a new version of the app) to the network. |
 | `move-node.test.py` / `move-node.test.mjs` | Moves on the server (disk, ordering, refusals, patch barriers) and in the browser; both read `spec/workspace/move-node.cases.json` so peers and server order a moved file identically. |
 | `static-compression.test.py` | Static files are gzipped only when accepted (q=0 honoured), small/binary files untouched, `Vary` sent, never stale after a file changes. |
