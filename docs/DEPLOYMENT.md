@@ -1403,3 +1403,28 @@ tests, all 53 browser tests (the desktop app's in Electron 44), none rerun.
 Private deployment backup: `/home/laplacengan/backups/stilomarker/20261029T233858Z-v0.3.20`.
 185 data files (taken with the service stopped), all 31 JSON files valid;
 the account file and the environment file as they were.
+
+## Verified release: v0.3.21
+
+Deployed on 2026-11-05 at 10:56 UTC, after `main` had been pushed to GitHub
+from `dev`: the server pages link to the README's "Run your own server", and
+this file says how to move the server to another machine. Browser code and
+docs only, no server change; the service was restarted so the ping reports
+the new version. The live checkout fast-forwarded to `dev`, level with
+GitHub's `main`. App version `0.3.21`; sync compatibility unchanged at `117`.
+The service's command line and environment file are unchanged; it was down
+under a second.
+
+Public checks: ping (`0.3.21`, accounts on), the service worker's cache label
+`mdnotes-shell-v0.3.21`, the new link in the page, the account file, the
+environment file, the sign-ins file and the server's code answered with the
+app's page (refused), an unknown token answered 403, a clean journal. A fresh
+browser on the public site and on GitHub Pages (no real data) was controlled
+by `0.3.21`, opened the architecture page under it, and had no page errors.
+
+Validation (`tools/run-tests.mjs --browser`): 418 Node tests, all 27 Python
+tests, all 53 browser tests, none rerun.
+
+Private deployment backup: `/home/laplacengan/backups/stilomarker/20261105T105636Z-v0.3.21`.
+185 data files (taken with the service stopped), all 31 JSON files valid;
+the session state, the account file and the environment file as they were.
