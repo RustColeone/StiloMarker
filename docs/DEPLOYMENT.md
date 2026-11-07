@@ -73,14 +73,79 @@ so it restores into any checkout.
    the unit at the clone's real path), put the files back under its `server/`,
    and start `python3 server/mdnotes_server.py --host 127.0.0.1 --port 8000`
    under the unit. Python 3.10 or later; nothing to install (a `venv/` in an old
-   checkout is not used).
+   checkout is not used). If another service has port 8000 (`ss -ltn`), use
+   another in both the unit and the proxy. The unit, as
+   `/etc/systemd/system/stilomarker.service` (`USER` and `APP`, the clone's
+   path, are the machine's), then `systemctl daemon-reload` and
+   `systemctl enable --now stilomarker`:
+
+   ```ini
+   [Unit]
+   Description=Stilo Marker — Markdown collaboration workspace
+   After=network.target
+
+   [Service]
+   Type=simple
+   User=USER
+   Group=USER
+   WorkingDirectory=APP
+   # The settings (keys, PINs); the leading "-" lets the unit start without it.
+   EnvironmentFile=-APP/server/stilomarker.env
+   ExecStart=/usr/bin/python3 server/mdnotes_server.py --host 127.0.0.1 --port 8000
+   # on-failure, not always: a stop by a bare SIGTERM stays down, to be noticed.
+   Restart=on-failure
+   RestartSec=3
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
 4. The proxy in front must pass the event streams unbuffered
    (`proxy_buffering off`), keep a stream open for an hour
    (`proxy_read_timeout 3600s`) and take request bodies of at least 1 MB: images
    go up in 256 KB pieces, but importing a project and a PIN session's state are
    sent whole, so a larger `client_max_body_size` lets bigger projects through.
+   The nginx site this machine runs, with that limit raised (the certificate's
+   lines are the machine's, from certbot or however its other sites get theirs;
+   certbot's usual check needs the name to point at the new machine first):
+
+   ```nginx
+   server {
+       listen 443 ssl;
+       listen [::]:443 ssl;
+       server_name stilomarker.ngantech.net;
+       # ssl_certificate, ssl_certificate_key: the machine's
+
+       location / {
+           proxy_pass http://127.0.0.1:8000;
+           proxy_http_version 1.1;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+           proxy_buffering off;          # the live event streams
+           proxy_cache off;
+           proxy_read_timeout 3600s;
+           proxy_send_timeout 3600s;
+           client_max_body_size 32m;     # this machine has 1m: imports and session pushes are sent whole
+       }
+   }
+
+   server {
+       listen 80;
+       listen [::]:80;
+       server_name stilomarker.ngantech.net;
+       return 301 https://$host$request_uri;
+   }
+   ```
+
+   The server sees every browser as local behind a proxy on the same machine,
+   so keep accounts on there (see `MDNOTES_CHAT_ALLOW_REMOTE` in the README).
 5. Check: `/api/ping` gives the version and `accounts: true`; a browser that was
-   signed in still is; a team project opens with its history and trash.
+   signed in still is; a team project opens with its history and trash. Then
+   point the name at the new machine. Data copied earlier is a snapshot: if the
+   old server kept running, stop it and copy again (step 2) just before the
+   switch.
 
 Each browser keeps its own workspace and copies under the site's address. At the
 same address, everyone keeps them; at a new address, each person's own browser
